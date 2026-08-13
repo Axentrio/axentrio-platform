@@ -1,3 +1,5 @@
+import { workerDatabaseName } from './worker-database';
+
 /**
  * First setup file — runs before `setup.ts` and before any test-file imports.
  *
@@ -10,8 +12,6 @@
 if (!process.env.TEST_DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL must be set for integration tests');
 }
-
-import { workerDatabaseName } from './worker-database';
 
 // Vitest assigns each worker a stable 1-based id, reused across files.
 const workerId = process.env.VITEST_POOL_ID ?? '1';

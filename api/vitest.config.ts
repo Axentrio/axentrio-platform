@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import dotenv from 'dotenv';
+import { TEST_WORKER_COUNT } from './src/__tests__/worker-database';
 
 // Load .env.test. Locally we override so a stale parent-shell value can't
 // poison the test env. In CI the workflow injects TEST_DATABASE_URL itself
@@ -35,7 +36,7 @@ export default defineConfig({
     // and surfaces latent timing races — failures CI never sees on its 2-core
     // runner. 4 keeps local runs as reliable as CI; min(4, cores) makes it a
     // no-op in CI. Paired with the enlarged tmpfs in docker-compose.test.yml.
-    maxWorkers: 4,
+    maxWorkers: TEST_WORKER_COUNT,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

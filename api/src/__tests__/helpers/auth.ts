@@ -10,8 +10,57 @@ export interface MockAuthState {
   clerkOrgId: string;
 }
 
+const auth = vi.hoisted((): MockAuthState => ({
+  userId: '',
+  tenantId: '',
+  agentId: '',
+  role: 'super_admin',
+  email: 'test@example.com',
+  clerkUserId: '',
+  clerkOrgId: '',
+}));
+
+vi.mock('../../middleware/clerk.middleware', () => ({
+  requireClerkAuth: (req: any, _res: any, next: any) => {
+    req.userId = auth.userId;
+    req.tenantId = auth.tenantId;
+    req.agentId = auth.agentId;
+    req.userRole = auth.role;
+    req.user = {
+      id: auth.userId,
+      email: auth.email,
+      role: auth.role,
+      tenantId: auth.tenantId,
+      clerkUserId: auth.clerkUserId,
+      type: 'agent',
+    };
+    next();
+  },
+  autoProvision: (_req: any, _res: any, next: any) => next(),
+  invalidateProvisionCache: () => {},
+  resolveClerkIds: () => ({}),
+}));
+
+vi.mock('../../middleware/super-admin.middleware', () => ({
+  requireSuperAdmin: (req: any, res: any, next: any) => {
+    if (req.user?.role !== 'super_admin') {
+      res.status(403).json({ error: 'Super admin access required' });
+      return;
+    }
+    next();
+  },
+  resolveTenantContext: (_req: any, _res: any, next: any) => next(),
+}));
+
+vi.mock('../../services/clerk-sync.service', () => ({
+  inviteToClerkOrganization: () => Promise.resolve(true),
+  removeFromClerkOrganization: () => Promise.resolve(true),
+  getAllOrgMemberships: () => Promise.resolve([]),
+}));
+
 /**
- * Create all vi.mock() calls and return the hoisted auth state.
+ * Return the module's hoisted auth state. Importing this helper installs the
+ * mocks before Vitest evaluates the app modules in the test file.
  * MUST be called at top of test file before any app/server import.
  *
  * Usage:
@@ -20,54 +69,6 @@ export interface MockAuthState {
  *   import { app } from '../../server';
  */
 export function createAuthMocks() {
-  const auth = vi.hoisted((): MockAuthState => ({
-    userId: '',
-    tenantId: '',
-    agentId: '',
-    role: 'super_admin',
-    email: 'test@example.com',
-    clerkUserId: '',
-    clerkOrgId: '',
-  }));
-
-  vi.mock('../../middleware/clerk.middleware', () => ({
-    requireClerkAuth: (req: any, _res: any, next: any) => {
-      req.userId = auth.userId;
-      req.tenantId = auth.tenantId;
-      req.agentId = auth.agentId;
-      req.userRole = auth.role;
-      req.user = {
-        id: auth.userId,
-        email: auth.email,
-        role: auth.role,
-        tenantId: auth.tenantId,
-        clerkUserId: auth.clerkUserId,
-        type: 'agent',
-      };
-      next();
-    },
-    autoProvision: (_req: any, _res: any, next: any) => next(),
-    invalidateProvisionCache: () => {},
-    resolveClerkIds: () => ({}),
-  }));
-
-  vi.mock('../../middleware/super-admin.middleware', () => ({
-    requireSuperAdmin: (req: any, res: any, next: any) => {
-      if (req.user?.role !== 'super_admin') {
-        res.status(403).json({ error: 'Super admin access required' });
-        return;
-      }
-      next();
-    },
-    resolveTenantContext: (_req: any, _res: any, next: any) => next(),
-  }));
-
-  vi.mock('../../services/clerk-sync.service', () => ({
-    inviteToClerkOrganization: () => Promise.resolve(true),
-    removeFromClerkOrganization: () => Promise.resolve(true),
-    getAllOrgMemberships: () => Promise.resolve([]),
-  }));
-
   return { auth };
 }
 

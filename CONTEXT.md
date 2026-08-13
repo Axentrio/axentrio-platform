@@ -153,7 +153,7 @@ Which address a widget conversation is about, held against the chat session for 
 _Avoid_: session address, selected address, sticky address, cached address (it is not a cache - losing it is safe and simply returns the conversation to typed addresses).
 
 **Pending Correction**:
-A question waiting on the Booking Customer: something suggested a different address from the one they chose. It changes nothing on its own and never blocks them from booking. It carries the id of the proposal it belongs to, so an answer that arrives after they have moved on cannot settle a question they have already left behind.
+A question waiting on the Booking Customer: something suggested a different address from the one they chose. It changes nothing on its own. On a surface that can render the confirmation control it asks once, then permits the booking against the unchanged binding; on a surface that cannot render it, a confirmed booking is refused and the safe fallback is a Request for owner review. It carries the id of the proposal it belongs to, so an answer that arrives after they have moved on cannot settle a question they have already left behind.
 
 Its lifecycle is `none → RECORDED → ASKED → SETTLED`. Recording is not asking: booking tools may
 record freely, but only a persisted reply on a channel that renders the server-authored control is

@@ -22,19 +22,22 @@
  * returning to the model in between, so a `create_booking` sitting behind a `check_availability`
  * in the SAME response must not be able to book past a question that has just been raised.
  *
- * `never blocks them from booking` (CONTEXT.md, Pending Correction) is the other half and is
- * asserted here too: asking is one refusal, not a wall. The next attempt goes through.
+ * On the widget, asking is one refusal rather than a wall: the next attempt goes through. A
+ * channel that cannot render the control may capture a Request, but may not silently confirm at
+ * either address while the question is contested.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
+const mockRequestBooking = vi.fn();
 vi.mock('../../booking/booking.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/booking.service')>();
   return {
     ...actual,
     checkAvailability: (...a: unknown[]) => mockCheckAvailability(...a),
     createBooking: (...a: unknown[]) => mockCreateBooking(...a),
+    requestBooking: (...a: unknown[]) => mockRequestBooking(...a),
   };
 });
 
@@ -47,7 +50,7 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
   buildEventBase: vi.fn(() => ({})),
 }));
 
-import { CheckAvailabilityTool, CreateBookingTool } from '../../agent/tools/booking.tool';
+import { CheckAvailabilityTool, CreateBookingTool, RequestAppointmentTool } from '../../agent/tools/booking.tool';
 import { bindAddress, getBoundAddress, getPendingCorrection, markQuestionAsked } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
 import { AppDataSource } from '../../database/data-source';
@@ -137,18 +140,45 @@ beforeEach(async () => {
   botParticipantId = participant.id;
   mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'Europe/Brussels' });
   mockCreateBooking.mockResolvedValue({ id: 'bk-1', status: 'confirmed' });
+  mockRequestBooking.mockResolvedValue({ id: 'req-1', status: 'request_created', requested: true });
   await bindAddress(sessionId, CHOSEN);
 });
 
 describe('the address question survives a preceding availability check', () => {
   it.each(['messenger', 'instagram', 'whatsapp', 'telegram'])(
-    'does not ASK on %s, where the confirmation control cannot be rendered',
+    'refuses a confirmed booking on %s, where the contested address cannot be settled safely',
     async (channel) => {
       const result = await new CreateBookingTool().execute(BOOK, ctx('run-1', channel));
 
       expect(raisesTheQuestion(result)).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/request_appointment/);
       expect(result.affordance).toBeUndefined();
-      expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+      expect(mockCreateBooking).not.toHaveBeenCalled();
+      expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
+
+      const request = await new RequestAppointmentTool().execute(
+        {
+          preferredTime: BOOK.startTime,
+          attendeeName: BOOK.attendeeName,
+          attendeeEmail: BOOK.attendeeEmail,
+          customerAddress: BOOK.customerAddress,
+        },
+        ctx('run-1', channel)
+      );
+      expect(request.success).toBe(true);
+      expect(mockRequestBooking).toHaveBeenCalledWith(
+        'agent',
+        sessionId,
+        expect.any(String),
+        BOOK.startTime,
+        expect.objectContaining({ name: BOOK.attendeeName }),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        expect.objectContaining({ customerAddress: CHOSEN.formattedAddress })
+      );
     }
   );
 
@@ -198,10 +228,9 @@ describe('the address question survives a preceding availability check', () => {
   });
 
   it('does not ask twice across turns, so the customer is never wedged', async () => {
-    // The other half of the design, and the half a naive fix breaks. CONTEXT.md: a Pending
-    // Correction "never blocks them from booking". A NEW run means the customer saw the question
-    // and answered it, or did not - either way they have had their turn, and a customer whose
-    // address Google cannot suggest must still be able to book.
+    // The other half of the widget design, and the half a naive fix breaks. A NEW run means the
+    // customer saw the question and answered it, or did not - either way they have had their turn,
+    // and a customer whose address Google cannot suggest must still be able to book.
     await new CheckAvailabilityTool().execute(
       { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: PROPOSED },
       ctx('run-1')
@@ -240,21 +269,10 @@ describe('the address question survives a preceding availability check', () => {
     expect(pending?.formattedAddress).toBe(PROPOSED);
   });
 
-  it('names BOTH addresses, because most channels render no buttons', async () => {
-    // A REGRESSION I INTRODUCED AND THEN CAUGHT IN REVIEW.
-    //
-    // The refusal used to say "they have been shown the two options - do not name either one
-    // yourself", which is true on the widget and false everywhere else. `affordance` reaches
-    // `Message.metadata` and the widget socket; it appears in NO channel adapter. So on Messenger,
-    // Instagram, WhatsApp and Telegram the customer saw nothing while the model was forbidden from
-    // saying anything - "which address is right?" with no addresses in it. Before that change those
-    // customers at least heard one address named.
-    //
-    // The prose has to work where there are no buttons, so it names both. Where buttons DO exist
-    // they are still server-labelled and still authoritative; the prose merely agrees with them.
-    // Letting the model name the two options is safe now in a way it was not this morning: a tap
-    // carries the server-issued proposalId and the transition requires `presented`, so a model that
-    // words the choice badly still cannot manufacture a valid answer.
+  it('names BOTH addresses in the widget reply that carries the controls', async () => {
+    // The prose and the server-labelled buttons must express the same A-or-B question. A tap still
+    // carries the server-issued proposalId and answering still requires persisted ASKED evidence;
+    // the model's wording cannot manufacture authority.
     const refused = await new CreateBookingTool().execute(BOOK, ctx('run-1'));
 
     expect(refused.success).toBe(false);

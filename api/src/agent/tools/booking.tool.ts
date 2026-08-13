@@ -24,6 +24,9 @@ import { XSSProtectionService } from '../../security/xss-protection';
  */
 const emails = new XSSProtectionService();
 
+/** Only this surface can persist and render the server-authored address controls today. */
+const canRenderAddressControls = (channel?: string): boolean => (channel ?? 'widget') === 'widget';
+
 /**
  * An address the confirmation can actually reach, or an error the model can fix.
  *
@@ -161,7 +164,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
       // changes anything - and suggestions are billed per request, so offering it anywhere else
       // spends the tenant's money on a question with no answer worth having.
-      const affordance = ctx.channel === 'widget' && result?.travel && !chosen.placeId
+      const affordance = canRenderAddressControls(ctx.channel) && result?.travel && !chosen.placeId
         ? {
             affordance: {
               kind: 'address_picker' as const,
@@ -311,10 +314,9 @@ export class CreateBookingTool implements ToolAdapter {
       //
       // `correctionPending` says the address is contested; it does not say asking is allowed.
       // ASKED is written exactly once per proposal, so a second attempt at the same booking
-      // proceeds rather than refusing again - which is what keeps the promise that a
-      // Pending Correction never blocks the customer from booking. A customer whose address Google
-      // cannot suggest is asked once, says nothing useful, and still gets their appointment at the
-      // address they chose.
+      // proceeds on the widget rather than refusing again. A customer whose address Google cannot
+      // suggest is asked once and can still get the appointment at the address they chose. A
+      // surface without controls degrades to a Request instead of guessing.
       //
       // The claim lives here rather than in `addressForTurn` because the other two tools call that
       // too, and neither of them can ask: `check_availability` is read-only and may be called
@@ -332,28 +334,28 @@ export class CreateBookingTool implements ToolAdapter {
       // decides. Two concurrent asks are harmless: both refuse, and only one reply is delivered.
       const pendingNow = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
 
-      if (
-        ctx.channel === 'widget' &&
-        booked.correctionPending &&
-        booked.proposalId &&
-        pendingNow?.status !== 'asked'
-      ) {
+      if (booked.correctionPending && booked.proposalId && !canRenderAddressControls(ctx.channel)) {
+        // This surface cannot render `address_confirm`, so it cannot produce ASKED evidence and
+        // cannot safely settle A-or-B. Falling through used the older bound address and would turn
+        // into a wrong-door booking as soon as any Meta channel gained an address picker. Preserve
+        // the house fallback instead: a Request commits nobody to a journey and lets the owner
+        // resolve the contested address before confirming it.
         return {
           success: false,
-          // NAMES BOTH, because on most channels the prose is the only thing the customer gets.
-          //
-          // This said "they have been shown the two options - do not name either one yourself",
-          // which is true on the widget and false everywhere else: `affordance` reaches
-          // `Message.metadata` and the widget socket, and appears in no channel adapter at all. So
-          // a Messenger, Instagram, WhatsApp or Telegram customer saw nothing while the model was
-          // forbidden from saying anything - "which address is right?", with no addresses in it.
-          // That was worse than the behaviour it replaced, where at least one address was named.
-          //
-          // Naming them is safe in a way it was not before today. A tap carries the proposalId the
-          // SERVER issued, that id now hashes both addresses, and the transition requires
-          // ASKED evidence - so a model that words the choice badly still cannot manufacture a valid
-          // answer. Where buttons exist they remain server-labelled and authoritative; this prose
-          // agrees with them rather than replacing them.
+          error:
+            `The customer has named a different address from the one previously selected, and ` +
+            `this channel cannot securely confirm which one is correct. Do not create a confirmed ` +
+            `booking. Use request_appointment instead so the business can verify the address before ` +
+            `anyone travels.`,
+          errorSafeForModel: true,
+        };
+      }
+
+      if (booked.correctionPending && booked.proposalId && pendingNow?.status !== 'asked') {
+        return {
+          success: false,
+          // The widget renders the server-authored control. Name both options in the prose too so
+          // the persisted reply and its buttons express the same A-or-B question.
           error:
             `The address for this appointment is not settled. Ask the customer whether the ` +
             `appointment should be at "${booked.address}" (the address they chose earlier) or ` +

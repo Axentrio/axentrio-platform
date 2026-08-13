@@ -97,6 +97,7 @@ async function runAgentLoop(
         tenantId: tenant.id,
         sessionId: session.id,
         runId,
+        channel: 'widget',
         toolsCalledThisTurn: toolsCalled,
         dataSource: {} as any,
         conversationHistory: messages,

@@ -1,12 +1,13 @@
 import type { DataSource } from 'typeorm';
 import type { ChatMessage } from '../llm/llm.types';
+import type { ChannelType } from '../database/entities/ChannelConnection';
 
 export interface ToolContext {
   tenantId: string;
   sessionId: string;
   runId: string;
   /** The surface receiving controls. Only the widget renders address affordances today. */
-  channel?: string;
+  channel: ChannelType;
   toolsCalledThisTurn: string[];
   dataSource: DataSource;
   conversationHistory: ChatMessage[];

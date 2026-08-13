@@ -62,6 +62,7 @@ import { createTestTenant, createTestAnchorBot, createTestSession } from '../hel
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
 /** What the model names instead - a different door, so a real question rather than a reformat. */
 const PROPOSED = 'Kerkstraat 12, 2060 Antwerpen';
+const CHANNELS_WITHOUT_ADDRESS_CONTROLS = ['messenger', 'instagram', 'whatsapp', 'telegram'] as const;
 
 let sessionId: string;
 let tenantId: string;
@@ -83,7 +84,7 @@ const BOOK = {
  * the customer saw. Passing the same id for what a test calls "the second attempt" would quietly
  * assert that a batch is a conversation.
  */
-const ctx = (runId: string, channel = 'widget'): ToolContext => ({
+const ctx = (runId: string, channel: ToolContext['channel'] = 'widget'): ToolContext => ({
   tenantId,
   sessionId,
   runId,
@@ -145,7 +146,20 @@ beforeEach(async () => {
 });
 
 describe('the address question survives a preceding availability check', () => {
-  it.each(['messenger', 'instagram', 'whatsapp', 'telegram'])(
+  it('fails closed when runtime context omits the channel', async () => {
+    const noChannel = ctx('run-1');
+    delete (noChannel as { channel?: string }).channel;
+
+    const result = await new CreateBookingTool().execute(BOOK, noChannel);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/request_appointment/);
+    expect(result.affordance).toBeUndefined();
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
+  });
+
+  it.each(CHANNELS_WITHOUT_ADDRESS_CONTROLS)(
     'refuses a confirmed booking on %s, where the contested address cannot be settled safely',
     async (channel) => {
       const result = await new CreateBookingTool().execute(BOOK, ctx('run-1', channel));

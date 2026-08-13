@@ -22,6 +22,7 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
     tenantId: 'tenant-123',
     sessionId: 'session-abc',
     runId: 'run-xyz',
+    channel: 'widget',
     toolsCalledThisTurn: [],
     dataSource: { getRepository: () => sessionRepo } as never,
     conversationHistory: [],

@@ -64,6 +64,7 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
     tenantId: 'tenant-123',
     sessionId: 'session-abc',
     runId: 'run-xyz',
+    channel: 'widget',
     toolsCalledThisTurn: [],
     // The KbSearchTool now queries the session row to resolve `bot_id` for
     // RAG scoping (multi-bot Phase 3). Stub `dataSource.query` so the tool

@@ -25,7 +25,7 @@ import { XSSProtectionService } from '../../security/xss-protection';
 const emails = new XSSProtectionService();
 
 /** Only this surface can persist and render the server-authored address controls today. */
-const canRenderAddressControls = (channel?: string): boolean => (channel ?? 'widget') === 'widget';
+const canRenderAddressControls = (channel: unknown): channel is 'widget' => channel === 'widget';
 
 /**
  * An address the confirmation can actually reach, or an error the model can fix.

@@ -27,6 +27,7 @@ import { ServiceType } from '../database/entities/ServiceType';
 import { getUploadService } from '../file-handling/upload.service';
 import { upsertLead } from '../leads/lead-capture.service';
 import { Not, IsNull } from 'typeorm';
+import { applyChannelAddressControl } from './address-controls';
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -101,6 +102,26 @@ export async function processInboundEvent(
 
     // ── 4. Message / postback events ─────────────────────────────────────
     const { session, participant, binding, created, sessionCreated } = await findOrCreateConversation(event, connection);
+
+    // Address buttons are server-observed actions, not sentences for the model to interpret.
+    // Apply them before lead classification, persistence and turn scheduling. A stale or forged
+    // action is consumed without becoming customer-authored text.
+    const addressControl = await applyChannelAddressControl(
+      { type: event.type, payload: event.postback?.payload },
+      { sessionId: session.id, tenantId: connection.tenantId, channel: connection.channel },
+    );
+    if (addressControl.handled && !addressControl.content) {
+      await markEventProcessed(eventLogRepo, event.dedupeKey);
+      return;
+    }
+    if (addressControl.handled) {
+      event = {
+        ...event,
+        type: 'message',
+        message: { type: 'text', content: addressControl.content! },
+        postback: undefined,
+      };
+    }
 
     // Hook 1 (leads-across-all-channels): capture a Lead deterministically, no LLM.
     // Gated by the per-channel auto-capture toggle (default on). Fire-and-forget:

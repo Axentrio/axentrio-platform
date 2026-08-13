@@ -40,6 +40,7 @@ import {
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
+import { renderChannelAddressControls } from '../channels/address-controls';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -1207,8 +1208,13 @@ async function routeBotMessageOutbound(
   offer?: OfferMeasurement,
 ): Promise<void> {
   const metadata = replyMetadata(extras ?? {});
-  const result = await routeOutboundMessage(
+  const outbound = renderChannelAddressControls(
     { type: 'text', content, ...(extras?.quickReplies?.length ? { quickReplies: extras.quickReplies } : {}), ...(offer ? { offer } : {}) },
+    extras?.affordance,
+    session.channel,
+  );
+  const result = await routeOutboundMessage(
+    outbound,
     { sessionId: session.id, tenantId: session.tenantId, messageId: savedId },
     {
       event: 'message:receive',
@@ -1559,8 +1565,13 @@ async function sendBotMessage(
   // them as native quick replies via the channel response payload. Each adapter
   // gates on its own supportsQuickReplies/maxQuickReplies, so unsupported
   // channels simply send the text.
-  await routeOutboundMessage(
+  const outbound = renderChannelAddressControls(
     { type: 'text', content, ...(extras?.quickReplies?.length ? { quickReplies: extras.quickReplies } : {}), ...(offer ? { offer } : {}) },
+    extras?.affordance,
+    session.channel,
+  );
+  await routeOutboundMessage(
+    outbound,
     { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
     {
       event: 'message:receive',

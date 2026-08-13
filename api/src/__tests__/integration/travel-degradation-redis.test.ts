@@ -56,6 +56,7 @@ import {
   recordCause,
   recordRoutingSuccess,
   monitorState,
+  platformFailures,
   scopedCauseSpread,
   __resetDegradationCounters,
   PLATFORM_THRESHOLD,
@@ -66,6 +67,8 @@ import {
   travelHealthSnapshot,
   __resetTravelHealthState,
 } from '../../booking/travel/travel-health';
+import { resolveTravelEligibility } from '../../booking/travel/travel-eligibility';
+import { config } from '../../config/environment';
 
 const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
 const FAILING = { isAxiosError: true, response: { status: 500, data: 'upstream is down' } };
@@ -218,6 +221,24 @@ describe('AC-5: sustained failure seen in REAL BOOKINGS, through real Redis', ()
 });
 
 describe('AC-5: what the operator can see without waiting to be told', () => {
+  it('records the production no_api_key gate in the real shared platform counter', async () => {
+    const mutableTravelConfig = config.travel as { googleMapsApiKey: string | undefined };
+    const previousKey = mutableTravelConfig.googleMapsApiKey;
+    mutableTravelConfig.googleMapsApiKey = undefined;
+    try {
+      expect(
+        await resolveTravelEligibility({
+          tenantId: 'tenant-a',
+          botId: 'bot-a',
+          itineraryKey: 'calendar:test',
+        })
+      ).toEqual({ active: false, reason: 'no_api_key' });
+      expect(await platformFailures()).toBe(1);
+    } finally {
+      mutableTravelConfig.googleMapsApiKey = previousKey;
+    }
+  });
+
   it('reports the probe, the standing incidents and the distinct affected parties', async () => {
     post.mockResolvedValue(ROUTED);
     await tick();

@@ -19,8 +19,8 @@
  * `resolveTenantContext`, and `requireRole(...)`. Each is mocked out here so
  * the request reaches the handler with a stable `req.user` / `req.tenantId`.
  * `AppDataSource.getRepository(...)` is mocked via `vi.hoisted` per the
- * existing route-phase wire-test pattern. `axios` is mocked for the Cal.com
- * upstream sites.
+ * existing route-phase wire-test pattern. The provider boundary is mocked for
+ * controller-envelope assertions; provider-to-Axios mapping has its own unit tests.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -31,12 +31,11 @@ import request from 'supertest';
 const TENANT_UUID = '11111111-1111-4111-8111-111111111111';
 const USER_UUID = '22222222-2222-4222-8222-222222222222';
 
-const { tenantFindOneOrFail, tenantSave, botFindOne, botSave, axiosGet } = vi.hoisted(() => ({
+const { tenantFindOneOrFail, tenantSave, botFindOne, botSave } = vi.hoisted(() => ({
   tenantFindOneOrFail: vi.fn(),
   tenantSave: vi.fn(),
   botFindOne: vi.fn(),
   botSave: vi.fn(),
-  axiosGet: vi.fn(),
 }));
 
 // Stub Clerk SDK so importing the routes (which import clerk middleware via
@@ -91,10 +90,6 @@ vi.mock('../../database/data-source', () => ({
   },
 }));
 
-vi.mock('axios', () => ({
-  default: { get: axiosGet },
-}));
-
 vi.mock('../../utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
@@ -118,8 +113,12 @@ vi.mock('../../utils/encryption', () => ({
 // Now import the code under test.
 import integrationsRoutes from '../../knowledge/integrations.routes';
 import widgetAppearanceRoutes from '../../widget/widget-appearance.routes';
-import { errorHandler } from '../../middleware/error-handler';
+import { ApiError, BadRequestError, errorHandler, RateLimitError } from '../../middleware/error-handler';
+import { ERROR_CODES } from '../../middleware/error-codes';
 import { requestIdMiddleware } from '../../middleware/request-id.middleware';
+import { calcomProvider } from '../../integrations';
+
+const calcomConnect = vi.spyOn(calcomProvider, 'connect');
 
 function makeApp(): express.Express {
   const app = express();
@@ -142,7 +141,7 @@ beforeEach(() => {
   tenantSave.mockReset();
   botFindOne.mockReset();
   botSave.mockReset();
-  axiosGet.mockReset();
+  calcomConnect.mockReset();
 });
 
 // ─── (a) integrations.getIntegrations success ──────────────────────────────
@@ -186,7 +185,7 @@ describe('integrations.controller — GET /integrations success envelope', () =>
 
 describe('integrations.controller — connectCalcom Cal.com 401 → BAD_REQUEST envelope', () => {
   it('emits 400 { success:false, error:{ code:"BAD_REQUEST", message:"Invalid or expired API key" } }', async () => {
-    axiosGet.mockRejectedValue({ response: { status: 401 }, message: 'Unauthorized' });
+    calcomConnect.mockRejectedValue(new BadRequestError('Invalid or expired API key'));
 
     const res = await request(makeApp())
       .post('/tenants/me/integrations/calcom/connect')
@@ -205,7 +204,9 @@ describe('integrations.controller — connectCalcom Cal.com 401 → BAD_REQUEST 
 
 describe('integrations.controller — connectCalcom Cal.com 429 → RATE_LIMIT_EXCEEDED envelope', () => {
   it('emits 429 { success:false, error:{ code:"RATE_LIMIT_EXCEEDED", message } }', async () => {
-    axiosGet.mockRejectedValue({ response: { status: 429 }, message: 'Too many requests' });
+    calcomConnect.mockRejectedValue(
+      new RateLimitError('Cal.com rate limit exceeded. Please try again later.'),
+    );
 
     const res = await request(makeApp())
       .post('/tenants/me/integrations/calcom/connect')
@@ -227,8 +228,13 @@ describe('integrations.controller — connectCalcom Cal.com 429 → RATE_LIMIT_E
 
 describe('integrations.controller — connectCalcom Cal.com unreachable → UPSTREAM_FAILED envelope', () => {
   it('emits 502 { success:false, error:{ code:"UPSTREAM_FAILED", message } }', async () => {
-    // No `.response` → drops through to the generic-upstream branch.
-    axiosGet.mockRejectedValue(new Error('ECONNREFUSED'));
+    calcomConnect.mockRejectedValue(
+      new ApiError(
+        'Could not reach Cal.com. Please try again later.',
+        502,
+        ERROR_CODES.UPSTREAM_FAILED,
+      ),
+    );
 
     const res = await request(makeApp())
       .post('/tenants/me/integrations/calcom/connect')

@@ -6,7 +6,7 @@ export interface ToolContext {
   tenantId: string;
   sessionId: string;
   runId: string;
-  /** The surface receiving controls. Only the widget renders address affordances today. */
+  /** The surface receiving controls. Unknown channels fail closed. */
   channel: ChannelType;
   toolsCalledThisTurn: string[];
   dataSource: DataSource;
@@ -89,6 +89,15 @@ export interface AddressPickerAffordance {
    * address" rule guards against. It must still never reach a log or the model.
    */
   query?: string;
+  /** Native-channel choices, produced by the server and never by the model. */
+  options?: Array<{
+    /** Opaque short id returned by the channel button. */
+    id: string;
+    /** Server-held identity resolved only after the persisted option is tapped. */
+    placeId: string;
+    /** Full address rendered in the message body, never squeezed into a button title. */
+    text: string;
+  }>;
 }
 
 /**

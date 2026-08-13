@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
+const mockAutocompleteAddress = vi.fn();
 vi.mock('../../booking/booking.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/booking.service')>();
   return {
@@ -37,6 +38,9 @@ vi.mock('../../booking/booking.service', async (importOriginal) => {
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
   buildEventBase: vi.fn(() => ({})),
+}));
+vi.mock('../../booking/travel/places.service', () => ({
+  autocompleteAddress: (...a: unknown[]) => mockAutocompleteAddress(...a),
 }));
 vi.mock('../../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -78,6 +82,7 @@ const NO_TRAVEL = { slots: [{ start: '2026-09-01T09:00:00Z' }], timezone: 'Europ
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mockAutocompleteAddress.mockResolvedValue({ status: 'ok', suggestions: [] });
 });
 
 describe('offering to verify the address', () => {
@@ -105,6 +110,34 @@ describe('offering to verify the address', () => {
 
     expect(res.affordance).toEqual({ kind: 'address_picker', reason: 'unverified', query: TYPED });
   });
+
+  it.each(['messenger', 'instagram', 'whatsapp'] as const)(
+    'offers %s numbered options backed by server suggestions',
+    async (channel) => {
+      mockCheckAvailability.mockResolvedValue(TRAVELS);
+      mockAutocompleteAddress.mockResolvedValue({
+        status: 'ok',
+        suggestions: [
+          { placeId: 'ChIJ_one', text: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+          { placeId: 'ChIJ_two', text: 'Turnhoutsebaan 101, 2140 Antwerpen' },
+        ],
+      });
+
+      const res = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: TYPED },
+        { ...ctx(), channel },
+      );
+
+      expect(mockAutocompleteAddress).toHaveBeenCalledWith('tenant-1', TYPED);
+      expect(res.affordance).toMatchObject({
+        kind: 'address_picker',
+        options: [
+          { placeId: 'ChIJ_one', text: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+          { placeId: 'ChIJ_two', text: 'Turnhoutsebaan 101, 2140 Antwerpen' },
+        ],
+      });
+    },
+  );
 
   it('says nothing for a service the customer comes to', async () => {
     // No travel, no address needed. Asking a customer to verify their home address for a job that

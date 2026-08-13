@@ -191,6 +191,43 @@ describe('runTurn — burst coalescing', () => {
     });
   });
 
+  it('renders a persisted Meta question as numbered native replies with full addresses in prose', async () => {
+    const chosen = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
+    const proposed = 'Turnhoutsebaan 101, 2140 Antwerpen';
+    const proposalId = 'p-meta';
+    initializeAgentService({
+      run: vi.fn().mockResolvedValue({
+        type: 'response',
+        content: 'Which address should we use?',
+        affordance: { kind: 'address_confirm', proposalId, proposed, bound: chosen.formattedAddress },
+      }),
+    } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'messenger' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const incoming = await createTestMessage(session.id, tenant.id, user.id, { content: 'book it' });
+    await bindAddress(session.id, chosen);
+    await proposeCorrection(session.id, {
+      proposalId,
+      formattedAddress: proposed,
+      expectedActivePlaceId: chosen.placeId,
+      expectedActiveAddress: chosen.formattedAddress,
+    });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(await runTurn(fresh, incoming)).toBe('answered');
+    expect(await getPendingCorrection(session.id)).toMatchObject({ proposalId, status: 'asked' });
+
+    const outbound = mockRouteOutboundMessage.mock.calls[0][0];
+    expect(outbound.content).toContain(`1. ${chosen.formattedAddress}`);
+    expect(outbound.content).toContain(`2. ${proposed}`);
+    expect(outbound.quickReplies).toEqual([
+      { title: '1', value: `ax:addr:confirm:${proposalId}:bound` },
+      { title: '2', value: `ax:addr:confirm:${proposalId}:proposed` },
+    ]);
+  });
+
   it('rolls back a reply whose address control no longer names the RECORDED question', async () => {
     const chosen = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
     const proposal = {

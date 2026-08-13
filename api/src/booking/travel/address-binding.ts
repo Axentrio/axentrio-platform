@@ -28,6 +28,7 @@ import {
 } from '../../database/entities/AddressBinding';
 import { returningRows } from '../../utils/raw-sql';
 import { logger } from '../../utils/logger';
+import { canRenderAddressControls } from '../../channels/address-control-capability';
 
 const FRESH_SQL = `updated_at > now() - interval '35 minutes'`;
 
@@ -219,7 +220,7 @@ export async function markQuestionAsked(
   evidence: QuestionEvidence,
   manager?: EntityManager
 ): Promise<boolean> {
-  if (evidence.channel !== 'widget' || !evidence.messageId) return false;
+  if (!canRenderAddressControls(evidence.channel) || !evidence.messageId) return false;
   const rows = returningRows<{ session_id: string }>(await executor(manager).query(
     `UPDATE chatbot_address_bindings b
         SET pending = b.pending || jsonb_build_object(

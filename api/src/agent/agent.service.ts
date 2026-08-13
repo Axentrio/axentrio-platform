@@ -32,7 +32,8 @@ import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, selectSkillIds } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
-import { formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
+import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
+import { getBoundAddress } from '../booking/travel/address-binding';
 import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
 import { isUpstreamQuotaExhausted, isUpstreamRateLimit } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
@@ -451,6 +452,12 @@ export class AgentService {
             tenantId: tenant.id,
             error,
           });
+        }
+      }
+      if (bookingActive) {
+        const boundAddress = await getBoundAddress(session.id);
+        if (boundAddress?.formattedAddress) {
+          moduleSections.push(buildBoundAddressSection(boundAddress.formattedAddress));
         }
       }
       // Pre-fill the customer's name from their messaging-channel profile (channel

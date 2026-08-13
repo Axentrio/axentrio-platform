@@ -28,7 +28,7 @@ interface CalcomPatch {
  * calls + the persisted config shape. Config stays under
  * Bot.settings.integrations.calcom so booking/egress readers are unaffected.
  */
-class CalcomIntegrationProvider implements IntegrationProvider {
+export class CalcomIntegrationProvider implements IntegrationProvider {
   readonly kind = 'calcom';
   readonly feature = 'calendarSync' as const;
   readonly errorCode = 'plan_limit_calendar_sync';

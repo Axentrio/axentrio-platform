@@ -16,6 +16,8 @@ import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 import type { CreateBookingResult } from '../../booking/booking-providers/types';
 import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
+import { autocompleteAddress } from '../../booking/travel/places.service';
+import { addressOptionId, canRenderAddressControls } from '../../channels/address-controls';
 
 /**
  * The platform's own address check, reused rather than re-invented.
@@ -24,8 +26,33 @@ import { XSSProtectionService } from '../../security/xss-protection';
  */
 const emails = new XSSProtectionService();
 
-/** Only this surface can persist and render the server-authored address controls today. */
-const canRenderAddressControls = (channel: unknown): channel is 'widget' => channel === 'widget';
+async function addressPickerAffordance(
+  ctx: ToolContext,
+  reason: 'unverified' | 'too_vague',
+  query: string | undefined,
+) {
+  if (!canRenderAddressControls(ctx.channel) || !query) return {};
+  if (ctx.channel === 'widget') {
+    return { affordance: { kind: 'address_picker' as const, reason, query } };
+  }
+
+  const result = await autocompleteAddress(ctx.tenantId, query);
+  if (result.status !== 'ok' || !result.suggestions.length) return {};
+  return {
+    affordance: {
+      kind: 'address_picker' as const,
+      reason,
+      query,
+      // Three is the tightest supported Meta limit (WhatsApp), so one persisted reply renders
+      // identically on Messenger, Instagram and WhatsApp.
+      options: result.suggestions.slice(0, 3).map((suggestion) => ({
+        id: addressOptionId(suggestion.placeId),
+        placeId: suggestion.placeId,
+        text: suggestion.text,
+      })),
+    },
+  };
+}
 
 /**
  * An address the confirmation can actually reach, or an error the model can fix.
@@ -185,15 +212,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
       // changes anything - and suggestions are billed per request, so offering it anywhere else
       // spends the tenant's money on a question with no answer worth having.
-      const affordance = canRenderAddressControls(ctx.channel) && result?.travel && !chosen.placeId
-        ? {
-            affordance: {
-              kind: 'address_picker' as const,
-              reason: result.travel.addressTooVague ? ('too_vague' as const) : ('unverified' as const),
-              // The text they typed, so the box opens where they left off rather than blank.
-              ...(chosen.address ? { query: chosen.address } : {}),
-            },
-          }
+      const affordance = result?.travel && !chosen.placeId
+        ? await addressPickerAffordance(
+            ctx,
+            result.travel.addressTooVague ? 'too_vague' : 'unverified',
+            chosen.address,
+          )
         : {};
       const replyFact = addressReplyFact(
         chosen.address,

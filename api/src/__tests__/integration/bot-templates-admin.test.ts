@@ -257,9 +257,10 @@ describe('multi-binding safety (unpublish blocks + reassigns a SECONDARY binding
 describe('delete version (drafts + unpublished)', () => {
   it('deletes a draft version', async () => {
     const id = await createTemplate();
-    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'd' });
+    const created = await request(app).post(`${BASE}/${id}/versions`).send({ body: 'd' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
     const del = await request(app).delete(`${BASE}/${id}/versions/1`);
-    expect(del.status).toBe(200);
+    expect(del.status, JSON.stringify(del.body)).toBe(200);
     const detail = await request(app).get(`${BASE}/${id}`);
     expect(detail.body.data.versions.length).toBe(0);
   });

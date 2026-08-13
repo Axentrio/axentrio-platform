@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import dotenv from 'dotenv';
-import { TEST_WORKER_COUNT } from './src/__tests__/worker-database';
+import crypto from 'node:crypto';
 
 // Load .env.test. Locally we override so a stale parent-shell value can't
 // poison the test env. In CI the workflow injects TEST_DATABASE_URL itself
@@ -15,8 +15,10 @@ dotenv.config({ path: path.resolve(__dirname, '.env.test'), override: !process.e
 // is already set before environment.ts runs — dotenv won't overwrite a
 // pre-set value.
 if (process.env.TEST_DATABASE_URL) {
+  process.env.TEST_DATABASE_BASE_URL = process.env.TEST_DATABASE_URL;
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 }
+process.env.TEST_RUN_ID = crypto.randomBytes(8).toString('hex');
 
 export default defineConfig({
   test: {
@@ -27,16 +29,12 @@ export default defineConfig({
     include: ['src/__tests__/**/*.test.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,
-    // Files run in parallel; each worker uses its own database (see setup.ts),
-    // so the per-test TRUNCATE stays isolated to that worker.
-    fileParallelism: true,
-    // Cap worker count. Vitest defaults to ~one fork per core; on a high-core
-    // machine that spins up many worker databases at once, whose concurrent
-    // startup overwhelms the shared test Postgres (disk/connection contention)
-    // and surfaces latent timing races — failures CI never sees on its 2-core
-    // runner. 4 keeps local runs as reliable as CI; min(4, cores) makes it a
-    // no-op in CI. Paired with the enlarged tmpfs in docker-compose.test.yml.
-    maxWorkers: TEST_WORKER_COUNT,
+    // Integration files exercise process-global seams (module mocks, provider
+    // singletons, queues and Redis). Parallel file processes produced moving,
+    // order-dependent failures even after each file received its own database.
+    // A focused file and the whole suite must therefore use the same execution
+    // model: one file at a time, each with a fresh database cloned in setup.ts.
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

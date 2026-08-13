@@ -103,6 +103,26 @@ describe('connectCalcom', () => {
     await expect(connectCalcom(req, res)).rejects.toThrow(/Invalid or expired API key/);
   });
 
+  it('throws RateLimitError if Cal.com rate-limits the request (429)', async () => {
+    const axiosError: any = new Error('Too many requests');
+    axiosError.response = { status: 429 };
+    mockAxiosGet.mockRejectedValue(axiosError);
+
+    const req = mockReq({ apiKey: 'valid-key' });
+    const res = mockRes();
+
+    await expect(connectCalcom(req, res)).rejects.toThrow(/rate limit exceeded/i);
+  });
+
+  it('throws the stable upstream error when Cal.com cannot be reached', async () => {
+    mockAxiosGet.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const req = mockReq({ apiKey: 'valid-key' });
+    const res = mockRes();
+
+    await expect(connectCalcom(req, res)).rejects.toThrow(/Could not reach Cal\.com/i);
+  });
+
   it('throws BadRequestError if no event types found', async () => {
     mockAxiosGet.mockResolvedValue({ data: { data: { eventTypeGroups: [] } } });
 

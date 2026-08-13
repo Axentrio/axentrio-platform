@@ -62,7 +62,7 @@ import { createTestTenant, createTestAnchorBot, createTestSession } from '../hel
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
 /** What the model names instead - a different door, so a real question rather than a reformat. */
 const PROPOSED = 'Kerkstraat 12, 2060 Antwerpen';
-const CHANNELS_WITHOUT_ADDRESS_CONTROLS = ['messenger', 'instagram', 'whatsapp', 'telegram'] as const;
+const META_CHANNELS_WITH_ADDRESS_CONTROLS = ['messenger', 'instagram', 'whatsapp'] as const;
 
 let sessionId: string;
 let tenantId: string;
@@ -159,42 +159,30 @@ describe('the address question survives a preceding availability check', () => {
     expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
   });
 
-  it.each(CHANNELS_WITHOUT_ADDRESS_CONTROLS)(
-    'refuses a confirmed booking on %s, where the contested address cannot be settled safely',
+  it.each(META_CHANNELS_WITH_ADDRESS_CONTROLS)(
+    'asks on %s with the two-address control instead of silently booking',
     async (channel) => {
       const result = await new CreateBookingTool().execute(BOOK, ctx('run-1', channel));
 
-      expect(raisesTheQuestion(result)).toBe(false);
+      expect(raisesTheQuestion(result)).toBe(true);
       expect(result.success).toBe(false);
-      expect(result.error).toMatch(/request_appointment/);
-      expect(result.affordance).toBeUndefined();
+      expect(result.affordance).toMatchObject({
+        kind: 'address_confirm',
+        bound: CHOSEN.formattedAddress,
+        proposed: PROPOSED,
+      });
       expect(mockCreateBooking).not.toHaveBeenCalled();
       expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
-
-      const request = await new RequestAppointmentTool().execute(
-        {
-          preferredTime: BOOK.startTime,
-          attendeeName: BOOK.attendeeName,
-          attendeeEmail: BOOK.attendeeEmail,
-          customerAddress: BOOK.customerAddress,
-        },
-        ctx('run-1', channel)
-      );
-      expect(request.success).toBe(true);
-      expect(mockRequestBooking).toHaveBeenCalledWith(
-        'agent',
-        sessionId,
-        expect.any(String),
-        BOOK.startTime,
-        expect.objectContaining({ name: BOOK.attendeeName }),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        expect.objectContaining({ customerAddress: CHOSEN.formattedAddress })
-      );
     }
   );
+
+  it('keeps Telegram on request_appointment because it cannot render the control safely', async () => {
+    const result = await new CreateBookingTool().execute(BOOK, ctx('run-1', 'telegram'));
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/request_appointment/);
+    expect(result.affordance).toBeUndefined();
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
 
   it('is still asked when check_availability named the same address first', async () => {
     // THE DEFECT, at the seam it lives at. `check_availability` proposes and cannot ask; the cap

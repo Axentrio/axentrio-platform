@@ -3,29 +3,10 @@
  * the migration that adds the override column.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { configureMockAuth, createAuthMocks } from '../helpers/auth';
 
-const auth = vi.hoisted(() => ({ userId: '', tenantId: '', role: 'admin' as string }));
+const { auth } = createAuthMocks();
 
-vi.mock('../../middleware/clerk.middleware', async () => {
-  const { UnauthorizedError } = await import('../../middleware/error-handler');
-  return {
-    requireClerkAuth: (req: any, _res: any, next: any) => {
-      if (!auth.userId) return next(new UnauthorizedError('no userId'));
-      req.userId = auth.userId;
-      req.tenantId = auth.tenantId;
-      req.userRole = auth.role;
-      req.user = { id: auth.userId, email: 'a@b.c', role: auth.role, tenantId: auth.tenantId, type: 'agent' };
-      next();
-    },
-    autoProvision: (_req: any, _res: any, next: any) => next(),
-    invalidateProvisionCache: () => {},
-    resolveClerkIds: () => ({}),
-  };
-});
-vi.mock('../../middleware/super-admin.middleware', () => ({
-  requireSuperAdmin: (_req: any, _res: any, next: any) => next(),
-  resolveTenantContext: (_req: any, _res: any, next: any) => next(),
-}));
 vi.mock('@clerk/express', () => ({ clerkMiddleware: () => (_r: any, _s: any, n: any) => n() }));
 vi.mock('../../utils/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
 
@@ -39,8 +20,12 @@ import { createTestTenant, createTestUser } from '../helpers/factories';
 async function seed(tier: 'pro' | 'enterprise' = 'enterprise') {
   const tenant = await createTestTenant({ tier });
   const user = await createTestUser(tenant.id, { role: 'admin' });
-  auth.tenantId = tenant.id;
-  auth.userId = user.id;
+  configureMockAuth(auth, {
+    tenantId: tenant.id,
+    userId: user.id,
+    agentId: user.id,
+    role: 'admin',
+  });
   const repo = AppDataSource.getRepository(Lead);
   const s = Math.random().toString(36).slice(2, 8);
   const lead = await repo.save(

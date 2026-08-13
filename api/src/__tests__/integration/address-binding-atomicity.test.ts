@@ -142,13 +142,18 @@ describe('Pending Correction transitions', () => {
     expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
   });
 
-  it.each(['messenger', 'instagram', 'whatsapp', 'telegram'])(
-    'does not become ASKED on %s, which cannot render the control',
+  it.each(['messenger', 'instagram', 'whatsapp'])(
+    'becomes ASKED on %s when a persisted reply carries its renderable control',
     async (channel) => {
-      expect(await ask(P1, channel)).toBe(false);
-      expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
+      expect(await ask(P1, channel)).toBe(true);
+      expect((await getPendingCorrection(sessionId))?.status).toBe('asked');
     }
   );
+
+  it('does not become ASKED on Telegram, where address controls remain unsupported', async () => {
+    expect(await ask(P1, 'telegram')).toBe(false);
+    expect((await getPendingCorrection(sessionId))?.status).toBe('recorded');
+  });
 
   it('promotes the proposed address after an ASKED question is confirmed', async () => {
     expect(await ask()).toBe(true);

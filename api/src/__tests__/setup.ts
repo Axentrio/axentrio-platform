@@ -1,6 +1,6 @@
 /**
- * Per-test-file setup. `env-setup.ts` has already rewritten DATABASE_URL to this
- * worker's database, so importing AppDataSource here binds it to that database.
+ * Per-test-file setup. `env-setup.ts` has already pointed DATABASE_URL at this
+ * file process's database, so importing AppDataSource here binds it there.
  *
  * AppDataSource is imported statically (not dynamically inside beforeAll): setup
  * files are evaluated before the test file, so this resolves to the REAL module
@@ -12,71 +12,53 @@ if (!process.env.TEST_DATABASE_URL) {
 
 import { DataSource } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
-import { INSTALL_TRANSCRIPT_REVISION_TRIGGER } from '../database/sql/transcript-revision.sql';
-import { INSTALL_BOOKING_BLOCKED_RANGE } from '../database/sql/booking-blocked-range.sql';
-import { beforeAll, afterEach } from 'vitest';
+import { assertTestSchemaReady } from './test-schema';
+import {
+  testFileDatabaseName,
+  testTemplateDatabaseName,
+} from './worker-database';
+import { beforeAll, afterAll, afterEach } from 'vitest';
 
-// Worker DB name derived the same way env-setup.ts did.
-const workerDbName = new URL(process.env.DATABASE_URL!).pathname.replace(/^\//, '');
+const testDatabaseBaseUrl = process.env.TEST_DATABASE_BASE_URL ?? process.env.TEST_DATABASE_URL;
+const workerId = process.env.VITEST_WORKER_ID ?? '0';
+const fileDatabase = testFileDatabaseName(testDatabaseBaseUrl, workerId);
+const templateDatabase = testTemplateDatabaseName(testDatabaseBaseUrl);
 
-async function ensureWorkerDatabase(): Promise<void> {
-  const adminUrl = new URL(process.env.DATABASE_URL!);
+async function adminDataSource(): Promise<DataSource> {
+  const adminUrl = new URL(testDatabaseBaseUrl);
   adminUrl.pathname = '/postgres';
   const admin = new DataSource({ type: 'postgres', url: adminUrl.toString(), logging: false });
   await admin.initialize();
-  const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [workerDbName]);
-  if (exists.length === 0) {
-    await admin.query(`CREATE DATABASE "${workerDbName}"`);
-  }
-  await admin.destroy();
+  return admin;
 }
-
-const SCHEMA_SENTINEL = '_vitest_schema_ready';
 
 beforeAll(async () => {
   if (AppDataSource.isInitialized) return;
 
-  await ensureWorkerDatabase();
+  const admin = await adminDataSource();
+  try {
+    await admin.query(`CREATE DATABASE "${fileDatabase}" TEMPLATE "${templateDatabase}"`);
+  } finally {
+    await admin.destroy();
+  }
   await AppDataSource.initialize();
-  const [{ ready }] = await AppDataSource.query(
-    `SELECT to_regclass('public.${SCHEMA_SENTINEL}') IS NOT NULL AS ready`
-  );
-  if (ready) return;
+  await assertTestSchemaReady(AppDataSource);
+});
 
-  // Extensions must exist before synchronize() creates vector / trigram columns.
-  await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+afterAll(async () => {
+  if (AppDataSource.isInitialized) await AppDataSource.destroy();
+  const admin = await adminDataSource();
   try {
-    await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS vector');
-  } catch {
-    console.warn('pgvector extension not available — skipping (knowledge base features will not work in tests)');
+    await admin.query(
+      `SELECT pg_terminate_backend(pid)
+         FROM pg_stat_activity
+        WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [fileDatabase],
+    );
+    await admin.query(`DROP DATABASE IF EXISTS "${fileDatabase}"`);
+  } finally {
+    await admin.destroy();
   }
-  try {
-    await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-  } catch {
-    console.warn('pg_trgm extension not available — Copilot lexical retrieval tests will fail');
-  }
-  // Idempotent: creates only missing tables/columns. afterEach keeps rows clean.
-  await AppDataSource.synchronize();
-
-  // Triggers are NOT part of entity metadata, so synchronize() cannot create them.
-  // Installed from the same shared DDL the migration uses, so the test schema behaves
-  // like prod: without this the transcript revision would never bump under test and
-  // every enrichment compare-and-swap assertion would pass while proving nothing.
-  for (const stmt of INSTALL_TRANSCRIPT_REVISION_TRIGGER) {
-    await AppDataSource.query(stmt);
-  }
-
-  // Same reasoning, one table over. `chatbot_bookings.blocked_range` is a range type the
-  // `Booking` entity deliberately does not map, so synchronize() never creates it - and
-  // `rekeyBotBookings`, whose query filters on it, therefore errored and was swallowed by
-  // the non-fatal catch in every caller. The rekey did nothing under test (#88).
-  for (const stmt of INSTALL_BOOKING_BLOCKED_RANGE) {
-    await AppDataSource.query(stmt);
-  }
-  // Created last: its presence means the entity schema and both pieces of migration-only DDL are
-  // complete. Later files in this worker connect and go straight to data cleanup; they never
-  // rewrite the schema underneath background work left by an earlier file.
-  await AppDataSource.query(`CREATE TABLE "${SCHEMA_SENTINEL}" (ready boolean NOT NULL DEFAULT true)`);
 });
 
 afterEach(async () => {

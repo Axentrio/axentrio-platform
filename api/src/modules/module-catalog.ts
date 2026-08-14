@@ -24,6 +24,26 @@ export type ModuleGate =
   | { kind: 'feature'; feature: FeatureKey }
   | { kind: 'enablement' };
 
+/**
+ * Every feature-gated skill whose feature is currently on.
+ *
+ * The set a template with `skillPolicy: 'inherit_entitled'` picks up. Deliberately EXCLUDES
+ * enablement-gated modules: those need per-tenant config to mean anything, so inheriting one would
+ * hand a bot a tool with nothing behind it.
+ *
+ * Takes a predicate rather than a tenant id so the caller decides where "is this feature on?" comes
+ * from. Readiness must answer it from entitlements it has ALREADY resolved — re-resolving there
+ * swallows failures and turns a real outage into a misleading silent-absent (booking readiness,
+ * Decision 3) — while the agent runtime answers it from the modules it has already activated.
+ */
+export function featureGatedSkillIds(isFeatureEnabled: (feature: FeatureKey) => boolean): string[] {
+  return allModules()
+    .filter((m): m is ModuleDefinition & { gate: { kind: 'feature'; feature: FeatureKey } } =>
+      m.gate.kind === 'feature')
+    .filter((m) => isFeatureEnabled(m.gate.feature))
+    .map((m) => m.id);
+}
+
 export interface ModulePromptContext {
   tenantId: string;
   botId: string;

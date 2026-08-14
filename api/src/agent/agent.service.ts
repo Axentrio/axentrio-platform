@@ -14,6 +14,7 @@ import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { getEntitlements } from '../billing/entitlements';
+import type { FeatureKey } from '../billing/types';
 import { shouldAskForContact } from '../leads/proactive/should-ask';
 import type { ToolAdapter, Affordance, BookingAddressReplyFact } from './tool-adapter';
 import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
@@ -25,12 +26,12 @@ import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
-import { getModule, gatedToolNames, skillPromptAllowed } from '../modules/module-catalog';
+import { getModule, gatedToolNames, skillPromptAllowed, featureGatedSkillIds } from '../modules/module-catalog';
 import { resolveSkillStates, dropUnreadySkillTools } from '../modules/skill-state';
 import { readinessRefinement } from '../llm/skill-readiness';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, selectSkillIds } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, effectiveSkillIds } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { getBoundAddress } from '../booking/travel/address-binding';
@@ -447,17 +448,28 @@ export class AgentService {
       // H6: skills come from ALL bound templates (composeTemplateBodies already unions
       // their prompt bodies), not just the primary — else a secondary template's skills
       // silently don't take effect. Union each binding's effective skills.
-      const selectedSkillIds = [...new Set(
-        resolvedTemplates.flatMap((rt) =>
-          selectSkillIds({
-            selectedSkillIds: composableEnabled ? (rt.selectedSkillIds ?? null) : null,
-            expectedModules: rt.expectedModules ?? [],
-          }),
-        ),
-      )];
       const moduleSections: string[] = [];
+      // Resolved BEFORE the skill selection, because an `inherit_entitled` template (#103) takes
+      // its skills from exactly this list. `listActiveModules` is already entitlement- and
+      // preference-filtered, so nothing here can hand a bot a tool its plan does not include.
       const activeModules = await listActiveModules(tenant.id);
       const activeModuleIds = activeModules.map((a) => a.module.id);
+      const activeFeatures = new Set(
+        activeModules
+          .map((a) => a.module.gate)
+          .filter((g): g is { kind: 'feature'; feature: FeatureKey } => g.kind === 'feature')
+          .map((g) => g.feature),
+      );
+      // Flag OFF is the legacy path: skills come from `expectedModules` alone and nothing
+      // inherits, exactly as before. Normalised here rather than inside the shared resolver, so
+      // the one function every surface calls stays free of a runtime-only flag.
+      const templatesForSkills = composableEnabled
+        ? resolvedTemplates
+        : resolvedTemplates.map((rt) => ({ ...rt, selectedSkillIds: null, skillPolicy: 'explicit' as const }));
+      const selectedSkillIds = effectiveSkillIds(
+        templatesForSkills,
+        composableEnabled ? featureGatedSkillIds((f) => activeFeatures.has(f)) : [],
+      );
       // Templates are the SOLE source of skills: the bot's skills are exactly what
       // its template composes (∩ entitlements). A Dental template that binds {booking}
       // won't also offer handoff just because the plan allows it; and NO template (or

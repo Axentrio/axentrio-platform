@@ -17,10 +17,10 @@
  * (`ModuleDefinition.gate`), not a hand-kept list — a new feature-gated skill is
  * covered the day it registers, and a renamed feature key can't drift.
  */
-import { allModules, type ModuleDefinition } from './module-catalog';
+import { allModules, featureGatedSkillIds, type ModuleDefinition } from './module-catalog';
 import {
   resolveBoundTemplates,
-  selectedSkillIdsOf,
+  effectiveSkillIds,
   type BotTemplateBinding,
 } from '../templates/template-resolver';
 import type { Entitlements, FeatureKey } from '../billing/types';
@@ -85,7 +85,13 @@ export async function computeUnselectedEntitledSkills(
   const resolved = await resolveBoundTemplates(bot);
   if (resolved.length === 0) return [];
   return findUnselectedEntitledSkills({
-    selectedSkillIds: selectedSkillIdsOf(resolved),
+    // The EFFECTIVE skills, not the explicitly selected ones (#103). A template whose policy is
+    // `inherit_entitled` — Blank — already gives the bot every entitled skill, so warning that it
+    // "did not select" them would report a misconfiguration that does not exist.
+    selectedSkillIds: effectiveSkillIds(
+      resolved,
+      featureGatedSkillIds((f) => entitlements.features[f] === true),
+    ),
     features: entitlements.features,
   });
 }

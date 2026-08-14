@@ -20,7 +20,8 @@ import {
 } from '../../database/entities/AvailabilityRule';
 import { loadActiveCredential } from '../../scheduler/calendar-provider';
 import { isBookingConfigured } from '../../scheduler/booking-readiness';
-import { resolveBoundTemplates, selectedSkillIdsOf } from '../../templates/template-resolver';
+import { resolveBoundTemplates, effectiveSkillIds } from '../../templates/template-resolver';
+import { featureGatedSkillIds } from '../../modules/module-catalog';
 import {
   registerCapability,
   type CapabilityReadiness,
@@ -117,9 +118,18 @@ const CTA_ENABLE_BOOKING_SKILL = { route: '/ai/bots', label: 'Give this bot the 
  * `lead_capture` while expecting `booking` reported booking as active here while the
  * bot was in fact denied the booking tools.
  */
-async function resolvedBookingTemplateActive(bot: ReadinessBotCtx['bot']): Promise<boolean> {
-  const resolved = await resolveBoundTemplates(bot);
-  return selectedSkillIdsOf(resolved).includes('booking');
+async function resolvedBookingTemplateActive(ctx: ReadinessBotCtx): Promise<boolean> {
+  const resolved = await resolveBoundTemplates(ctx.bot);
+  // The EFFECTIVE skills (#103): a template whose policy is `inherit_entitled` — Blank — delivers
+  // booking without naming it, and reading only the explicit selection would call that bot dead.
+  //
+  // The inheritable set is built from the entitlements this check ALREADY resolved, never from
+  // `listActiveModules`: that re-resolves and swallows failures (Decision 3), which would turn a
+  // real entitlement outage into a quiet "booking not delivered" instead of a 5xx.
+  return effectiveSkillIds(
+    resolved,
+    featureGatedSkillIds((f) => ctx.entitlements.features[f] === true),
+  ).includes('booking');
 }
 
 export const bookingReadiness: CapabilityReadiness = {
@@ -152,7 +162,7 @@ export const bookingReadiness: CapabilityReadiness = {
     const hasAutoService = services.some((s) => s.bookingMode !== 'request');
 
     // Computed from the RESOLVED bound version(s) (Decision 4).
-    const bookingTemplateActive = await resolvedBookingTemplateActive(ctx.bot);
+    const bookingTemplateActive = await resolvedBookingTemplateActive(ctx);
 
     // `live` mirrors the runtime gate verbatim (the anti-lying guarantee) — BOTH halves of it.
     //

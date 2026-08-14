@@ -19,7 +19,7 @@ import { createTestTenant } from '../helpers/factories';
 
 const rt = (body: string, topics: string[] = []): ResolvedTemplate => ({
   templateId: 't', body, config: { guardrails: { topicsToAvoid: topics } }, resolvedVersion: 1,
-  category: null, expectedModules: [], selectedSkillIds: null, skillProse: null, variables: null, pinnedButUnavailable: false, templateUnavailable: false,
+  category: null, expectedModules: [], selectedSkillIds: null, skillPolicy: 'explicit', skillProse: null, variables: null, pinnedButUnavailable: false, templateUnavailable: false,
 });
 
 describe('composeTemplateBodies (AND/OR stitching)', () => {
@@ -128,6 +128,8 @@ describe('resolveBoundTemplate', () => {
       category: null,
       expectedModules: [],
       selectedSkillIds: null, skillProse: null, variables: null,
+      // An unbound bot has no template, so no template intent to inherit from (#103).
+      skillPolicy: 'explicit',
       pinnedButUnavailable: false,
       templateUnavailable: false,
     });

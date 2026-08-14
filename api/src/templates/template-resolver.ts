@@ -19,11 +19,15 @@
  * billability is never served a stale list.
  */
 import { AppDataSource } from '../database/data-source';
-import { BotTemplate } from '../database/entities/BotTemplate';
+import { BotTemplate, type SkillPolicy } from '../database/entities/BotTemplate';
 import { BotTemplateVersion, type BotTemplateConfig, type TemplateVariable } from '../database/entities/BotTemplateVersion';
 import { getEntitlements } from '../billing/entitlements';
+import type { FeatureKey } from '../billing/types';
+import { featureGatedSkillIds } from '../modules/module-catalog';
 import { cached, invalidate, readCounter, bumpCounter } from '../utils/cache';
 import { logger } from '../utils/logger';
+
+export type { SkillPolicy };
 
 const TEMPLATES_TTL_SECONDS = 60;
 // Per-tenant availability cache is version-keyed: a change affecting the GLOBAL
@@ -43,9 +47,13 @@ export interface AvailableTemplate {
   availableToAllTenants: boolean;
   /** Highest published version, or null if the template has no published version yet. */
   latestPublishedVersion: number | null;
-  /** Skill ids the latest published version composes (selected_skill_ids, else the
-   *  legacy expected_modules) — powers the "what this speciality gives" preview. */
+  /** The skills a bot bound to this template would ACTUALLY get — the explicit selection for a
+   *  specialty, the tenant's entitled set for an inheriting one, none for a knowledge-only one.
+   *  Powers the picker's "what this gives you" preview, which is what makes a capability-removing
+   *  choice visible BEFORE it is saved (#103). */
   skills: string[];
+  /** Why `skills` is what it is, so the picker can word the preview honestly. */
+  skillPolicy: SkillPolicy;
 }
 
 export interface ResolvedTemplate {
@@ -66,6 +74,8 @@ export interface ResolvedTemplate {
   /** Composable-templates: skill ids bound by the resolved version (module==skill,
    *  1:1). null for legacy templates (→ runtime falls back to expectedModules). */
   selectedSkillIds: string[] | null;
+  /** What the template INTENDS about skills — see `SkillPolicy` (#103). */
+  skillPolicy: SkillPolicy;
   /** Per-template prose overrides (skillId → prose) for the resolved version. */
   skillProse: Record<string, string> | null;
   /** Declared custom {placeholder} variables (for runtime defaults + tenant fill). */
@@ -97,6 +107,8 @@ const UNBOUND: ResolvedTemplate = {
   category: null,
   expectedModules: [],
   selectedSkillIds: null,
+  // An unbound bot has no template to inherit an intent from, so it stays tool-free.
+  skillPolicy: 'explicit',
   skillProse: null,
   variables: null,
   pinnedButUnavailable: false,
@@ -121,6 +133,8 @@ interface TemplateBundle {
   id: string;
   status: string;
   category: string | null;
+  /** Skill intent — a property of the TEMPLATE, not of a version (#103). */
+  skillPolicy: SkillPolicy;
   /** Published versions only, sorted DESC by version. */
   publishedVersions: PublishedVersion[];
 }
@@ -130,7 +144,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
   return cached(bundleCacheKey(templateId), TEMPLATES_TTL_SECONDS, async () => {
     const tmpl = await AppDataSource.getRepository(BotTemplate).findOne({
       where: { id: templateId },
-      select: ['id', 'status', 'category'],
+      select: ['id', 'status', 'category', 'skillPolicy'],
     });
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
@@ -142,6 +156,10 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
       id: tmpl.id,
       status: tmpl.status,
       category: tmpl.category ?? null,
+      // `?? 'explicit'` is load-bearing, not defensive noise: a bundle cached before this column
+      // existed deserialises with no policy, and defaulting the other way would hand every
+      // template in the cache the full entitled toolset for the life of its TTL.
+      skillPolicy: tmpl.skillPolicy ?? 'explicit',
       publishedVersions: versions.map((v) => ({
         version: v.version,
         body: v.body,
@@ -158,8 +176,14 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
 /** Templates the tenant may bind right now. `[]` for free/non-active tenants (D2). */
 export async function listAvailableTemplates(tenantId: string): Promise<AvailableTemplate[]> {
   let billable = false;
+  let inheritable: string[] = [];
   try {
-    billable = (await getEntitlements(tenantId)).billable;
+    const entitlements = await getEntitlements(tenantId);
+    billable = entitlements.billable;
+    // What an `inherit_entitled` template would give this tenant (#103), resolved OUTSIDE the
+    // availability cache for the same reason `billable` is: the answer depends on the plan, and a
+    // tenant whose plan just changed must not be shown last minute's capability list.
+    inheritable = featureGatedSkillIds((f: FeatureKey) => entitlements.features[f] === true);
   } catch (error) {
     logger.warn('[Templates] entitlement resolution failed — no templates available (fail closed)', {
       tenantId,
@@ -170,7 +194,9 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
   if (!billable) return [];
 
   const version = await readCounter(availVersionKey);
-  return cached(availCacheKey(tenantId, version), TEMPLATES_TTL_SECONDS, async () => {
+  // The cache holds the TEMPLATE facts only. Anything derived from the tenant's plan is applied
+  // after it, below.
+  const rowsCached = await cached(availCacheKey(tenantId, version), TEMPLATES_TTL_SECONDS, async () => {
     const rows: Array<{
       id: string;
       key: string;
@@ -180,8 +206,10 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
       available_to_all_tenants: boolean;
       latest_published: number | null;
       skills: string[] | null;
+      skill_policy: SkillPolicy | null;
     }> = await AppDataSource.query(
       `SELECT t.id, t.key, t.display_name, t.category, t.description, t.available_to_all_tenants,
+              t.skill_policy,
               (SELECT MAX(v.version) FROM bot_template_versions v
                  WHERE v.template_id = t.id AND v.status = 'published') AS latest_published,
               (SELECT COALESCE(v.selected_skill_ids, v.expected_modules, '[]'::jsonb)
@@ -204,8 +232,28 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
       description: r.description,
       availableToAllTenants: r.available_to_all_tenants,
       latestPublishedVersion: r.latest_published === null ? null : Number(r.latest_published),
-      skills: Array.isArray(r.skills) ? r.skills : [],
+      selectedSkills: Array.isArray(r.skills) ? r.skills : [],
+      skillPolicy: r.skill_policy ?? ('explicit' as SkillPolicy),
     }));
+  });
+
+  return rowsCached.map((r) => {
+    const policy = r.skillPolicy;
+    // What the bot would ACTUALLY get, so the picker can preview capabilities instead of
+    // showing Blank as an empty, harmless-looking choice — which is how #103 happened.
+    const skills =
+      policy === 'none' ? [] : policy === 'inherit_entitled' ? inheritable : r.selectedSkills;
+    return {
+      id: r.id,
+      key: r.key,
+      displayName: r.displayName,
+      category: r.category,
+      description: r.description,
+      availableToAllTenants: r.availableToAllTenants,
+      latestPublishedVersion: r.latestPublishedVersion,
+      skills,
+      skillPolicy: policy,
+    };
   });
 }
 
@@ -248,6 +296,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       category: bundle.category,
+      skillPolicy: bundle.skillPolicy,
       expectedModules: latest.expectedModules,
       selectedSkillIds: latest.selectedSkillIds,
       skillProse: latest.skillProse,
@@ -267,6 +316,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       category: bundle.category,
+      skillPolicy: bundle.skillPolicy,
       expectedModules: exact.expectedModules,
       selectedSkillIds: exact.selectedSkillIds,
       skillProse: exact.skillProse,
@@ -284,6 +334,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       category: bundle.category,
+      skillPolicy: bundle.skillPolicy,
       expectedModules: latest.expectedModules,
       selectedSkillIds: latest.selectedSkillIds,
       skillProse: latest.skillProse,
@@ -476,6 +527,37 @@ export function selectSkillIds(
  * Mirrors the selection the agent runtime feeds `gatedToolNames`, so the advisory
  * surfaces that read it can never disagree with what the bot actually gets. Pure.
  */
+/**
+ * The skills a bot ACTUALLY gets — the one function every surface must ask (#103).
+ *
+ * The agent's tool gate, booking readiness and the coverage advisory each used to work this out
+ * for themselves, and they drifted: readiness called a bot `live` while the runtime denied it the
+ * booking tools, and a customer's bot told people it worked without appointments. Independent
+ * copies of one rule is the bug, so there is now one copy.
+ *
+ * `inheritable` is passed in rather than looked up, because the callers cannot agree on where it
+ * comes from and should not have to. Readiness must use entitlements it has already resolved (see
+ * booking readiness, Decision 3); the runtime uses the modules it has already activated. Both feed
+ * `featureGatedSkillIds`.
+ *
+ * A binding whose template could not be resolved contributes nothing, whatever its policy says: an
+ * archived vertical must not quietly become the everything-bot.
+ */
+export function effectiveSkillIds(resolved: ResolvedTemplate[], inheritable: string[]): string[] {
+  const usable = resolved.filter((rt) => !rt.templateUnavailable && rt.resolvedVersion !== null);
+  const explicit = usable.flatMap((rt) =>
+    // `none` is deliberately tool-free and outranks whatever the version happens to select.
+    (rt.skillPolicy ?? 'explicit') === 'none'
+      ? []
+      : selectSkillIds({
+          selectedSkillIds: rt.selectedSkillIds ?? null,
+          expectedModules: rt.expectedModules ?? [],
+        }),
+  );
+  const inherits = usable.some((rt) => rt.skillPolicy === 'inherit_entitled');
+  return [...new Set([...explicit, ...(inherits ? inheritable : [])])];
+}
+
 export function selectedSkillIdsOf(resolved: ResolvedTemplate[]): string[] {
   return [
     ...new Set(

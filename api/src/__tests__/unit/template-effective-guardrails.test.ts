@@ -29,6 +29,7 @@ const resolved = (config: ResolvedTemplate['config'], id: string | null = 't1'):
   category: null,
   expectedModules: [],
   selectedSkillIds: null,
+  skillPolicy: 'explicit',
   skillProse: null,
   variables: null,
   pinnedButUnavailable: false,

@@ -53,7 +53,9 @@ vi.mock('../../templates/template-resolver', () => ({
   effectiveConfigFromList: () => ({}),
   withEffectiveConfig: (s: any) => s,
   templateUnavailabilityReason: () => null,
-  selectSkillIds: ({ selectedSkillIds }: any) => selectedSkillIds ?? [],
+  // The runtime asks `effectiveSkillIds` for a bot's skills (#103). These suites are not about
+  // skill policy, so the stub mirrors the explicit path: whatever the template selected.
+  effectiveSkillIds: (resolved: any[]) => resolved.flatMap((r: any) => r.selectedSkillIds ?? []),
 }));
 
 const tool = (name: string): ToolAdapter => ({

@@ -219,7 +219,7 @@ export async function forwardMessageToN8n(
   // ── Pre-forwarding checks (cheap, local) — shared with the coalesced path ──
   if (aiSettings) {
     const plainContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
-    const auto = localAutoresponse(session, savedMessage.type, plainContent, botSettings, aiSettings);
+    const auto = localAutoresponse(session, savedMessage.type, plainContent, botSettings, aiSettings, bot.businessTimezone);
     if (auto) {
       const botParticipant = await ensureBotParticipant(session, aiSettings);
       // Localize the canned off-hours/escalation message to the customer's
@@ -349,14 +349,17 @@ function localAutoresponse(
   plainContent: string,
   botSettings: BotSettings,
   aiSettings: BotAiSettings,
+  businessTimezone: string,
 ): { kind: 'off_hours' | 'escalation'; message: string } | null {
   if (session.status !== 'bot' || messageType !== 'text' || !aiSettings?.enabled) return null;
 
   // Off-hours. With the kill-switch ON (default) the AI runs and the
   // `## AVAILABILITY` fact carries the closed state into the prompt; only the
   // switch OFF short-circuits with the canned message. Detection is the shared
-  // `isOutsideBusinessHours` predicate — one definition for the gate and the prompt.
-  if (offHoursCannedReplyEnabled() && isOutsideBusinessHours(botSettings.businessHours)) {
+  // `isOutsideBusinessHours` predicate — one definition for the gate and the
+  // prompt — anchored to the bot's canonical `businessTimezone`, never the
+  // browser-written `businessHours.timezone`.
+  if (offHoursCannedReplyEnabled() && isOutsideBusinessHours(botSettings.businessHours, businessTimezone)) {
     return {
       kind: 'off_hours',
       message: aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon.",
@@ -1417,7 +1420,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // them. Finalise via the watermark so the turn is marked answered (won't re-run)
   // and route outbound; escalation also hands off.
   const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
-  let auto = localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings);
+  let auto = localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings, bot.businessTimezone);
   // The hwm itself didn't trip off-hours/escalation — but an EARLIER message in
   // this coalesced burst might contain an escalation keyword (the legacy path sees
   // each message individually; we must scan the whole window for parity). Off-hours
@@ -1435,7 +1438,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     for (const m of scan) {
       if (m.id === pending.id || m.type !== 'text') continue;
       const mc = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
-      const esc = localAutoresponse(session, 'text', mc, botSettings, aiSettings);
+      const esc = localAutoresponse(session, 'text', mc, botSettings, aiSettings, bot.businessTimezone);
       if (esc?.kind === 'escalation') { auto = esc; break; }
     }
   }

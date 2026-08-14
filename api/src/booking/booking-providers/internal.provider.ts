@@ -12,6 +12,7 @@ import { In, MoreThan, Raw } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
+import type { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { normalizeVenue } from '../../contracts/venue-address';
@@ -855,12 +856,21 @@ const createdWithinDedupWindow = () =>
   Raw((alias) => `${alias} > now() - interval '${BOOKING_DEDUP_WINDOW_MS} milliseconds'`);
 
 export class InternalProvider implements BookingProvider {
-  /** Business availability for the bot (shared by all services). */
-  private async loadRule(botId: string): Promise<AvailabilityRule> {
-    const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId } });
+  /**
+   * Business availability for the bot (shared by all services).
+   *
+   * The rule's denormalized `timezone` is overwritten with the bot's canonical
+   * `businessTimezone` HERE, at the single load boundary, so every downstream
+   * `rule.timezone` reader — slot expansion, day boundaries, parse anchoring,
+   * calendar all-day busy, capacity day-bucketing, display formatting — reads
+   * the server-owned value without each site having to know about the cutover.
+   */
+  private async loadRule(bot: Bot): Promise<AvailabilityRule> {
+    const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } });
     if (!rule) {
       throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
     }
+    rule.timezone = bot.businessTimezone || rule.timezone;
     return rule;
   }
 
@@ -957,7 +967,7 @@ export class InternalProvider implements BookingProvider {
      */
     customerAddress?: string
   ): Promise<AvailabilityResult> {
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
     // Request-only services aren't booked against the calendar — there are no
     // bookable slots to offer. Hard-stop here so the agent can't present times or
@@ -1801,7 +1811,7 @@ export class InternalProvider implements BookingProvider {
     intakeAnswers?: unknown,
     extras?: BookingExtras
   ): Promise<CreateBookingResult> {
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     // Create-time revalidation: the service must still exist, belong to this bot,
     // and be active (a slot chip / multi-turn gap can go stale).
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -2500,7 +2510,7 @@ export class InternalProvider implements BookingProvider {
     }
 
     // Resolve the service (sole-active default / SERVICE_REQUIRED / SERVICE_NOT_FOUND).
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
     const itineraryKey = await resolveItineraryKey(ctx.bot.id);
 
@@ -2614,13 +2624,8 @@ export class InternalProvider implements BookingProvider {
       return;
     }
     void (async () => {
-      let timezone = 'UTC';
-      try {
-        const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.bot.id } });
-        if (rule?.timezone) timezone = rule.timezone;
-      } catch {
-        // non-fatal — fall back to UTC
-      }
+      // Canonical, server-owned business timezone — already on the resolved bot.
+      const timezone = ctx.bot.businessTimezone || 'UTC';
       await sendRequestNotificationEmail({
         ownerEmail,
         serviceName: service.name,
@@ -2947,7 +2952,7 @@ export class InternalProvider implements BookingProvider {
     if (start.getTime() <= Date.now()) {
       throw new BookingError('This request is for a time in the past', 'REQUEST_EXPIRED', 409);
     }
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     const service = await this.serviceForBooking(booking);
     // Frozen length (stored span for legacy rows; never recompute from the service).
     const effectiveDuration = booking.bookedDurationMin ?? Math.round((end.getTime() - start.getTime()) / 60_000);
@@ -3316,7 +3321,7 @@ export class InternalProvider implements BookingProvider {
     if (booking.status !== 'confirmed') {
       throw new BookingError('Only confirmed bookings can be rescheduled', 'BOOKING_NOT_RESCHEDULABLE', 409);
     }
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     const service = await this.serviceForBooking(booking);
     const itineraryKey = await resolveItineraryKey(ctx.bot.id);
 
@@ -3836,7 +3841,7 @@ export class InternalProvider implements BookingProvider {
     if (booking.status !== 'confirmed') {
       throw new BookingError('Only confirmed bookings can be cancelled', 'BOOKING_NOT_CANCELLABLE', 409);
     }
-    const rule = await this.loadRule(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot);
     const service = await this.serviceForBooking(booking);
 
     const rows = returningRows<{ sequence: number }>(await AppDataSource.getRepository(Booking).query(
@@ -3902,7 +3907,7 @@ export class InternalProvider implements BookingProvider {
         itineraryKey: key,
       });
       if (!eligibility.active || !eligibility.startFromBase) return undefined;
-      const rule = await this.loadRule(ctx.bot.id);
+      const rule = await this.loadRule(ctx.bot);
       const { verdict } = await this.assertExposedFirstJob({
         eligibility,
         rule,

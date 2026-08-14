@@ -9,14 +9,16 @@ vi.mock('../../queue/message-queue', () => ({
 
 const bookingFindOne = vi.fn();
 const eventTypeFindOne = vi.fn();
-const ruleFindOne = vi.fn();
+// PR 1a: the reminder timezone now comes from the BOT's canonical
+// businessTimezone (via getBotBusinessTimezone), not the AvailabilityRule.
+const botFindOne = vi.fn();
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: any) => {
       const name = entity?.name || entity;
       if (name === 'Booking') return { findOne: bookingFindOne };
       if (name === 'ServiceType') return { findOne: eventTypeFindOne };
-      if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
+      if (name === 'Bot') return { findOne: botFindOne };
       return {};
     },
   },
@@ -71,7 +73,7 @@ describe('reminders · processor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     eventTypeFindOne.mockResolvedValue({ name: 'Intro call' });
-    ruleFindOne.mockResolvedValue({ timezone: 'Europe/Brussels' });
+    botFindOne.mockResolvedValue({ id: 'bot-1', businessTimezone: 'Europe/Brussels' });
   });
 
   it('sends the reminder when the booking is still confirmed and current', async () => {
@@ -86,7 +88,12 @@ describe('reminders · processor', () => {
     });
     await proc(job({ bookingId: 'bk-1', kind: '24h', sequence: 0 }));
     expect(sendReminderEmail).toHaveBeenCalledOnce();
-    expect(sendReminderEmail.mock.calls[0][0]).toMatchObject({ summary: 'Intro call', leadLabel: 'tomorrow' });
+    expect(sendReminderEmail.mock.calls[0][0]).toMatchObject({
+      summary: 'Intro call',
+      leadLabel: 'tomorrow',
+      // The bot's canonical businessTimezone, never the AvailabilityRule copy.
+      timezone: 'Europe/Brussels',
+    });
   });
 
   it('skips a cancelled booking', async () => {

@@ -20,6 +20,7 @@ import { ServiceType } from '../database/entities/ServiceType';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { resolveEventLocation } from '../booking/booking-providers/event-location';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
 import { returningRows } from '../utils/raw-sql';
@@ -277,7 +278,10 @@ async function loadEventMeta(
     ? await etRepo.findOne({ where: { id: row.event_type_id } })
     : await etRepo.findOne({ where: { botId: row.bot_id, isActive: true } });
   const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: row.bot_id } });
-  if (!eventType || !rule) return { timezone: rule?.timezone };
+  // Canonical, server-owned business timezone — the bot is authoritative on
+  // read; the rule row only gates "is booking configured at all".
+  const timezone = await getBotBusinessTimezone(row.bot_id);
+  if (!eventType || !rule) return { timezone };
 
   const bookingRows: Array<{
     attendee_name: string | null;
@@ -352,7 +356,7 @@ async function loadEventMeta(
     content,
     location,
     conferencing: eventType.locationType === 'google_meet',
-    timezone: rule.timezone,
+    timezone,
     startUtc: b?.start_utc ?? row.start_utc,
     endUtc: b?.end_utc ?? row.end_utc,
   };

@@ -19,6 +19,7 @@ import {
   type TimeWindow,
 } from '../../database/entities/AvailabilityRule';
 import { loadActiveCredential } from '../../scheduler/calendar-provider';
+import { getBotBusinessTimezone } from '../../booking/business-timezone';
 import { isBookingConfigured } from '../../scheduler/booking-readiness';
 import { resolveBoundTemplates, effectiveSkillIds } from '../../templates/template-resolver';
 import { featureGatedSkillIds } from '../../modules/module-catalog';
@@ -212,8 +213,10 @@ export const bookingReadiness: CapabilityReadiness = {
     let willAutoConfirm = false;
 
     if (hasAutoService) {
+      // Canonical, server-owned business timezone — never the rule's
+      // denormalized (historically browser-derived) copy.
       const today = DateTime.now()
-        .setZone(rule?.timezone || 'UTC')
+        .setZone(await getBotBusinessTimezone(botId))
         .toFormat('yyyy-MM-dd');
       const effectiveHours = hasEffectiveHours(rule, today);
 

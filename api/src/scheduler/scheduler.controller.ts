@@ -12,7 +12,13 @@ import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceTy
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { Booking } from '../database/entities/Booking';
+import { Tenant } from '../database/entities/Tenant';
 import type { Bot, BotSettings } from '../database/entities/Bot';
+import {
+  DEFAULT_BUSINESS_TIMEZONE,
+  resolveBusinessTimezone,
+  UnsupportedBusinessCountryError,
+} from '../booking/business-timezone';
 import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
 import { targetBotId } from '../utils/target-bot';
 import { resolveWorkLocation } from '../booking/service-location';
@@ -226,7 +232,12 @@ async function readConfig(tenantId: string, bot: Bot) {
     // the portal's sibling derivations (`neverAsked`, `hasAddressService`) already filter, so
     // leaving this one unfiltered made the same screen answer the same question two ways.
     workLocation: resolveWorkLocation(services.filter((s) => s.isActive)),
-    availability: availability ?? null,
+    // The bot's canonical businessTimezone is authoritative on read: the rule's
+    // denormalized copy (historically browser-derived) is never returned raw,
+    // so every response shows the DERIVED value (tolerant cutover, PR 1a).
+    availability: availability
+      ? Object.assign(availability, { timezone: bot.businessTimezone || availability.timezone })
+      : null,
     // No settings row (or a hand-edited non-array) reads as "no area configured", which
     // never blocks a booking.
     serviceArea: Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
@@ -307,6 +318,28 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // the column. Kept here rather than in the resolver so the resolver answers one question.
   const settings = bot.settings ?? ({} as BotSettings);
 
+  // Pre-write guard (PR 1a): reject an unsupported business-location country
+  // BEFORE any section write, so a refused venue leaves nothing written — the
+  // portal saves the whole page (event type, availability, venue) in one PUT, so
+  // a late rejection would otherwise persist the opening hours of a venue we
+  // refused. A TYPED country with no place id is settled here; a place id is
+  // resolved (BE-restricted, so it can only yield BE) and its post-resolution
+  // check runs below before the settings write.
+  {
+    const v = (data.venueAddress ?? null) as { country?: string | null; placeId?: string | null } | null;
+    const hasPlaceId = !!v && typeof v.placeId === 'string' && v.placeId.trim().length > 0;
+    if (v && !hasPlaceId && typeof v.country === 'string' && v.country.trim()) {
+      try {
+        resolveBusinessTimezone({ venue: { country: v.country } });
+      } catch (err) {
+        if (err instanceof UnsupportedBusinessCountryError) {
+          throw new ApiError(err.message, 400, 'UNSUPPORTED_BUSINESS_COUNTRY');
+        }
+        throw err;
+      }
+    }
+  }
+
   if (data.provider) {
     // Ignore any legacy 'calcom' input — the provider is always internal now.
     await replaceBotSettingsSection(bot.id, tenantId, 'integrations', {
@@ -328,6 +361,21 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     let rule = await repo.findOne({ where: { botId: bot.id } });
     if (!rule) rule = repo.create({ tenantId, botId: bot.id });
     Object.assign(rule, data.availability);
+    // Tolerant cutover (PR 1a): a client-sent `timezone` is ACCEPTED but
+    // IGNORED — the rule's denormalized timezone is always written equal to the
+    // bot's canonical, geography-derived businessTimezone. Old deployed clients
+    // still send `availability.timezone` (their schema requires it), so the
+    // server must not fail on it; it just can no longer change business time.
+    const derivedTimezone = bot.businessTimezone || DEFAULT_BUSINESS_TIMEZONE;
+    if (data.availability.timezone && data.availability.timezone !== derivedTimezone) {
+      logger.warn('[BusinessTimezone] client-sent availability.timezone conflicts with the derived value — ignored', {
+        tenantId,
+        botId: bot.id,
+        received: data.availability.timezone,
+        derived: derivedTimezone,
+      });
+    }
+    rule.timezone = derivedTimezone;
     await repo.save(rule);
   }
 
@@ -390,6 +438,34 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
           botId: bot.id,
           cause: resolved.status === 'unavailable' ? resolved.cause : resolved.status,
         });
+      }
+    }
+    // ── Server-owned business timezone (PR 1a) ────────────────────────────
+    // A venue write is a business-location change, so the bot's canonical
+    // businessTimezone is recomputed from it — venue country first (Google's
+    // own component when a place id resolved, else what the owner typed), the
+    // tenant's admitted operating country when the venue states none (which is
+    // also the `venueAddress: null` No-Location path). An UNSUPPORTED country
+    // is rejected here, at the business-location boundary, before anything is
+    // written: a wrong-but-plausible guess would corrupt every booking
+    // silently. The recompute itself joins the settings upsert's transaction
+    // below, so the venue and the timezone it implies can never disagree.
+    let derivedBusinessTimezone: string | null = null;
+    if (venueProvided) {
+      const tenantRow = await AppDataSource.getRepository(Tenant).findOne({
+        where: { id: tenantId },
+        select: { id: true, operatingCountry: true },
+      });
+      try {
+        derivedBusinessTimezone = resolveBusinessTimezone({
+          country: tenantRow?.operatingCountry,
+          venue: { country: typeof va.country === 'string' ? va.country : null },
+        });
+      } catch (err) {
+        if (err instanceof UnsupportedBusinessCountryError) {
+          throw new ApiError(err.message, 400, 'UNSUPPORTED_BUSINESS_COUNTRY');
+        }
+        throw err;
       }
     }
     // Generated rather than hand-written: seven nullable int columns, each needing a value
@@ -536,12 +612,33 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
     // A real upsert rather than findOne-then-save: the unique index on bot_id means two
     // concurrent first-writes for the same bot raced to a 23505.
-    await AppDataSource.query(
-      `INSERT INTO chatbot_booking_settings (${insertCols.join(', ')})
-       VALUES (${insertVals.join(', ')})
-       ON CONFLICT (bot_id) DO UPDATE SET ${updates.join(', ')}, updated_at = now()`,
-      params
-    );
+    //
+    // The venue write and the businessTimezone it implies commit in ONE
+    // transaction (with the denormalized AvailabilityRule copy kept equal), so
+    // a crash between them can never leave a venue whose timezone still
+    // describes the previous location.
+    await AppDataSource.transaction(async (manager) => {
+      await manager.query(
+        `INSERT INTO chatbot_booking_settings (${insertCols.join(', ')})
+         VALUES (${insertVals.join(', ')})
+         ON CONFLICT (bot_id) DO UPDATE SET ${updates.join(', ')}, updated_at = now()`,
+        params
+      );
+      if (derivedBusinessTimezone) {
+        await manager.query(
+          `UPDATE chatbot_bots SET business_timezone = $1, updated_at = now()
+            WHERE id = $2 AND business_timezone IS DISTINCT FROM $1`,
+          [derivedBusinessTimezone, bot.id]
+        );
+        await manager.query(
+          `UPDATE chatbot_availability_rules SET timezone = $1, updated_at = now()
+            WHERE bot_id = $2 AND timezone IS DISTINCT FROM $1`,
+          [derivedBusinessTimezone, bot.id]
+        );
+      }
+    });
+    // Keep the in-memory bot current so the response below reflects the write.
+    if (derivedBusinessTimezone) bot.businessTimezone = derivedBusinessTimezone;
   }
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });
@@ -725,12 +822,14 @@ export async function applyPreset(req: Request, res: Response): Promise<void> {
         const a = presetAvailabilitySchema.parse(preset.availability);
         // Raw targeted ON CONFLICT (bot_id) — jsonb params JSON.stringify'd so node-pg
         // doesn't serialize the arrays/objects as Postgres array literals.
+        // The rule's timezone is the bot's canonical businessTimezone, never
+        // the preset's — the preset value is display seed data, not authority.
         await manager.query(
           `INSERT INTO chatbot_availability_rules
              (tenant_id, bot_id, timezone, weekly_hours, date_overrides, slot_granularity_min)
            VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6)
            ON CONFLICT (bot_id) DO NOTHING`,
-          [tenantId, botId, a.timezone, JSON.stringify(a.weeklyHours), JSON.stringify(a.dateOverrides), a.slotGranularityMin]
+          [tenantId, botId, bot.businessTimezone || a.timezone, JSON.stringify(a.weeklyHours), JSON.stringify(a.dateOverrides), a.slotGranularityMin]
         );
       }
     }

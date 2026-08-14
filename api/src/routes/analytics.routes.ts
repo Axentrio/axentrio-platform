@@ -10,6 +10,7 @@ import { Booking } from '../database/entities/Booking';
 import { Lead } from '../database/entities/Lead';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { isWithinBusinessHours } from '../booking/booking-providers/slot-engine';
+import { applyBotBusinessTimezones } from '../booking/business-timezone';
 import type { OutcomesResponse, OutcomeAggregates, OutcomesTimeseriesResponse } from '../contracts/analytics';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
@@ -381,7 +382,11 @@ router.get(
       60,
       async () => {
         // Scheduler business hours, one rule per bot — loaded once for both windows.
-        const rules = await availabilityRepository.find({ where: { tenantId } });
+        // Each rule's timezone is overridden by its bot's canonical
+        // businessTimezone, so day-bucketing follows the server-owned value.
+        const rules = await applyBotBusinessTimezones(
+          await availabilityRepository.find({ where: { tenantId } }),
+        );
         const [current, previous] = await Promise.all([
           computeOutcomes(tenantId, from, to, rules),
           computeOutcomes(tenantId, prevFrom, prevTo, rules),

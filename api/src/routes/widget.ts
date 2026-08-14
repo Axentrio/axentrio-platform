@@ -177,10 +177,12 @@ router.get(
         handoffEnabled: botSettings.features?.handoffEnabled ?? true,
         aiEnabled: botSettings.ai?.enabled ?? false,
       },
-      businessHours: botSettings.businessHours || {
-        enabled: false,
-        timezone: 'UTC',
-      },
+      // Display fact only. The timezone shown is the DERIVED bot value (PR 1a):
+      // legacy rows may still store a browser-written timezone the server no
+      // longer honours anywhere.
+      businessHours: botSettings.businessHours
+        ? { ...botSettings.businessHours, timezone: bot.businessTimezone || botSettings.businessHours.timezone }
+        : { enabled: false, timezone: bot.businessTimezone || 'UTC' },
       appearance,
       attribution: { hide: hideAttribution },
       widgetVersion: widgetVersionHash,

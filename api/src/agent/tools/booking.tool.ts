@@ -17,7 +17,8 @@ import type { CreateBookingResult } from '../../booking/booking-providers/types'
 import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
-import { addressOptionId, canRenderAddressControls } from '../../channels/address-controls';
+import { canRenderAddressControls } from '../../channels/address-controls';
+import { randomUUID } from 'crypto';
 
 /**
  * The platform's own address check, reused rather than re-invented.
@@ -46,7 +47,10 @@ async function addressPickerAffordance(
       // Three is the tightest supported Meta limit (WhatsApp), so one persisted reply renders
       // identically on Messenger, Instagram and WhatsApp.
       options: result.suggestions.slice(0, 3).map((suggestion) => ({
-        id: addressOptionId(suggestion.placeId),
+        // #97 D3: a random per-offer token, written as an offer row in the reply-persist transaction
+        // and placed in the button. NOT a hash of the place, so an old render's button can never
+        // consume a newer re-offer for the same place.
+        id: randomUUID(),
         placeId: suggestion.placeId,
         text: suggestion.text,
       })),

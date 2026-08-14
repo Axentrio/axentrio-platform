@@ -155,10 +155,9 @@ export function formatResponseForChannel(
   switch (type) {
     case 'text':
     case 'quick_reply': {
-      const msg: OutboundChannelMessage = {
-        type: 'text',
-        content: typeof response.content === 'string' ? response.content : JSON.stringify(response.content),
-      };
+      const prefix = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+      const tail = response.protectedTail ?? '';
+      const msg: OutboundChannelMessage = { type: 'text', content: prefix + tail };
       if (response.quickReplies && capabilities.supportsQuickReplies) {
         msg.type = 'quick_reply';
         msg.quickReplies = response.quickReplies
@@ -171,7 +170,21 @@ export function formatResponseForChannel(
           .map((b) => ({ type: b.type as 'url' | 'postback', title: b.title, value: b.url || b.value || '' }));
       }
       if (msg.content && msg.content.length > capabilities.maxTextLength) {
-        msg.content = msg.content.slice(0, capabilities.maxTextLength - 3) + '...';
+        if (tail && tail.length <= capabilities.maxTextLength - 3) {
+          // Protect the tail (the numbered address list its buttons name); truncate the prefix (#97 D2).
+          msg.content = prefix.slice(0, capabilities.maxTextLength - tail.length - 3) + '...' + tail;
+        } else if (tail) {
+          // The tail alone will not fit. Fail closed: a numbered control whose lines were cut is worse
+          // than no control, so drop the tail AND every control that referred to it.
+          msg.content = prefix.length > capabilities.maxTextLength - 3
+            ? prefix.slice(0, capabilities.maxTextLength - 3) + '...'
+            : prefix;
+          delete msg.quickReplies;
+          delete msg.buttons;
+          if (msg.type === 'quick_reply') msg.type = 'text';
+        } else {
+          msg.content = msg.content.slice(0, capabilities.maxTextLength - 3) + '...';
+        }
       }
       messages.push(msg);
       break;

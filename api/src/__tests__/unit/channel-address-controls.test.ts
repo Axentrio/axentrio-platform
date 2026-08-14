@@ -38,8 +38,9 @@ describe('channel address controls', () => {
       'messenger',
     );
 
-    expect(rendered.content).toContain(`1. ${BOUND}`);
-    expect(rendered.content).toContain(`2. ${PROPOSED}`);
+    expect(rendered.content).toBe('I found these times.');
+    expect(rendered.protectedTail).toContain(`1. ${BOUND}`);
+    expect(rendered.protectedTail).toContain(`2. ${PROPOSED}`);
     expect(rendered.quickReplies).toEqual([
       { title: '1', value: addressPickerPayload(firstId) },
       { title: '2', value: addressPickerPayload(secondId) },
@@ -55,8 +56,9 @@ describe('channel address controls', () => {
       'whatsapp',
     );
 
-    expect(rendered.content).toContain(`1. ${BOUND}`);
-    expect(rendered.content).toContain(`2. ${PROPOSED}`);
+    expect(rendered.content).toBe('Which address should I use?');
+    expect(rendered.protectedTail).toContain(`1. ${BOUND}`);
+    expect(rendered.protectedTail).toContain(`2. ${PROPOSED}`);
     expect(rendered.quickReplies).toEqual([
       { title: '1', value: addressConfirmPayload('proposal-1', 'bound') },
       { title: '2', value: addressConfirmPayload('proposal-1', 'proposed') },

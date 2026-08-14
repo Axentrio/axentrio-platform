@@ -142,11 +142,11 @@ export async function getPendingCorrection(sessionId: string): Promise<PendingCo
  * The customer picked an address. This changes the binding generation and voids every question
  * about the previous binding.
  */
-export async function bindAddress(sessionId: string, address: BoundAddress): Promise<void> {
+export async function bindAddress(sessionId: string, address: BoundAddress, manager?: EntityManager): Promise<void> {
   const formattedAddress = address.formattedAddress.trim();
   const placeId = address.placeId?.trim();
   if (!formattedAddress || !placeId) throw new Error('A picked address requires text and place identity');
-  await AppDataSource.query(
+  await executor(manager).query(
     `INSERT INTO chatbot_address_bindings
        (session_id, address, place_id, source, pending, version, updated_at)
      VALUES ($1, $2, $3, 'picked', NULL, 0, now())

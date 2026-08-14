@@ -12,10 +12,11 @@ import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import type { FeatureOverride } from '../../database/entities/Tenant';
 import { TenantModule } from '../../database/entities/TenantModule';
-import { PLANS } from '../../billing/plans';
+import { PLANS, overrideExceedsTier } from '../../billing/plans';
+import type { FeatureKey } from '../../billing/types';
 import { FEATURE_TAXONOMY, FEATURE_GROUPS } from '../../billing/feature-taxonomy';
 import { allModules, getModule, invalidateModules, invalidateEntitlementsAndModules, listActiveModules } from '../../modules';
-import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/error-handler';
+import { asyncHandler, ValidationError, NotFoundError, ApiError } from '../../middleware/error-handler';
 import { sendSuccess } from '../../utils/response';
 import { logAudit } from '../../utils/audit';
 
@@ -61,14 +62,28 @@ router.put(
   '/tenants/:id/feature-overrides',
   asyncHandler(async (req: Request, res: Response) => {
     const tenant = await loadTenant(req.params.id);
-    const body = req.body as Record<string, unknown>;
-    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const rawBody = req.body as Record<string, unknown>;
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
       throw new ValidationError('Body must be an object mapping feature keys to overrides');
     }
+    // Backward-compatible wire shape. The portal used to POST the bare feature
+    // map; it now POSTs { overrides, confirmAboveTier }. The API and portal deploy
+    // INDEPENDENTLY, so accept BOTH — a cached portal must keep working.
+    const wrapped =
+      typeof rawBody.overrides === 'object' &&
+      rawBody.overrides !== null &&
+      !Array.isArray(rawBody.overrides);
+    const body = (wrapped ? rawBody.overrides : rawBody) as Record<string, unknown>;
+    const confirmAboveTier = rawBody.confirmAboveTier === true;
 
     const setBy = adminIdentity(req);
     const setAt = new Date().toISOString();
     const next: Record<string, FeatureOverride> = {};
+    // Grants that turn a feature ON above the tenant's plan AND are new or changed
+    // versus the stored map. An above-plan comp stays allowed, but only with an
+    // explicit confirmation, so an accidental flip cannot silently enable, for
+    // example, booking on an Essential tenant.
+    const aboveTierNew: string[] = [];
 
     for (const [key, entry] of Object.entries(body)) {
       if (!FEATURE_KEYS.has(key)) throw new ValidationError(`Unknown feature key: ${key}`);
@@ -90,6 +105,21 @@ router.put(
         existing && existing.value === value && existing.reason === reason.trim()
           ? existing
           : { value, reason: reason.trim().slice(0, 500), setBy, setAt };
+      // A grant is "new above-tier" only when it exceeds the plan AND was not
+      // already granted — so re-saving an existing comp, or editing an unrelated
+      // key, never re-prompts.
+      if (overrideExceedsTier(tenant.tier, key as FeatureKey, value) && existing?.value !== true) {
+        aboveTierNew.push(key);
+      }
+    }
+
+    if (aboveTierNew.length && !confirmAboveTier) {
+      throw new ApiError(
+        `Granting ${aboveTierNew.join(', ')} above the ${tenant.tier} plan needs confirmation.`,
+        400,
+        'above_tier_confirmation_required',
+        { featureKeys: aboveTierNew },
+      );
     }
 
     tenant.featureOverrides = next;
@@ -98,6 +128,7 @@ router.put(
     await invalidateEntitlementsAndModules(tenant.id);
     await logAudit(req.userId!, 'tenant.feature_overrides_updated', 'tenant', tenant.id, tenant.id, {
       overrides: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v.value])),
+      aboveTier: aboveTierNew,
     });
 
     sendSuccess(res, {

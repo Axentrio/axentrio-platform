@@ -412,19 +412,35 @@ export function useTenantOverrides(id: string) {
   });
 }
 
-/** Replaces the FULL override map — absent features return to tier default. */
+/**
+ * Replaces the FULL override map — absent features return to tier default.
+ * Sends the { overrides, confirmAboveTier } shape; the API also accepts the
+ * legacy bare map, so this stays compatible across an independent deploy. A
+ * grant above the tenant's plan returns `above_tier_confirmation_required`; the
+ * panel catches that and re-submits with `confirmAboveTier: true`.
+ */
 export function useSetTenantOverrides(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (overrides: Record<string, { value: boolean; reason: string }>) =>
-      api.put<TenantOverridesResponse>(`/admin/tenants/${id}/feature-overrides`, overrides),
+    mutationFn: (vars: {
+      overrides: Record<string, { value: boolean; reason: string }>;
+      confirmAboveTier?: boolean;
+    }) =>
+      api.put<TenantOverridesResponse>(`/admin/tenants/${id}/feature-overrides`, {
+        overrides: vars.overrides,
+        ...(vars.confirmAboveTier ? { confirmAboveTier: true } : {}),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantOverrides(id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(id) });
       toast.success('Feature overrides saved');
     },
-    onError: (err: Any) =>
-      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to save overrides'),
+    onError: (err: Any) => {
+      // An above-tier grant needs an explicit confirmation, which the panel
+      // prompts for — so this is not a failure to toast.
+      if (err?.response?.data?.error?.code === 'above_tier_confirmation_required') return;
+      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to save overrides');
+    },
   });
 }
 

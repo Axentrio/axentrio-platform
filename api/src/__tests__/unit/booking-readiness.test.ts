@@ -247,7 +247,14 @@ beforeEach(() => {
   state.ruleRow = null;
   state.templateVersionRow = null;
   state.activeCredential = null;
-  state.resolvedTemplates = [];
+  // `live` has TWO conjuncts since 2026-08-13: configured AND delivered by a bound template.
+  // Every suite below this line varies the CONFIGURATION axis, so delivery is held on — a
+  // default of `[]` would make them all assert against a bot that has no booking tools at all,
+  // and the configuration truth table would silently stop testing configuration. The delivery
+  // axis has its own suite at the bottom of this file, which sets its templates explicitly.
+  state.resolvedTemplates = [
+    { templateId: 'tmpl-default', resolvedVersion: 1, selectedSkillIds: ['booking'], expectedModules: ['booking'] },
+  ];
 });
 
 async function runCheck(ctx?: ReadinessBotCtx): Promise<ReadinessResult> {
@@ -445,5 +452,91 @@ describe('bookingReadiness.check — detail.bookingTemplateActive from RESOLVED 
     state.resolvedTemplates = [];
     const r = await runCheck();
     expect(r.detail?.bookingTemplateActive).toBe(false);
+  });
+});
+
+/**
+ * Configured is not delivered.
+ *
+ * Found on production, 2026-08-13. The readiness payload for a live customer bot said booking was
+ * `state: 'live'` with `missingSteps: []`, a healthy calendar and `willAutoConfirm: true` — and in
+ * the same response, `bookingTemplateActive: false` and `unselectedEntitledSkills: [booking]`. The
+ * bot was telling customers it worked without appointments, because the template gate strips the
+ * booking tools before the agent ever sees them. Binding a template that selects booking fixed it
+ * in one request, which is what proved the causation.
+ *
+ * The anti-lying guarantee this file was built on mirrors `isBookingConfigured`, the CONFIGURATION
+ * gate. It never mirrored the DELIVERY gate. Both have to hold, because a bot that cannot be handed
+ * the tool is not live in any sense a business owner means by the word — and this exact failure,
+ * unnoticed on a different skill, already cost a paying customer ninety days of leads.
+ */
+describe('bookingReadiness.check — live means the tools are actually delivered', () => {
+  beforeEach(() => {
+    // Configured beyond doubt: an auto service, real hours, a healthy calendar.
+    state.serviceRows = [{ id: 'a', bookingMode: 'auto' }];
+    state.ruleRow = ruleBusinessHours();
+    state.activeCredential = HEALTHY_CAL;
+  });
+
+  it('is NOT live when no bound template selects the booking skill', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 1, selectedSkillIds: ['answering'], expectedModules: [] },
+    ];
+
+    const r = await runCheck();
+
+    expect(r.state).toBe('not_ready');
+    // The diagnostic stays, because "why" is the half an owner needs.
+    expect(r.detail?.bookingTemplateActive).toBe(false);
+  });
+
+  it('names enabling the skill as the missing step, with somewhere to go', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 1, selectedSkillIds: [], expectedModules: [] },
+    ];
+
+    const r = await runCheck();
+
+    const step = (r.missingSteps ?? []).find((s) => s.id === 'enable_booking_skill');
+    expect(step).toBeDefined();
+    expect(step?.cta?.route).toBeTruthy();
+  });
+
+  it('does not blame configuration when configuration is fine', async () => {
+    // The owner must not be sent to add a service they already have.
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 1, selectedSkillIds: [], expectedModules: [] },
+    ];
+
+    const r = await runCheck();
+
+    expect((r.missingSteps ?? []).map((s) => s.id)).not.toContain('add_service');
+    expect((r.missingSteps ?? []).map((s) => s.id)).not.toContain('set_hours');
+  });
+
+  it('is live once a bound template selects booking', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 1, selectedSkillIds: ['booking'], expectedModules: [] },
+    ];
+
+    const r = await runCheck();
+
+    expect(r.state).toBe('live');
+    expect(r.detail?.bookingTemplateActive).toBe(true);
+  });
+
+  it('still reports an unconfigured bot against configuration, not the skill', async () => {
+    // Both wrong at once: the path to live starts with the service, and naming the skill
+    // first would send the owner to a template screen for a bot with nothing to book.
+    state.serviceRows = [];
+    state.ruleRow = null;
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 1, selectedSkillIds: [], expectedModules: [] },
+    ];
+
+    const r = await runCheck();
+
+    expect(r.state).toBe('not_ready');
+    expect((r.missingSteps ?? [])[0]?.id).toBe('add_service');
   });
 });

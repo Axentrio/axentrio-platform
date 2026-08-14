@@ -138,6 +138,36 @@ async function provision(opts: {
   return { tenantId: tenant.id, botId: bot.id };
 }
 
+let templateKeyN = 0;
+
+/**
+ * Seed a globally-available template whose published v1 selects `skills`, and bind it.
+ *
+ * Module-scoped since 2026-08-13, because booking `live` now requires a bound template that
+ * SELECTS the booking skill, not merely a configured bot. Every suite asserting `live` has to
+ * deliver the skill the way production does.
+ */
+async function bindTemplateSelecting(botId: string, skills: string[]): Promise<void> {
+  const tpl = await AppDataSource.getRepository(BotTemplate).save({
+    key: `coverage-tmpl-${++templateKeyN}-${Math.random().toString(36).slice(2, 8)}`,
+    displayName: 'Coverage',
+    availableToAllTenants: true,
+    status: 'active',
+  });
+  await AppDataSource.getRepository(BotTemplateVersion).save({
+    templateId: tpl.id,
+    version: 1,
+    body: 'body',
+    status: 'published',
+    expectedModules: [],
+    selectedSkillIds: skills,
+  });
+  await AppDataSource.getRepository(Bot).update(
+    { id: botId },
+    { templateId: tpl.id, templateVersion: 'latest', templateBindings: [{ templateId: tpl.id, version: 'latest' }] },
+  );
+}
+
 /** The booking result. Scoped by capability rather than "the only one": answering
  *  and channel now contribute too, and these assertions are about booking. */
 function bookingOf(body: any) {
@@ -193,6 +223,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
     const { tenantId, botId } = await provision({ tier: 'pro' });
     await seedService(tenantId, botId, { bookingMode: 'auto' });
     await seedRule(tenantId, botId);
+    await bindTemplateSelecting(botId, ['booking']);
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
     const cap = bookingOf(res.body);
@@ -204,6 +235,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
   it('pro + REQUEST-only (no calendar) ⇒ live, willAutoConfirm false, NO attention (no calendar nag)', async () => {
     const { tenantId, botId } = await provision({ tier: 'pro' });
     await seedService(tenantId, botId, { bookingMode: 'request' });
+    await bindTemplateSelecting(botId, ['booking']);
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
     const cap = bookingOf(res.body);
@@ -218,6 +250,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
     const { tenantId, botId } = await provision({ tier: 'pro' });
     await seedService(tenantId, botId, { bookingMode: 'auto' });
     await seedRule(tenantId, botId);
+    await bindTemplateSelecting(botId, ['booking']);
     await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: false });
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
@@ -241,6 +274,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
     });
     await seedService(tenantId, botId, { bookingMode: 'auto' });
     await seedRule(tenantId, botId);
+    await bindTemplateSelecting(botId, ['booking']);
     await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: false });
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
@@ -255,6 +289,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
     const { tenantId, botId } = await provision({ tier: 'pro' });
     await seedService(tenantId, botId, { bookingMode: 'auto' });
     await seedRule(tenantId, botId);
+    await bindTemplateSelecting(botId, ['booking']);
     await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: true });
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
@@ -270,6 +305,7 @@ describe('GET /bots/readiness (real DB) — live + auto-confirm enrichment', () 
     await seedService(tenantId, botId, { bookingMode: 'auto' });
     // hasRule=true (live mirrors rule existence) but no effective hours.
     await seedRule(tenantId, botId, { availabilityMode: 'business_hours', weeklyHours: {} });
+    await bindTemplateSelecting(botId, ['booking']);
     await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: false });
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
@@ -309,30 +345,6 @@ describe('GET /bots/readiness (real DB) — serving-state overall flags', () => 
  * selection, bound to the bot, against the real Pro entitlement map.
  */
 describe('GET /bots/readiness (real DB) — entitled but undelivered skills', () => {
-  let keyN = 0;
-
-  /** Seed a globally-available template whose published v1 selects `skills`, and bind it. */
-  async function bindTemplateSelecting(botId: string, skills: string[]): Promise<void> {
-    const tpl = await AppDataSource.getRepository(BotTemplate).save({
-      key: `coverage-tmpl-${++keyN}-${Math.random().toString(36).slice(2, 8)}`,
-      displayName: 'Coverage',
-      availableToAllTenants: true,
-      status: 'active',
-    });
-    await AppDataSource.getRepository(BotTemplateVersion).save({
-      templateId: tpl.id,
-      version: 1,
-      body: 'body',
-      status: 'published',
-      expectedModules: [],
-      selectedSkillIds: skills,
-    });
-    await AppDataSource.getRepository(Bot).update(
-      { id: botId },
-      { templateId: tpl.id, templateVersion: 'latest', templateBindings: [{ templateId: tpl.id, version: 'latest' }] },
-    );
-  }
-
   beforeEach(() => {
     // The tool-gate this mirrors only runs behind the composable flag.
     process.env.COMPOSABLE_TEMPLATES_ENABLED = 'true';
@@ -369,6 +381,35 @@ describe('GET /bots/readiness (real DB) — entitled but undelivered skills', ()
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
     expect(res.body.data.unselectedEntitledSkills).toEqual([]);
+  });
+
+  /**
+   * The contradiction this endpoint served on production, 2026-08-13, made impossible.
+   *
+   * The payload said booking was `live` with no missing steps, a healthy calendar and
+   * `willAutoConfirm: true`, and in the same breath listed booking under
+   * `unselectedEntitledSkills` with `bookingTemplateActive: false`. The bot was telling
+   * customers it worked without appointments. An owner reading `allLive: true` had no reason
+   * to scroll to the field that contradicted it.
+   */
+  it('booking can never be reported both unselected AND live', async () => {
+    const { tenantId, botId } = await provision({ tier: 'pro' });
+    // Configured past every objection — the only thing missing is delivery.
+    await seedService(tenantId, botId, { bookingMode: 'auto' });
+    await seedRule(tenantId, botId);
+    await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: false });
+    await bindTemplateSelecting(botId, ['lead_capture', 'handoff']);
+
+    const res = await request(app).get(READINESS_URL);
+
+    expect(res.status).toBe(200);
+    const unselected = res.body.data.unselectedEntitledSkills.map((s: any) => s.skillId);
+    expect(unselected).toContain('booking');
+
+    const cap = bookingOf(res.body);
+    expect(cap.state).toBe('not_ready');
+    expect(cap.missingSteps.map((s: any) => s.id)).toContain('enable_booking_skill');
+    expect(res.body.data.overall.allLive).toBe(false);
   });
 });
 

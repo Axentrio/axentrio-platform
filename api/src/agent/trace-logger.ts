@@ -38,6 +38,8 @@ export interface AgentTrace {
 export type TerminalErrorKind =
   | 'upstream_quota'
   | 'upstream_rate_limit'
+  | 'upstream_server_error'
+  | 'upstream_unreachable'
   | 'llm_timeout'
   | 'bot_fault';
 

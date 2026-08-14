@@ -555,6 +555,46 @@ describe('forwardMessageToN8n', () => {
     });
   });
 
+  // ── 7b. Upstream failure keeps the bot on the legacy path ───────────────
+
+  describe('upstream failure on the legacy path', () => {
+    it('sends the fallback but does NOT hand off when the agent error is an upstream/infra failure', async () => {
+      // A provider outage (or a Redis/queue failure) hits every conversation at
+      // once; a handoff would park the whole inbox and silence the bot.
+      initializeAgentService({
+        run: vi.fn().mockResolvedValue({
+          type: 'error', error: 'upstream down', fallbackMessage: 'One moment please.', infraFailure: true,
+        }),
+      } as unknown as AgentService);
+      const tenant = await createTestTenant({
+        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+      });
+      const { session, message } = await setup(tenant.id, 'hello');
+
+      await forwardMessageToN8n(session, message);
+
+      expect((await getBotMessages(session.id)).length).toBeGreaterThanOrEqual(1); // fallback sent
+      expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(0); // NOT handed off
+      expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).status).toBe('bot'); // bot keeps it
+    });
+
+    it('still hands off when the agent error is a genuine bot fault (infraFailure false)', async () => {
+      initializeAgentService({
+        run: vi.fn().mockResolvedValue({
+          type: 'error', error: 'prompt composition blew up', fallbackMessage: 'One moment please.', infraFailure: false,
+        }),
+      } as unknown as AgentService);
+      const tenant = await createTestTenant({
+        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+      });
+      const { session, message } = await setup(tenant.id, 'hello');
+
+      await forwardMessageToN8n(session, message);
+
+      expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(1); // escalated
+    });
+  });
+
   // ── 8. n8n forwarding (AI disabled, custom webhook) ─────────────────────
 
   // ── 9. No AI + no webhook ───────────────────────────────────────────────

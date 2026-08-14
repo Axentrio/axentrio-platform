@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
+import { MessageDelivery } from '../../database/entities/MessageDelivery';
 import {
   createTestTenant,
   createTestAnchorBot,
@@ -215,13 +216,29 @@ describe('runTurn — burst coalescing', () => {
       expectedActiveAddress: chosen.formattedAddress,
     });
 
+    // The real routeOutboundMessage writes a MessageDelivery row on provider-accept; the mock must
+    // too, because #97 D1 flips a Meta question to ASKED only on that durable evidence.
+    mockRouteOutboundMessage.mockImplementation(async (_outbound: unknown, ctx: { messageId: string }) => {
+      await AppDataSource.getRepository(MessageDelivery).save(
+        AppDataSource.getRepository(MessageDelivery).create({
+          internalMessageId: ctx.messageId,
+          channelConnectionId: '00000000-0000-4000-8000-000000000000',
+          channel: 'messenger',
+          status: 'sent',
+          attempts: 1,
+        }),
+      );
+      return { success: true };
+    });
+
     const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
     expect(await runTurn(fresh, incoming)).toBe('answered');
     expect(await getPendingCorrection(session.id)).toMatchObject({ proposalId, status: 'asked' });
 
+    // D2: the numbered list is a protected tail now, not appended to content.
     const outbound = mockRouteOutboundMessage.mock.calls[0][0];
-    expect(outbound.content).toContain(`1. ${chosen.formattedAddress}`);
-    expect(outbound.content).toContain(`2. ${proposed}`);
+    expect(outbound.protectedTail).toContain(`1. ${chosen.formattedAddress}`);
+    expect(outbound.protectedTail).toContain(`2. ${proposed}`);
     expect(outbound.quickReplies).toEqual([
       { title: '1', value: `ax:addr:confirm:${proposalId}:bound` },
       { title: '2', value: `ax:addr:confirm:${proposalId}:proposed` },

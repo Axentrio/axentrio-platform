@@ -90,6 +90,13 @@ export interface OfferMeasurement {
 export interface ResponsePayload {
   type?: ResponseType;
   content?: string | Record<string, unknown>;
+  /**
+   * Text appended after `content` that channel truncation must keep WHOLE - the numbered address
+   * list a button set refers to. `formatResponseForChannel` trims `content`, never this; and if the
+   * tail cannot fit the channel's limit it drops the tail AND the controls rather than cut the list
+   * off its buttons (#97 D2). Set only by the Meta address renderer.
+   */
+  protectedTail?: string;
   quickReplies?: (string | QuickReply)[];
   /** Measurement only. Never rendered, never sent to a customer. */
   offer?: OfferMeasurement;

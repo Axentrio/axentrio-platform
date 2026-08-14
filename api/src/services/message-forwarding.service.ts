@@ -11,6 +11,8 @@ import { AppDataSource } from '../database/data-source';
 import { notificationService } from './notification.service';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
+import { MessageDelivery } from '../database/entities/MessageDelivery';
+import { AddressOffer } from '../database/entities/AddressOffer';
 import { decrypt, encrypt } from '../utils/encryption';
 import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
@@ -1047,6 +1049,65 @@ async function markAddressQuestionAsked(
   if (!applied) throw new AddressQuestionStateConflictError();
 }
 
+/** True ONLY for the widget, where the persisted reply IS the delivery, so a question may be marked
+ *  ASKED at persist time. Fails closed: it requires the explicit 'widget' channel and never infers
+ *  widget from a missing connection id, so a Meta reply's ASKED flip always waits for provider
+ *  acceptance (#97 D1). */
+export function deliveryIsPersistence(session: { channel?: string | null }): boolean {
+  return session.channel === 'widget';
+}
+
+/**
+ * RECORDED -> ASKED for an external channel, AFTER the provider accepted the reply.
+ *
+ * On the widget the reply row is the delivery, so `markAddressQuestionAsked` flips ASKED inside the
+ * persist transaction. On Meta the two differ: #97 finding 1 is that a failed Send left the question
+ * ASKED with nothing on the customer's screen, and `create_booking` then booked the stale binding.
+ * So a Meta question flips ASKED only once a durable `MessageDelivery` row proves the provider
+ * accepted THIS exact reply. That row is stronger than the in-memory delivery result: the router's
+ * widget fallback (a Meta session with a null connection id) returns success but writes no such row,
+ * so gating on the row leaves that reply RECORDED. On any conflict the question stays RECORDED and
+ * the next create_booking re-asks; unlike the persist-time path this NEVER rolls the reply back,
+ * because the reply is already committed and delivered.
+ */
+export async function markAddressQuestionAskedAfterDelivery(
+  session: ChatSession,
+  messageId: string,
+  extras?: ReplyExtras,
+): Promise<void> {
+  const a = extras?.affordance;
+  if (a?.kind !== 'address_confirm' || deliveryIsPersistence(session)) return;
+  const delivered = await AppDataSource.getRepository(MessageDelivery).findOne({
+    where: { internalMessageId: messageId, status: 'sent' },
+  });
+  if (!delivered) return;
+  await markQuestionAsked(session.id, a.proposalId, { messageId, channel: session.channel ?? 'widget' });
+}
+
+/**
+ * Write the single-use offer rows for a Meta address picker, in the SAME transaction that persists
+ * the reply (#97 D3). The row ids are the tool-generated tokens already carried on the affordance
+ * options, so the button renderer needs no extra plumbing and the reply and its offers commit
+ * together. A widget picker carries no options and keeps its own places/select path.
+ */
+async function writePickerOffers(manager: EntityManager, session: ChatSession, extras?: ReplyExtras): Promise<void> {
+  const a = extras?.affordance;
+  if (a?.kind !== 'address_picker' || !a.options?.length || deliveryIsPersistence(session)) return;
+  const setId = randomUUID();
+  const expiresAt = new Date(Date.now() + 35 * 60 * 1000);
+  await manager.getRepository(AddressOffer).insert(
+    a.options.map((o) => ({
+      id: o.id,
+      setId,
+      sessionId: session.id,
+      channel: session.channel ?? 'unknown',
+      placeId: o.placeId,
+      expiresAt,
+      consumedAt: null,
+    })),
+  );
+}
+
 /**
  * Everything a bot reply carries for the CLIENT, built in one place.
  *
@@ -1172,7 +1233,10 @@ async function finalizeReply(
         [session.id],
       );
 
-      await markAddressQuestionAsked(manager, session, saved.id, extras);
+      // The widget's persisted reply IS its delivery, so ASKED flips here; a Meta reply waits for
+      // provider acceptance and flips post-delivery (#97 D1).
+      if (deliveryIsPersistence(session)) await markAddressQuestionAsked(manager, session, saved.id, extras);
+      await writePickerOffers(manager, session, extras);
 
       return { status: 'answered' as const, savedId: saved.id };
     });
@@ -1238,6 +1302,8 @@ async function routeBotMessageOutbound(
       channel: session.channel, error: result.error,
     });
   }
+  // #97 D1: an external question becomes ASKED only now, and only if the provider accepted the reply.
+  await markAddressQuestionAskedAfterDelivery(session, savedId, extras);
 }
 
 /**
@@ -1556,7 +1622,10 @@ async function sendBotMessage(
       ...(metadata ? { metadata } : {}),
     });
     const persisted = await repo.save(botMsg);
-    await markAddressQuestionAsked(manager, session, persisted.id, extras);
+    // The widget's persisted reply IS its delivery, so ASKED flips here; a Meta reply waits for
+    // provider acceptance and flips post-delivery (#97 D1).
+    if (deliveryIsPersistence(session)) await markAddressQuestionAsked(manager, session, persisted.id, extras);
+    await writePickerOffers(manager, session, extras);
     return persisted;
   });
 
@@ -1589,6 +1658,9 @@ async function sendBotMessage(
       },
     },
   );
+
+  // #97 D1: an external question becomes ASKED only now, and only if the provider accepted the reply.
+  await markAddressQuestionAskedAfterDelivery(session, saved.id, extras);
 
   return saved;
 }

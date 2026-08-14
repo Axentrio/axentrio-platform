@@ -43,6 +43,14 @@ const limitedCapabilities: ChannelCapabilities = {
   requiresTemplatesOutsideWindow: false,
 };
 
+// Supports quick replies but with a small text cap, to force the protected-tail truncation paths.
+const pickerCapabilities: ChannelCapabilities = {
+  ...limitedCapabilities,
+  maxTextLength: 100,
+  supportsQuickReplies: true,
+  maxQuickReplies: 3,
+};
+
 describe('formatResponseForChannel', () => {
   describe('text messages', () => {
     it('should pass through simple text', () => {
@@ -161,6 +169,44 @@ describe('formatResponseForChannel', () => {
         limitedCapabilities,
       );
       expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('protected tail (#97 D2)', () => {
+    const TAIL = '\n\n1. Foo Street 12\n2. Bar Avenue 34';
+
+    it('keeps the tail whole and truncates the prefix when over the limit', () => {
+      const result = formatResponseForChannel(
+        { type: 'quick_reply', content: 'A'.repeat(120), protectedTail: TAIL, quickReplies: ['1', '2'] },
+        pickerCapabilities,
+      );
+      expect(result[0].content!.length).toBeLessThanOrEqual(100);
+      expect(result[0].content!.endsWith(TAIL)).toBe(true);
+      expect(result[0].content).toContain('1. Foo Street 12');
+      expect(result[0].content).toContain('2. Bar Avenue 34');
+      expect(result[0].quickReplies).toHaveLength(2);
+      expect(result[0].type).toBe('quick_reply');
+    });
+
+    it('passes prefix + tail through whole when under the limit', () => {
+      const result = formatResponseForChannel(
+        { type: 'quick_reply', content: 'Which address is it?', protectedTail: TAIL, quickReplies: ['1', '2'] },
+        telegramCapabilities,
+      );
+      expect(result[0].content).toBe('Which address is it?' + TAIL);
+      expect(result[0].quickReplies).toHaveLength(2);
+    });
+
+    it('fails closed when the tail alone will not fit: drops the tail AND the controls', () => {
+      const bigTail = '\n\n' + 'X'.repeat(120);
+      const result = formatResponseForChannel(
+        { type: 'quick_reply', content: 'Pick', protectedTail: bigTail, quickReplies: ['1', '2'] },
+        pickerCapabilities,
+      );
+      expect(result[0].content!.length).toBeLessThanOrEqual(100);
+      expect(result[0].content).not.toContain('XXXXX');
+      expect(result[0].quickReplies).toBeUndefined();
+      expect(result[0].type).toBe('text');
     });
   });
 });

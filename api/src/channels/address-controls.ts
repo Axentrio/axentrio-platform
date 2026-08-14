@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import { AppDataSource } from '../database/data-source';
+import { AddressOffer } from '../database/entities/AddressOffer';
+import { returningRows } from '../utils/raw-sql';
 import type { ChannelType } from '../database/entities/ChannelConnection';
 import type { Affordance } from '../agent/tool-adapter';
 import type { ResponsePayload } from './response.types';
@@ -43,7 +45,10 @@ export function renderChannelAddressControls(
     if (!options.length) return response;
     return {
       ...response,
-      content: `${String(response.content ?? '')}\n\n${options.map((option, i) => `${i + 1}. ${option.text}`).join('\n')}`,
+      content: String(response.content ?? ''),
+      // The numbered list is a protected tail: truncation must never cut an address off the button
+      // that names it (#97 D2). Full addresses in the body, bare numbers on the titles.
+      protectedTail: `\n\n${options.map((option, i) => `${i + 1}. ${option.text}`).join('\n')}`,
       quickReplies: options.map((option, i) => ({
         title: String(i + 1),
         value: addressPickerPayload(option.id),
@@ -53,7 +58,8 @@ export function renderChannelAddressControls(
 
   return {
     ...response,
-    content: `${String(response.content ?? '')}\n\n1. ${affordance.bound}\n2. ${affordance.proposed}`,
+    content: String(response.content ?? ''),
+    protectedTail: `\n\n1. ${affordance.bound}\n2. ${affordance.proposed}`,
     quickReplies: [
       { title: '1', value: addressConfirmPayload(affordance.proposalId, 'bound') },
       { title: '2', value: addressConfirmPayload(affordance.proposalId, 'proposed') },
@@ -64,27 +70,6 @@ export function renderChannelAddressControls(
 type AddressControlEvent = { type: string; payload?: string };
 type AddressControlContext = { sessionId: string; tenantId: string; channel: ChannelType };
 export type AddressControlResult = { handled: false } | { handled: true; content?: string };
-
-async function offeredPlaceId(sessionId: string, optionId: string): Promise<string | null> {
-  const rows = await AppDataSource.query(
-    `SELECT option->>'placeId' AS place_id
-       FROM messages m
-       JOIN participants p ON p.id = m.participant_id
-       CROSS JOIN LATERAL jsonb_array_elements(
-         COALESCE(m.metadata #> '{affordance,options}', '[]'::jsonb)
-       ) option
-      WHERE m.session_id = $1
-        AND p.type = 'bot'
-        AND m.is_deleted = false
-        AND m.created_at > now() - interval '35 minutes'
-        AND m.metadata #>> '{affordance,kind}' = 'address_picker'
-        AND option->>'id' = $2
-      ORDER BY m.created_at DESC
-      LIMIT 1`,
-    [sessionId, optionId],
-  ) as Array<{ place_id: string | null }>;
-  return rows[0]?.place_id?.trim() || null;
-}
 
 /**
  * Apply a signed-channel postback before it becomes an ordinary customer message.
@@ -101,17 +86,35 @@ export async function applyChannelAddressControl(
   }
 
   if (event.payload.startsWith(PICK_PREFIX)) {
-    const optionId = event.payload.slice(PICK_PREFIX.length);
-    if (!/^[a-f0-9]{16}$/.test(optionId)) return { handled: true };
-    const placeId = await offeredPlaceId(context.sessionId, optionId);
-    if (!placeId || addressOptionId(placeId) !== optionId) return { handled: true };
-    const resolved = await resolvePlaceId(context.tenantId, placeId);
-    if (resolved.status !== 'placed') return { handled: true };
-    await bindAddress(context.sessionId, {
-      placeId: resolved.place.placeId,
-      formattedAddress: resolved.place.formattedAddress,
+    const token = event.payload.slice(PICK_PREFIX.length);
+    if (!/^[0-9a-f-]{36}$/i.test(token)) return { handled: true };
+    // #97 D3: the token is an offer row id. The offer table is the authority, not message metadata;
+    // a guessed token finds no live offer and is consumed but ignored.
+    const offer = await AppDataSource.getRepository(AddressOffer).findOne({
+      where: { id: token, sessionId: context.sessionId, channel: context.channel },
     });
-    return { handled: true, content: resolved.place.formattedAddress };
+    if (!offer || offer.consumedAt || offer.expiresAt.getTime() <= Date.now()) return { handled: true };
+    const resolved = await resolvePlaceId(context.tenantId, offer.placeId);
+    if (resolved.status !== 'placed') return { handled: true };
+    // Consume the whole SET and bind in one transaction: picking any option retires its siblings, so
+    // two taps cannot move the binding twice (AC 3). A losing concurrent tap finds the set consumed.
+    const bound = await AppDataSource.transaction(async (manager) => {
+      const claimed = returningRows<{ id: string }>(await manager.query(
+        `UPDATE chatbot_address_offers
+            SET consumed_at = now()
+          WHERE set_id = $1 AND consumed_at IS NULL AND expires_at > now()
+        RETURNING id`,
+        [offer.setId],
+      ));
+      if (claimed.length === 0) return null;
+      await bindAddress(
+        context.sessionId,
+        { placeId: resolved.place.placeId, formattedAddress: resolved.place.formattedAddress },
+        manager,
+      );
+      return resolved.place.formattedAddress;
+    });
+    return bound ? { handled: true, content: bound } : { handled: true };
   }
 
   if (event.payload.startsWith(CONFIRM_PREFIX)) {

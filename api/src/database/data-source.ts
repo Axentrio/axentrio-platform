@@ -52,6 +52,7 @@ import { BookingSettings } from './entities/BookingSettings';
 import { Booking } from './entities/Booking';
 import { TravelUsage } from './entities/TravelUsage';
 import { AddressBinding } from './entities/AddressBinding';
+import { AddressOffer } from './entities/AddressOffer';
 import { TenantModule } from './entities/TenantModule';
 import { CalendarCredential } from './entities/CalendarCredential';
 import { AvailabilityCall } from './entities/AvailabilityCall';
@@ -131,6 +132,7 @@ export const AppDataSource = new DataSource({
     Booking,
     TravelUsage,
     AddressBinding,
+    AddressOffer,
     TenantModule,
     CalendarCredential,
     BookingReference,

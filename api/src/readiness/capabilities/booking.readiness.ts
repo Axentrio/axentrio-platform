@@ -100,6 +100,8 @@ const CTA_ADD_SERVICE = { route: '/bookings/setup', label: 'Add a bookable servi
 const CTA_SET_HOURS = { route: '/bookings/setup', label: 'Set availability hours' };
 const CTA_CONNECT_CAL = { route: '/bookings/setup', label: 'Connect a calendar' };
 const CTA_RECONNECT_CAL = { route: '/bookings/setup', label: 'Reconnect your calendar' };
+/** The template binding is what hands the bot the skill, so that is where this sends them. */
+const CTA_ENABLE_BOOKING_SKILL = { route: '/ai/bots', label: 'Give this bot the booking skill' };
 
 /**
  * Does any resolved bound template give this bot the booking skill? Computed from the
@@ -149,24 +151,45 @@ export const bookingReadiness: CapabilityReadiness = {
     const hasRule = !!rule;
     const hasAutoService = services.some((s) => s.bookingMode !== 'request');
 
-    // `live` mirrors the runtime gate verbatim (the anti-lying guarantee).
-    const live = isBookingConfigured(services, hasRule);
-
-    // The nudge field — computed from the RESOLVED bound version(s) (Decision 4).
+    // Computed from the RESOLVED bound version(s) (Decision 4).
     const bookingTemplateActive = await resolvedBookingTemplateActive(ctx.bot);
+
+    // `live` mirrors the runtime gate verbatim (the anti-lying guarantee) — BOTH halves of it.
+    //
+    // `isBookingConfigured` is the CONFIGURATION gate. It was the whole of this check until
+    // 2026-08-13, when production showed a bot reporting `live` with no missing steps, a healthy
+    // calendar and `willAutoConfirm: true`, while telling customers it worked without
+    // appointments. The template gate had stripped the booking tools before the agent saw them,
+    // and `bookingTemplateActive: false` sat in the same payload as advisory detail.
+    //
+    // A bot that cannot be handed the tool is not live in any sense an owner means by the word,
+    // and this failure on a different skill already cost a paying customer ninety days of leads.
+    const configured = isBookingConfigured(services, hasRule);
+    const live = configured && bookingTemplateActive;
 
     const missingSteps: ReadinessResult['missingSteps'] = [];
     const attention: NonNullable<ReadinessResult['attention']> = [];
     const detail: Record<string, unknown> = { bookingTemplateActive };
 
     if (!live) {
-      // not_ready: ordered PATH TO LIVE only.
-      if (services.length === 0) {
-        missingSteps.push({ id: 'add_service', label: 'Add a bookable service', cta: CTA_ADD_SERVICE });
-      } else {
-        // Services exist but all are auto-mode with no rule → the rule IS the
-        // path to live here (auto-only with no rule is genuinely not_ready).
-        missingSteps.push({ id: 'set_hours', label: 'Set availability hours', cta: CTA_SET_HOURS });
+      // not_ready: ordered PATH TO LIVE only. Configuration comes first even when the skill is
+      // also missing — sending an owner to a template screen for a bot with nothing bookable
+      // asks them to deliver a capability that has no content yet.
+      if (!configured) {
+        if (services.length === 0) {
+          missingSteps.push({ id: 'add_service', label: 'Add a bookable service', cta: CTA_ADD_SERVICE });
+        } else {
+          // Services exist but all are auto-mode with no rule → the rule IS the
+          // path to live here (auto-only with no rule is genuinely not_ready).
+          missingSteps.push({ id: 'set_hours', label: 'Set availability hours', cta: CTA_SET_HOURS });
+        }
+      }
+      if (!bookingTemplateActive) {
+        missingSteps.push({
+          id: 'enable_booking_skill',
+          label: 'Give this bot the booking skill',
+          cta: CTA_ENABLE_BOOKING_SKILL,
+        });
       }
       detail.willAutoConfirm = false;
       return [{ capability: 'booking', state: 'not_ready', missingSteps, attention: undefined, detail }];

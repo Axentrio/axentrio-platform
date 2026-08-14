@@ -15,6 +15,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Check,
 } from 'typeorm';
 import type { GeocodePrecision, LocationSource } from '../../contracts/travel';
 
@@ -45,6 +46,17 @@ export type BookingMode = 'auto' | 'request';
 // the migration-built prod schema agree — an index that exists only in prod means its
 // query plan is never exercised by any test.
 @Index('ix_bookings_lead', ['leadId'], { where: '"lead_id" IS NOT NULL' })
+// Declared here AND in migration 1791000000000, for the same reason as the index above: a
+// constraint that exists only in prod is one no test can ever violate, and this file's whole
+// job is to keep the two schemas honest with each other.
+//
+// A place id is a durable Google identity or it is absent, never `''`. The empty string means
+// the same thing as NULL while being TRUTHY in JavaScript, so `customerPlaceId ? resolve(...) :
+// geocode(...)` takes the wrong branch and asks Google to resolve nothing. ADR-0014 makes
+// `place_id` the one value allowed to outlive the 30-day coordinate window and the handle the
+// retention sweep re-resolves through, which puts a falsy-but-truthy value straight onto the
+// path that keeps a far-future appointment locatable.
+@Check('chk_chatbot_bookings_place_id_not_blank', `"customer_place_id" IS NULL OR btrim("customer_place_id") <> ''`)
 @Entity('chatbot_bookings')
 export class Booking {
   @PrimaryGeneratedColumn('uuid')

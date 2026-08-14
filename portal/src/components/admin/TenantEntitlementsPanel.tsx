@@ -6,7 +6,7 @@
  * Admin-internal surface — intentionally not i18n'd (English-only, matches
  * the operator-facing backend reasons/audit strings).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, ShieldCheck, Boxes } from 'lucide-react';
 import {
   Accordion,
@@ -25,6 +25,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   useTenantOverrides,
   useSetTenantOverrides,
@@ -50,6 +60,12 @@ export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
   const setModule = useSetTenantModule(tenantId);
 
   const [drafts, setDrafts] = useState<Record<string, OverrideDraft>>({});
+  // Above-tier confirmation flow: the API rejects a grant above the tenant's plan
+  // with `above_tier_confirmation_required`; we prompt, then re-submit confirmed.
+  const [aboveTierKeys, setAboveTierKeys] = useState<string[] | null>(null);
+  // Held in a ref, not state: it is only read inside handlers (the confirm click),
+  // never during render, so it must not trigger a re-render.
+  const pendingPayloadRef = useRef<Record<string, { value: boolean; reason: string }> | null>(null);
 
   // Seed drafts from the server state whenever it (re)loads.
   useEffect(() => {
@@ -79,13 +95,33 @@ export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
     [drafts],
   );
 
+  const submit = async (
+    payload: Record<string, { value: boolean; reason: string }>,
+    confirmAboveTier: boolean,
+  ) => {
+    try {
+      await setOverrides.mutateAsync({ overrides: payload, confirmAboveTier });
+      setAboveTierKeys(null);
+      pendingPayloadRef.current = null;
+    } catch (err) {
+      const error = (
+        err as { response?: { data?: { error?: { code?: string; details?: { featureKeys?: string[] } } } } }
+      )?.response?.data?.error;
+      if (error?.code === 'above_tier_confirmation_required') {
+        pendingPayloadRef.current = payload;
+        setAboveTierKeys(error.details?.featureKeys ?? []);
+      }
+      // Any other error is surfaced by the mutation's onError toast.
+    }
+  };
+
   const handleSave = () => {
     const payload: Record<string, { value: boolean; reason: string }> = {};
     for (const [key, d] of Object.entries(drafts)) {
       if (d.state === 'default') continue; // absent = tier default (deletion)
       payload[key] = { value: d.state === 'on', reason: d.reason.trim() };
     }
-    setOverrides.mutate(payload);
+    void submit(payload, false);
   };
 
   return (
@@ -137,6 +173,41 @@ export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
           </div>
         )}
       </Card>
+
+      {/* Above-tier grant confirmation — a feature the tenant's plan excludes. */}
+      <AlertDialog
+        open={!!aboveTierKeys}
+        onOpenChange={(o) => {
+          if (!o) {
+            setAboveTierKeys(null);
+            pendingPayloadRef.current = null;
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Grant above the {overridesData?.tier} plan?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {aboveTierKeys?.length
+                ? `${aboveTierKeys.map((k) => overridesData?.taxonomy?.[k]?.label ?? k).join(', ')} ` +
+                  `${aboveTierKeys.length > 1 ? 'are' : 'is'} not included in this tenant's plan. ` +
+                  `Confirm to comp ${aboveTierKeys.length > 1 ? 'them' : 'it'} above the plan.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingPayloadRef.current) void submit(pendingPayloadRef.current, true);
+              }}
+              disabled={setOverrides.isPending}
+            >
+              Confirm above-tier grant
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -14,7 +14,7 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 import { entitlementsFor } from '../../billing/entitlements';
-import { PLANS } from '../../billing/plans';
+import { PLANS, overrideExceedsTier } from '../../billing/plans';
 import { OPT_IN_FEATURES } from '../../billing/feature-toggles';
 import type { FeatureOverride } from '../../database/entities/Tenant';
 
@@ -353,5 +353,31 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
       expect(PLANS.pro.features.bookings).toBe(true);
       expect(entitlementsFor('pro').features.bookings).toBe(true);
     });
+  });
+});
+
+// Rule 4 (booking-behaviour epic): Essential must not get online booking by
+// accident. The default already blocks it; this pins the invariant explicitly so
+// a future refactor cannot silently drop it (the repo's "dropped-value" bug class).
+describe('Rule 4 invariant — Essential has no online booking by default', () => {
+  it('essential with NO override cannot book (bookings=false, travelTime=false)', () => {
+    const e = entitlementsFor('essential', NO_LIMITS, { status: 'active', featureOverrides: {} });
+    expect(e.features.bookings).toBe(false);
+    expect(e.features.travelTime).toBe(false);
+  });
+});
+
+describe('overrideExceedsTier — flags an above-plan grant for the admin write', () => {
+  it('bookings:true on essential exceeds the plan (Essential has no bookings)', () => {
+    expect(overrideExceedsTier('essential', 'bookings', true)).toBe(true);
+  });
+  it('crm:true on pro exceeds the plan (crm is not a Pro feature)', () => {
+    expect(overrideExceedsTier('pro', 'crm', true)).toBe(true);
+  });
+  it('bookings:true on pro does NOT exceed the plan (Pro already includes bookings)', () => {
+    expect(overrideExceedsTier('pro', 'bookings', true)).toBe(false);
+  });
+  it('turning a feature OFF never exceeds the plan', () => {
+    expect(overrideExceedsTier('essential', 'bookings', false)).toBe(false);
   });
 });

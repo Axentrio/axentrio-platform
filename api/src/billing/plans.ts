@@ -10,7 +10,7 @@
  */
 
 import { config } from '../config/environment';
-import type { InternalPlanId, PlanDefinition } from './types';
+import type { InternalPlanId, PlanDefinition, FeatureKey } from './types';
 
 export const PLANS: Record<InternalPlanId, PlanDefinition> = {
   // Internal-only cancellation terminal state. Never offered for signup,
@@ -173,6 +173,18 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
  * unset. Callers must check for `null` and surface a deterministic
  * configuration error (see PR6 pre-flight guard).
  */
+/**
+ * Does turning `key` ON via a per-tenant override grant a feature the tenant's
+ * plan does not include? Overrides are the sanctioned way to comp a feature above
+ * a plan (see feature-taxonomy), so this only FLAGS the grant - it never blocks
+ * it. The admin write uses it to require an explicit confirmation for an
+ * above-plan grant, so an accidental flip cannot silently enable, for example,
+ * booking on an Essential tenant.
+ */
+export function overrideExceedsTier(tier: InternalPlanId, key: FeatureKey, value: boolean): boolean {
+  return value === true && PLANS[tier].features[key] === false;
+}
+
 export function getStripePriceIdFor(planId: InternalPlanId): string | null {
   switch (planId) {
     case 'essential':

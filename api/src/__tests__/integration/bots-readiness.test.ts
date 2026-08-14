@@ -28,7 +28,7 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
-import { BotTemplate } from '../../database/entities/BotTemplate';
+import { BotTemplate, type SkillPolicy } from '../../database/entities/BotTemplate';
 import { BotTemplateVersion } from '../../database/entities/BotTemplateVersion';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
@@ -147,12 +147,17 @@ let templateKeyN = 0;
  * SELECTS the booking skill, not merely a configured bot. Every suite asserting `live` has to
  * deliver the skill the way production does.
  */
-async function bindTemplateSelecting(botId: string, skills: string[]): Promise<void> {
+async function bindTemplateSelecting(
+  botId: string,
+  skills: string[],
+  skillPolicy: SkillPolicy = 'explicit',
+): Promise<void> {
   const tpl = await AppDataSource.getRepository(BotTemplate).save({
     key: `coverage-tmpl-${++templateKeyN}-${Math.random().toString(36).slice(2, 8)}`,
     displayName: 'Coverage',
     availableToAllTenants: true,
     status: 'active',
+    skillPolicy,
   });
   await AppDataSource.getRepository(BotTemplateVersion).save({
     templateId: tpl.id,
@@ -392,6 +397,54 @@ describe('GET /bots/readiness (real DB) — entitled but undelivered skills', ()
    * customers it worked without appointments. An owner reading `allLive: true` had no reason
    * to scroll to the field that contradicted it.
    */
+  /**
+   * #103. Blank says "no specialty identity", not "no capabilities".
+   *
+   * Two of the three production bots with bookable services were on Blank and delivered no
+   * booking tools, one of them a paying customer's. These two tests are the surfaces that
+   * reported it: readiness called the bot dead, and coverage nagged about a skill the bot was
+   * about to be given.
+   */
+  it('an INHERITING template delivers booking without naming it', async () => {
+    const { tenantId, botId } = await provision({ tier: 'pro' });
+    await seedService(tenantId, botId, { bookingMode: 'auto' });
+    await seedRule(tenantId, botId);
+    await seedCalendar(tenantId, botId, { status: 'active', reauthRequired: false });
+    // Blank: selects nothing, inherits everything the plan allows.
+    await bindTemplateSelecting(botId, [], 'inherit_entitled');
+
+    const res = await request(app).get(READINESS_URL);
+
+    expect(res.status).toBe(200);
+    const cap = bookingOf(res.body);
+    expect(cap.state).toBe('live');
+    expect(cap.detail.bookingTemplateActive).toBe(true);
+  });
+
+  it('does not nag about skills an inheriting template already delivers', async () => {
+    const { botId } = await provision({ tier: 'pro' });
+    await bindTemplateSelecting(botId, [], 'inherit_entitled');
+
+    const res = await request(app).get(READINESS_URL);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.unselectedEntitledSkills).toEqual([]);
+  });
+
+  it('a KNOWLEDGE-ONLY template stays tool-free however much the plan allows', async () => {
+    // The reason an empty selection could not simply mean "everything": `none` and Blank both
+    // select nothing, and only one of them should get tools.
+    const { tenantId, botId } = await provision({ tier: 'pro' });
+    await seedService(tenantId, botId, { bookingMode: 'auto' });
+    await seedRule(tenantId, botId);
+    await bindTemplateSelecting(botId, [], 'none');
+
+    const res = await request(app).get(READINESS_URL);
+
+    expect(res.status).toBe(200);
+    expect(bookingOf(res.body).state).toBe('not_ready');
+  });
+
   it('booking can never be reported both unselected AND live', async () => {
     const { tenantId, botId } = await provision({ tier: 'pro' });
     // Configured past every objection — the only thing missing is delivery.

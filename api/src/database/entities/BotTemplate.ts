@@ -18,6 +18,19 @@ import {
 
 export type BotTemplateStatus = 'active' | 'archived';
 
+/**
+ * What a template intends about the bot's SKILLS, as opposed to its identity (#103).
+ *
+ * - `explicit`          — exactly the skills the resolved version selects. Every specialty.
+ * - `inherit_entitled`  — every feature-gated skill the tenant's plan already enables. Blank.
+ * - `none`              — deliberately tool-free, whatever is selected or entitled.
+ *
+ * Resolution lives in `templates/template-resolver.ts#effectiveSkillIds`, which is the ONLY
+ * place allowed to turn this into a skill list.
+ */
+export type SkillPolicy = 'explicit' | 'inherit_entitled' | 'none';
+export const SKILL_POLICIES: readonly SkillPolicy[] = ['explicit', 'inherit_entitled', 'none'];
+
 /** Commercial tier this template belongs to; mirrors the tenant plan names
  *  (minus 'free'). A template lives in exactly one tier — tiers do not cross. */
 export type BotTemplateTier = 'essential' | 'pro' | 'enterprise';
@@ -57,6 +70,23 @@ export class BotTemplate {
   /** 'archived' hides it from new bindings; bound bots fall back per T21. */
   @Column({ type: 'varchar', length: 20, default: 'active' })
   status!: BotTemplateStatus;
+
+  /**
+   * What this template intends about the bot's SKILLS, as opposed to its identity (#103).
+   *
+   * A specialty template curates its skills and is `explicit`. `Blank (no template)` says "no
+   * specialty identity" and used to mean "no capabilities", because skills were only ever an
+   * explicit selection and Blank selects nothing — so choosing a neutral-sounding, documented
+   * option silently removed booking, lead capture and handoff from a paying customer's bot.
+   * `inherit_entitled` lets it mean what it says. `none` stays deliberately tool-free.
+   *
+   * Lives on the TEMPLATE rather than the version: it is part of what the template IS, so
+   * repairing Blank repairs every bot bound to it, including bots pinned to an old version.
+   *
+   * Default `explicit` matters — a template that has never heard of this column must not inherit.
+   */
+  @Column({ type: 'varchar', length: 20, default: 'explicit', name: 'skill_policy' })
+  skillPolicy!: SkillPolicy;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

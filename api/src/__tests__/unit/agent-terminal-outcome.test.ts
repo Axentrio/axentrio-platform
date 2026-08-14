@@ -141,4 +141,51 @@ describe('AgentService — the trace records WHY a run ended', () => {
     expect(res.type).toBe('error');
     expect(res.type === 'error' && res.fallbackMessage).not.toContain('ECONNREFUSED');
   });
+
+  it('classifies a provider 5xx as an upstream server error, not a bot fault', async () => {
+    (mockProvider.chat as any).mockRejectedValue(
+      Object.assign(new Error('503 Service Unavailable'), { status: 503 }),
+    );
+
+    const res = await run(agent);
+
+    expect(savedTrace().terminal.error.kind).toBe('upstream_server_error');
+    // An upstream failure must not be reported as one conversation going wrong.
+    expect(res.type === 'error' && res.infraFailure).toBe(true);
+  });
+
+  it('names an unreachable provider as upstream_unreachable, not a bot fault', async () => {
+    (mockProvider.chat as any).mockRejectedValue(
+      Object.assign(new Error('Connection error.'), { name: 'APIConnectionError' }),
+    );
+
+    const res = await run(agent);
+
+    expect(savedTrace().terminal.error.kind).toBe('upstream_unreachable');
+    expect(res.type === 'error' && res.infraFailure).toBe(true);
+  });
+
+  it('retries the provider once on a transient 5xx and completes when the retry succeeds', async () => {
+    (mockProvider.chat as any)
+      .mockRejectedValueOnce(Object.assign(new Error('502 Bad Gateway'), { status: 502 }))
+      .mockResolvedValueOnce({
+        content: 'Booked.', finishReason: 'stop', toolCalls: [],
+        usage: { promptTokens: 1, completionTokens: 1 },
+      });
+
+    const res = await run(agent);
+
+    expect((mockProvider.chat as any).mock.calls.length).toBe(2); // one retry
+    expect(res.type).toBe('response');
+    expect(savedTrace().terminal).toMatchObject({ result: 'completed' });
+  });
+
+  it('does NOT retry a bot fault (a deterministic error will not clear)', async () => {
+    (mockProvider.chat as any).mockRejectedValue(new Error('prompt composition blew up'));
+
+    await run(agent);
+
+    expect((mockProvider.chat as any).mock.calls.length).toBe(1); // no retry
+    expect(savedTrace().terminal.error.kind).toBe('bot_fault');
+  });
 });

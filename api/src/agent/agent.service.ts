@@ -11,7 +11,7 @@ import { getProvider } from '../llm/provider-factory';
 import { buildPromptTrace } from '../llm/block-ledger';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
+import { ChatMessage, ContentPart, ToolDefinition, type LLMProvider, type LLMOptions, type LLMResponse } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { getEntitlements } from '../billing/entitlements';
 import type { FeatureKey } from '../billing/types';
@@ -36,7 +36,7 @@ import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { getBoundAddress } from '../booking/travel/address-binding';
 import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
-import { isUpstreamQuotaExhausted, isUpstreamRateLimit } from '../llm/upstream-error';
+import { isUpstreamQuotaExhausted, isUpstreamRateLimit, isUpstreamServerError, isUpstreamUnreachable, isRetryableUpstream, UpstreamUnreachableError } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 
@@ -369,8 +369,61 @@ const BOOKING_SAFE_FALLBACK =
 function classifyTerminalError(error: unknown): TerminalErrorKind {
   if (isUpstreamQuotaExhausted(error)) return 'upstream_quota';
   if (isUpstreamRateLimit(error)) return 'upstream_rate_limit';
+  if (isUpstreamServerError(error)) return 'upstream_server_error';
+  // Only the provider call site raises this typed error, so a DB/Redis transport
+  // failure is never misread as an LLM-provider outage.
+  if (error instanceof UpstreamUnreachableError) return 'upstream_unreachable';
   if (error instanceof Error && /LLM request timeout/i.test(error.message)) return 'llm_timeout';
   return 'bot_fault';
+}
+
+/** The whole provider budget for one iteration, before this file gives up on the call. */
+const LLM_TIMEOUT_MS = 30000;
+/** A short pause before the single retry, so an instant re-hit does not just fail again. */
+const UPSTREAM_RETRY_BACKOFF_MS = 400;
+
+/** One provider call, raced against the per-call timeout. */
+function callProviderOnce(provider: LLMProvider, messages: ChatMessage[], opts: LLMOptions): Promise<LLMResponse> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('LLM request timeout after 30s')), LLM_TIMEOUT_MS);
+  });
+  // Clear the timer once the call settles: a fast success must not leave a dormant
+  // 30s timer alive, or they accumulate under load.
+  return Promise.race([provider.chat(messages, opts), timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * A provider call with ONE retry on a transient upstream failure (a 429 rate
+ * limit, a 5xx, or an unreachable provider). This wraps EVERY provider call in
+ * the run, not only the first: a transient blip on any iteration throws out of
+ * the loop and loses the whole turn, and the customer gets the handoff fallback.
+ * That is exactly the 2026-08-13 booking incident - a booking dropped by a
+ * momentary provider failure with no second chance.
+ *
+ * We do NOT retry the locally enforced 30s timeout (a second wait doubles an
+ * already bad latency), a quota-exhausted key (it will not clear), or a 4xx/bot
+ * fault (deterministic). On a final transport failure the error is wrapped so
+ * the trace names it `upstream_unreachable` rather than the default `bot_fault`.
+ */
+async function callProviderWithRetry(
+  provider: LLMProvider,
+  messages: ChatMessage[],
+  opts: LLMOptions,
+  sessionId: string,
+): Promise<LLMResponse> {
+  try {
+    return await callProviderOnce(provider, messages, opts);
+  } catch (error) {
+    if (!isRetryableUpstream(error)) throw error;
+    logger.warn('[agent] transient upstream error on provider call; retrying once', { sessionId });
+    await new Promise((resolve) => setTimeout(resolve, UPSTREAM_RETRY_BACKOFF_MS));
+    try {
+      return await callProviderOnce(provider, messages, opts);
+    } catch (retryError) {
+      throw isUpstreamUnreachable(retryError) ? new UpstreamUnreachableError(retryError) : retryError;
+    }
+  }
 }
 
 export class AgentService {
@@ -720,13 +773,14 @@ export class AgentService {
           ? tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
           : undefined;
 
-        // Call LLM
+        // Call LLM (one retry on a transient upstream failure — see callProviderWithRetry).
         const startMs = Date.now();
-        const timeoutMs = 30000; // 30 seconds
-        const response = await Promise.race([
-          provider.chat(messages, { model, maxTokens: 1000, temperature: 0.3, jsonMode: false, tools: toolDefs }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('LLM request timeout after 30s')), timeoutMs)),
-        ]);
+        const response = await callProviderWithRetry(
+          provider,
+          messages,
+          { model, maxTokens: 1000, temperature: 0.3, jsonMode: false, tools: toolDefs },
+          session.id,
+        );
         const latencyMs = Date.now() - startMs;
 
         // Record metering
@@ -1048,19 +1102,23 @@ export class AgentService {
       trace.finishReason = 'error';
       // WHICH failure, recorded before the save. `finishReason` alone left a production
       // incident with five candidate causes and no way to choose between them.
-      trace.terminal = {
-        result: 'error',
-        error: terminalErrorFrom(error, classifyTerminalError(error)),
-      };
+      const kind = classifyTerminalError(error);
+      trace.terminal = { result: 'error', error: terminalErrorFrom(error, kind) };
       void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       logger.error('Agent loop error', { sessionId: session.id, error });
-      const infraFailure = isUpstreamQuotaExhausted(error) || isUpstreamRateLimit(error);
+      // Any upstream_* kind is a provider/platform failure, not one conversation
+      // going wrong: it must not park the session in a bot_error handoff.
+      const infraFailure =
+        kind === 'upstream_quota' ||
+        kind === 'upstream_rate_limit' ||
+        kind === 'upstream_server_error' ||
+        kind === 'upstream_unreachable';
       if (infraFailure) {
-        // Log distinctly: an out-of-credit platform key is an operational
-        // emergency across every tenant, not one conversation going wrong.
+        // Log distinctly: a provider outage is an operational emergency, often
+        // across every tenant at once, not one conversation going wrong.
         logger.error('[agent] upstream provider failure — NOT a bot fault', {
           sessionId: session.id,
-          quotaExhausted: isUpstreamQuotaExhausted(error),
+          kind,
         });
       }
       return {

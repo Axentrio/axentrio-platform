@@ -653,6 +653,10 @@ async function platformAgentPath(
       }
 
       let handedOff = false;
+      // An upstream failure sends the fallback but writes NO handoff (the bot keeps
+      // the session); it must still stop the drain, or the outage becomes a storm of
+      // failing runs over the rest of the burst.
+      let stopDrain = false;
       switch (result.type) {
         case 'response': {
           // Output guardrails (AC14): a blocked AI reply is treated like an agent
@@ -680,8 +684,17 @@ async function platformAgentPath(
         case 'error':
           logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
           await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
-          await handleBotHandoff(session, botParticipant.id, 'bot_error');
-          handedOff = true;
+          // Mirror the coalescer path: an UPSTREAM failure (out of credit, throttled,
+          // provider down, queue/Redis unreachable) hits every conversation at once.
+          // Handing it to a human parks the whole inbox and SILENCES the bot for the
+          // 60-minute sweep. So send the fallback, stop the drain, and keep the session
+          // with the bot. A genuine bot fault still escalates.
+          if (result.infraFailure) {
+            stopDrain = true;
+          } else {
+            await handleBotHandoff(session, botParticipant.id, 'bot_error');
+            handedOff = true;
+          }
           break;
 
         case 'budget_exceeded':
@@ -724,8 +737,10 @@ async function platformAgentPath(
       // stops a coalescer job from re-answering the same message.
       await advanceCoalescedWatermark(session.id, pending.id);
 
-      // Once handed to a human, stop draining — the bot no longer owns the session.
-      if (handedOff) break;
+      // Stop draining when the turn was handed to a human (the bot no longer owns
+      // the session), OR when an upstream failure means re-running the agent now
+      // would only fail again over the rest of the burst.
+      if (handedOff || stopDrain) break;
 
       // Brief settle so a message typed right after this reply joins the same
       // drain rather than racing the lock release.

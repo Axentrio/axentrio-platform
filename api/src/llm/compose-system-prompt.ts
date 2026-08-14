@@ -191,6 +191,11 @@ interface AgentCtx {
   /** The places this business travels to, for {serviceArea}. Like {openingHours} this is
    *  a business FACT rather than a booking capability, so every bot may state it. */
   serviceArea?: string;
+  /** The venue address as one line (formatVenueLine), when the owner configured a
+   *  premises that receives customers. Gates the come-in-person invite in the
+   *  BOOKING (NOT AVAILABLE) block: a mobile-only business has no venue, so the
+   *  invite is omitted rather than sending customers to an address that isn't one. */
+  venueLine?: string;
   /** Session channel (widget/whatsapp/messenger/instagram/telegram). On a
    *  non-widget channel the customer's contact is already known (the channel
    *  handle), so the lead-capture guidance is adapted to capture the request
@@ -492,9 +497,16 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     ledger.exclude(K.PROACTIVE_CONTACT_ASK, 'toolAbsent');
   }
 
-  // Escalation
-  if (tools.some((t) => t.name === 'escalate_to_human')) {
-    sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');
+  // Escalation. One predicate for this block AND the booking insist ladder
+  // below — skill-selection gating can strip the tool, and the guard must drop
+  // both texts with it (no phantom-tool instruction).
+  // The rule is deliberately NARROW ("explicitly asks for a human", not "or you
+  // cannot help"): "cannot help" is true the instant booking is unavailable, so
+  // the broad wording preempted the BOOKING (NOT AVAILABLE) ladder — come in
+  // person → capture contact → ask-then-escalate — before it could run.
+  const canEscalate = tools.some((t) => t.name === 'escalate_to_human');
+  if (canEscalate) {
+    sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent, call the escalate_to_human tool.');
     ledger.include(K.ESCALATION);
   } else {
     ledger.exclude(K.ESCALATION, 'toolAbsent');
@@ -506,9 +518,23 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // state that plainly to stop phantom bookings (customer thinks they booked,
   // nothing is scheduled).
   if (!canBook) {
+    // The one block owns the whole no-booking ladder, in order: (1) cannot book
+    // here, (2) come in person if a venue exists, (3) capture contact / connect
+    // team, (4) if still insisting, ask about a human then escalate.
+    // (2) is venue-gated: a mobile-only business has no premises to invite anyone
+    // to, so without a venueLine the invite is omitted entirely. Opening hours ride
+    // along only when known — the invite should name when visiting actually works.
+    const visitInvite = ctx.venueLine
+      ? ` tell them they are welcome to visit us in person at ${ctx.venueLine}${ctx.openingHours ? ` during our opening hours: ${ctx.openingHours}` : ''},`
+      : '';
+    // (4) only when the escalate tool is actually loaded — otherwise the sentence
+    // instructs a tool call that cannot happen (phantom-tool instruction).
+    const insistLadder = canEscalate
+      ? ` If the customer keeps insisting on booking after you have said you cannot, ask whether they would like you to connect them with a human. If they say yes, call the escalate_to_human tool.`
+      : '';
     sections.push(
       `\n## BOOKING (NOT AVAILABLE)
-You cannot book, reschedule, cancel, or check availability for appointments — those tools are not enabled for you. NEVER offer to schedule a slot, ask for booking details, or imply an appointment has been made. If the customer wants to book, briefly say you can't schedule appointments here, then capture their contact details (if you can) or offer to connect them with the team.`
+You cannot book, reschedule, cancel, or check availability for appointments — those tools are not enabled for you. NEVER offer to schedule a slot, ask for booking details, or imply an appointment has been made. If the customer wants to book, briefly say you can't schedule appointments here,${visitInvite} then capture their contact details (if you can) or offer to connect them with the team.${insistLadder}`
     );
     // Distinguish "entitled-but-unconfigured" (tools loaded, no availability/service)
     // from "not capable at all" (no booking tools) — the one sanctioned two-gate.

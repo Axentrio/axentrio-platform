@@ -22,6 +22,7 @@ import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { describeServiceArea } from '../contracts/service-area';
+import { formatVenueLine } from '../contracts/venue-address';
 import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
@@ -50,6 +51,15 @@ export type AgentResult =
   | {
       type: 'response';
       content: string;
+      /**
+       * The customer explicitly asked for a human and `escalate_to_human` executed
+       * successfully this run. TERMINAL on every variant: a tool success followed by
+       * a LATER provider failure must not lose the request, so even an `error` exit
+       * carries it. The forwarding result mappings consume it to fire exactly ONE
+       * real handoff (`escalation_trigger`) after reply finalization — with
+       * precedence over the per-result `bot_error` / infraFailure rules.
+       */
+      handoffRequested?: boolean;
       quickReplies?: QuickReply[];
       /**
        * A control the client should offer, decided by the server and never by the model.
@@ -70,13 +80,15 @@ export type AgentResult =
        */
       offer?: OfferMeasurement;
     }
-  | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string }
-  | { type: 'max_iterations'; fallbackMessage: string }
-  | { type: 'budget_exceeded'; fallbackMessage: string }
+  | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string; handoffRequested?: boolean }
+  | { type: 'max_iterations'; fallbackMessage: string; handoffRequested?: boolean }
+  | { type: 'budget_exceeded'; fallbackMessage: string; handoffRequested?: boolean }
   | {
       type: 'error';
       error: string;
       fallbackMessage: string;
+      /** See the `response` variant — a successful escalation survives the error exit. */
+      handoffRequested?: boolean;
       /**
        * The provider failed (out of credit, throttled, unreachable) rather than
        * the bot. Callers must NOT hand these to a human: an infra outage hits
@@ -479,6 +491,11 @@ export class AgentService {
       iterations: [],
       finishReason: 'completed',
     };
+    // True once `escalate_to_human` executed SUCCESSFULLY this run. Declared
+    // outside the try, because the promise must survive the run's own failure:
+    // a provider error AFTER the tool succeeded still returns
+    // `handoffRequested: true` from the catch below.
+    let escalationRequested = false;
 
     try {
       let tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
@@ -631,6 +648,10 @@ export class AgentService {
       // want to state, and it is one indexed lookup that returns nothing for the bots
       // (the overwhelming majority) with no area configured. Fails open to ''.
       let serviceArea = '';
+      // The venue address (where the business receives customers), from the SAME
+      // BookingSettings row — no new query. Gates the come-in-person invite in the
+      // BOOKING (NOT AVAILABLE) block; stays undefined for a mobile-only business.
+      let venueLine: string | undefined;
       try {
         const bookingSettings = await AppDataSource.getRepository(BookingSettings).findOne({
           where: { botId: bot.id },
@@ -638,6 +659,12 @@ export class AgentService {
         serviceArea = describeServiceArea(
           Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
         );
+        venueLine = formatVenueLine({
+          street: bookingSettings?.venueStreet,
+          postalCode: bookingSettings?.venuePostalCode,
+          city: bookingSettings?.venueCity,
+          country: bookingSettings?.venueCountry,
+        }) ?? undefined;
       } catch (error) {
         logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
       }
@@ -698,7 +725,7 @@ export class AgentService {
       const kbContext = await this.prefetchKbContext({
         message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
       });
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea }, { proactiveAsk });
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine }, { proactiveAsk });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
@@ -765,6 +792,7 @@ export class AgentService {
           return {
             type: 'budget_exceeded',
             fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'I apologize, but I am temporarily unavailable.',
+            ...(escalationRequested ? { handoffRequested: true } : {}),
           };
         }
 
@@ -837,7 +865,7 @@ export class AgentService {
             // sentence, and it is still true. Dropping it in the early return is the exact shape
             // #82 records two files over: attached only at the last exit, shipped from none of
             // the others.
-            return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}) };
+            return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}), ...(escalationRequested ? { handoffRequested: true } : {}) };
           }
           trace.finishReason = 'completed';
           trace.terminal = { result: 'completed' };
@@ -877,6 +905,7 @@ export class AgentService {
             type: 'response',
             content: safeContent,
             quickReplies: slotChips,
+            ...(escalationRequested ? { handoffRequested: true } : {}),
             ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
             // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
             // delivered. It cannot be measured here - channels truncate quick replies and drop
@@ -960,6 +989,10 @@ export class AgentService {
             // #7: only now (post-success) is the side-effect "performed" — a failed
             // attempt stays retryable.
             if (sideEffectSig && result.success) sideEffectsInvoked.add(sideEffectSig);
+            // The customer asked for a human and the escalation tool accepted it.
+            // Latched (never reset) so whatever exit this run takes carries
+            // `handoffRequested: true` — the forwarding mapping owes them a human.
+            if (tool.name === 'escalate_to_human' && result.success) escalationRequested = true;
             if (result.success && result.replyFact?.kind === 'booking_address') {
               const merged = mergeAddressFacts(pendingAddressFact, result.replyFact);
               pendingAddressFact = merged.fact;
@@ -1096,7 +1129,7 @@ export class AgentService {
       trace.finishReason = 'max_iterations';
       trace.terminal = { result: 'max_iterations' };
       void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-      return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent." };
+      return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent.", ...(escalationRequested ? { handoffRequested: true } : {}) };
 
     } catch (error) {
       trace.finishReason = 'error';
@@ -1126,6 +1159,10 @@ export class AgentService {
         error: error instanceof Error ? error.message : 'Unknown error',
         fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
         infraFailure,
+        // A successful escalation earlier in this run survives the failure: the
+        // customer explicitly asked for a human, so the handoff must still happen
+        // — even (especially) when the provider then fell over.
+        ...(escalationRequested ? { handoffRequested: true } : {}),
       };
     }
   }

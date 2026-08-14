@@ -197,7 +197,10 @@ describe('PromptBuilder', () => {
       },
     } as unknown as Tenant;
     const { prompt } = builder.build(tenantWithSkills, tenantWithSkills.settings as any, mockTools);
-    expect(prompt).toContain('## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');
+    // Fix 3 (plan-booking-behaviour.md): the rule is deliberately NARROW — the old
+    // "or you cannot help" wording preempted the BOOKING (NOT AVAILABLE) ladder.
+    expect(prompt).toContain('## ESCALATION\nIf the customer explicitly asks for a human agent, call the escalate_to_human tool.');
+    expect(prompt).not.toContain('or you cannot help');
     expect(prompt).toContain('## AVAILABLE SKILLS');
     expect(prompt).toContain('### booking');
     expect(prompt).toContain('When: User wants to schedule');

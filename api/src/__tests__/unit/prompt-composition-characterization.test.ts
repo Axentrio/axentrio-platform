@@ -11,6 +11,14 @@
 // therefore composes at layer 2 instead of layer 4 — that ordering shift IS the diff,
 // and it is the intended behaviour change.
 //
+// RE-LOCKED 2026-08-14 (plan-booking-behaviour.md, Fix 3): the ## ESCALATION rule
+// was narrowed to "explicitly asks for a human agent" (the broad "or you cannot
+// help" preempted the BOOKING (NOT AVAILABLE) insist ladder). That one-line diff
+// IS the intended behaviour change. The venue-gated come-in-person invite and the
+// insist->ask->escalate ladder (Fix 2 + Fix 3) are asserted in their own cases
+// below; neither renders in the locked snapshots (no venueLine, and either no
+// escalate tool or booking available).
+//
 // The agent FORMATTING RULES block embeds today's date (`new Date()`), which is
 // inherently volatile; `stripDateLine` normalizes just that one line so the
 // rest of the prompt is byte-locked.
@@ -91,7 +99,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       The moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.
 
       ## ESCALATION
-      If the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.
+      If the customer explicitly asks for a human agent, call the escalate_to_human tool.
 
       ## SERVICES
       Drain cleaning — 60 min
@@ -206,6 +214,111 @@ describe('characterization: agent PromptBuilder.build', () => {
     const { prompt } = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: true });
     expect(prompt).toContain('When confirming a booking');
     expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
+  });
+
+  // ── Fix 2 (plan-booking-behaviour.md): venue-gated come-in-person invite ──
+
+  it('no booking + venue: invites the customer in person at the venue address', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+    });
+    expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).toContain('tell them they are welcome to visit us in person at Stationsstraat 12, 9300 Aalst,');
+    // No opening hours known → the invite must not dangle an empty hours clause.
+    expect(prompt).not.toContain('during our opening hours');
+    // The existing capture-contact / connect-team text survives, after the invite.
+    expect(prompt).toContain('then capture their contact details (if you can) or offer to connect them with the team.');
+  });
+
+  it('no booking + venue + opening hours: the invite names the hours', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+      openingHours: 'Mon-Fri 09:00-17:00',
+    });
+    expect(prompt).toContain(
+      'welcome to visit us in person at Stationsstraat 12, 9300 Aalst during our opening hours: Mon-Fri 09:00-17:00,'
+    );
+  });
+
+  it('no booking + NO venue (mobile-only business): no in-person invite at all', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      openingHours: 'Mon-Fri 09:00-17:00',
+    });
+    expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).not.toContain('visit us in person');
+  });
+
+  it('booking available + venue: no NOT-AVAILABLE block, so no invite either', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking')], bookingConfigured: true,
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+    });
+    expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).not.toContain('visit us in person');
+  });
+
+  it('entitled-but-unconfigured booking bot with a venue still gets the invite', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking')], bookingConfigured: false,
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+    });
+    expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).toContain('welcome to visit us in person at Stationsstraat 12, 9300 Aalst');
+  });
+
+  // ── Fix 3 (plan-booking-behaviour.md): insist -> ask -> escalate ladder ──
+
+  const INSIST_LADDER =
+    'If the customer keeps insisting on booking after you have said you cannot, ask whether they would like you to connect them with a human. If they say yes, call the escalate_to_human tool.';
+
+  it('no booking + escalate tool: the insist->ask->escalate ladder renders, last in the block', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search'), tool('escalate_to_human')],
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+    });
+    expect(prompt).toContain(INSIST_LADDER);
+    // Compose order inside the one block: cannot book → come in person → capture
+    // contact / connect team → insist ladder.
+    const block = prompt.slice(prompt.indexOf('## BOOKING (NOT AVAILABLE)'));
+    const iCannot = block.indexOf("briefly say you can't schedule appointments here");
+    const iVisit = block.indexOf('visit us in person');
+    const iCapture = block.indexOf('capture their contact details');
+    const iInsist = block.indexOf('keeps insisting on booking');
+    expect(iCannot).toBeGreaterThanOrEqual(0);
+    expect(iVisit).toBeGreaterThan(iCannot);
+    expect(iCapture).toBeGreaterThan(iVisit);
+    expect(iInsist).toBeGreaterThan(iCapture);
+    // The narrowed generic ESCALATION rule no longer preempts the ladder.
+    expect(prompt).toContain('## ESCALATION\nIf the customer explicitly asks for a human agent, call the escalate_to_human tool.');
+    expect(prompt).not.toContain('or you cannot help');
+  });
+
+  it('no booking, escalate tool ABSENT: no insist ladder (no phantom-tool instruction)', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+    });
+    expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).not.toContain('keeps insisting on booking');
+    expect(prompt).not.toContain('## ESCALATION');
+  });
+
+  it('booking available + escalate tool: no NOT-AVAILABLE block, so no insist ladder', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking'), tool('escalate_to_human')], bookingConfigured: true,
+    });
+    expect(prompt).not.toContain('keeps insisting on booking');
+    expect(prompt).toContain('## ESCALATION');
   });
 
   it('anchors the "Today is" date to the business timezone when provided', () => {

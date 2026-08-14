@@ -38,6 +38,7 @@ import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
  *  projected onto the response. */
 interface TraceShape {
   prompt?: Record<string, unknown>;
+  terminal?: { result?: string; error?: { kind?: string; message?: string } };
   iterations?: Array<{
     llmCall?: { model?: string; latencyMs?: number; promptTokens?: number; completionTokens?: number };
     toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean } }>;
@@ -363,6 +364,10 @@ router.get(
         finishReason: r.finishReason ?? null,
         totalTokens: r.totalTokens ?? null,
         totalLatencyMs: r.totalLatencyMs ?? null,
+        // `finishReason` names the SHAPE of the ending; this names the CAUSE. On the list
+        // because "which of these errors are the platform's fault" is the first question
+        // asked of this page, and opening fifty rows to answer it is not an answer.
+        terminalErrorKind: t.terminal?.error?.kind ?? null,
         iterationCount: iterations.length,
         // The single most diagnostic number on the list: a turn that answered a
         // factual question with zero tool calls never consulted the knowledge base.
@@ -395,6 +400,9 @@ router.get(
         // The prompt ledger is the payload here: block keys and the REASON each
         // was excluded. No prompt text, so nothing tenant-authored leaks.
         prompt: t.prompt ?? null,
+        // Why the run ended. Super-admin only, like the rest of this route, and the
+        // message is the error's own words truncated at the writer — never a stack.
+        terminal: t.terminal ?? null,
         iterations: (t.iterations ?? []).map((it, i) => ({
           index: i,
           model: it.llmCall?.model ?? null,

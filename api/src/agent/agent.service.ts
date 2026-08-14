@@ -5,7 +5,7 @@ import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
 import { MeteringService } from './metering.service';
-import { TraceLogger, AgentTrace } from './trace-logger';
+import { TraceLogger, AgentTrace, terminalErrorFrom, type TerminalErrorKind } from './trace-logger';
 import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
 import { buildPromptTrace } from '../llm/block-ledger';
@@ -330,6 +330,21 @@ const BOOKING_CORRECTION_NOTE =
 const BOOKING_SAFE_FALLBACK =
   "Sorry, let me just confirm a couple of details before I put that through — could you confirm the date and time you'd like?";
 
+/**
+ * Which kind of failure ended this run.
+ *
+ * The order matters: an upstream 429 also matches nothing else, but the LLM timeout is raised by
+ * this file's own `Promise.race` and must not be read as a bot fault — a provider that went slow
+ * is a provider problem. Everything unrecognised is `bot_fault`, which is the honest default:
+ * claiming a provider outage we cannot demonstrate would send an operator to the wrong dashboard.
+ */
+function classifyTerminalError(error: unknown): TerminalErrorKind {
+  if (isUpstreamQuotaExhausted(error)) return 'upstream_quota';
+  if (isUpstreamRateLimit(error)) return 'upstream_rate_limit';
+  if (error instanceof Error && /LLM request timeout/i.test(error.message)) return 'llm_timeout';
+  return 'bot_fault';
+}
+
 export class AgentService {
   constructor(
     private toolRegistry: ToolRegistry,
@@ -653,6 +668,7 @@ export class AgentService {
         // Budget check
         if (await this.metering.isOverBudget(tenant.id, (aiSettings as any)?.dailyTokenBudget)) {
           trace.finishReason = 'budget_exceeded';
+          trace.terminal = { result: 'budget_exceeded' };
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
           return {
             type: 'budget_exceeded',
@@ -719,6 +735,7 @@ export class AgentService {
               continue; // re-run: model should call the tool or ask for the missing detail
             }
             trace.finishReason = 'completed';
+            trace.terminal = { result: 'completed' };
             void this.traceLogger.save(trace);
             logger.warn('[agent] persistent unrecorded booking claim; returning safe fallback', { sessionId: session.id });
             // The affordance rides even the safe fallback. This branch fires when the model kept
@@ -730,6 +747,7 @@ export class AgentService {
             return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}) };
           }
           trace.finishReason = 'completed';
+          trace.terminal = { result: 'completed' };
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
           const slotChips = buildSlotQuickReplies(pendingAvailability);
 
@@ -983,11 +1001,18 @@ export class AgentService {
 
       // Max iterations reached
       trace.finishReason = 'max_iterations';
+      trace.terminal = { result: 'max_iterations' };
       void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent." };
 
     } catch (error) {
       trace.finishReason = 'error';
+      // WHICH failure, recorded before the save. `finishReason` alone left a production
+      // incident with five candidate causes and no way to choose between them.
+      trace.terminal = {
+        result: 'error',
+        error: terminalErrorFrom(error, classifyTerminalError(error)),
+      };
       void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       logger.error('Agent loop error', { sessionId: session.id, error });
       const infraFailure = isUpstreamQuotaExhausted(error) || isUpstreamRateLimit(error);

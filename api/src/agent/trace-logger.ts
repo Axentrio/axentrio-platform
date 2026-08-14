@@ -22,6 +22,45 @@ export interface AgentTrace {
    *  and why) — nests into the `trace` jsonb, no schema change. Absent on the
    *  RAG/legacy paths that don't run the agent composer. */
   prompt?: PromptTrace;
+  /** WHY the run ended, not just the shape of the ending. See `TerminalOutcome`. */
+  terminal?: TerminalOutcome;
+}
+
+/**
+ * How a bot fault is told apart from a provider outage, after the fact.
+ *
+ * `finishReason: 'error'` says a run ended badly and nothing else. A production failure on
+ * 2026-08-13 left exactly that and no way to choose between an exhausted platform key, upstream
+ * throttling, a 30-second LLM timeout and a genuine fault in the run — five causes, one word, and
+ * an operator with no next step. The distinction is not cosmetic: `upstream_*` is a platform
+ * emergency affecting every tenant at once, `bot_fault` is one conversation going wrong.
+ */
+export type TerminalErrorKind =
+  | 'upstream_quota'
+  | 'upstream_rate_limit'
+  | 'llm_timeout'
+  | 'bot_fault';
+
+export interface TerminalOutcome {
+  /** Mirrors the returned union's `type`, so the record and the reply cannot disagree. */
+  result: 'completed' | 'max_iterations' | 'budget_exceeded' | 'error';
+  /**
+   * Present only when `result` is `error`.
+   *
+   * The message is the provider's or the thrown error's own words, TRUNCATED and never a stack:
+   * this column is read by support, and an unbounded error string is how a payload ends up in an
+   * audit table. It is deliberately absent from every customer-facing path — the fallback the
+   * customer reads is the tenant's own wording and must stay that way.
+   */
+  error?: { kind: TerminalErrorKind; message: string };
+}
+
+/** Errors are operator-facing, not a place to spool a payload into the audit table. */
+const MAX_ERROR_CHARS = 500;
+
+export function terminalErrorFrom(error: unknown, kind: TerminalErrorKind): TerminalOutcome['error'] {
+  const message = error instanceof Error ? error.message : String(error);
+  return { kind, message: message.slice(0, MAX_ERROR_CHARS) };
 }
 
 const PII_FIELDS = ['email', 'attendeeemail', 'attendee_email', 'phone', 'phonenumber'];

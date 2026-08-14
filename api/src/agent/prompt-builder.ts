@@ -35,7 +35,7 @@ export class PromptBuilder {
      *  a premises is configured) gating the come-in-person invite. */
     liveFields?: { services?: string; openingHours?: string; serviceArea?: string; venueLine?: string },
     /** Per-turn runtime decisions the composer must not make for itself. */
-    runtime?: { proactiveAsk?: boolean }
+    runtime?: { proactiveAsk?: boolean; outsideBusinessHours?: boolean }
   ): { prompt: string; ledger: BlockLedger } {
     return composeSystemPrompt({
       mode: 'agent',
@@ -58,6 +58,7 @@ export class PromptBuilder {
       venueLine: liveFields?.venueLine,
       channel,
       proactiveAsk: runtime?.proactiveAsk,
+      outsideBusinessHours: runtime?.outsideBusinessHours,
     });
   }
 }

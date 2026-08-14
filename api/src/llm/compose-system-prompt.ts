@@ -177,6 +177,13 @@ interface AgentCtx {
    * which is the behaviour every tier had before and the safe default.
    */
   proactiveAsk?: boolean;
+  /**
+   * Runtime signal: the business is currently OUTSIDE its opening hours. Adds the
+   * `## AVAILABILITY` fact so the bot keeps helping and never announces "closed" as a
+   * reason to disengage — opening hours are informational, not a gate on service.
+   * Absent/false ⇒ no such section (in-hours, or hours not configured).
+   */
+  outsideBusinessHours?: boolean;
   /** Runtime signal: false ⇒ booking tools are loaded but booking is not actually
    *  configured (no availability rule / no bookable service), so the bot must not
    *  offer it. Absent/true ⇒ trust the loaded tools (back-compat for direct callers/tests). */
@@ -338,6 +345,13 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
   // Brand voice
   sections.push(`You are ${brandVoice?.name || tenantName}.`);
   sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);
+  // Off-hours: opening hours are INFORMATIONAL, never a reason to disengage. Placed
+  // high (after the language + identity) so it outranks any "we are closed" instinct.
+  if (ctx.outsideBusinessHours) {
+    sections.push(
+      `\n## AVAILABILITY\nThe business is outside its opening hours right now, but the opening hours are for INFORMATION ONLY. Do NOT refuse to help, stop answering, or stop gathering information because of the time of day, and NEVER tell the customer the business is "closed" as a reason to disengage. Keep answering questions and collecting details exactly as you would during opening hours, and handle any booking request normally. You MAY mention the opening hours as a helpful fact — for example when the customer wants to visit in person or expects someone to respond right away — but never as a refusal.${ctx.openingHours ? ` The opening hours are: ${ctx.openingHours}.` : ''}`,
+    );
+  }
   // ── Template layer (layer 2): the resolved bot-template identity, before the
   //    tenant's own additions. Empty/absent (e.g. blank-base) contributes nothing.
   // AC4: a resolved vertical template body if present, else the safe generic

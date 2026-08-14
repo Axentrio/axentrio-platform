@@ -43,6 +43,7 @@ import {
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
+import { isOutsideBusinessHours } from '../utils/format-business-hours';
 import { renderChannelAddressControls } from '../channels/address-controls';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
@@ -331,6 +332,17 @@ export async function advanceCoalescedWatermark(sessionId: string, messageId: st
 // diverge (the coalescer previously skipped both gates). Returns null when the
 // agent should run normally. Mirrors the legacy gate: text turns on bot-owned
 // sessions with AI enabled only.
+/**
+ * Off-hours kill-switch, read per-call so it is togglable at runtime (and in
+ * tests). Default ON: the AI runs off-hours and the `## AVAILABILITY` prompt fact
+ * tells it the business is currently closed, so it keeps helping (opening hours are
+ * informational). Set OFF_HOURS_AI_REPLY=false to restore the old behaviour — a
+ * canned off-hours reply that short-circuits the agent — instantly, no deploy.
+ */
+function offHoursCannedReplyEnabled(): boolean {
+  return process.env.OFF_HOURS_AI_REPLY === 'false';
+}
+
 function localAutoresponse(
   session: ChatSession,
   messageType: Message['type'],
@@ -340,21 +352,15 @@ function localAutoresponse(
 ): { kind: 'off_hours' | 'escalation'; message: string } | null {
   if (session.status !== 'bot' || messageType !== 'text' || !aiSettings?.enabled) return null;
 
-  const bh = botSettings.businessHours;
-  if (bh?.enabled && bh.schedule?.length) {
-    const now = new Date();
-    const tz = bh.timezone || 'UTC';
-    const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
-    const timeStr = `${parts.find((p) => p.type === 'hour')!.value}:${parts.find((p) => p.type === 'minute')!.value}`;
-    const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
-    const isOutsideHours = !daySchedule || daySchedule.closed || timeStr < daySchedule.open || timeStr >= daySchedule.close;
-    if (isOutsideHours) {
-      return {
-        kind: 'off_hours',
-        message: aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon.",
-      };
-    }
+  // Off-hours. With the kill-switch ON (default) the AI runs and the
+  // `## AVAILABILITY` fact carries the closed state into the prompt; only the
+  // switch OFF short-circuits with the canned message. Detection is the shared
+  // `isOutsideBusinessHours` predicate — one definition for the gate and the prompt.
+  if (offHoursCannedReplyEnabled() && isOutsideBusinessHours(botSettings.businessHours)) {
+    return {
+      kind: 'off_hours',
+      message: aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon.",
+    };
   }
 
   const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];

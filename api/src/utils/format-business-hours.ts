@@ -44,3 +44,42 @@ export function formatBusinessHoursForPlaceholder(bh?: BusinessHours | null): st
     })
     .join(', ');
 }
+
+/**
+ * Is the business currently OUTSIDE its configured hours?
+ *
+ * The single source of truth for "closed right now", used by BOTH the off-hours
+ * gate and the `## AVAILABILITY` prompt fact, so the two can never disagree. It
+ * reproduces the gate's original math: the local day + time in the business
+ * timezone versus the day's schedule.
+ *
+ * Returns FALSE — treat as OPEN, never announce "closed" — whenever hours are
+ * disabled, the schedule is empty, the timezone is invalid (Intl throws), or a
+ * day's open/close is malformed. Failing safe toward engaging the customer is
+ * always better than a wrong "we are closed".
+ */
+export function isOutsideBusinessHours(bh?: BusinessHours | null, now: Date = new Date()): boolean {
+  if (!bh?.enabled || !Array.isArray(bh.schedule) || bh.schedule.length === 0) return false;
+  try {
+    const tz = bh.timezone || 'UTC';
+    const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const hour = parts.find((p) => p.type === 'hour')?.value;
+    const minute = parts.find((p) => p.type === 'minute')?.value;
+    if (!hour || !minute) return false;
+    const timeStr = `${hour}:${minute}`;
+    const daySchedule = bh.schedule.find(
+      (s) => s && typeof s.day === 'string' && s.day.toLowerCase() === dayName,
+    );
+    if (!daySchedule || daySchedule.closed) return true; // no entry for today, or explicitly closed
+    if (typeof daySchedule.open !== 'string' || typeof daySchedule.close !== 'string') return false; // malformed → open
+    return timeStr < daySchedule.open || timeStr >= daySchedule.close;
+  } catch {
+    return false; // invalid timezone or any unexpected shape → treat as open
+  }
+}

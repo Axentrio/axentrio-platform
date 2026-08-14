@@ -216,6 +216,39 @@ describe('characterization: agent PromptBuilder.build', () => {
     expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
   });
 
+  // ── Fix 1 (plan-booking-behaviour.md): the off-hours AVAILABILITY fact ──
+
+  it('outsideBusinessHours: emits the AVAILABILITY fact (hours are info, never disengage)', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      outsideBusinessHours: true,
+      openingHours: 'Mon 09:00-17:00',
+    });
+    expect(prompt).toContain('## AVAILABILITY');
+    expect(prompt).toContain('INFORMATION ONLY');
+    expect(prompt).toContain('never as a refusal');
+    expect(prompt).toContain('The opening hours are: Mon 09:00-17:00.');
+  });
+
+  it('outsideBusinessHours without openingHours: no dangling hours clause', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      outsideBusinessHours: true,
+    });
+    expect(prompt).toContain('## AVAILABILITY');
+    expect(prompt).not.toContain('The opening hours are:');
+  });
+
+  it('in-hours (flag absent): no AVAILABILITY fact', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+    });
+    expect(prompt).not.toContain('## AVAILABILITY');
+  });
+
   // ── Fix 2 (plan-booking-behaviour.md): venue-gated come-in-person invite ──
 
   it('no booking + venue: invites the customer in person at the venue address', () => {

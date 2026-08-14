@@ -36,7 +36,7 @@ import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, 
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { getBoundAddress } from '../booking/travel/address-binding';
-import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
+import { formatBusinessHoursForPlaceholder, isOutsideBusinessHours } from '../utils/format-business-hours';
 import { isUpstreamQuotaExhausted, isUpstreamRateLimit, isUpstreamServerError, isUpstreamUnreachable, isRetryableUpstream, UpstreamUnreachableError } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
@@ -725,7 +725,10 @@ export class AgentService {
       const kbContext = await this.prefetchKbContext({
         message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
       });
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine }, { proactiveAsk });
+      // Currently outside opening hours: the composer adds the AVAILABILITY fact so
+      // the bot keeps helping and never announces "closed" as a reason to disengage.
+      const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours);
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine }, { proactiveAsk, outsideBusinessHours });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.

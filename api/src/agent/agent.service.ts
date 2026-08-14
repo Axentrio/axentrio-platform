@@ -190,24 +190,51 @@ function claimsBookingDone(text: string): boolean {
  * we just offered. A single time in prose — "we open at 9:00" — is left alone.
  */
 export function unofferedTimesIn(text: string, offeredLocal: string[]): string[] {
-  // `9:00`, `09:30`, `1:30 PM`, `13.00`. Requires minutes, so a bare "9" or a price is not a time.
-  const found = [...text.matchAll(/\b(\d{1,2})[:.](\d{2})\s*([ap]\.?m\.?)?/gi)];
-  if (found.length < 2) return [];
+  // `9:00`, `09:30`, `1:30 PM`, `13.00`, and — since 2026-08-13 — `9 AM` and `9a.m.`.
+  //
+  // Minutes are optional ONLY when a meridiem follows. That asymmetry is the whole guard against
+  // false positives: a lone number is not a clock reading, so "3 slots", "45 EUR" and "17 August"
+  // stay prose. Before whole hours were recognised at all, the live sentence "9 AM, 11 AM, or
+  // 11:30 AM" presented one recognised time and stood down.
+  // The meridiem alternatives are deliberately symmetric — `a.m.` / `a.m` OR `am`, never `am.`.
+  // A lone trailing dot belongs to the sentence, and swallowing it reports the offence as
+  // "11:30 AM." to a log and a measurement that should hold a time.
+  const found = [...text.matchAll(/\b(\d{1,2})(?:[:.](\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
 
   const offered = new Set(offeredLocal);
-  const named: string[] = [];
+  /** Every match that is genuinely a clock reading, paired with the text as written. */
+  const times: Array<{ written: string; key: string; ambiguous: boolean; hour: number; minute: number }> = [];
   for (const m of found) {
-    let hour = Number(m[1]);
-    const minute = Number(m[2]);
-    if (hour > 23 || minute > 59) continue;
     const suffix = (m[3] ?? '').toLowerCase().replace(/\./g, '');
+    const hasMinutes = m[2] !== undefined;
+    if (!hasMinutes && !suffix) continue; // a bare number is not a time
+    let hour = Number(m[1]);
+    const minute = hasMinutes ? Number(m[2]) : 0;
+    if (hour > 23 || minute > 59) continue;
     if (suffix === 'pm' && hour < 12) hour += 12;
     if (suffix === 'am' && hour === 12) hour = 0;
-    const key = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    times.push({
+      written: m[0].trim(),
+      key: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      ambiguous: suffix === '',
+      hour,
+      minute,
+    });
+  }
+
+  // Only ENUMERATIONS are judged. One time in prose — "we open at 08:00" — is a fact about the
+  // business, and replacing that reply is worse than leaving it. Counted after parsing, so the
+  // looser pattern above cannot inflate the count with numbers that are not times.
+  if (times.length < 2) return [];
+
+  const named: string[] = [];
+  for (const t of times) {
     // A 12-hour time with no suffix is ambiguous — "1:30" could be 13:30. Accept either reading,
     // so an unsuffixed time only counts as unoffered when NEITHER interpretation was offered.
-    const alt = hour < 12 ? `${String(hour + 12).padStart(2, '0')}:${String(minute).padStart(2, '0')}` : key;
-    if (!offered.has(key) && !(suffix === '' && offered.has(alt))) named.push(m[0].trim());
+    const alt = t.hour < 12
+      ? `${String(t.hour + 12).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`
+      : t.key;
+    if (!offered.has(t.key) && !(t.ambiguous && offered.has(alt))) named.push(t.written);
   }
   return named;
 }

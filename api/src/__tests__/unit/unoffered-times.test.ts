@@ -40,7 +40,63 @@ describe('naming a time that was never offered', () => {
   });
 });
 
+/**
+ * The whole-hour blind spot, found by driving production on 2026-08-13.
+ *
+ * The chips carried 09:30, 10:00, 10:30, 11:00, 13:00, 13:30, 14:00 and 14:30. The sentence above
+ * them read "the available times are 9 AM, 11 AM, or 11:30 AM" - not one of the three was a real
+ * offer in the shape the customer read it, and the guard said nothing.
+ *
+ * The reason is exact: the pattern required `[:.]` plus two minute digits, so `9 AM` and `11 AM`
+ * were never times at all. Only `11:30 AM` matched, which left ONE recognised time, and the
+ * two-or-more enumeration guard returned early. The single time it did recognise was the bogus
+ * one, and it was discarded for want of a second.
+ */
+describe('whole-hour times, which the minutes-only pattern could not see', () => {
+  const CHIPS = ['09:30', '10:00', '10:30', '11:00', '13:00', '13:30', '14:00', '14:30'];
+
+  it('catches the 2026-08-13 production sentence', () => {
+    const reply =
+      'The available times for tomorrow at Turnhoutsebaan 100, 2140 Antwerpen are 9 AM, 11 AM, or 11:30 AM.';
+    // `11 AM` is a real offer (11:00) and must survive; the other two are inventions.
+    expect(unofferedTimesIn(reply, CHIPS)).toEqual(['9 AM', '11:30 AM']);
+  });
+
+  it('stays quiet when the whole hours WERE offered', () => {
+    expect(unofferedTimesIn('I have 10 AM or 1 PM free.', CHIPS)).toEqual([]);
+  });
+
+  it('reads a whole hour and a minute time as one enumeration', () => {
+    // Two recognised times only if the whole hour counts. Before this, `10 AM` was invisible and
+    // the guard saw a single time and stood down.
+    expect(unofferedTimesIn('I can do 10 AM or 16:00.', CHIPS)).toEqual(['16:00']);
+  });
+
+  it('handles the 12-hour boundary in both directions', () => {
+    // 12 PM is noon, 12 AM is midnight. Neither was offered.
+    expect(unofferedTimesIn('How about 12 PM or 12 AM?', CHIPS)).toEqual(['12 PM', '12 AM']);
+  });
+
+  it('reads punctuated and unspaced meridiems', () => {
+    expect(unofferedTimesIn('We could do 9a.m. or 8 p.m.', CHIPS)).toEqual(['9a.m.', '8 p.m.']);
+  });
+});
+
 describe('when it must stay quiet', () => {
+  const CHIPS = ['09:30', '10:00', '10:30', '11:00'];
+
+  it('does NOT read a bare number as a whole-hour time', () => {
+    // The meridiem is what makes a lone digit a clock reading. Without this, "3 slots" and
+    // "2 staff" become 03:00 and 02:00, and a perfectly good reply is thrown away.
+    const reply = 'We have 3 slots left with 2 engineers, at 09:30 and 10:00.';
+    expect(unofferedTimesIn(reply, CHIPS)).toEqual([]);
+  });
+
+  it('does NOT read a date or a price as a whole-hour time', () => {
+    const reply = 'On 17 August the call-out is 45 EUR; I have 09:30 and 10:00.';
+    expect(unofferedTimesIn(reply, CHIPS)).toEqual([]);
+  });
+
   it('ignores a reply that names only ONE time', () => {
     // Not an enumeration. "We open at 08:00" is a fact about the business, not a claim about a
     // slot, and replacing that reply would be worse than leaving it.

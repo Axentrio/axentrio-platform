@@ -657,6 +657,13 @@ async function platformAgentPath(
       // the session); it must still stop the drain, or the outage becomes a storm of
       // failing runs over the rest of the burst.
       let stopDrain = false;
+      // The customer explicitly asked for a human and `escalate_to_human`
+      // succeeded this run. Exactly ONE handoff per turn: every per-case
+      // `bot_error` handoff below stands down, and one `escalation_trigger`
+      // handoff fires AFTER the reply — winning even over an `error` exit,
+      // INCLUDING `infraFailure` (which otherwise does not hand off): a provider
+      // outage is no reason to lose a human the customer explicitly asked for.
+      const explicitHandoff = result.handoffRequested === true;
       switch (result.type) {
         case 'response': {
           // Output guardrails (AC14): a blocked AI reply is treated like an agent
@@ -667,8 +674,10 @@ async function platformAgentPath(
           });
           if (guard.blocked) {
             await sendBotMessage(session, botParticipant.id, guard.content);
-            await handleBotHandoff(session, botParticipant.id, 'bot_error');
-            handedOff = true;
+            if (!explicitHandoff) {
+              await handleBotHandoff(session, botParticipant.id, 'bot_error');
+              handedOff = true;
+            }
           } else {
             await sendBotMessage(
               session,
@@ -691,7 +700,7 @@ async function platformAgentPath(
           // with the bot. A genuine bot fault still escalates.
           if (result.infraFailure) {
             stopDrain = true;
-          } else {
+          } else if (!explicitHandoff) {
             await handleBotHandoff(session, botParticipant.id, 'bot_error');
             handedOff = true;
           }
@@ -700,15 +709,19 @@ async function platformAgentPath(
         case 'budget_exceeded':
           logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
           await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
-          await handleBotHandoff(session, botParticipant.id, 'bot_error');
-          handedOff = true;
+          if (!explicitHandoff) {
+            await handleBotHandoff(session, botParticipant.id, 'bot_error');
+            handedOff = true;
+          }
           break;
 
         case 'max_iterations':
           logger.warn(`Platform agent max iterations for session ${session.id}`);
           await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
-          await handleBotHandoff(session, botParticipant.id, 'bot_error');
-          handedOff = true;
+          if (!explicitHandoff) {
+            await handleBotHandoff(session, botParticipant.id, 'bot_error');
+            handedOff = true;
+          }
           break;
 
         case 'awaiting_confirmation': {
@@ -720,13 +733,21 @@ async function platformAgentPath(
           });
           if (guard.blocked) {
             await sendBotMessage(session, botParticipant.id, guard.content);
-            await handleBotHandoff(session, botParticipant.id, 'bot_error');
-            handedOff = true;
+            if (!explicitHandoff) {
+              await handleBotHandoff(session, botParticipant.id, 'bot_error');
+              handedOff = true;
+            }
           } else {
             await sendBotMessage(session, botParticipant.id, result.message);
           }
           break;
         }
+      }
+
+      // The one explicit-escalation handoff, after the reply reached the customer.
+      if (explicitHandoff) {
+        await handleBotHandoff(session, botParticipant.id, 'escalation_trigger');
+        handedOff = true;
       }
 
       // Stop typing indicator
@@ -1517,6 +1538,18 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       handoffReason = 'bot_error';
       staleGuard = false;
     }
+  }
+
+  // The customer explicitly asked for a human and `escalate_to_human` succeeded
+  // this run. Exactly ONE handoff per turn, and this reason WINS: it replaces any
+  // `bot_error` set above (including the guardrail block) and overrides the
+  // infraFailure no-handoff rule — a provider outage is no reason to lose a human
+  // the customer explicitly asked for. `staleGuard` is forced off to match the
+  // deterministic escalation-keyword path: a newer customer message arriving
+  // mid-run must not roll back the turn that asked for a person.
+  if (result.handoffRequested) {
+    handoffReason = 'escalation_trigger';
+    staleGuard = false;
   }
 
   const extras: ReplyExtras = { quickReplies, affordance };

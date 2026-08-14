@@ -46,10 +46,10 @@ export class ToolRegistry {
    * the resolver says is active (feature-gated modules follow the tenant's
    * resolved entitlements — overrides and the free/non-active deny included;
    * enablement-gated modules follow their tenant_modules row). Fails closed
-   * on resolution errors. `_botSettings` is kept on the signature (callers
-   * still pass the resolved bot settings).
+   * on resolution errors. `botSettings` is the resolved bot settings slice —
+   * it carries the per-bot `features.handoffEnabled` gate for escalation.
    */
-  async getToolsForTenant(tenant: Tenant, _botSettings: BotSettings): Promise<ToolAdapter[]> {
+  async getToolsForTenant(tenant: Tenant, botSettings: BotSettings): Promise<ToolAdapter[]> {
     const tools: ToolAdapter[] = [];
 
     const kbSearch = this.builtinTools.get('kb_search');
@@ -61,8 +61,15 @@ export class ToolRegistry {
     // (the ## ESCALATION prompt block keys off tool presence, so it drops too). This
     // also lets the template gate drop it normally — handoff appears in
     // activeModuleIds only when entitled, so gatedToolNames couldn't reach it before.
+    // ALSO gated per-bot: `features.handoffEnabled !== false`, matching
+    // handleBotHandoff's own rule. `features` is optional and a normal bot omits
+    // it, so requiring literal `true` would strip escalation from every bot that
+    // never set the field — only an EXPLICIT false withholds the tool. With the
+    // tool withheld, the ## ESCALATION and booking-insist prompt lines drop too
+    // (they key off tool presence), so the bot never promises a human that the
+    // handoff path would then refuse to summon.
     const escalation = this.builtinTools.get('escalate_to_human');
-    if (escalation) {
+    if (escalation && botSettings?.features?.handoffEnabled !== false) {
       try {
         if ((await getEntitlements(tenant.id)).features.handoff) tools.push(escalation);
       } catch (error) {

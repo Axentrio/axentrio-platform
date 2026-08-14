@@ -12,6 +12,7 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  Check,
   Index,
 } from 'typeorm';
 import { Tenant } from './Tenant';
@@ -22,8 +23,13 @@ import { Message } from './Message';
 import { HandoffRequest } from './HandoffRequest';
 
 export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff' | 'bot';
+export type SessionOwnership = 'bot_owned' | 'handoff_requested' | 'human_owned' | 'closed';
 
 @Entity('chat_sessions')
+@Check(
+  'chk_chat_sessions_human_control_duration_hours',
+  '"human_control_duration_hours" IS NULL OR ("human_control_duration_hours" >= 1 AND "human_control_duration_hours" <= 24)',
+)
 @Index(['tenantId', 'status'])
 @Index(['tenantId', 'visitorId'])
 @Index(['assignedAgentId', 'status'])
@@ -54,6 +60,24 @@ export class ChatSession {
 
   @Column({ type: 'uuid', nullable: true, name: 'assigned_agent_id' })
   assignedAgentId?: string;
+
+  @Column({ type: 'varchar', length: 24, default: 'bot_owned' })
+  ownership!: SessionOwnership;
+
+  @Column({ type: 'int', default: 0, name: 'ownership_version' })
+  ownershipVersion!: number;
+
+  @Column({ type: 'varchar', length: 16, nullable: true, name: 'human_control_mode' })
+  humanControlMode?: 'timed' | 'indefinite';
+
+  @Column({ type: 'int', nullable: true, name: 'human_control_duration_hours' })
+  humanControlDurationHours?: number;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'human_control_until' })
+  humanControlUntil?: Date;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'human_control_started_at' })
+  humanControlStartedAt?: Date;
 
   @Column({ type: 'varchar', length: 100, default: 'widget' })
   source!: string;

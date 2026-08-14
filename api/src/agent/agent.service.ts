@@ -613,7 +613,12 @@ export class AgentService {
           const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
             where: { botId: bot.id },
           });
-          bookingTimezone = rule?.timezone || undefined;
+          // Canonical, server-owned business timezone (PR 1a): the bot value is
+          // authoritative; the rule's denormalized copy is never consulted —
+          // including inside the placeholder formatter, which derives "today"
+          // (closure relevance) from rule.timezone.
+          bookingTimezone = bot.businessTimezone || rule?.timezone || undefined;
+          if (rule && bot.businessTimezone) rule.timezone = bot.businessTimezone;
           openingHours = formatHoursForPlaceholder(rule);
           // ponytail: rule existence is treated as "hours set up". A rule with empty
           // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
@@ -727,7 +732,7 @@ export class AgentService {
       });
       // Currently outside opening hours: the composer adds the AVAILABILITY fact so
       // the bot keeps helping and never announces "closed" as a reason to disengage.
-      const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours);
+      const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
       const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine }, { proactiveAsk, outsideBusinessHours });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,

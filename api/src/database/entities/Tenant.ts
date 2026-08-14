@@ -66,6 +66,17 @@ export class Tenant {
   })
   tier!: TenantTier;
 
+  /**
+   * The tenant's admitted operating country (ISO 3166-1 alpha-2) — a
+   * business-wide fact: every bot of a tenant operates in the same country.
+   * Server-owned provenance for `Bot.businessTimezone` when a bot has no
+   * venue. Belgium-only today, so `BE` for everyone; admitting another
+   * country requires the country→IANA resolver to support it first
+   * (`booking/business-timezone.ts`).
+   */
+  @Column({ type: 'varchar', length: 2, default: 'BE', name: 'operating_country' })
+  operatingCountry!: string;
+
   @Column({
     type: 'enum',
     enum: ['active', 'suspended', 'cancelled'],

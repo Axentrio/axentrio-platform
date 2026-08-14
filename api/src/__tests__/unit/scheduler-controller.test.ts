@@ -46,13 +46,21 @@ const ruleSave = vi.fn((x) => x);
 const managerQuery = vi.fn(async (..._a: any[]) => [] as any[]);
 const bsFindOne = vi.fn(async () => null as any);
 const bsSave = vi.fn((x) => x);
+// PR 1a: a venue write resolves the tenant's operating country for the
+// businessTimezone recompute. BE = the platform default.
+const tenantFindOne = vi.fn(async () => ({ id: 'ten-1', operatingCountry: 'BE' } as any));
 function repoFor(entity: any) {
   const name = entity?.name || entity;
   if (name === 'ServiceType') return { findOne: etFindOne, find: etFind, count: etCount, create: (d: any) => d, save: etSave, update: etUpdate };
   if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
   if (name === 'BookingSettings') return { findOne: bsFindOne, create: (d: any) => d, save: bsSave };
+  if (name === 'Tenant') return { findOne: tenantFindOne };
   return {};
 }
+/** The booking-settings upsert now runs inside a transaction (PR 1a: the venue
+ *  and the businessTimezone it implies commit together), so upsert-shape
+ *  assertions scan BOTH the datasource handle and the transaction manager's. */
+const allQueryCalls = () => [...dsQuery.mock.calls, ...managerQuery.mock.calls];
 // `query` was missing here, and no test exercised the booking-settings upsert — so the one
 // statement in this controller that hand-computes positional parameters was covered by
 // nothing at all, and a mock that lacked the method still went green.
@@ -464,7 +472,7 @@ describe('scheduler.controller · booking settings upsert', () => {
 
   const save = async (body: Record<string, unknown>) => {
     await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
-    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
     return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
   };
 
@@ -556,7 +564,7 @@ describe('scheduler.controller · venue address upsert', () => {
 
   const save = async (body: Record<string, unknown>) => {
     await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
-    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
     return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
   };
 
@@ -625,7 +633,7 @@ describe('scheduler.controller · pause switch', () => {
 
   const save = async (body: Record<string, unknown>) => {
     await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
-    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
     return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
   };
 
@@ -691,7 +699,7 @@ describe('scheduler.controller · travel time switch', () => {
 
   const save = async (body: Record<string, unknown>) => {
     await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
-    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
     return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
   };
 
@@ -747,7 +755,7 @@ describe('scheduler.controller · travel time switch', () => {
       { tenantId: 'ten-1', body: { travel: { enabled: true, slackMin: 15 } } } as any,
       res
     ).catch(() => undefined);
-    expect(dsQuery.mock.calls.some((c) => String(c[0]).includes('chatbot_booking_settings'))).toBe(false);
+    expect(allQueryCalls().some((c) => String(c[0]).includes('chatbot_booking_settings'))).toBe(false);
   });
 
   it('never refuses switching OFF', async () => {

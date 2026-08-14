@@ -9,6 +9,9 @@ const refFind = vi.fn();
 const refSave = vi.fn();
 const etFindOne = vi.fn();
 const ruleFindOne = vi.fn();
+// PR 1a: the event timezone now comes from the BOT's canonical businessTimezone
+// (via getBotBusinessTimezone); the rule row only gates "configured at all".
+const botFindOne = vi.fn();
 const loggerInfo = vi.fn();
 const bsFindOne = vi.fn(async () => null as any);
 
@@ -20,6 +23,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'BookingReference') return { find: refFind, save: refSave, create: (x: any) => x };
       if (name === 'ServiceType') return { findOne: etFindOne };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
+      if (name === 'Bot') return { findOne: botFindOne };
       // The mirror now carries a venue, so loadEventMeta reads the booking settings row.
       if (name === 'BookingSettings') return { findOne: bsFindOne };
       return {};
@@ -101,6 +105,7 @@ beforeEach(() => {
   refFind.mockResolvedValue([]);
   etFindOne.mockResolvedValue({ name: 'Intro call' });
   ruleFindOne.mockResolvedValue({ timezone: 'UTC' });
+  botFindOne.mockResolvedValue({ id: 'b1', businessTimezone: 'UTC' });
 });
 
 // Empty-claim shape: what the DB returns when nothing is pending.
@@ -287,6 +292,7 @@ describe('reconciler content parity', () => {
   beforeEach(() => {
     etFindOne.mockResolvedValue(SERVICE);
     ruleFindOne.mockResolvedValue({ timezone: 'Europe/Brussels' });
+    botFindOne.mockResolvedValue({ id: 'b1', businessTimezone: 'Europe/Brussels' });
     refFind.mockResolvedValue([]);
     createCalendarEvent.mockResolvedValue({ eventId: 'ev-1', calendarId: 'primary' });
   });

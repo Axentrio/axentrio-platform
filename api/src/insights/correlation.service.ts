@@ -11,6 +11,7 @@ import { AppDataSource } from '../database/data-source';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
 import { isWithinBusinessHours } from '../booking/booking-providers/slot-engine';
+import { applyBotBusinessTimezones } from '../booking/business-timezone';
 import { fisherExactTwoSided, relativeRisk } from './stats/fisher';
 import { logger } from '../utils/logger';
 
@@ -91,7 +92,11 @@ export async function aggregateCorrelations(tenantId: string, now: Date): Promis
   const candidates: Candidate[] = [];
 
   // ── Pair 1: after-hours ↔ booking. Needs business hours (P1.5 helper). ──
-  const rules = await AppDataSource.getRepository(AvailabilityRule).find({ where: { tenantId } });
+  // Each rule's timezone is overridden by its bot's canonical businessTimezone,
+  // so after-hours classification follows the server-owned value.
+  const rules = await applyBotBusinessTimezones(
+    await AppDataSource.getRepository(AvailabilityRule).find({ where: { tenantId } }),
+  );
   if (rules.length > 0) {
     const byBot = new Map(rules.map((r) => [r.botId, r]));
     const fallback = rules.length === 1 ? rules[0] : null;

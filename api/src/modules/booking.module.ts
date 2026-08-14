@@ -31,6 +31,7 @@ import { BookingSettings } from '../database/entities/BookingSettings';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
 import { formatVenueLine } from '../contracts/venue-address';
 import { resolveTravelEligibility } from '../booking/travel/travel-eligibility';
+import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { resolveItineraryKey } from '../scheduler/itinerary-key';
 import { logger } from '../utils/logger';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
@@ -517,6 +518,10 @@ export const bookingModule: ModuleDefinition = {
       AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),
       AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: ctx.botId } }),
     ]);
+    // Canonical, server-owned business timezone: the bot is authoritative on
+    // read, so the prompt's "today" / opening-hours facts never quote the
+    // rule's denormalized (historically browser-derived) copy.
+    if (rule) rule.timezone = await getBotBusinessTimezone(ctx.botId);
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );

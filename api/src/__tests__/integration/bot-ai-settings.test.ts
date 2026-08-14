@@ -305,13 +305,16 @@ describe('Per-bot AI settings', () => {
       ],
     };
 
-    it('persists businessHours and returns it on the bot GET', async () => {
+    it('persists businessHours and returns it on the bot GET — with the DERIVED timezone', async () => {
       const patch = await request(app).patch(`/api/v1/bots/${botId}`).send({ businessHours: validBH });
       expect(patch.status).toBe(200);
 
       const get = await request(app).get(`/api/v1/bots/${botId}`);
       expect(get.status).toBe(200);
-      expect(get.body.data.businessHours).toEqual(validBH);
+      // PR 1a (server-owned Business Time): the client-sent timezone is
+      // accepted for compatibility but IGNORED — the schedule round-trips,
+      // while the timezone is the bot's canonical businessTimezone.
+      expect(get.body.data.businessHours).toEqual({ ...validBH, timezone: 'Europe/Brussels' });
     });
 
     it('rejects an invalid day name (must match Intl weekday output)', async () => {

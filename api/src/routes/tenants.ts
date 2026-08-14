@@ -200,13 +200,36 @@ router.patch(
     // the moved keys present in the request body and apply via the writer.
     // Section-level deep merge happens inside updateAnchorBotSettings — so
     // e.g. `settings.theme.primaryColor` won't wipe `settings.theme.logoUrl`.
+    // Tolerant cutover (PR 1a, server-owned Business Time): any client-sent
+    // `businessHours.timezone` is ACCEPTED but IGNORED — the stored value is
+    // always the anchor bot's canonical, server-owned `businessTimezone`, so a
+    // browser clock (which is what legacy onboarding wrote here) can no longer
+    // move business time. Conflicts are logged for the cutover metric.
+    const withDerivedTimezone = async (
+      bh: Record<string, unknown>,
+    ): Promise<BotSettings['businessHours']> => {
+      const { bot: anchor } = await getAnchorBotConfig(tenantId);
+      const derived = anchor.businessTimezone || 'Europe/Brussels';
+      if (typeof bh.timezone === 'string' && bh.timezone && bh.timezone !== derived) {
+        logger.warn('[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored', {
+          tenantId,
+          botId: anchor.id,
+          received: bh.timezone,
+          derived,
+        });
+      }
+      return { ...bh, timezone: derived } as BotSettings['businessHours'];
+    };
+
     if (settings) {
       const botPatch: Partial<BotSettings> = {};
       if (settings.theme !== undefined) botPatch.theme = settings.theme;
       if (settings.widget !== undefined) botPatch.widget = settings.widget;
       if (settings.features !== undefined) botPatch.features = settings.features;
       if (settings.integrations !== undefined) botPatch.integrations = settings.integrations;
-      if (settings.businessHours !== undefined) botPatch.businessHours = settings.businessHours;
+      if (settings.businessHours !== undefined) {
+        botPatch.businessHours = await withDerivedTimezone(settings.businessHours);
+      }
       // ai/skills/automations are rejected above — not relayed here.
 
       if (Object.keys(botPatch).length > 0) {
@@ -219,10 +242,10 @@ router.patch(
       // Read current to preserve unrelated keys (timezone vs schedule vs enabled).
       const { settings: currentBot } = await getAnchorBotConfig(tenantId);
       await updateAnchorBotSettings(tenantId, {
-        businessHours: {
+        businessHours: await withDerivedTimezone({
           ...(currentBot.businessHours ?? {}),
           ...businessHours,
-        } as BotSettings['businessHours'],
+        }),
       });
     }
 

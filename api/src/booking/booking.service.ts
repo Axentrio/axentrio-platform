@@ -16,8 +16,8 @@ import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
-import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { Bot, type BotSettings } from '../database/entities/Bot';
+import { getBotBusinessTimezone } from './business-timezone';
 import {
   getBotConfigForSession,
   getAnchorBotConfig,
@@ -756,11 +756,13 @@ export async function getManageBooking(
 ): Promise<{ booking: Booking; timezone: string; eventName: string } | null> {
   const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
   if (!booking || booking.provider !== 'internal') return null;
-  const [rule, eventType] = await Promise.all([
-    AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } }),
+  // Canonical, server-owned business timezone — the bot is authoritative on
+  // read; the AvailabilityRule copy is a denormalization.
+  const [timezone, eventType] = await Promise.all([
+    getBotBusinessTimezone(booking.botId),
     AppDataSource.getRepository(ServiceType).findOne({ where: { botId: booking.botId, isActive: true } }),
   ]);
-  return { booking, timezone: rule?.timezone ?? 'UTC', eventName: eventType?.name ?? 'Appointment' };
+  return { booking, timezone, eventName: eventType?.name ?? 'Appointment' };
 }
 
 // Lifted to its own dependency-free module; re-exported so existing importers are unaffected.

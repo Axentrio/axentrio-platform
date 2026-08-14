@@ -53,15 +53,26 @@ export function formatBusinessHoursForPlaceholder(bh?: BusinessHours | null): st
  * reproduces the gate's original math: the local day + time in the business
  * timezone versus the day's schedule.
  *
+ * `timezone` is EXPLICIT and required: callers pass the bot's canonical
+ * `businessTimezone` (server-owned, geography-derived). The legacy
+ * `bh.timezone` is deliberately ignored — it was written from the
+ * configurator's browser clock, which is exactly the authority this predicate
+ * must not consult.
+ *
  * Returns FALSE — treat as OPEN, never announce "closed" — whenever hours are
- * disabled, the schedule is empty, the timezone is invalid (Intl throws), or a
- * day's open/close is malformed. Failing safe toward engaging the customer is
- * always better than a wrong "we are closed".
+ * disabled, the schedule is empty, the timezone is missing/invalid (Intl
+ * throws), or a day's open/close is malformed. Failing safe toward engaging
+ * the customer is always better than a wrong "we are closed".
  */
-export function isOutsideBusinessHours(bh?: BusinessHours | null, now: Date = new Date()): boolean {
+export function isOutsideBusinessHours(
+  bh: BusinessHours | null | undefined,
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
   if (!bh?.enabled || !Array.isArray(bh.schedule) || bh.schedule.length === 0) return false;
+  if (!timezone) return false; // no trustworthy timezone → treat as open
   try {
-    const tz = bh.timezone || 'UTC';
+    const tz = timezone;
     const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,

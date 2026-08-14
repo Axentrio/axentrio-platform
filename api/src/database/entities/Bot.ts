@@ -184,6 +184,21 @@ export class Bot {
   settings!: BotSettings;
 
   /**
+   * The canonical, SERVER-owned business timezone (IANA) for everything this
+   * bot does in business-local time: the off-hours gate, the prompt's "today",
+   * slot generation, date overrides, calendar events, reminders and analytics
+   * day-bucketing. Resolved from business geography — the bot's venue country
+   * when a venue exists, else the tenant's `operatingCountry` — and recomputed
+   * in the same transaction whenever the venue changes. NEVER written from a
+   * client payload: `settings.businessHours.timezone` and
+   * `AvailabilityRule.timezone` are legacy denormalizations kept equal to this
+   * value on write and overridden by it on read
+   * (`booking/business-timezone.ts`).
+   */
+  @Column({ type: 'varchar', length: 64, default: 'Europe/Brussels', name: 'business_timezone' })
+  businessTimezone!: string;
+
+  /**
    * Bound BotTemplate (prompt identity). Nullable for now; Phase 2 binds every
    * existing bot to the seeded `blank-base` template. This is the SOLE binding
    * source — the legacy client-side `settings.ai.brandVoice.templateId` is

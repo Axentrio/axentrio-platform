@@ -13,7 +13,7 @@ import { addJob, removeJob } from '../../queue/message-queue';
 import { AppDataSource } from '../../database/data-source';
 import { Booking } from '../../database/entities/Booking';
 import { ServiceType } from '../../database/entities/ServiceType';
-import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
+import { getBotBusinessTimezone } from '../business-timezone';
 import { logger } from '../../utils/logger';
 import { sendReminderEmail } from './booking-email';
 import { buildManageUrl } from '../../scheduler/booking-token';
@@ -92,12 +92,14 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
     const eventType = booking.eventTypeId
       ? await serviceRepo.findOne({ where: { id: booking.eventTypeId, botId: booking.botId } })
       : await serviceRepo.findOne({ where: { botId: booking.botId, isActive: true } });
-    const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } });
+    // Canonical, server-owned business timezone (the AvailabilityRule copy is
+    // a denormalization; the bot is authoritative on read).
+    const timezone = await getBotBusinessTimezone(booking.botId);
 
     await sendReminderEmail({
       summary: eventType?.name ?? 'Your appointment',
       start: booking.startUtc,
-      timezone: rule?.timezone ?? 'UTC',
+      timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
       leadLabel: LEAD_LABEL[kind],

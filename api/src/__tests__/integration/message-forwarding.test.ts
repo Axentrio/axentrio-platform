@@ -275,9 +275,10 @@ describe('forwardMessageToN8n', () => {
       }
     });
 
-    it('off-hours pre-check still fires for a no-custom (platform-agent) bot — no n8n, no agent run', async () => {
-      // The restructure moved the early-return; confirm the business-hours
-      // pre-check still short-circuits BEFORE the platform agent on the no-webhook path.
+    it('off-hours pre-check fires with the kill-switch OFF — no n8n, no agent run', async () => {
+      // With OFF_HOURS_AI_REPLY=false the business-hours pre-check still
+      // short-circuits BEFORE the platform agent on the no-webhook path.
+      vi.stubEnv('OFF_HOURS_AI_REPLY', 'false');
       const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi' });
       initializeAgentService({ run: runMock } as unknown as AgentService);
       try {
@@ -304,6 +305,7 @@ describe('forwardMessageToN8n', () => {
         expect(await getBotMessages(session.id)).toEqual(['We are closed.']);
       } finally {
         initializeAgentService(null as unknown as AgentService);
+        vi.unstubAllEnvs();
       }
     });
 
@@ -416,13 +418,22 @@ describe('forwardMessageToN8n', () => {
 
   // ── 5. Business hours ────────────────────────────────────────────────────
 
-  describe('business hours handling', () => {
+  // The OLD off-hours behaviour, now behind the kill-switch: with
+  // OFF_HOURS_AI_REPLY=false the off-hours gate sends the canned message and does
+  // NOT run the agent. The new default (AI runs off-hours) is covered below.
+  describe('business hours handling (kill-switch OFF_HOURS_AI_REPLY=false)', () => {
     // Pin time to Wednesday 2026-01-14 at 10:00 UTC for deterministic tests
     const FIXED_DATE = new Date('2026-01-14T10:00:00Z');
     const FIXED_DAY = 'wednesday';
 
-    beforeEach(() => { vi.useFakeTimers({ now: FIXED_DATE }); });
-    afterEach(() => { vi.useRealTimers(); });
+    beforeEach(() => {
+      vi.useFakeTimers({ now: FIXED_DATE });
+      vi.stubEnv('OFF_HOURS_AI_REPLY', 'false');
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
 
     it('should send offHoursMessage when outside hours (1-min window)', async () => {
       const tenant = await createTestTenant({
@@ -528,6 +539,68 @@ describe('forwardMessageToN8n', () => {
       expect(mockSendToWebhook).not.toHaveBeenCalled();
       expect(await getBotMessages(session.id)).toEqual(['Closed.']);
       expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(0);
+    });
+  });
+
+  // Default OFF_HOURS_AI_REPLY (on): the AI runs off-hours; opening hours are
+  // informational, so the off-hours gate no longer short-circuits it.
+  describe('business hours — default (AI runs off-hours)', () => {
+    const FIXED_DATE = new Date('2026-01-14T10:00:00Z'); // Wednesday 10:00 UTC
+    beforeEach(() => { vi.useFakeTimers({ now: FIXED_DATE }); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    const closedNowHours = {
+      enabled: true,
+      timezone: 'UTC',
+      // Open 08:00-09:00 only → 10:00 is outside on every day.
+      schedule: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(
+        (day) => ({ day, open: '08:00', close: '09:00', closed: false }),
+      ),
+    };
+
+    it('off-hours runs the agent instead of sending the canned message', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Agent replied' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: {
+            ai: aiSettings({ guardrails: { escalationKeywords: [], offHoursMessage: 'We are closed.' } }),
+            features: { fileUploadEnabled: true, handoffEnabled: true },
+            businessHours: closedNowHours,
+          },
+        });
+        const { session, message } = await setup(tenant.id);
+
+        await forwardMessageToN8n(session, message);
+
+        expect(runMock).toHaveBeenCalled();
+        expect(await getBotMessages(session.id)).not.toContain('We are closed.');
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('off-hours: an escalation keyword still hands off BEFORE the agent', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Agent replied' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: {
+            ai: aiSettings({ guardrails: { escalationKeywords: ['speak to human'], offHoursMessage: 'We are closed.' } }),
+            features: { fileUploadEnabled: true, handoffEnabled: true },
+            businessHours: closedNowHours,
+          },
+        });
+        const { session, message } = await setup(tenant.id, 'please let me speak to human');
+
+        await forwardMessageToN8n(session, message);
+
+        expect(runMock).not.toHaveBeenCalled(); // escalation keyword short-circuits, off-hours or not
+        const h = await handoffRepo.findOne({ where: { sessionId: session.id } });
+        expect(h!.reason).toBe('bot_escalation_keyword');
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
     });
   });
 

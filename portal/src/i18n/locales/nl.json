@@ -357,14 +357,28 @@
         "description": "Geluiden afspelen voor nieuwe berichten en overdrachten"
       },
       "volume": "Volume",
+      "platform": {
+        "title": "Platformmeldingen",
+        "description": "Meldingen in het portaal tonen"
+      },
+      "email": {
+        "title": "E-mailmeldingen",
+        "description": "Meldings-e-mails voor nieuwe overdrachten verzenden"
+      },
+      "handoffRequest": {
+        "title": "Overdrachtsverzoeken",
+        "description": "Mij melden wanneer een bezoeker om hulp vraagt"
+      },
+      "newMessage": {
+        "title": "Nieuwe berichten",
+        "description": "Mij melden wanneer een nieuw bericht binnenkomt"
+      },
       "desktop": {
         "title": "Desktopmeldingen",
-        "description": "Browsermeldingen weergeven"
+        "description": "Browsermeldingen weergeven",
+        "permissionDenied": "Desktopmeldingen zijn niet ingeschakeld. Sta ze toe in je browserinstellingen."
       },
-      "handsoffOnly": {
-        "title": "Alleen overdrachtsmeldingen",
-        "description": "Alleen melden bij overdrachtsverzoeken"
-      }
+      "saveFailed": "Meldingsvoorkeuren opslaan is mislukt. Probeer het opnieuw."
     },
     "appearance": {
       "title": "Thema",

@@ -130,6 +130,10 @@ class NotificationSound {
 // Singleton instance
 const notificationSound = new NotificationSound();
 
+export function setSoundMuted(muted: boolean): void {
+  notificationSound.setMuted(muted);
+}
+
 // React hook for notification sounds
 export const useNotificationSound = () => {
   const soundRef = useRef(notificationSound);

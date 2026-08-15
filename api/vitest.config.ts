@@ -3,6 +3,10 @@ import path from 'path';
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 
+const isNotificationPrefsUnitRun = process.argv.some((arg) =>
+  arg.endsWith('src/services/notification-prefs.service.test.ts'),
+);
+
 // Load .env.test. Locally we override so a stale parent-shell value can't
 // poison the test env. In CI the workflow injects TEST_DATABASE_URL itself
 // (pointing at the service container on :5432), so we must NOT override —
@@ -24,9 +28,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    globalSetup: ['./src/__tests__/global-setup.ts'],
-    setupFiles: ['./src/__tests__/env-setup.ts', './src/__tests__/setup.ts'],
-    include: ['src/__tests__/**/*.test.ts'],
+    globalSetup: isNotificationPrefsUnitRun ? undefined : ['./src/__tests__/global-setup.ts'],
+    setupFiles: isNotificationPrefsUnitRun
+      ? []
+      : ['./src/__tests__/env-setup.ts', './src/__tests__/setup.ts'],
+    include: ['src/__tests__/**/*.test.ts', 'src/services/notification-prefs.service.test.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,
     // Integration files exercise process-global seams (module mocks, provider

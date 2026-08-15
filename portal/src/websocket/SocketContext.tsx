@@ -9,6 +9,7 @@ import { WS_CONFIG } from '@config/api.config';
 import { WS_EVENTS } from '@config/constants';
 import { useAuth } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
+import { isDesktopNotificationsEnabled } from '@utils/desktopNotificationPref';
 import type {
   TypingIndicator,
   Agent,
@@ -61,12 +62,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const socketRef = useRef<Socket | null>(null);
   const handlersRef = useRef<Map<string, SocketEventHandlers>>(new Map());
   const { getToken, isSignedIn, orgId } = useAuth();
-  const { user, isAuthenticated } = useAppAuth();
+  const { user, isAuthenticated, notificationPreferences } = useAppAuth();
   const tokenRef = useRef<string | null>(null);
+  const notificationPrefsRef = useRef(notificationPreferences);
   
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    notificationPrefsRef.current = notificationPreferences;
+  }, [notificationPreferences]);
 
   // Initialize socket connection
   const connectSocket = useCallback(async () => {
@@ -171,14 +177,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       handlersRef.current.forEach((handlers) => {
         handlers.onHandoffNew?.(handoff);
       });
-      // Play notification sound + show browser notification
-      try {
-        const audio = new Audio('/sounds/notification.mp3');
-        audio.volume = 0.5;
-        audio.play().catch(() => {});
-      } catch {}
       // Browser desktop notification
-      if ('Notification' in window && Notification.permission === 'granted') {
+      if (
+        'Notification' in window &&
+        isDesktopNotificationsEnabled() &&
+        Notification.permission === 'granted' &&
+        notificationPrefsRef.current.handoffRequest &&
+        notificationPrefsRef.current.push
+      ) {
         new Notification('New handoff request', {
           body: `A visitor needs assistance (${handoff.reason || 'escalation'})`,
           icon: '/favicon.ico',
@@ -334,4 +340,3 @@ export const useSocket = (): SocketContextType => {
   }
   return context;
 };
-

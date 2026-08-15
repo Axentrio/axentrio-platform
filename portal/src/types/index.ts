@@ -144,6 +144,12 @@ export interface Chat {
   ownershipVersion?: number;
   channel?: string;
   botId?: string;
+  // ── Timed human control (B-PR5a) ──
+  /** How the human holds control; 'timed' auto-returns at humanControlUntil. */
+  humanControlMode?: 'timed' | 'indefinite' | null;
+  humanControlDurationHours?: number | null;
+  /** ISO deadline of a timed control. The SERVER owns the expiry. */
+  humanControlUntil?: string | null;
 }
 
 export interface ChatMetadata {
@@ -215,6 +221,10 @@ export interface ConversationSummaryPayload {
   channel?: string;
   /** Durable customer-thread key (B-PR4a computeCustomerThreadId). */
   customerThreadId?: string;
+  /** B-PR5a timed human control (all three null when bot-owned). */
+  humanControlMode?: 'timed' | 'indefinite' | null;
+  humanControlDurationHours?: number | null;
+  humanControlUntil?: string | null;
 }
 
 export interface ConversationUpsertEvent {
@@ -311,6 +321,8 @@ export interface CommandConversationSummary {
   ownershipVersion: number;
   assignedAgentId: string | null;
   humanControlMode?: 'timed' | 'indefinite' | null;
+  humanControlDurationHours?: number | null;
+  humanControlUntil?: string | null;
   openHandoffId?: string | null;
 }
 

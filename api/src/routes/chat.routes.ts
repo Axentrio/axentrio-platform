@@ -888,6 +888,16 @@ router.get(
       visitorId: session.visitorId,
       assignedAgentId: session.assignedAgentId,
       assignedAgentName: session.assignedAgent?.userId ?? null,
+      // Ownership + human-control facts so a deep-linked (GET-first) timed chat
+      // renders the "AI paused - resumes in ..." countdown immediately, not only
+      // after the first socket upsert. Same shape the list row + upsert emit.
+      ownership: session.ownership,
+      ownershipVersion: session.ownershipVersion,
+      humanControlMode: session.humanControlMode ?? null,
+      humanControlDurationHours: session.humanControlDurationHours ?? null,
+      humanControlUntil: session.humanControlUntil
+        ? new Date(session.humanControlUntil).toISOString()
+        : null,
       messages: messages.reverse().map((m) => ({
         ...serialiseMessage(m),
         sender: m.participant?.type ?? 'user',

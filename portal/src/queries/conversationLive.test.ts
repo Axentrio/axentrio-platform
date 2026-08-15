@@ -170,11 +170,11 @@ describe('applyConversationUpsert — list variants', () => {
     expect(listData(qc, ALL_PARAMS)[0].lastMessage).toBe('rev-100');
 
     // Stale (lower) revision — dropped.
-    expect(applyConversationUpsert(qc, upsert(makeSummary({ lastMessage: 'rev-99' }), 99))).toBe(false);
+    expect(applyConversationUpsert(qc, upsert(makeSummary({ lastMessage: 'rev-99' }), 99))).toBeNull();
     expect(listData(qc, ALL_PARAMS)[0].lastMessage).toBe('rev-100');
 
     // Equal revision (same-ms emit) — applied, not dropped.
-    expect(applyConversationUpsert(qc, upsert(makeSummary({ lastMessage: 'rev-100b' }), 100))).toBe(true);
+    expect(applyConversationUpsert(qc, upsert(makeSummary({ lastMessage: 'rev-100b' }), 100))).not.toBeNull();
     expect(listData(qc, ALL_PARAMS)[0].lastMessage).toBe('rev-100b');
   });
 
@@ -284,6 +284,83 @@ describe('applyConversationUpsert — list variants', () => {
     expect(patched.lastMessage).toBe('still merges'); // non-ownership facts applied
     // And the stale event must not re-insert the row into the handoff tab.
     expect(listData(qc, HANDOFF_PARAMS)).toEqual([]);
+  });
+
+  it('B-PR5b: the human-control policy merges from an upsert but never from a stale-ownership one', () => {
+    const until = '2026-08-15T14:00:00.000Z';
+    qc.setQueryData(listKey(ALL_PARAMS), { data: [makeChat({ status: 'handsoff' })] });
+
+    // The timed takeover commits (command response, ownershipVersion 3).
+    // REAL contract: the claim keeps status 'handoff' with ownership
+    // 'human_owned' (deriveStatusFromOwnership).
+    applyCommandConversation(qc, {
+      sessionId: 'c1',
+      tenantId: 't1',
+      status: 'handoff',
+      ownership: 'human_owned',
+      ownershipVersion: 3,
+      assignedAgentId: 'ag-1',
+      humanControlMode: 'timed',
+      humanControlDurationHours: 2,
+      humanControlUntil: until,
+    });
+    let row = listData(qc, ALL_PARAMS)[0];
+    expect(row.ownership).toBe('human_owned');
+    expect(row.humanControlMode).toBe('timed');
+    expect(row.humanControlDurationHours).toBe(2);
+    expect(row.humanControlUntil).toBe(until);
+
+    // A delayed PRE-command upsert must not regress the policy either — the
+    // human-control columns are written by the same ownership commands. The
+    // RETURNED patch is the sanitized one the open pane must receive (FIX 2):
+    // the ownership-bearing fields are stripped from it.
+    const stalePatch = applyConversationUpsert(
+      qc,
+      upsert(
+        makeSummary({
+          status: 'handoff',
+          ownership: 'handoff_requested',
+          ownershipVersion: 2,
+          humanControlMode: null,
+          humanControlDurationHours: null,
+          humanControlUntil: null,
+          lastMessage: 'still merges',
+        }),
+        Date.now() + 1000,
+      ),
+    );
+    expect(stalePatch).not.toBeNull();
+    expect(stalePatch!.lastMessage).toBe('still merges');
+    expect(stalePatch).not.toHaveProperty('ownership');
+    expect(stalePatch).not.toHaveProperty('status');
+    expect(stalePatch).not.toHaveProperty('humanControlMode');
+    expect(stalePatch).not.toHaveProperty('humanControlDurationHours');
+    expect(stalePatch).not.toHaveProperty('humanControlUntil');
+    row = listData(qc, ALL_PARAMS)[0];
+    expect(row.ownership).toBe('human_owned');
+    expect(row.humanControlMode).toBe('timed');
+    expect(row.humanControlUntil).toBe(until);
+
+    // A CURRENT upsert (the expiry worker's release) clears the fields.
+    applyConversationUpsert(
+      qc,
+      upsert(
+        makeSummary({
+          status: 'bot',
+          ownership: 'bot_owned',
+          ownershipVersion: 4,
+          assignedAgentId: null,
+          humanControlMode: null,
+          humanControlDurationHours: null,
+          humanControlUntil: null,
+        }),
+        Date.now() + 2000,
+      ),
+    );
+    row = listData(qc, ALL_PARAMS)[0];
+    expect(row.humanControlMode).toBeNull();
+    expect(row.humanControlDurationHours).toBeNull();
+    expect(row.humanControlUntil).toBeNull();
   });
 
   it('patches the selected chat detail summary without touching messages', () => {

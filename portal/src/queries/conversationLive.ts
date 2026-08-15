@@ -147,6 +147,11 @@ export function summaryToChatPatch(dto: ConversationSummaryPayload): Partial<Cha
   if (dto.ownershipVersion !== undefined) patch.ownershipVersion = dto.ownershipVersion;
   if (dto.channel !== undefined) patch.channel = dto.channel;
   if (dto.botId !== undefined) patch.botId = dto.botId;
+  if (dto.humanControlMode !== undefined) patch.humanControlMode = dto.humanControlMode;
+  if (dto.humanControlDurationHours !== undefined) {
+    patch.humanControlDurationHours = dto.humanControlDurationHours;
+  }
+  if (dto.humanControlUntil !== undefined) patch.humanControlUntil = dto.humanControlUntil;
   return patch;
 }
 
@@ -171,7 +176,7 @@ function summaryToChatRow(dto: ConversationSummaryPayload): Chat {
 export function commandSummaryToChatPatch(
   summary: CommandConversationSummary,
 ): Partial<Chat> & { id: string } {
-  return {
+  const patch: Partial<Chat> & { id: string } = {
     id: summary.sessionId,
     sessionId: summary.sessionId,
     status: normalizeChatStatus(summary.status),
@@ -179,6 +184,14 @@ export function commandSummaryToChatPatch(
     ownership: summary.ownership,
     ownershipVersion: summary.ownershipVersion,
   };
+  // B-PR5b: the human-control policy the command committed (defined-only, so
+  // an older API that omits the fields never clobbers a known value).
+  if (summary.humanControlMode !== undefined) patch.humanControlMode = summary.humanControlMode;
+  if (summary.humanControlDurationHours !== undefined) {
+    patch.humanControlDurationHours = summary.humanControlDurationHours;
+  }
+  if (summary.humanControlUntil !== undefined) patch.humanControlUntil = summary.humanControlUntil;
+  return patch;
 }
 
 /** Socket message payload → portal Message. The operator reply carries its
@@ -322,21 +335,26 @@ function withTotalDelta(entry: ChatListCacheEntry, rows: Chat[], delta: number):
 
 /**
  * Fold a `conversation:upsert` into every cached list variant + the detail
- * cache. Returns false when the event was dropped as stale (strict `<`).
+ * cache. Returns the SANITIZED patch that was applied (revision-gated,
+ * ownership-stale fields stripped) so the caller can apply the exact same
+ * patch to any component-state copy of the row (the open Inbox pane) —
+ * rebuilding a patch from the raw event would bypass the ownership gate and
+ * could resurrect just-cleared human-control state. Returns null when the
+ * event was dropped as stale (strict `<` revision).
  */
 export function applyConversationUpsert(
   queryClient: QueryClient,
   event: ConversationUpsertEvent,
-): boolean {
+): (Partial<Chat> & { id: string }) | null {
   ensureRegistriesFor(queryClient);
   const dto = event?.conversation;
-  if (!dto) return false;
+  if (!dto) return null;
   const id = dto.id ?? dto.sessionId;
-  if (!id) return false;
+  if (!id) return null;
 
   const applied = appliedRevisions.get(id);
   if (typeof event.revision === 'number') {
-    if (applied !== undefined && event.revision < applied) return false;
+    if (applied !== undefined && event.revision < applied) return null;
     appliedRevisions.set(id, event.revision);
   }
 
@@ -361,6 +379,11 @@ export function applyConversationUpsert(
       ownershipVersion: _ownershipVersion,
       assignedAgentId: _assignedAgentId,
       assignedAgentName: _assignedAgentName,
+      // The human-control policy is written by the same ownership commands —
+      // a stale upsert must not regress a just-changed duration either.
+      humanControlMode: _humanControlMode,
+      humanControlDurationHours: _humanControlDurationHours,
+      humanControlUntil: _humanControlUntil,
       ...rest
     } = patch;
     patch = rest as typeof patch;
@@ -403,7 +426,7 @@ export function applyConversationUpsert(
     old ? mergeDefined(old, patch as Partial<ChatDetailCacheEntry>) : old,
   );
 
-  return true;
+  return patch;
 }
 
 // ---------------------------------------------------------------------------
@@ -622,10 +645,12 @@ export function useLiveConversationSync(options: LiveConversationSyncOptions = {
 
     const handlerId = registerHandlers({
       onConversationUpsert: (event) => {
-        const appliedNow = applyConversationUpsert(queryClient, event);
-        const id = event?.conversation?.id ?? event?.conversation?.sessionId;
-        if (appliedNow && id && id === selectedChatIdRef.current) {
-          onSelectedUpsertRef.current?.(summaryToChatPatch(event.conversation));
+        // The pane gets the SAME sanitized patch the cache got — never a
+        // rebuilt raw one, which would bypass the revision/ownership gates
+        // and could resurrect cleared human-control state (B-PR5b FIX 2).
+        const appliedPatch = applyConversationUpsert(queryClient, event);
+        if (appliedPatch && appliedPatch.id === selectedChatIdRef.current) {
+          onSelectedUpsertRef.current?.(appliedPatch);
         }
       },
       onMessageCreated: (event) => {

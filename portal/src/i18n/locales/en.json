@@ -2037,7 +2037,16 @@
       }
     },
     "takeover": {
-      "button": "Take Over"
+      "button": "Take Over",
+      "indefinite": "Until I return it to AI",
+      "forHours_one": "For {{count}} hour",
+      "forHours_other": "For {{count}} hours",
+      "changeDuration": "Change duration"
+    },
+    "humanControl": {
+      "indefinite": "AI paused - you have control",
+      "timed": "AI paused - resumes in {{time}}",
+      "resuming": "AI resuming…"
     },
     "guardrail": {
       "paused": "AI paused · {{reason}}",
@@ -2082,7 +2091,9 @@
       "closeSuccess": "Chat closed",
       "closeFailed": "Failed to close chat",
       "returnToBotSuccess": "Chat returned to bot",
-      "returnToBotFailed": "Failed to return chat to bot"
+      "returnToBotFailed": "Failed to return chat to bot",
+      "durationUpdated": "Control duration updated",
+      "durationUpdateFailed": "Failed to update the control duration"
     },
     "stream": {
       "title": "Live chats",

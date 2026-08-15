@@ -117,14 +117,11 @@ export const notificationService = {
     return created;
   },
 
-  /** Fan out to all active operators of a tenant. */
-  async createForTenant(input: CreateNotificationInput): Promise<void> {
-    const users = await AppDataSource.getRepository(User).find({
-      where: { tenantId: input.tenantId, isActive: true },
-      select: ['id'],
-    });
-    if (users.length === 0) return;
-    const created = await this.createForUsers({ ...input, recipientUserIds: users.map((u) => u.id) });
+  /** Create for an explicit recipient list, then emit one tenant-wide WS event. */
+  async createForRecipients(
+    input: CreateNotificationInput & { recipientUserIds: string[] },
+  ): Promise<void> {
+    const created = await this.createForUsers(input);
     // Nothing new was written (a fully-deduped retry of the same dedupeBase) →
     // don't re-toast/re-sound desktops for an event they were already alerted to.
     if (created === 0) return;
@@ -150,6 +147,16 @@ export const notificationService = {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  },
+
+  /** Fan out to all active operators of a tenant. */
+  async createForTenant(input: CreateNotificationInput): Promise<void> {
+    const users = await AppDataSource.getRepository(User).find({
+      where: { tenantId: input.tenantId, isActive: true },
+      select: ['id'],
+    });
+    if (users.length === 0) return;
+    await this.createForRecipients({ ...input, recipientUserIds: users.map((u) => u.id) });
   },
 
   async list(params: {

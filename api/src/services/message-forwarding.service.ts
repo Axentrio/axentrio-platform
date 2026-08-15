@@ -8,7 +8,6 @@ import { randomUUID } from 'crypto';
 import type { EntityManager } from 'typeorm';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
-import { notificationService } from './notification.service';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
@@ -47,6 +46,7 @@ import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
 import { isOutsideBusinessHours } from '../utils/format-business-hours';
 import { renderChannelAddressControls } from '../channels/address-controls';
+import { notifyNewHandoff } from './handoff-notification.service';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -2009,19 +2009,22 @@ async function handleBotHandoff(
   // entity's ownership/status/version were just synced from the command result.
   await emitConversationUpsert(session);
 
-  // Push notification to operators (fire-and-forget; never blocks handoff).
-  void notificationService
-    .createForTenant({
-      tenantId: session.tenantId,
-      type: 'handoff_requested',
-      title: 'New handoff request',
-      message: reason
-        ? `A visitor needs help: ${reason}`
-        : 'A visitor is requesting a human agent.',
-      data: { sessionId: session.id, handoffId },
-      dedupeBase: `handoff:${handoffId}`,
-    })
-    .catch(() => {});
+  // Durable platform/email notification fan-out (fire-and-forget; never blocks handoff).
+  void notifyNewHandoff({
+    tenantId: session.tenantId,
+    handoffId,
+    sessionId: session.id,
+    reason,
+    requestedAt: new Date(),
+  })
+    .catch((error) => {
+      logger.warn('Handoff notification backstop failed', {
+        tenantId: session.tenantId,
+        sessionId: session.id,
+        handoffId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
   logger.info(`Bot handoff triggered for session ${session.id}`, { reason });
 }

@@ -62,6 +62,7 @@ import { BookingReference } from './entities/BookingReference';
 import { Notification } from './entities/Notification';
 import { MobileDevice } from './entities/MobileDevice';
 import { NotificationDelivery } from './entities/NotificationDelivery';
+import { EmailDelivery } from './entities/EmailDelivery';
 import { CanonicalTopic } from './entities/CanonicalTopic';
 import { Judgment } from './entities/Judgment';
 import { Gap } from './entities/Gap';
@@ -143,6 +144,7 @@ export const AppDataSource = new DataSource({
     Notification,
     MobileDevice,
     NotificationDelivery,
+    EmailDelivery,
     CanonicalTopic,
     Judgment,
     Gap,

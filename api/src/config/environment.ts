@@ -93,6 +93,7 @@ const envSchema = z.object({
 
   // API base URL (for webhook callbacks)
   API_URL: z.string().default('http://localhost:3000'),
+  PORTAL_URL: z.string().default('http://localhost:4080'),
 
   // Webhook / N8N
   WEBHOOK_URL: z.string().optional(),
@@ -502,6 +503,10 @@ export const config = {
 
   api: {
     url: env.API_URL,
+  },
+
+  portal: {
+    url: env.PORTAL_URL,
   },
 
   billing: {

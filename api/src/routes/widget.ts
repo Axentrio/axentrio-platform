@@ -28,6 +28,7 @@ import {
 } from '../services/widget-session-identity';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
 import { conversationCommands } from '../services/conversation-command.service';
+import { notifyNewHandoff } from '../services/handoff-notification.service';
 import type { HandoffReason } from '../database/entities/HandoffRequest';
 import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
@@ -686,9 +687,10 @@ router.post(
     // The old handler wrote status='handoff' directly and created NO
     // HandoffRequest row, so this path was invisible to the /handoffs/queue.
     const validReasons: HandoffReason[] = ['user_request', 'bot_confidence_low', 'escalation_trigger', 'business_hours'];
+    const handoffReason = validReasons.includes(reason as HandoffReason) ? (reason as HandoffReason) : 'user_request';
     const result = await conversationCommands.requestHandoff(
       sessionId,
-      validReasons.includes(reason as HandoffReason) ? (reason as HandoffReason) : 'user_request',
+      handoffReason,
       'widget',
       undefined,
       { tenantId },
@@ -719,6 +721,20 @@ router.post(
     // B-PR3a: normalized ownership event, post-commit, only when the state moved.
     if (result.outcome === 'requested') {
       await emitConversationUpsertForSession(sessionId, tenantId);
+      void notifyNewHandoff({
+        tenantId,
+        handoffId: result.handoffId!,
+        sessionId,
+        reason: handoffReason,
+        requestedAt: new Date(),
+      }).catch((error) => {
+        logger.warn('Handoff notification backstop failed', {
+          tenantId,
+          sessionId,
+          handoffId: result.handoffId!,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
 
     logger.info('Handoff requested from widget', {

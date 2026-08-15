@@ -27,6 +27,7 @@ import { requestHandoffSchema } from '../schemas';
 import { requireFeature } from '../billing/enforce';
 import { redisLoopStore } from '../guardrails/loop-store';
 import { conversationCommands } from '../services/conversation-command.service';
+import { notifyNewHandoff } from '../services/handoff-notification.service';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -115,6 +116,20 @@ router.post(
     // B-PR3a: normalized ownership event, post-commit, when the state moved.
     if (result.outcome === 'requested') {
       await emitConversationUpsertForSession(sessionId, tenantId);
+      void notifyNewHandoff({
+        tenantId: tenantId!,
+        handoffId: result.handoffId!,
+        sessionId,
+        reason: 'user_request',
+        requestedAt: new Date(),
+      }).catch((error) => {
+        logger.warn('Handoff notification backstop failed', {
+          tenantId: tenantId!,
+          sessionId,
+          handoffId: result.handoffId!,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
 
     logger.info(`Handoff requested for session ${sessionId}`, {

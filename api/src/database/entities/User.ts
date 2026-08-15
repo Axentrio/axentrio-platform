@@ -16,6 +16,7 @@ import {
 } from 'typeorm';
 import { Tenant } from './Tenant';
 import { Agent } from './Agent';
+import type { NotificationPreferences } from '../../contracts/notification-preferences';
 
 export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'agent';
 
@@ -63,13 +64,7 @@ export class User {
   locale?: string;
 
   @Column({ type: 'jsonb', nullable: true, name: 'notification_preferences' })
-  notificationPreferences?: {
-    email?: boolean;
-    push?: boolean;
-    sound?: boolean;
-    newMessage?: boolean;
-    handoffRequest?: boolean;
-  };
+  notificationPreferences?: NotificationPreferences | null;
 
   @Column({ type: 'timestamptz', nullable: true, name: 'last_login_at' })
   lastLoginAt?: Date;

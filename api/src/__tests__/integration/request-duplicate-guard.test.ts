@@ -157,9 +157,13 @@ describe('accepting a request that would duplicate a live appointment', () => {
     const visitorId = `visitor-${randomBytes(4).toString('hex')}`;
     const first = await createTestSession(tenant.id);
     const second = await createTestSession(tenant.id);
+    // CHANNEL sessions, exactly as the scenario says: two open sessions for
+    // one external identity is a channels shape. Widget sessions can no
+    // longer hold two open rows per identity (uq_chat_sessions_widget_open,
+    // B-PR4a) - the widget path resolves the one open session instead.
     await AppDataSource.getRepository(ChatSession).update(
       { id: In([first.id, second.id]) },
-      { visitorId, botId }
+      { visitorId, botId, source: 'messenger', channel: 'messenger' }
     );
 
     const existing = await seedBooking({ sessionId: first.id, serviceId, status: 'confirmed', hoursFromNow: 48 });

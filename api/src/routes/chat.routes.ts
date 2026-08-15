@@ -43,7 +43,12 @@ import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
 import { sendMessageSchema, chatListQuerySchema } from '../schemas';
 import { emitWebhookEvent } from '../webhooks/webhook.emitter';
-import { serializeConversationSummary, previewFromRaw } from '../realtime/conversation-serializer';
+import {
+  serializeConversationSummary,
+  previewFromRaw,
+  type CustomerThreadBinding,
+} from '../realtime/conversation-serializer';
+import { ConversationBinding } from '../database/entities/ConversationBinding';
 import {
   emitConversationUpsert,
   emitConversationUpsertForSession,
@@ -440,12 +445,36 @@ router.get(
       }
     }
 
+    // customerThreadId (B-PR4a): external sessions need their binding row for
+    // the e:{connection}:{user}:{thread} key. One batch query for the page's
+    // non-widget rows; widget rows compute the key from the session alone.
+    const bindings: Record<string, CustomerThreadBinding> = {};
+    const externalIds = result.data.filter((s) => s.source !== 'widget').map((s) => s.id);
+    if (externalIds.length > 0) {
+      const rows = await AppDataSource.getRepository(ConversationBinding)
+        .createQueryBuilder('b')
+        .where('b.sessionId IN (:...ids)', { ids: externalIds })
+        .orderBy('b.createdAt', 'ASC')
+        .getMany();
+      // ASC + overwrite ⇒ the NEWEST binding wins, matching conversation-events.
+      for (const b of rows) {
+        bindings[b.sessionId] = {
+          channelConnectionId: b.channelConnectionId,
+          externalUserId: b.externalUserId,
+          externalThreadId: b.externalThreadId,
+        };
+      }
+    }
+
     // ONE mapper for this row and the conversation:upsert socket payload
     // (B-PR3a): the shapes cannot diverge because they are the same code.
     sendPaginated(
       res,
       result.data.map((s) =>
-        serializeConversationSummary(s, { lastMessage: lastMessages[s.id] ?? null }),
+        serializeConversationSummary(s, {
+          lastMessage: lastMessages[s.id] ?? null,
+          binding: bindings[s.id] ?? null,
+        }),
       ),
       result.meta
     );

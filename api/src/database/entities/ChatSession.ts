@@ -33,6 +33,15 @@ export type SessionOwnership = 'bot_owned' | 'handoff_requested' | 'human_owned'
 @Index(['tenantId', 'status'])
 @Index(['tenantId', 'visitorId'])
 @Index(['assignedAgentId', 'status'])
+// One non-closed WIDGET session per stable customer identity (B-PR4a). This
+// mirrors migration 1791500000000-WidgetOpenSessionIdentity so the
+// synchronize-built test schema enforces the same invariant production gets
+// from the migration. Untyped literals on purpose: status is an enum in the
+// test schema and may be varchar elsewhere - both resolve.
+@Index('uq_chat_sessions_widget_open', ['tenantId', 'botId', 'visitorId'], {
+  unique: true,
+  where: `status <> 'closed' AND source = 'widget'`,
+})
 export class ChatSession {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

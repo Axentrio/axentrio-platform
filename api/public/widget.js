@@ -287,6 +287,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
   const LEGACY_STORAGE_KEY = 'cb_session_v2';
   const STORAGE_KEY_PREFIX = 'cb_session_v3_';
+  // Durable customer identity, SEPARATE from the replaceable session blob.
+  // Survives session recovery and "new conversation" - the server uses it to
+  // resolve the same conversation for a returning visitor.
+  const VISITOR_KEY_PREFIX = 'cb_visitor_v1_';
   const CONNECTION_STATUS = {
     connecting: {
       label: 'Connecting...',
@@ -1387,6 +1391,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.serverFileUploadEnabled = false;
       this.pendingMessages = [];
       this.storageKey = this.getStorageKey();
+      this.visitorKey = this.getVisitorKey();
       this._connected = false;
       this._hasEverConnected = false;
       // Monotonic session-lifecycle counter. Bumped whenever a NEW session
@@ -1402,6 +1407,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       // Render immediately, connect async
       this.loadSession();
+      // Resolve the durable visitorId AFTER loadSession: the stored blob is
+      // the adoption source for installs that predate the durable key.
+      this._ensureVisitorId();
+      // A blob written for ANOTHER identity (a stale cached script minted a
+      // random id while the durable key holds ours) must never be resumed.
+      this._reconcileStoredIdentity();
       this.createShadowDOM();
       this.render();
       this.attachEventListeners();
@@ -1431,14 +1442,76 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this._loadAppearanceConfig();
     }
 
-    getStorageKey() {
+    // One hash per embed triple (api origin + key + bot) - shared by the
+    // session-blob key and the durable visitor key so they always pair up.
+    _embedHash() {
       const identity = [
         this.config.apiUrl || 'default-api',
         this.config.apiKey || 'public',
         this.config.botId || 'default',
       ].join('|');
 
-      return STORAGE_KEY_PREFIX + utils.hashString(identity);
+      return utils.hashString(identity);
+    }
+
+    getStorageKey() {
+      return STORAGE_KEY_PREFIX + this._embedHash();
+    }
+
+    getVisitorKey() {
+      return VISITOR_KEY_PREFIX + this._embedHash();
+    }
+
+    // Resolve the durable visitorId. Order: (a) the durable key; else
+    // (b) ADOPT the visitorId from the stored session blob (returning
+    // installs keep their server-side conversation); else (c) mint one.
+    // NEVER regenerated after this - recovery and "new conversation" keep it.
+    _ensureVisitorId() {
+      let durable = null;
+      try {
+        durable = localStorage.getItem(this.visitorKey);
+      } catch (err) {
+        this.log('Failed to read visitor id:', err && err.message);
+      }
+      if (durable && typeof durable === 'string') {
+        this.visitorId = durable;
+        return;
+      }
+      if (!this.visitorId) {
+        // loadSession may not have found a blob yet (or was skipped) - check.
+        const stored = this.readStoredSession();
+        if (stored && stored.session && typeof stored.session.visitorId === 'string') {
+          this.visitorId = stored.session.visitorId;
+        }
+      }
+      if (!this.visitorId) {
+        this.visitorId = 'widget-' + utils.generateId();
+      }
+      try {
+        localStorage.setItem(this.visitorKey, this.visitorId);
+      } catch (err) {
+        // Storage unavailable (private mode/quota): keep the in-memory id -
+        // this load behaves like today's per-session identity.
+        this.log('Failed to persist visitor id:', err && err.message);
+      }
+    }
+
+    // Discard a stored session blob that belongs to a DIFFERENT visitorId
+    // than the durable identity (S2). Resuming it would put this customer in
+    // another identity's conversation. The in-memory state loadSession copied
+    // from that blob is dropped too; _initSession then resolves the durable
+    // identity's own session server-side.
+    _reconcileStoredIdentity() {
+      const stored = this.readStoredSession();
+      if (!stored || !stored.session) return;
+      const blobVisitorId = stored.session.visitorId;
+      if (!blobVisitorId || !this.visitorId || blobVisitorId === this.visitorId) return;
+      this.log('Discarding stored session for a different visitor id');
+      this.clearStoredSession();
+      this.sessionId = null;
+      this.tenantId = null;
+      this.token = null;
+      this.messages = [];
     }
 
     readStoredSession() {
@@ -1663,10 +1736,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       if (storedSession) {
         const { key, session } = storedSession;
 
-        if (session.sessionId && session.tenantId) {
+        if (session.sessionId && session.tenantId &&
+            // Never resume a blob written for ANOTHER identity (S2) - a stale
+            // cached script may have rewritten it since the constructor check.
+            (!session.visitorId || !this.visitorId || session.visitorId === this.visitorId)) {
           this.sessionId = session.sessionId;
           this.tenantId = session.tenantId;
-          this.visitorId = session.visitorId;
+          // The durable visitorId owns identity - only fall back to the blob's
+          // when the durable one is missing (storage-unavailable loads).
+          if (!this.visitorId) this.visitorId = session.visitorId;
           this.token = session.token;
           // Restored (not brand-new) session — backfill missed messages on join.
           this._isNewSession = false;
@@ -1680,8 +1758,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
 
-      // Create new session via API
-      this.visitorId = 'widget-' + utils.generateId();
+      // Resolve-or-create via API with the DURABLE visitorId - never a fresh
+      // one. The server resolves the visitor's open session (isNew:false) or
+      // creates one; identity is stable across loads, recovery and reconnects.
+      if (!this.visitorId) this._ensureVisitorId();
       const resp = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1706,9 +1786,11 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.tenantId = data.session.tenantId || data.tenantId;
       // Widget JWT — needed to call /widget/history for reconnect backfill.
       this.token = data.token;
-      // Brand-new session: nothing to backfill on the first join (avoids
-      // re-rendering the server-side greeting on top of the client greeting).
-      this._isNewSession = true;
+      // Brand-new session (isNew): nothing to backfill on the first join
+      // (avoids re-rendering the server-side greeting on top of the client
+      // greeting). A RESOLVED session (isNew:false - the server matched our
+      // durable visitorId) must backfill its transcript on join instead.
+      this._isNewSession = data.isNew !== false;
 
       // Clear old messages from previous session
       this.messages = [];
@@ -1718,15 +1800,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
 
-      this.log('New session created:', this.sessionId);
+      this.log(this._isNewSession ? 'New session created:' : 'Session resolved:', this.sessionId);
       this._saveSession();
       this.flushPendingMessages();
     }
 
-    // One-shot recovery: tear down the socket, re-init the session (this.visitorId
-    // stays in memory so /widget/init resumes the SAME active session → fresh
-    // token), then reconnect with the new token. The bound session is fixed at the
-    // handshake, so a new token needs a new socket — never a re-emit. Issue #19.
+    // One-shot recovery: tear down the socket, re-init the session (the DURABLE
+    // visitorId survives - /widget/init resolves the SAME non-closed session →
+    // fresh token), then reconnect with the new token. The bound session is fixed
+    // at the handshake, so a new token needs a new socket - never a re-emit. #19.
     _recoverWidgetSession(reason) {
       if (this._recovering) return; // one-shot — avoid init/connect loops
       this._recovering = true;
@@ -1751,23 +1833,68 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         });
     }
 
-    // Start a brand-new conversation. A widget session is restored from
-    // localStorage on every load (see _initSession), so its transcript keeps
-    // being replayed to the model — which is why a bot that was reconfigured
-    // (new specialty, removed services/docs) still behaves like the old one
-    // until the session ends. This forgets the stored session, mints a fresh
-    // one against the CURRENT bot config, clears the transcript, and re-greets.
-    // The old session is left to the server's idle auto-close.
+    // Start a brand-new conversation for the SAME durable visitorId. This is
+    // a SERVER command now (POST /widget/new-conversation): in one server
+    // transaction the current session is closed and a fresh one is opened
+    // against the CURRENT bot config. A client-only localStorage clear cannot
+    // do this any more - with a stable visitorId, /widget/init would simply
+    // resolve the old session again. Nothing is torn down until the server
+    // confirms, so a failed call leaves the current conversation working.
     startNewConversation() {
       if (this._startingNew) return; // guard against concurrent double-taps
-      // Light throttle: each new conversation mints a fresh server session, so
+      // Light throttle: each new conversation replaces the server session, so
       // ignore rapid repeats (fat-fingers, or a scripted newConversation loop)
-      // on top of the in-flight guard. The server also rate-limits /widget/init.
+      // on top of the in-flight guard. The server also rate-limits the endpoint.
       const now = (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
       if (now && this._lastNewConversationAt && (now - this._lastNewConversationAt) < 1500) return;
       this._lastNewConversationAt = now;
       this._startingNew = true;
 
+      if (!this.token) {
+        // Never connected - there is no server session to swap. The normal
+        // connect path owns retries; nothing to do here.
+        this._startingNew = false;
+        this.log('New conversation skipped: no session token yet');
+        return;
+      }
+
+      fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/new-conversation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + this.token,
+        },
+        body: JSON.stringify({}),
+      }, 15000)
+        .then((resp) => {
+          if (!resp.ok) {
+            const err = new Error('new-conversation failed: ' + resp.status);
+            err.status = resp.status;
+            throw err;
+          }
+          return resp.json();
+        })
+        .then((body) => {
+          const data = body && body.data;
+          if (!data || !data.session || !data.session.id || !data.token) {
+            throw new Error('new-conversation: malformed response');
+          }
+          this._adoptNewConversation(data);
+        })
+        .catch((err) => {
+          // The current conversation was NOT torn down - it keeps working.
+          if (err && err.status === 401) {
+            // Expired token: recover (re-init resolves the SAME session with a
+            // fresh token); the user can tap "New chat" again after.
+            this._recoverWidgetSession('new_conversation_auth');
+          }
+          this.log('New conversation failed:', err && err.message);
+        })
+        .finally(() => { this._startingNew = false; });
+    }
+
+    // Swap to the server-issued replacement session (same durable visitorId).
+    _adoptNewConversation(data) {
       // A fresh session lifecycle: bump the epoch so any in-flight init (the
       // initial connect, or a reconnect recovery) bails before it assigns a
       // socket, and clear the recovery guard it may have left set.
@@ -1780,49 +1907,39 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       } catch (e) { /* ignore */ }
       this.socket = null;
 
-      // Forget the old session so _initSession creates a new one (fresh visitorId).
-      this.clearStoredSession();
-      this.sessionId = null;
-      this.token = null;
-      this.visitorId = null;
-      // Drop the old session's queued messages so they aren't flushed into the
-      // new one, and treat the next join as a cold load (_joinedOnce=false) so
-      // syncHistory doesn't re-fetch + re-render the server-persisted greeting
-      // on top of the client greeting.
-      this.pendingMessages = [];
+      this.sessionId = data.session.id;
+      this.tenantId = data.session.tenantId || this.tenantId;
+      this.token = data.token;
+      // Brand-new session: skip the first-join backfill (avoids re-rendering
+      // the server-persisted greeting on top of the client greeting), and drop
+      // the old session's queued messages so they aren't flushed into it.
+      this._isNewSession = true;
       this._joinedOnce = false;
+      this.pendingMessages = [];
 
-      // Clear the transcript now for responsive feedback. (_initSession clears it
-      // again on the new-session path; the greeting is re-added on resolve. We do
-      // NOT call render() here — it would rebuild the DOM and drop bound refs.)
+      // Clear the transcript for responsive feedback. (We do NOT call render()
+      // here - it would rebuild the DOM and drop bound refs.)
       this.messages = [];
       if (this.messagesContainer) {
         while (this.messagesContainer.firstChild) {
           this.messagesContainer.removeChild(this.messagesContainer.firstChild);
         }
       }
+      this._saveSession();
+
+      // Re-show the client greeting exactly like a first load.
+      if (this.config.greetingMessage) {
+        this.addMessage({
+          id: utils.generateId(),
+          text: this.config.greetingMessage,
+          sender: 'bot',
+          timestamp: new Date(),
+          isGreeting: true,
+        });
+      }
 
       this.setConnectionState('connecting');
-      this._initSession(epoch)
-        .then(() => {
-          if (epoch !== this._sessionEpoch) return; // superseded mid-flight
-          // Re-show the client greeting exactly like a first load.
-          if (this.config.greetingMessage) {
-            this.addMessage({
-              id: utils.generateId(),
-              text: this.config.greetingMessage,
-              sender: 'bot',
-              timestamp: new Date(),
-              isGreeting: true,
-            });
-          }
-          this._connectSocketIO(epoch);
-        })
-        .catch((err) => {
-          this.setConnectionState('offline');
-          this.log('New conversation failed:', err && err.message);
-        })
-        .finally(() => { this._startingNew = false; });
+      this._connectSocketIO(epoch);
     }
 
     _connectSocketIO(epoch) {

@@ -504,10 +504,16 @@ describe('getRecentChatSessionStats', () => {
       status: 'handoff',
       lastActivityAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
       startedAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
-      visitorId: TENANT_A_SENTINELS.visitorId,
+      // A second OPEN widget session needs its own identity - one open widget
+      // session per (tenant, bot, visitor) since B-PR4a's unique index.
+      visitorId: `${TENANT_A_SENTINELS.visitorId}-handoff`,
     });
+    // Channel sessions carry their channel as `source` too (the inbound
+    // pipeline writes source = connection.channel) - which also keeps them
+    // outside the widget-only unique index.
     await createTestSession(a.tenantId, {
       channel: 'messenger',
+      source: 'messenger',
       status: 'closed',
       lastActivityAt: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
       startedAt: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
@@ -516,6 +522,7 @@ describe('getRecentChatSessionStats', () => {
     });
     await createTestSession(a.tenantId, {
       channel: 'messenger',
+      source: 'messenger',
       status: 'bot',
       lastActivityAt: now,
       startedAt: now,
@@ -524,6 +531,7 @@ describe('getRecentChatSessionStats', () => {
     // Tenant B: 2 sessions — must not appear in tenant A's stats
     await createTestSession(b.tenantId, {
       channel: 'whatsapp',
+      source: 'whatsapp',
       status: 'closed',
       lastActivityAt: now,
       startedAt: now,
@@ -531,6 +539,7 @@ describe('getRecentChatSessionStats', () => {
     });
     await createTestSession(b.tenantId, {
       channel: 'whatsapp',
+      source: 'whatsapp',
       status: 'closed',
       lastActivityAt: now,
       startedAt: now,

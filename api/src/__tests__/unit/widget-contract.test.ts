@@ -85,8 +85,21 @@ vi.mock('../../database/data-source', () => ({
       }
       return { findOne: async () => null, find: async () => [], create: (x: unknown) => x, save: async (x: unknown) => x };
     },
-    transaction: async (fn: (m: unknown) => unknown) =>
-      fn({
+    transaction: async (fn: (m: unknown) => unknown) => {
+      // B-PR4a: /init resolves-or-creates INSIDE the transaction - under the
+      // identity advisory lock (manager.query) with a query-builder resolve
+      // across all non-closed states (manager.getRepository(...).createQueryBuilder).
+      const qb = {
+        where: () => qb,
+        andWhere: () => qb,
+        orderBy: () => qb,
+        addOrderBy: () => qb,
+        getOne: async () => st.existingSession,
+      };
+      return fn({
+        query: async () => [], // pg_advisory_xact_lock no-op in the stub
+        getRepository: () => ({ createQueryBuilder: () => qb }),
+        findOne: async ({ where }: any) => (where?.id ? st.sessionById : st.existingSession),
         count: async () => 0,
         create: (_e: unknown, draft: Record<string, unknown>) => draft,
         save: async (_e: unknown, draft: Record<string, unknown>) => {
@@ -94,7 +107,8 @@ vi.mock('../../database/data-source', () => ({
           st.savedSessions.push(saved);
           return saved;
         },
-      }),
+      });
+    },
   },
 }));
 
@@ -162,7 +176,15 @@ describe('POST /widget/init — validation + key resolution', () => {
   });
 
   it('reuses an active session for a returning visitor', async () => {
-    st.existingSession = { id: 'sess-old', status: 'active', startedAt: new Date(), botId: 'bot-1' };
+    st.existingSession = {
+      id: 'sess-old',
+      status: 'active',
+      startedAt: new Date(),
+      botId: 'bot-1',
+      tenantId: 'tenant-1',
+      visitorId: 'v-back',
+      source: 'widget',
+    };
     const res = await request(createApp())
       .post('/widget/init')
       .send({ apiKey: 'k', visitorId: 'v-back' });

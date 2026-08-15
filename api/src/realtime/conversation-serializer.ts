@@ -51,6 +51,45 @@ export function previewFromRaw(row: {
   };
 }
 
+/**
+ * The binding facts needed to compute an external customerThreadId. A subset
+ * of ConversationBinding, so callers can pass either the entity or a raw row.
+ */
+export interface CustomerThreadBinding {
+  channelConnectionId: string;
+  externalUserId: string;
+  externalThreadId: string;
+}
+
+/**
+ * The COMPUTED durable customer-thread key (B-PR4a §5). Never materialized -
+ * the user decision is that external identity stays in conversation_bindings
+ * and widget identity stays in (tenant_id, bot_id, visitor_id); this
+ * projection just names the group so B-PR4b can render one thread.
+ *
+ *   widget    w:{tenantId}:{botId}:{visitorId}
+ *   external  e:{channelConnectionId}:{externalUserId}:{externalThreadId}
+ *             (Telegram DM vs group chat differ on externalThreadId, so they
+ *              stay separate threads - same uniqueness the binding table has)
+ *   fallback  s:{sessionId} when an external session has no binding row
+ *
+ * Discriminates on source === 'widget' - the same predicate the partial
+ * unique index uses - so the projection and the invariant agree on which
+ * sessions are widget sessions.
+ */
+export function computeCustomerThreadId(
+  session: Pick<ChatSession, 'id' | 'tenantId' | 'botId' | 'visitorId' | 'source'>,
+  binding?: CustomerThreadBinding | null,
+): string {
+  if (session.source === 'widget') {
+    return `w:${session.tenantId}:${session.botId}:${session.visitorId}`;
+  }
+  if (binding) {
+    return `e:${binding.channelConnectionId}:${binding.externalUserId}:${binding.externalThreadId}`;
+  }
+  return `s:${session.id}`;
+}
+
 export interface ConversationSummaryDto {
   // ── Legacy GET /chat/sessions row (unchanged keys and semantics) ──────────
   id: string;
@@ -82,6 +121,9 @@ export interface ConversationSummaryDto {
   ownershipVersion: number;
   assignedAgentId: string | null;
   channel: string;
+  // ── B-PR4a addition (additive; shipped clients ignore unknown keys) ───────
+  /** Durable customer-thread key - see computeCustomerThreadId. */
+  customerThreadId: string;
 }
 
 /**
@@ -92,7 +134,17 @@ export interface ConversationSummaryDto {
  */
 export function serializeConversationSummary(
   session: ChatSession,
-  opts: { lastMessage?: LastMessagePreview | null } = {},
+  opts: {
+    lastMessage?: LastMessagePreview | null;
+    /**
+     * Binding facts for EXTERNAL sessions (B-PR4a). Widget sessions never
+     * need it. Callers that serialize external sessions must fetch and pass
+     * the binding (conversation-events + the REST list do), or the key
+     * degrades to the s:{sessionId} fallback and the thread grouping loses
+     * that row. `null` = fetched-and-absent (an unbound external session).
+     */
+    binding?: CustomerThreadBinding | null;
+  } = {},
 ): ConversationSummaryDto {
   const last = opts.lastMessage ?? null;
   // The REST list loads the assignedAgent relation; most emit sites only hold
@@ -126,6 +178,7 @@ export function serializeConversationSummary(
     ownershipVersion: session.ownershipVersion ?? 0,
     assignedAgentId,
     channel: session.channel,
+    customerThreadId: computeCustomerThreadId(session, opts.binding ?? null),
   };
 }
 

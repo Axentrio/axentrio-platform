@@ -176,6 +176,14 @@ interface CommandOpts {
   /** Tenant scoping; when set the session must belong to it (404 otherwise, no
    *  cross-tenant probe distinction). System sweeps omit it. */
   tenantId?: string;
+  /**
+   * Run the command inside the CALLER'S transaction instead of opening one
+   * (B-PR4a: the widget new-conversation close-and-open must be atomic under
+   * one advisory lock). The caller owns commit/rollback; every rule above -
+   * row lock first, targeted UPDATEs, one system event - applies unchanged
+   * because the same code runs on the provided manager.
+   */
+  manager?: EntityManager;
 }
 
 // ── Core helpers ─────────────────────────────────────────────────────────────
@@ -191,7 +199,7 @@ async function withConversation<T extends { conversation: ConversationSummary }>
   opts: CommandOpts,
   apply: (manager: EntityManager, session: ChatSession) => Promise<T>,
 ): Promise<T> {
-  return AppDataSource.transaction(async (manager) => {
+  const run = async (manager: EntityManager) => {
     const session = await manager.findOne(ChatSession, {
       where: { id: sessionId },
       lock: { mode: 'pessimistic_write' },
@@ -221,7 +229,10 @@ async function withConversation<T extends { conversation: ConversationSummary }>
       } as QueryDeepPartialEntity<ConversationCommand>);
     }
     return result;
-  });
+  };
+  // Caller-owned transaction (opts.manager) or our own - same body either way.
+  if (opts.manager) return run(opts.manager);
+  return AppDataSource.transaction(run);
 }
 
 /**

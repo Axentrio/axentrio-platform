@@ -6,7 +6,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
-import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
@@ -17,7 +16,16 @@ import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { ApiError } from '../middleware/error-handler';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
-import { emitConversationUpsert, emitConversationUpsertForSession } from '../realtime/conversation-events';
+import { emitConversationUpsertForSession } from '../realtime/conversation-events';
+import { computeCustomerThreadId } from '../realtime/conversation-serializer';
+import {
+  acquireWidgetIdentityLock,
+  resolveOpenWidgetSession,
+  createWidgetSessionInTx,
+  announceWidgetSession,
+  ensureWidgetGreeting,
+  assertValidVisitorId,
+} from '../services/widget-session-identity';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
 import { conversationCommands } from '../services/conversation-command.service';
 import type { HandoffReason } from '../database/entities/HandoffRequest';
@@ -30,17 +38,13 @@ import {
 } from '../booking/travel/address-binding';
 import { placesRateLimiter } from '../middleware/rate-limit';
 import { addressConfirmSchema, placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
-import { decrypt, encrypt } from '../utils/encryption';
+import { decrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
-import { enforceCountLimit, requireFeature } from '../billing/enforce';
+import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
-import { Not } from 'typeorm';
-import { effectiveBotConfig, withEffectiveConfig } from '../templates/template-resolver';
-import { substituteVariables } from '../llm/prompt-builder';
-import { defaultBotAi } from '../config/default-bot-settings';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -107,6 +111,16 @@ async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
 }
 
 const router = Router();
+
+// ── Stable widget identity (B-PR4a) ─────────────────────────────────────────
+// One real customer = one (tenantId, botId, visitorId) = at most ONE non-closed
+// widget session, enforced by the partial unique index
+// uq_chat_sessions_widget_open (migration 1791500000000). Every resolve-or-
+// create and every close-and-open runs under the SAME transaction-level
+// advisory lock on that identity, so concurrent inits (two tabs) serialize:
+// the first creates, the rest resolve the winner - nobody 500s on the index.
+// The helpers live in services/widget-session-identity so the legacy
+// /auth/widget creator shares the EXACT same seam (review fix B1).
 
 /**
  * Get widget configuration
@@ -206,6 +220,9 @@ router.post(
     if (!apiKey || !visitorId) {
       throw new ValidationError('API key and visitor ID are required');
     }
+    // 422 for non-string / oversized / control-character ids (S3) - they feed
+    // varchar(255) and the advisory-lock key, and must never become a DB 500.
+    assertValidVisitorId(visitorId);
 
     const result = await validateApiKey(apiKey);
 
@@ -221,159 +238,176 @@ router.post(
     const tenant = result.tenant;
     const resolvedBot = result.bot;
 
-    // Check if visitor already has an active session
-    const sessionRepository = AppDataSource.getRepository(ChatSession);
-    const existingSession = await sessionRepository.findOne({
-      where: {
+    // Resolve-or-create by stable identity, race-safe (B-PR4a). The whole
+    // decision runs in ONE transaction under the identity advisory lock, so a
+    // two-tab race serializes: the first request creates, the second resolves
+    // the winner - it can never double-create and 500 on the unique index.
+    const { session, isNew } = await AppDataSource.transaction(async (manager) => {
+      await acquireWidgetIdentityLock(manager, tenant.id, resolvedBot.id, visitorId);
+
+      const existing = await resolveOpenWidgetSession(manager, tenant.id, resolvedBot.id, visitorId);
+      if (existing) {
+        return { session: existing, isNew: false };
+      }
+
+      const created = await createWidgetSessionInTx(manager, {
+        tenant,
+        bot: resolvedBot,
+        visitorId,
+        metadata,
+        req,
+      });
+      return { session: created, isNew: true };
+    });
+
+    if (isNew) {
+      // Post-commit: upsert announce + idempotent greeting. The participant
+      // committed WITH the session (S1); nothing here can throw.
+      await announceWidgetSession(session, tenant, resolvedBot);
+      logger.info('Widget session initialized', {
+        sessionId: session.id,
         tenantId: tenant.id,
         visitorId,
-        status: 'active',
-      },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (existingSession) {
-      // Bind a botId to legacy sessions that pre-date the column. Targeted
-      // UPDATE, never save(existingSession): a full-entity write would revert a
-      // human takeover committed since the load (B-PR2b fix B1).
-      if (!existingSession.botId) {
-        existingSession.botId = resolvedBot.id;
-        await sessionRepository.update(existingSession.id, { botId: resolvedBot.id });
-      }
-      const token = generateWidgetToken(existingSession.id, tenant.id, visitorId);
-
-      sendSuccess(res, {
-        session: {
-          id: existingSession.id,
-          status: existingSession.status,
-          startedAt: existingSession.startedAt,
-        },
-        token,
-        isNew: false,
       });
-      return;
+    } else {
+      // Resolve-retry healing (S1): if a prior create committed but its
+      // greeting write failed, this re-announces the missing greeting.
+      // Idempotent - it no-ops when the session already has any message.
+      await ensureWidgetGreeting(session, tenant, resolvedBot);
     }
 
-    // Determine initial status based on AI settings — #16d: read from
-    // bot.settings, not tenant.settings. Issue #3: an AI-enabled bot is answered
-    // by the platform agent (or a custom webhook), so it starts in 'bot' — no
-    // longer keyed off the legacy usePlatformAgent flag or the dead default URL.
-    const aiEnabled = resolvedBot.settings?.ai?.enabled;
-    const initialStatus = aiEnabled ? 'bot' : 'waiting';
-
-    // Plan-gate (step 10, count 2). Wrap session create in a tx that locks
-    // the tenants row, counts non-closed sessions, throws 402 on cap.
-    // The plan calls for `tenants.current_sessions`, but that counter is
-    // not actually maintained anywhere in this codebase — we use a live
-    // COUNT(*) on chat_sessions filtered by tenant + non-closed status
-    // instead. Cost is one indexed count per widget /init (index on
-    // (tenant_id, status) already exists for other queries).
-    const session = await AppDataSource.transaction(async (manager) => {
-      await enforceCountLimit({
-        manager,
-        tenantId: tenant.id,
-        capability: 'sessions',
-        errorCode: 'plan_limit_sessions',
-        countQuery: (m) =>
-          m.count(ChatSession, {
-            where: { tenantId: tenant.id, status: Not('closed') },
-          }),
-      });
-      const draft = manager.create(ChatSession, {
-        tenantId: tenant.id,
-        botId: resolvedBot.id,
-        visitorId,
-        source: 'widget',
-        metadata: {
-          ...metadata,
-          ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          pageUrl: metadata?.pageUrl,
-          referrer: metadata?.referrer,
-        },
-        status: initialStatus,
-        startedAt: new Date(),
-        lastActivityAt: new Date(),
-      });
-      return manager.save(ChatSession, draft);
-    });
-
-    // B-PR3a: announce the new conversation row AFTER the create commits
-    // (before the greeting, which does not count into message_count either).
-    await emitConversationUpsert(session, { lastMessage: null });
-
-    // Create participant
-    const participantRepository = AppDataSource.getRepository(Participant);
-    const participant = participantRepository.create({
-      sessionId: session.id,
-      type: 'user',
-      name: metadata?.name || 'Visitor',
-      isAnonymous: true,
-      joinedAt: new Date(),
-      metadata: {
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-      },
-    });
-
-    await participantRepository.save(participant);
-
-    // Send bot greeting if session starts in bot mode. The greeting comes from
-    // the effective config (template-owned when bound, else the bot's own stored
-    // value), with placeholders like {botName}/{businessName} substituted.
-    if (initialStatus === 'bot') {
-      const eff = await effectiveBotConfig(resolvedBot);
-      const botAi = resolvedBot.settings?.ai ?? defaultBotAi(resolvedBot.name);
-      const aiForGreeting = withEffectiveConfig(botAi, eff);
-      const rawGreeting = aiForGreeting.guardrails?.greetingMessage ?? '';
-      const greetingMessage = rawGreeting
-        ? substituteVariables(rawGreeting, aiForGreeting, { businessName: tenant.name })
-        : '';
-      if (greetingMessage) {
-        const messageRepository = AppDataSource.getRepository(Message);
-        const botParticipant = participantRepository.create({
-          sessionId: session.id,
-          type: 'bot',
-          name: resolvedBot.settings?.ai?.brandVoice?.name || 'AI Assistant',
-          isAnonymous: false,
-          joinedAt: new Date(),
-        });
-        await participantRepository.save(botParticipant);
-
-        const greeting = messageRepository.create({
-          sessionId: session.id,
-          tenantId: tenant.id,
-          participantId: botParticipant.id,
-          type: 'text' as Message['type'],
-          content: encrypt(greetingMessage),
-          contentEncrypted: true,
-          status: 'sent' as Message['status'],
-          sentAt: new Date(),
-          metadata: {
-            quickReplies: ['Book appointment', 'Our services', 'Pricing', 'Talk to someone'],
-          },
-        });
-        await messageRepository.save(greeting);
-      }
-    }
-
-    // Generate token
+    // Fresh token either way - a resolve is how a returning tab (or a
+    // recovering widget) re-arms an expired token for the SAME session.
     const token = generateWidgetToken(session.id, tenant.id, visitorId);
-
-    logger.info('Widget session initialized', {
-      sessionId: session.id,
-      tenantId: tenant.id,
-      visitorId,
-    });
 
     sendSuccess(res, {
       session: {
         id: session.id,
         status: session.status,
         startedAt: session.startedAt,
+        // The widget's stored-session guard requires tenantId; the old
+        // response never carried it, which silently disabled blob restore.
+        tenantId: tenant.id,
+      },
+      token,
+      isNew,
+      customerThreadId: computeCustomerThreadId(session),
+    });
+  })
+);
+
+/**
+ * Start a new conversation for the SAME stable identity (B-PR4a §3).
+ * POST /api/v1/widget/new-conversation  (widget token auth)
+ *
+ * ONE transaction under the SAME identity advisory lock: close the visitor's
+ * current non-closed widget session THROUGH the conversation-command service
+ * (ownership -> 'closed', handoff bookkeeping, the system event), then open a
+ * fresh session for the same visitorId. Replaces the widget's client-only
+ * localStorage clear, which with a durable visitorId would just resolve the
+ * old session again.
+ */
+router.post(
+  '/new-conversation',
+  widgetInitRateLimit,
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tokenSessionId = req.widget!.sessionId;
+    const tenantId = req.widget!.tenantId;
+    if (!tokenSessionId) {
+      throw new ValidationError('Session not initialized');
+    }
+    const metadata = (req.body?.metadata ?? undefined) as
+      | { name?: string; pageUrl?: string; referrer?: string }
+      | undefined;
+
+    const outcome = await AppDataSource.transaction(async (manager) => {
+      // The token's session anchors the identity; the SERVER's stored
+      // (tenant_id, bot_id, visitor_id) is what gets closed and reopened -
+      // never anything client-supplied.
+      const anchor = await manager.findOne(ChatSession, {
+        where: { id: tokenSessionId, tenantId },
+      });
+      if (!anchor) throw new NotFoundError('Session not found');
+      if (anchor.source !== 'widget') {
+        throw new ValidationError('Not a widget session');
+      }
+
+      const tenant = await manager.findOne(Tenant, { where: { id: tenantId } });
+      if (!tenant) throw new NotFoundError('Tenant not found');
+      const bot = await manager.findOne(Bot, { where: { id: anchor.botId } });
+      if (!bot) throw new NotFoundError('Bot not found');
+      if (bot.status === 'paused') {
+        // Same surface rule as /init (#16b): a paused bot opens nothing new.
+        throw new ForbiddenError('This chatbot is currently paused');
+      }
+
+      await acquireWidgetIdentityLock(manager, tenantId, anchor.botId, anchor.visitorId);
+
+      // Lock-order note: this transaction takes the SESSION row lock (inside
+      // closeConversation below) BEFORE the tenants row lock (inside
+      // createWidgetSessionInTx), while /init and the inbound pipeline take
+      // the tenants lock first. Reviewed: no live cycle exists, because no
+      // path holds the tenants lock while locking an EXISTING session row -
+      // the tenants-lock holders only INSERT new rows.
+
+      // The identity's CURRENT open session (the token's may already be
+      // closed and superseded). Under the invariant there is at most one.
+      const current = await resolveOpenWidgetSession(
+        manager,
+        tenantId,
+        anchor.botId,
+        anchor.visitorId,
+      );
+      let closedSessionId: string | null = null;
+      if (current) {
+        await conversationCommands.closeConversation(
+          current.id,
+          { kind: 'customer' },
+          undefined,
+          { tenantId, manager, reason: 'Customer started a new conversation' },
+        );
+        closedSessionId = current.id;
+      }
+
+      const created = await createWidgetSessionInTx(manager, {
+        tenant,
+        bot,
+        visitorId: anchor.visitorId,
+        metadata,
+        req,
+      });
+      return { closedSessionId, session: created, tenant, bot };
+    });
+
+    // Post-commit fan-out, same order the command routes use: the close's
+    // normalized upsert first, then the new session's announce + greeting.
+    // The participant committed WITH the session (S1); nothing here throws.
+    if (outcome.closedSessionId) {
+      await emitConversationUpsertForSession(outcome.closedSessionId, tenantId);
+    }
+    await announceWidgetSession(outcome.session, outcome.tenant, outcome.bot);
+
+    const token = generateWidgetToken(outcome.session.id, tenantId, outcome.session.visitorId);
+
+    logger.info('Widget conversation replaced', {
+      tenantId,
+      closedSessionId: outcome.closedSessionId,
+      newSessionId: outcome.session.id,
+      visitorId: outcome.session.visitorId,
+    });
+
+    sendSuccess(res, {
+      session: {
+        id: outcome.session.id,
+        status: outcome.session.status,
+        startedAt: outcome.session.startedAt,
+        tenantId,
       },
       token,
       isNew: true,
+      closedSessionId: outcome.closedSessionId,
+      customerThreadId: computeCustomerThreadId(outcome.session),
     });
   })
 );

@@ -27,6 +27,7 @@ import {
   serializeMessage,
   conversationRevision,
   previewFromRaw,
+  type CustomerThreadBinding,
   type LastMessagePreview,
   type MessageDtoInput,
 } from './conversation-serializer';
@@ -62,6 +63,34 @@ async function fetchLastMessagePreview(sessionId: string): Promise<LastMessagePr
 }
 
 /**
+ * Binding facts for the customerThreadId projection (B-PR4a). Widget sessions
+ * compute their key from the session row alone - no query. External sessions
+ * need their conversation_bindings row; newest wins on the (theoretical)
+ * multi-binding case. Same lazy-import discipline as fetchLastMessagePreview.
+ *
+ * Perf note: this is one indexed lookup per upsert emit for EXTERNAL sessions
+ * only. If an external hot path that already holds its binding ever needs to
+ * shed it, extend emitConversationUpsert's opts with a `binding` pass-through
+ * (mirroring `lastMessage`) instead of widening call sites ad hoc.
+ */
+async function fetchThreadBinding(session: ChatSession): Promise<CustomerThreadBinding | null> {
+  if (session.source === 'widget') return null;
+  const { AppDataSource } = await import('../database/data-source');
+  const { ConversationBinding } = await import('../database/entities/ConversationBinding');
+  const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
+    where: { sessionId: session.id },
+    order: { createdAt: 'DESC' },
+  });
+  return binding
+    ? {
+        channelConnectionId: binding.channelConnectionId,
+        externalUserId: binding.externalUserId,
+        externalThreadId: binding.externalThreadId,
+      }
+    : null;
+}
+
+/**
  * Emit `conversation:upsert` for a session entity the caller already holds
  * (post-commit). `opts.lastMessage`: pass the preview when in hand (the
  * message just written), pass `null` for a brand-new session (skips the
@@ -76,8 +105,9 @@ export async function emitConversationUpsert(
   try {
     const lastMessage =
       opts.lastMessage !== undefined ? opts.lastMessage : await fetchLastMessagePreview(session.id);
+    const binding = await fetchThreadBinding(session);
     const payload = {
-      conversation: serializeConversationSummary(session, { lastMessage }),
+      conversation: serializeConversationSummary(session, { lastMessage, binding }),
       revision: conversationRevision(),
     };
     // SAME payload to both rooms — the plan forbids per-room wrapping.

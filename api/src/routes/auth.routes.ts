@@ -3,6 +3,7 @@
  * POST /auth/widget - Widget authentication via API key (unchanged)
  * GET /auth/me - Get current user via Clerk auth + auto-provisioning
  */
+import crypto from 'crypto';
 import { Router, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
@@ -16,7 +17,13 @@ import { asyncHandler, BadRequestError, ForbiddenError, UnauthorizedError } from
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { widgetAuthSchema } from '../schemas';
-import { emitConversationUpsert } from '../realtime/conversation-events';
+import {
+  acquireWidgetIdentityLock,
+  resolveOpenWidgetSession,
+  createWidgetSessionInTx,
+  announceWidgetSession,
+  assertValidVisitorId,
+} from '../services/widget-session-identity';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -65,16 +72,30 @@ router.post(
 
     const { tenant, bot } = resolved;
 
-    // Get or create session
-    let session: ChatSession;
+    // Client-supplied identity: 422 for oversized / control-character values
+    // (S3) - they feed varchar(255) and the identity advisory-lock key.
+    if (userId !== undefined) assertValidVisitorId(userId);
+
+    // Get or create session. GUARDED since B-PR4a (review fix B1): this
+    // legacy public creator used to insert widget-source rows with
+    // visitorId 'anonymous', no lock, and an 'active'-only resume filter -
+    // the exact producer of the duplicate rows migration 1791500000000
+    // remediates. Every create now goes through the SAME advisory-locked
+    // resolve-or-create seam as /widget/init, so it can never trip the
+    // uq_chat_sessions_widget_open index into a public 500.
+    let session: ChatSession | null = null;
+    let isNew = false;
 
     if (sessionId) {
-      // Try to find existing session
       const existingSession = await sessionRepository.findOne({
         where: { id: sessionId, tenantId: tenant.id },
       });
 
-      if (existingSession && existingSession.isActive()) {
+      // Broadened from isActive() (= 'active' only) to ANY non-closed state:
+      // the 'active'-only filter is the dead-dedup bug B-PR4a fixes, and
+      // creating a duplicate for a live 'waiting'/'bot' session would now
+      // collide with the unique index.
+      if (existingSession && !existingSession.isClosed()) {
         session = existingSession;
         // Targeted UPDATE, never save(session): a full-entity write from this
         // stale copy would revert a concurrent human takeover (B-PR2b fix B1).
@@ -86,45 +107,40 @@ router.post(
         } else {
           await sessionRepository.update(session.id, { lastActivityAt: new Date() });
         }
-      } else {
-        // Create new session if not found or closed
-        session = sessionRepository.create({
-          tenantId: tenant.id,
-          botId: bot.id,
-          visitorId: userId || 'anonymous',
-          status: 'waiting' as const,
-          startedAt: new Date(),
-          lastActivityAt: new Date(),
+      }
+    }
+
+    if (!session) {
+      // Identity: the caller's stable userId, or a UNIQUE per-call anonymous
+      // id. A SHARED 'anonymous' identity is what produced the duplicate rows
+      // the migration remediates - and resolving every anonymous caller onto
+      // ONE open session would hand one visitor another visitor's transcript.
+      // A unique id preserves the old per-call-create behavior for anonymous
+      // callers, and unique ids never collide in the partial index.
+      const visitorId = userId || `anon-${crypto.randomUUID()}`;
+      const outcome = await AppDataSource.transaction(async (manager) => {
+        await acquireWidgetIdentityLock(manager, tenant.id, bot.id, visitorId);
+        const existing = await resolveOpenWidgetSession(manager, tenant.id, bot.id, visitorId);
+        if (existing) return { session: existing, isNew: false };
+        const created = await createWidgetSessionInTx(manager, {
+          tenant,
+          bot,
+          visitorId,
           metadata: {
             ...metadata,
-            userAgent: req.headers['user-agent'],
-            ipAddress: req.ip,
-            referrer: req.headers.referer,
-          },
+            referrer: (metadata?.referrer as string | undefined) ?? req.headers.referer,
+          } as { name?: string; pageUrl?: string; referrer?: string },
+          req,
         });
-        await sessionRepository.save(session);
-        // B-PR3a: announce the new conversation row (post-commit, no messages yet).
-        await emitConversationUpsert(session, { lastMessage: null });
-      }
-    } else {
-      // Create new session
-      session = sessionRepository.create({
-        tenantId: tenant.id,
-        botId: bot.id,
-        visitorId: userId || 'anonymous',
-        status: 'waiting' as const,
-        startedAt: new Date(),
-        lastActivityAt: new Date(),
-        metadata: {
-          ...metadata,
-          userAgent: req.headers['user-agent'],
-          ipAddress: req.ip,
-          referrer: req.headers.referer,
-        },
+        return { session: created, isNew: true };
       });
-      await sessionRepository.save(session);
-      // B-PR3a: announce the new conversation row (post-commit, no messages yet).
-      await emitConversationUpsert(session, { lastMessage: null });
+      session = outcome.session;
+      isNew = outcome.isNew;
+    }
+
+    if (isNew) {
+      // B-PR3a announce + idempotent greeting, post-commit, fail-safe.
+      await announceWidgetSession(session, tenant, bot);
     }
 
     // Generate widget token

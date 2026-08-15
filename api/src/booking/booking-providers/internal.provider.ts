@@ -1171,21 +1171,25 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId: input.excludeBookingId,
     });
 
-    // Bound to this conversation, because that is the only scope a cached duration may have.
-    const lookup = driveLookupFor(eligibility, ctx.session?.id ?? null);
-    // ONE budget for the whole list, not one per slot. A customer is waiting behind this and
-    // every lookup is a paid element, so the list is bounded in both — see `routeBudget`.
+    // ONE budget for the whole list, shared by every slot. It bounds two independent things: a
+    // whole-pass DEADLINE (checked per slot in the gate, cache reads included) and a per-call COUNT
+    // of real Google calls. The count is claimed inside the lookup on a cache MISS — so a full day
+    // of one repeated leg routes from a single purchase instead of exhausting the budget on cache
+    // hits and degrading the later (clustering) slots to Requests. See `routeBudget`.
     const budget = routeBudget();
+    // Bound to this conversation, because that is the only scope a cached duration may have. The
+    // budget is handed to the lookup so a miss consumes the count; a hit costs nothing.
+    const lookup = driveLookupFor(eligibility, ctx.session?.id ?? null, { budget });
 
     const slotCauses = new Set<string>();
     const cleared: Array<{ start: string; end: string }> = [];
     const requestableSlots: Array<{ start: string; end: string }> = [];
     const unreachableSlots: Array<{ start: string; end: string }> = [];
-    // Sequential, and NOT because the cache makes later slots free — it does not. Slots share
-    // both endpoints but differ in departure time, and the traffic-aware bucket is finer than
-    // the usual slot spacing, so each one is its own key. Sequential so the shared budget is
-    // actually enforced: fired concurrently, every slot would pass the check before any of
-    // them decremented it.
+    // Sequential so the shared budget is actually enforced: fired concurrently, every slot would
+    // pass the deadline check before any of them advanced. The cache DOES make repeated same-leg
+    // slots free — for a traffic-unaware (>24h) list every slot shares one departure bucket, so a
+    // single purchase answers them all — which is exactly why the COUNT is now claimed on the spend
+    // path (a cache miss) rather than per slot: burning it on hits is what degraded the later slots.
     for (const slot of input.slots) {
       const slotCandidate = {
         ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),

@@ -35,7 +35,7 @@ import { getRedisClient } from '../../config/redis';
 import { logger } from '../../utils/logger';
 import { drivePlausible, haversineKm, type GeoPoint } from '../../contracts/travel';
 import type { ActiveTravelEligibility } from './travel-eligibility';
-import type { DriveLookup } from './travel-gate';
+import { claimRouteCount, type DriveLookup, type RouteBudget } from './travel-gate';
 import type { DegradationCause } from './degradation-monitor';
 import { reserveTravelElements } from './travel-usage.service';
 
@@ -67,7 +67,15 @@ export type DriveResult =
       // nowhere is now unrepresentable rather than merely untested.
       cause: Extract<
         DegradationCause,
-        'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' | 'not_cached'
+        | 'no_api_key'
+        | 'cap_exhausted'
+        | 'api_error'
+        | 'malformed_response'
+        | 'departed'
+        | 'not_cached'
+        // The per-call route COUNT ran out on a genuine cache miss. Like `not_cached`, this is a
+        // "declined to ask" cause, so the caller degrades to a Request rather than refusing.
+        | 'budget_spent'
       >;
     };
 
@@ -248,6 +256,17 @@ export async function driveMinutes(
      * Waiting for a successful response would undercount every failure.
      */
     onBilled?: () => void;
+    /**
+     * Vetoes a spend before it happens — the per-availability route COUNT lives here.
+     *
+     * Called ONLY on a cache MISS about to reserve an element: after the cache read and the
+     * `departed`/`notAfter` checks, before `reserveTravelElements`. A `false` return degrades to
+     * `budget_spent` (a Request), never a refusal. Because a cache HIT returns earlier, it never
+     * calls this — which is the fix: the count now bounds real Google calls, not slot-leg reads,
+     * so a full day of one repeated leg no longer exhausts the budget on hits. `onBilled` is too
+     * late to enforce a ceiling (it fires AT the reservation), so this is a separate hook.
+     */
+    beforeSpend?: () => boolean;
   }
 ): Promise<DriveResult> {
   const apiKey = config.travel.googleMapsApiKey;
@@ -282,6 +301,14 @@ export async function driveMinutes(
   // instant itself is already too late - an off-by-one here buys an element for nobody.
   if (input.notAfter !== undefined && Date.now() >= input.notAfter) {
     return { status: 'unavailable', cause: 'not_cached' };
+  }
+
+  // THE PER-AVAILABILITY ROUTE COUNT, claimed here on the real spend path rather than per slot in
+  // the gate. A cache HIT returned above and never reaches this, so one repeated leg across a whole
+  // day costs a single count instead of one per slot — which is what stops the later clustering
+  // slots degrading to Requests. A `false` degrades like `not_cached`, never a refusal.
+  if (input.beforeSpend && !input.beforeSpend()) {
+    return { status: 'unavailable', cause: 'budget_spent' };
   }
 
   // Claimed BEFORE the request. Google bills the request rather than the answer, so a
@@ -397,8 +424,19 @@ function interpret(
 export function driveLookupFor(
   eligibility: ActiveTravelEligibility,
   sessionId: string | null,
-  /** Only an OPTIONAL caller passes these. Feasibility buys what it needs and counts nothing. */
-  opts?: { cacheOnly?: boolean; onWouldSpend?: () => void; onBilled?: () => void; notAfter?: number }
+  /**
+   * `cacheOnly`/`onWouldSpend`/`notAfter` are the grouping/deadline knobs. `budget` is the
+   * per-availability route count: the AVAILABILITY caller passes it so each real Google call
+   * (cache miss) claims one via `beforeSpend`, and cache hits cost nothing. Callers that omit it
+   * (create, grouping) are bounded by their own rules.
+   */
+  opts?: {
+    cacheOnly?: boolean;
+    onWouldSpend?: () => void;
+    onBilled?: () => void;
+    notAfter?: number;
+    budget?: RouteBudget;
+  }
 ): DriveLookup {
   return async (leg) => {
     const result = await driveMinutes(eligibility, {
@@ -410,6 +448,8 @@ export function driveLookupFor(
       onWouldSpend: opts?.onWouldSpend,
       onBilled: opts?.onBilled,
       notAfter: opts?.notAfter,
+      // Claimed only on a real spend (cache miss), so one repeated leg across a day costs one count.
+      beforeSpend: opts?.budget ? () => claimRouteCount(opts.budget as RouteBudget) : undefined,
     });
     if (result.status === 'routed') return { minutes: result.minutes };
     // NOT a refusal. `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with

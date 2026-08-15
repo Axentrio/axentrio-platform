@@ -387,7 +387,7 @@ describe('operator REST reply — POST /chats/:sessionId/messages', () => {
     // Ownership-path upserts re-select WITH the relation, so the relation-only
     // field is PRESENT here (contrast: message hot paths omit it).
     expect('assignedAgentName' in upsert!.conversation).toBe(true);
-    expect(upsert!.conversation.assignedAgentName).toBe(user.id);
+    expect(upsert!.conversation.assignedAgentName).toBe(user.name);
 
     // Backward compat: legacy message:new + handoff:assigned still fire.
     expect(agentsCalls('message:new')).toHaveLength(1);

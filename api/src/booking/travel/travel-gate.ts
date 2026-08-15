@@ -498,9 +498,26 @@ export function routeBudget(): RouteBudget {
   return { remaining: MAX_ROUTE_LOOKUPS_PER_CALL, deadline: Date.now() + ROUTE_LOOKUP_DEADLINE_MS };
 }
 
-/** Spend one, or report that there is nothing left to spend. */
-function claimRouteBudget(budget: RouteBudget): boolean {
-  if (budget.remaining <= 0 || Date.now() >= budget.deadline) return false;
+/**
+ * Has the whole-pass latency budget run out? Checked per slot BEFORE the lookup, so it bounds
+ * the ENTIRE routing pass — cache reads included — not just paid calls. This half is the reason
+ * a slow pass still stops rather than reading Redis forever.
+ */
+function deadlinePassed(budget: RouteBudget): boolean {
+  return Date.now() >= budget.deadline;
+}
+
+/**
+ * Claim one real spend, or report the per-call ceiling is reached.
+ *
+ * Called ONLY on a cache MISS that is about to reserve an element — see `routes.service.ts`
+ * `driveLookupFor`, which passes it as `beforeSpend`. That is the whole fix: the count now
+ * bounds Google CALLS rather than slot-leg assessments, so a full day of repeated legs routes
+ * from one purchase instead of exhausting the budget on cache hits and degrading the rest.
+ * Exported for that one caller; the deadline half stays private to this file.
+ */
+export function claimRouteCount(budget: RouteBudget): boolean {
+  if (budget.remaining <= 0) return false;
   budget.remaining -= 1;
   return true;
 }
@@ -647,12 +664,21 @@ export async function assessSlotRouted(input: {
       continue;
     }
 
-    // Checked BEFORE each lookup, so a spent budget degrades exactly like an outage rather
-    // than half-answering a slot list. The remaining slots stay undecided, which withholds
-    // them into Requests — the safe direction.
-    if (input.budget && !claimRouteBudget(input.budget)) {
+    // THE DEADLINE, checked before each lookup so it bounds the WHOLE routing pass — cache reads
+    // included — not just paid calls. Past it, the pass degrades exactly like an outage: the
+    // remaining slots stay undecided, which withholds them into Requests — the safe direction.
+    //
+    // Emits `route_deadline`, NOT `budget_spent`. The two per-call ceilings are different problems
+    // with different fixes: `route_deadline` means the pass ran past its latency bound (slow
+    // Google/Redis); `budget_spent` means the COUNT ran out. One label for both would hide which.
+    //
+    // The per-call COUNT is NOT claimed here any more. Claiming it before the lookup spent it on
+    // cache hits, so a full day of one repeated leg exhausted the budget and degraded later slots
+    // (the cheap clustering ones grouping needs) even though the real calls were few. The count is
+    // now claimed on the spend path in `driveMinutes` (`beforeSpend`), so only a genuine miss costs it.
+    if (input.budget && deadlinePassed(input.budget)) {
       routedEvery = false;
-      causes.add('budget_spent');
+      causes.add('route_deadline');
       resolved.push(outcome);
       continue;
     }

@@ -152,9 +152,11 @@ const EXPECTED_CLASS: Record<string, CauseClass> = {
   // Definite states about one business, notified on first occurrence rather than on a threshold.
   cap_exhausted: 'tenant',
   shared_itinerary: 'configuration',
-  // Counted, never mailed. One is ordinary; a sustained rate is a regression.
+  // Counted, never mailed. One is ordinary; a sustained rate is a regression. `budget_spent` and
+  // `route_deadline` are the two per-call ceilings, kept distinct (count vs latency).
   no_route: 'metric',
   budget_spent: 'metric',
+  route_deadline: 'metric',
   // "Something failed and we do not know what" - the one cause that MUST NOT be silent, because a
   // nameless failure is the one nothing else will report. It was 'none' until this change.
   unknown: 'metric',

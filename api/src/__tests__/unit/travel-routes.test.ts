@@ -22,7 +22,8 @@ vi.mock('../../booking/travel/travel-usage.service', () => ({
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { driveMinutes, driveCacheKey, departureBucket } from '../../booking/travel/routes.service';
+import { driveMinutes, driveLookupFor, driveCacheKey, departureBucket } from '../../booking/travel/routes.service';
+import { routeBudget } from '../../booking/travel/travel-gate';
 import type { ActiveTravelEligibility } from '../../booking/travel/travel-eligibility';
 
 const ELIGIBLE: ActiveTravelEligibility = {
@@ -94,6 +95,64 @@ describe('routes.service', () => {
     // normal race, so it degrades rather than erroring.
     expect(await call(new Date(NOW.getTime() - 60_000))).toEqual({ status: 'unavailable', cause: 'departed' });
     expect(reserve).not.toHaveBeenCalled();
+  });
+
+  describe('the per-availability route count (beforeSpend)', () => {
+    const withSpend = (beforeSpend: () => boolean, departAt = soon()) =>
+      driveMinutes(ELIGIBLE, { from: ANTWERP, to: BRUSSELS, departAt, sessionId: 'sess-1', beforeSpend });
+
+    it('claims the count on a cache MISS, before the reservation', async () => {
+      const order: string[] = [];
+      const beforeSpend = vi.fn(() => { order.push('count'); return true; });
+      reserve.mockImplementation(async () => { order.push('reserve'); return true; });
+      await withSpend(beforeSpend);
+      expect(beforeSpend).toHaveBeenCalledOnce();
+      expect(order).toEqual(['count', 'reserve']);
+    });
+
+    it('a cache HIT never claims the count — one repeated leg across a day costs nothing after the first', async () => {
+      redisGet.mockResolvedValue(JSON.stringify({ status: 'routed', minutes: 42 }));
+      const beforeSpend = vi.fn(() => true);
+      expect(await withSpend(beforeSpend)).toEqual({ status: 'routed', minutes: 42 });
+      expect(beforeSpend).not.toHaveBeenCalled();
+      expect(reserve).not.toHaveBeenCalled();
+      expect(axiosPost).not.toHaveBeenCalled();
+    });
+
+    it('a spent count degrades to budget_spent without calling Google or reserving', async () => {
+      const beforeSpend = vi.fn(() => false);
+      expect(await withSpend(beforeSpend)).toEqual({ status: 'unavailable', cause: 'budget_spent' });
+      expect(reserve).not.toHaveBeenCalled();
+      expect(axiosPost).not.toHaveBeenCalled();
+    });
+
+    it('a departed slot short-circuits before the count is claimed', async () => {
+      const beforeSpend = vi.fn(() => true);
+      expect(await withSpend(beforeSpend, new Date(NOW.getTime() - 60_000))).toEqual({
+        status: 'unavailable',
+        cause: 'departed',
+      });
+      expect(beforeSpend).not.toHaveBeenCalled();
+    });
+
+    it('driveLookupFor: a repeated leg spends the route count ONCE (the miss), not per read', async () => {
+      // In-memory cache so the second read of the same leg is a real HIT — the exact case a busy
+      // diary hits, and the bug that used to burn one count per slot.
+      const store = new Map<string, string>();
+      redisGet.mockImplementation(async (...args: unknown[]) => store.get(args[0] as string) ?? null);
+      redisSet.mockImplementation(async (...args: unknown[]) => {
+        store.set(args[0] as string, args[1] as string);
+        return 'OK';
+      });
+      const budget = routeBudget();
+      const start = budget.remaining;
+      const lookup = driveLookupFor(ELIGIBLE, 'sess-1', { budget });
+      const leg = { from: ANTWERP, to: BRUSSELS, departAt: distant(), budgetMin: 90 };
+      await lookup(leg); // miss → one real call, one count
+      await lookup(leg); // hit → no call, no count
+      expect(budget.remaining).toBe(start - 1);
+      expect(axiosPost).toHaveBeenCalledOnce();
+    });
   });
 
   describe('traffic horizon', () => {

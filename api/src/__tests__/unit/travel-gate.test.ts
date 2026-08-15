@@ -449,13 +449,14 @@ describe('assessSlotRouted — the per-call budget', () => {
     };
   };
 
-  it('stops looking up once the shared budget is spent', async () => {
+  it('no longer stops on the count — that is now the lookup’s job, so every slot reaches it', async () => {
+    // The COUNT moved to `driveMinutes` (claimed only on a real cache miss). The gate keeps just
+    // the deadline, so a mocked lookup — which bypasses the count — is asked for EVERY slot, and
+    // the gate never decrements `remaining`. This is the whole fix: repeated cached legs no longer
+    // exhaust the budget per slot. The neighbour moves WITH each slot so every one has the same
+    // 30-minute gap (a fixed neighbour would give later slots hours the floor settles for free).
     const { calls, lookup } = counting(5);
     const budget = routeBudget();
-    // Twelve slots against a budget of ten. The neighbour moves WITH each slot so every one
-    // has the same 30-minute gap — a fixed neighbour would give the later slots hours of
-    // clearance, which the floor settles for free, and the test would then be measuring the
-    // bounds rather than the budget.
     for (let i = 0; i < 12; i += 1) {
       const hour = String(9 + i).padStart(2, '0');
       await assessSlotRouted({
@@ -466,18 +467,19 @@ describe('assessSlotRouted — the per-call budget', () => {
         budget,
       });
     }
-    expect(calls).toHaveLength(10);
-    expect(budget.remaining).toBe(0);
+    expect(calls).toHaveLength(12);
+    expect(budget.remaining).toBe(10);
   });
 
-  it('degrades the slots past the ceiling rather than clearing them', async () => {
-    const { lookup } = counting(5);
-    const budget = { remaining: 0, deadline: Date.now() + 60_000 };
+  it('degrades to a Request when the lookup reports the count is spent', async () => {
+    // The real count lives in `driveMinutes`; here the lookup stands in for an exhausted count by
+    // returning `budget_spent`. The gate must withhold the slot into a Request, never confirm it.
+    const budget = routeBudget();
     const { verdict, fullyRouted, degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
       slackMin: 0,
-      lookup,
+      lookup: async () => ({ minutes: null, cause: 'budget_spent' as const }),
       budget,
     });
     // Withheld into a Request, never confirmed — the safe direction.
@@ -486,10 +488,10 @@ describe('assessSlotRouted — the per-call budget', () => {
     expect(degradedCauses).toContain('budget_spent');
   });
 
-  it('stops on the deadline even with lookups left to spend', async () => {
+  it('stops on the deadline even with lookups left to spend, and names it route_deadline not budget_spent', async () => {
     const { calls, lookup } = counting(5);
     const budget = { remaining: 10, deadline: Date.now() - 1 };
-    await assessSlotRouted({
+    const { degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
       slackMin: 0,
@@ -497,6 +499,10 @@ describe('assessSlotRouted — the per-call budget', () => {
       budget,
     });
     expect(calls).toHaveLength(0);
+    // The LATENCY ceiling, kept distinct from the COUNT ceiling (`budget_spent`) so the monitor
+    // can tell "Google/Redis is slow" from "the count is too low". See degradation-monitor.
+    expect(degradedCauses).toContain('route_deadline');
+    expect(degradedCauses).not.toContain('budget_spent');
   });
 
   it('is unbounded when no budget is given — the single-slot create path', async () => {

@@ -29,8 +29,8 @@
  *     They are ALSO aggregated for the operator, by DISTINCT IDENTITY, because twenty tenants
  *     exhausting their cap in one afternoon is a pricing misjudgement rather than twenty
  *     coincidences - and one busy capped tenant must not be able to look like that.
- *   - **metrics** (`no_route`, `budget_spent`) - counted, never mailed. One `no_route` is
- *     ordinary; a sustained rate is an upstream or data regression worth seeing.
+ *   - **metrics** (`no_route`, `budget_spent`, `route_deadline`) - counted, never mailed. One
+ *     `no_route` is ordinary; a sustained rate is an upstream or data regression worth seeing.
  *
  * ORDERING COMES FROM REDIS, NOT FROM CLOCKS. Deciding whether a success came AFTER the last
  * failure is the whole of the recovery rule, and the two events are recorded by whichever
@@ -95,10 +95,15 @@ export const CAUSE_CLASS = {
 
   // Not faults, but worth a rate. One `no_route` is Google having no route for those coordinates
   // today - a geocode in a canal produces one. A sustained rate across distinct pairs is a
-  // regression. `budget_spent` at a high rate means the per-call ceiling is defeating the feature
-  // rather than bounding it.
+  // regression.
   no_route: 'metric',
+  // THE TWO PER-CALL CEILINGS, kept DISTINCT because the operator acts differently on each.
+  // `budget_spent` at a high rate means the COUNT ceiling is defeating the feature (the cache is
+  // not sharing, or the count is too low). `route_deadline` means the whole availability pass ran
+  // past its 8s latency bound - upstream Google/Routes or Redis is slow - which raising the count
+  // would not fix. Collapsing them into one label is the exact imprecision #93 exists to refuse.
   budget_spent: 'metric',
+  route_deadline: 'metric',
 
   // An unexplained degradation, and the one entry that CHANGED when this map replaced the switch.
   //
@@ -295,7 +300,7 @@ export function platformFailures(): Promise<number> {
 /** Rates that are watched but never mailed (see the header). */
 export async function metricCounts(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
-  for (const cause of ['no_route', 'budget_spent']) out[cause] = await readCount(`metric:${cause}`);
+  for (const cause of ['no_route', 'budget_spent', 'route_deadline']) out[cause] = await readCount(`metric:${cause}`);
   return out;
 }
 

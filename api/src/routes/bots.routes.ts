@@ -32,7 +32,6 @@ import {
   disableDedicatedKb,
 } from '../knowledge/bot-knowledge.service';
 import { validate } from '../middleware/validate';
-import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { config } from '../config/environment';
 import { defaultBotSettings } from '../config/default-bot-settings';
@@ -359,19 +358,11 @@ router.patch(
         } as Bot['settings'];
       }
       // Operational, tenant-owned business hours live on the bot's settings blob.
-      // Tolerant cutover (PR 1a): a client-sent `timezone` is ACCEPTED but
-      // IGNORED — the stored value is always the bot's canonical, server-owned
-      // businessTimezone, so a browser clock can no longer move business time.
+      // Timezone is never client-writable: it is the bot's canonical, geography-derived
+      // businessTimezone (server-owned authority, TZ PR1a); the write schema stopped
+      // accepting the field in PR1c.
       if (businessHours !== undefined) {
         const derivedTimezone = bot.businessTimezone || 'Europe/Brussels';
-        if (businessHours.timezone && businessHours.timezone !== derivedTimezone) {
-          logger.warn('[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored', {
-            tenantId,
-            botId: bot.id,
-            received: businessHours.timezone,
-            derived: derivedTimezone,
-          });
-        }
         bot.settings = {
           ...(bot.settings ?? {}),
           businessHours: { ...businessHours, timezone: derivedTimezone },

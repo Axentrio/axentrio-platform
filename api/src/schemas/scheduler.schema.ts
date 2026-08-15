@@ -261,13 +261,6 @@ export function isValidTimezone(tz: string): boolean {
 }
 
 export const availabilityInputSchema = z.object({
-  // Tolerant cutover (PR 1a, server-owned Business Time): ACCEPTED for old
-  // deployed clients (whose schema requires sending it) but IGNORED — the
-  // server persists the bot's derived `businessTimezone` instead and logs a
-  // conflict. Optional so newer clients may stop sending it; removal from the
-  // schema is the NEXT release (PR 1c). Still shape-validated when present so
-  // a garbled payload fails loudly rather than being silently discarded.
-  timezone: z.string().min(1).max(64).refine(isValidTimezone, 'Not a recognised IANA timezone').optional(),
   // 'always_open' → bookable 24/7 (weekly hours ignored); 'business_hours' → gated by weeklyHours.
   availabilityMode: z.enum(['always_open', 'business_hours']).default('business_hours'),
   weeklyHours: weeklyHours.default({}),

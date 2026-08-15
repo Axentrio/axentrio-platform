@@ -191,7 +191,7 @@ export interface SchedulerConfig {
 export interface UpdateSchedulerPayload {
   provider?: 'calcom' | 'internal';
   eventType?: Omit<SchedulerEventType, 'id'>;
-  availability?: Omit<SchedulerAvailability, 'id'>;
+  availability?: Omit<SchedulerAvailability, 'id' | 'timezone'>;
   /** [] is a real value here — it clears the area — so never drop an empty array. */
   serviceArea?: ServiceAreaEntry[];
   bookingRules?: Partial<BookingRules>;

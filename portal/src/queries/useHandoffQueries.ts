@@ -11,7 +11,8 @@ import { useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
-import type { HandoffRequest } from '@app-types/index';
+import { applyCommandConversation, newUuid } from './conversationLive';
+import type { HandoffRequest, CommandConversationSummary } from '@app-types/index';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -98,37 +99,31 @@ export function useHandoffsQuery(status: 'pending' | 'assigned' | 'resolved' | '
 }
 
 // ---------------------------------------------------------------------------
-// Mutations
+// Mutations — acknowledged REST commands (B-PR3b)
+//
+// Accept = POST /chats/:sessionId/takeover; Decline = POST /chats/:sessionId/
+// cancel. No fire-and-forget socket emit and NO optimistic removal before the
+// ack anymore: the command either commits (the resulting conversation:upsert /
+// handoff events + the onSettled refetch reconcile the queue) or it fails and
+// the card stays. Each mutation carries an idempotencyKey.
 // ---------------------------------------------------------------------------
+
+/** POST command response body (after envelope unwrap). */
+interface CommandResponse {
+  outcome: string;
+  conversation?: CommandConversationSummary;
+}
 
 export function useAcceptHandoff() {
   const queryClient = useQueryClient();
-  const { acceptHandoff: socketAcceptHandoff } = useSocket();
 
   return useMutation({
-    mutationFn: (handoffId: string) => {
-      socketAcceptHandoff(handoffId);
-      return Promise.resolve();
-    },
-    onMutate: async (handoffId: string) => {
-      // Optimistic removal from the pending list
-      await queryClient.cancelQueries({ queryKey: queryKeys.handoffs.all() });
-
-      const previousData = queryClient.getQueryData<HandoffRequest[]>(
-        queryKeys.handoffs.list('pending'),
-      );
-
-      queryClient.setQueryData<HandoffRequest[]>(
-        queryKeys.handoffs.list('pending'),
-        (prev = []) => prev.filter((h) => h.id !== handoffId),
-      );
-
-      return { previousData };
-    },
-    onError: (_err, _handoffId, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKeys.handoffs.list('pending'), context.previousData);
-      }
+    mutationFn: ({ chatId }: { chatId: string }) =>
+      api.post<CommandResponse>(`/chats/${chatId}/takeover`, { idempotencyKey: newUuid() }),
+    onSuccess: (res) => {
+      // The response carries the committed ownership — fold it into the chat
+      // caches immediately (no follow-up GET needed).
+      applyCommandConversation(queryClient, res?.conversation);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.handoffs.all() });
@@ -138,32 +133,15 @@ export function useAcceptHandoff() {
 
 export function useRejectHandoff() {
   const queryClient = useQueryClient();
-  const { declineHandoff: socketDeclineHandoff } = useSocket();
 
   return useMutation({
-    mutationFn: ({ handoffId, reason }: { handoffId: string; reason?: string }) => {
-      socketDeclineHandoff(handoffId, reason);
-      return Promise.resolve();
-    },
-    onMutate: async ({ handoffId }: { handoffId: string; reason?: string }) => {
-      // Optimistic removal from the pending list
-      await queryClient.cancelQueries({ queryKey: queryKeys.handoffs.all() });
-
-      const previousData = queryClient.getQueryData<HandoffRequest[]>(
-        queryKeys.handoffs.list('pending'),
-      );
-
-      queryClient.setQueryData<HandoffRequest[]>(
-        queryKeys.handoffs.list('pending'),
-        (prev = []) => prev.filter((h) => h.id !== handoffId),
-      );
-
-      return { previousData };
-    },
-    onError: (_err, _variables, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(queryKeys.handoffs.list('pending'), context.previousData);
-      }
+    mutationFn: ({ chatId, reason }: { chatId: string; reason?: string }) =>
+      api.post<CommandResponse>(`/chats/${chatId}/cancel`, {
+        idempotencyKey: newUuid(),
+        reason,
+      }),
+    onSuccess: (res) => {
+      applyCommandConversation(queryClient, res?.conversation);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.handoffs.all() });

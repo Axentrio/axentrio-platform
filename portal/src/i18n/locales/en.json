@@ -1966,7 +1966,9 @@
   "inbox": {
     "header": {
       "subtitle": "Unified workspace for all conversations",
-      "live": "Live"
+      "live": "Live",
+      "reconnecting": "Reconnecting",
+      "offline": "Offline"
     },
     "tabs": {
       "all": "All",
@@ -2002,7 +2004,9 @@
       },
       "composer": {
         "placeholder": "Type a message…",
-        "send": "Send message"
+        "send": "Send message",
+        "conflictTaken": "A different agent has this conversation. The message was not sent. Your text is kept below.",
+        "conflictClosed": "This conversation is closed. The message was not sent. Your text is kept below."
       },
       "sender": {
         "agent": "Agent",
@@ -2011,7 +2015,10 @@
       },
       "message": {
         "image": "Image",
-        "file": "File"
+        "file": "File",
+        "sending": "Sending…",
+        "failed": "Not delivered",
+        "retry": "Retry"
       },
       "transferChat": "Transfer chat",
       "empty": {

@@ -125,8 +125,8 @@ export interface Chat {
   // 'bot'); guardrailStatus is the reason category (spam/scam/phishing/bot_loop).
   aiAutoReplyEnabled?: boolean;
   guardrailStatus?: string;
-  assignedAgentId?: string;
-  assignedAgentName?: string;
+  assignedAgentId?: string | null;
+  assignedAgentName?: string | null;
   messages: Message[];
   metadata: ChatMetadata;
   createdAt: string;
@@ -135,6 +135,15 @@ export interface Chat {
   lastActivityAt?: string;
   closedAt?: string;
   csatScore?: number;
+  // ── Live-inbox summary fields (B-PR3a conversation:upsert / REST list row) ──
+  /** Last-message preview (server truncates to 80 chars). */
+  lastMessage?: string | null;
+  lastMessageSender?: string | null;
+  messageCount?: number;
+  ownership?: string;
+  ownershipVersion?: number;
+  channel?: string;
+  botId?: string;
 }
 
 export interface ChatMetadata {
@@ -161,6 +170,91 @@ export interface Message {
   isRead: boolean;
   createdAt: string;
   updatedAt?: string;
+  /** Client-generated idempotency id for operator replies (B-PR3b composer). */
+  clientMessageId?: string;
+  /**
+   * Composer delivery state. 'pending' = optimistic, POST in flight;
+   * 'failed' = the POST failed or the server reports message.status='failed'
+   * (retryable with the SAME clientMessageId); absent/'sent' = delivered.
+   */
+  deliveryState?: 'pending' | 'sent' | 'failed';
+}
+
+// ============================================
+// Realtime conversation events (B-PR3a wire contract)
+// ============================================
+
+/**
+ * `conversation:upsert` summary payload — the SAME serializer as the REST
+ * GET /chats/sessions row (api/src/realtime/conversation-serializer.ts).
+ * `status` is the BACKEND vocabulary ('active'|'closed'|'waiting'|'handoff'|'bot').
+ * `assignedAgentName` is OMITTED (not null) when the agent relation was not
+ * loaded server-side — merge defined fields only, never clobber with undefined.
+ */
+export interface ConversationSummaryPayload {
+  id: string;
+  sessionId: string;
+  status: string;
+  aiAutoReplyEnabled?: boolean;
+  guardrailStatus?: string;
+  userName?: string;
+  assignedAgent?: { id: string } | null;
+  assignedAgentName?: string | null;
+  messageCount?: number;
+  lastMessage?: string | null;
+  lastMessageSender?: string | null;
+  lastMessageAt?: string | null;
+  lastActivityAt?: string;
+  source?: string;
+  createdAt?: string;
+  tenantId?: string;
+  botId?: string;
+  ownership?: string;
+  ownershipVersion?: number;
+  assignedAgentId?: string | null;
+  channel?: string;
+}
+
+export interface ConversationUpsertEvent {
+  conversation: ConversationSummaryPayload;
+  /** Emit-time epoch-ms clock; the client drops a strictly LOWER revision. */
+  revision: number;
+}
+
+/** `message:created` message payload (api serializeMessage). */
+export interface MessageCreatedPayload {
+  id: string;
+  sessionId: string;
+  type: string;
+  content: string;
+  senderType: string;
+  sender: string;
+  status: string;
+  createdAt: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MessageCreatedEvent {
+  sessionId: string;
+  message: MessageCreatedPayload;
+  conversationRevision: number;
+}
+
+/**
+ * The `conversation` object the POST /chats/:sessionId/{takeover,release,
+ * cancel,close,messages} command responses carry (a REDUCED summary from the
+ * command service — no userName/lastMessage/lastActivityAt).
+ */
+export interface CommandConversationSummary {
+  sessionId: string;
+  tenantId: string;
+  status: string;
+  ownership: string;
+  ownershipVersion: number;
+  assignedAgentId: string | null;
+  humanControlMode?: 'timed' | 'indefinite' | null;
+  openHandoffId?: string | null;
 }
 
 export interface TypingIndicator {

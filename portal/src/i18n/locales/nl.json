@@ -1999,7 +1999,16 @@
       }
     },
     "takeover": {
-      "button": "Overnemen"
+      "button": "Overnemen",
+      "indefinite": "Tot ik het teruggeef aan de AI",
+      "forHours_one": "Voor {{count}} uur",
+      "forHours_other": "Voor {{count}} uur",
+      "changeDuration": "Duur wijzigen"
+    },
+    "humanControl": {
+      "indefinite": "AI gepauzeerd - jij hebt de controle",
+      "timed": "AI gepauzeerd - hervat over {{time}}",
+      "resuming": "AI wordt hervat…"
     },
     "guardrail": {
       "paused": "AI gepauzeerd · {{reason}}",
@@ -2044,7 +2053,9 @@
       "closeSuccess": "Gesprek gesloten",
       "closeFailed": "Gesprek sluiten mislukt",
       "returnToBotSuccess": "Gesprek terug naar bot",
-      "returnToBotFailed": "Terugzetten naar bot mislukt"
+      "returnToBotFailed": "Terugzetten naar bot mislukt",
+      "durationUpdated": "Duur van overname bijgewerkt",
+      "durationUpdateFailed": "Duur bijwerken mislukt"
     },
     "stream": {
       "title": "Live chats",

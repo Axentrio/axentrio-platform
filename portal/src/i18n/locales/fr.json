@@ -1998,7 +1998,16 @@
       }
     },
     "takeover": {
-      "button": "Prendre en charge"
+      "button": "Prendre en charge",
+      "indefinite": "Jusqu'à ce que je la rende à l'IA",
+      "forHours_one": "Pour {{count}} heure",
+      "forHours_other": "Pour {{count}} heures",
+      "changeDuration": "Modifier la durée"
+    },
+    "humanControl": {
+      "indefinite": "IA en pause - vous avez le contrôle",
+      "timed": "IA en pause - reprise dans {{time}}",
+      "resuming": "Reprise de l'IA…"
     },
     "guardrail": {
       "paused": "IA en pause · {{reason}}",
@@ -2043,7 +2052,9 @@
       "closeSuccess": "Conversation clôturée",
       "closeFailed": "Échec de la clôture de la conversation",
       "returnToBotSuccess": "Conversation rendue au bot",
-      "returnToBotFailed": "Échec du retour de la conversation au bot"
+      "returnToBotFailed": "Échec du retour de la conversation au bot",
+      "durationUpdated": "Durée de prise en charge mise à jour",
+      "durationUpdateFailed": "Échec de la mise à jour de la durée"
     },
     "stream": {
       "title": "Conversations en direct",

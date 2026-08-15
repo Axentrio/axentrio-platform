@@ -22,8 +22,10 @@ import {
   ArrowLeft,
   Bot,
   CheckCircle,
+  ChevronDown,
   ShieldAlert,
   ShieldCheck,
+  Timer,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -39,6 +41,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
+import { HumanControlBadge, TakeoverMenu } from '@components/HumanControl';
+import type { TakeoverPolicy } from '@utils/humanControl';
 import { ChatStatusBadge, PriorityBadge } from '@components/StatusBadge';
 import { ConnectionIndicator } from '@components/ConnectionIndicator';
 import { Modal } from '@components/Modal';
@@ -169,6 +173,11 @@ const Inbox: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  // B-PR5b FIX 3: takeover/policy commands are SERIALIZED. A same-owner
+  // policy update keeps the ownershipVersion, so two in-flight duration
+  // changes cannot be ordered by the revision gates — the UI must not allow
+  // a second one while the first is on the wire.
+  const [isTakeoverPending, setIsTakeoverPending] = useState(false);
 
   const queryClient = useQueryClient();
   const { isConnected, isConnecting } = useSocket();
@@ -256,20 +265,54 @@ const Inbox: React.FC = () => {
     setSelectedChat(patch ? mergeDefined(chat, patch) : chat);
   };
 
-  const handleTakeover = async (chatId: string) => {
+  /**
+   * POST /takeover and fold the committed summary into the caches + the open
+   * pane (no refetch-after-mutation). B-PR5b: an omitted policy posts the
+   * modeless legacy body (= indefinite); an explicit policy posts { mode,
+   * hours? } — on a same-owner re-claim the backend treats an explicit mode
+   * as a policy update (the "change duration" path).
+   */
+  const postTakeover = async (chatId: string, policy?: TakeoverPolicy) => {
+    const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
+      `/chats/${chatId}/takeover`,
+      {
+        idempotencyKey: newUuid(),
+        ...(policy?.mode === 'timed' ? { mode: 'timed' as const, hours: policy.hours } : {}),
+        ...(policy?.mode === 'indefinite' ? { mode: 'indefinite' as const } : {}),
+      },
+    );
+    applyCommandConversation(queryClient, res.conversation);
+    await selectFromCommandResponse(chatId, res.conversation);
+  };
+
+  const handleTakeover = async (chatId: string, policy?: TakeoverPolicy) => {
+    if (isTakeoverPending) return; // serialized — see isTakeoverPending
+    setIsTakeoverPending(true);
     try {
-      const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
-        `/chats/${chatId}/takeover`,
-        { idempotencyKey: newUuid() },
-      );
-      // The response carries the committed ownership — fold it into the list
-      // + detail caches and the open pane; no refetch-after-mutation.
-      applyCommandConversation(queryClient, res.conversation);
-      await selectFromCommandResponse(chatId, res.conversation);
+      await postTakeover(chatId, policy);
       toast.success(t('inbox.toasts.takeoverSuccess'));
     } catch (error) {
       console.error('Failed to takeover chat:', error);
       toast.error(t('inbox.toasts.takeoverFailed'));
+    } finally {
+      setIsTakeoverPending(false);
+    }
+  };
+
+  // "Change duration" on an already-owned chat: ALWAYS an explicit mode, so
+  // the backend rewrites the policy (indefinite converts a timed control).
+  const handleChangeDuration = async (policy: TakeoverPolicy) => {
+    if (!selectedChat) return;
+    if (isTakeoverPending) return; // serialized — see isTakeoverPending
+    setIsTakeoverPending(true);
+    try {
+      await postTakeover(selectedChat.id, policy);
+      toast.success(t('inbox.toasts.durationUpdated'));
+    } catch (error) {
+      console.error('Failed to change control duration:', error);
+      toast.error(t('inbox.toasts.durationUpdateFailed'));
+    } finally {
+      setIsTakeoverPending(false);
     }
   };
 
@@ -387,8 +430,15 @@ const Inbox: React.FC = () => {
   // Render
   // -----------------------------------------------------------------------
 
-  const isHandoff = selectedChat?.status === 'handsoff';
-  const isHuman = selectedChat?.status === 'human';
+  // B-PR5b: OWNERSHIP is the authoritative gate for the human controls. A
+  // real takeover is ownership:'human_owned' with backend status 'handoff'
+  // (deriveStatusFromOwnership) — portal status 'handsoff' — so a
+  // status==='human' gate would never fire for a taken-over chat.
+  const isHumanOwned = selectedChat?.ownership === 'human_owned';
+  // Takeover offer: a handoff-status chat NOT already human-owned. A row with
+  // an unknown ownership (the detail GET omits the field) lands here too — a
+  // same-owner re-claim is harmless and the response corrects the pane.
+  const isHandoff = selectedChat?.status === 'handsoff' && !isHumanOwned;
   // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
   const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
 
@@ -581,6 +631,12 @@ const Inbox: React.FC = () => {
                           {t('inbox.guardrail.paused', { reason: selectedChat.guardrailStatus || 'flagged' })}
                         </span>
                       )}
+                      {isHumanOwned && (
+                        <HumanControlBadge
+                          mode={selectedChat.humanControlMode}
+                          until={selectedChat.humanControlUntil}
+                        />
+                      )}
                       {selectedChat.tenantName && (
                         <>
                           <span>-</span>
@@ -609,17 +665,41 @@ const Inbox: React.FC = () => {
                     </Button>
                   )}
                   {isHandoff && (
-                    <Button
-                      onClick={() => handleTakeover(selectedChat.id)}
-                      size="sm"
-                      className="gap-2 rounded-xl"
-                    >
-                      <UserCheck className="w-4 h-4" />
-                      {t('inbox.takeover.button')}
-                    </Button>
+                    <TakeoverMenu
+                      onSelect={(policy) =>
+                        // The initial indefinite pick keeps the modeless
+                        // legacy body — only timed picks carry a policy.
+                        handleTakeover(
+                          selectedChat.id,
+                          policy.mode === 'indefinite' ? undefined : policy,
+                        )
+                      }
+                      trigger={
+                        <Button size="sm" disabled={isTakeoverPending} className="gap-2 rounded-xl">
+                          <UserCheck className="w-4 h-4" />
+                          {t('inbox.takeover.button')}
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </Button>
+                      }
+                    />
                   )}
-                  {isHuman && (
+                  {isHumanOwned && (
                     <>
+                      <TakeoverMenu
+                        onSelect={handleChangeDuration}
+                        trigger={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isTakeoverPending}
+                            className="gap-1.5 rounded-xl"
+                          >
+                            <Timer className="w-3.5 h-3.5" />
+                            {t('inbox.takeover.changeDuration')}
+                            <ChevronDown className="w-3 h-3" />
+                          </Button>
+                        }
+                      />
                       <Button
                         variant="outline"
                         size="sm"

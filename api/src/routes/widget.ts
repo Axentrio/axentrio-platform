@@ -17,6 +17,7 @@ import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { ApiError } from '../middleware/error-handler';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
+import { emitConversationUpsert, emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
 import { conversationCommands } from '../services/conversation-command.service';
 import type { HandoffReason } from '../database/entities/HandoffRequest';
@@ -296,6 +297,10 @@ router.post(
       });
       return manager.save(ChatSession, draft);
     });
+
+    // B-PR3a: announce the new conversation row AFTER the create commits
+    // (before the greeting, which does not count into message_count either).
+    await emitConversationUpsert(session, { lastMessage: null });
 
     // Create participant
     const participantRepository = AppDataSource.getRepository(Participant);
@@ -675,6 +680,11 @@ router.post(
         priority,
         timestamp: new Date().toISOString(),
       });
+    }
+
+    // B-PR3a: normalized ownership event, post-commit, only when the state moved.
+    if (result.outcome === 'requested') {
+      await emitConversationUpsertForSession(sessionId, tenantId);
     }
 
     logger.info('Handoff requested from widget', {

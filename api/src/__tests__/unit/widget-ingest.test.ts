@@ -21,6 +21,11 @@ const rawQueries: Array<{ sql: string; params: unknown[] }> = [];
 const emit = vi.fn();
 const schedule = vi.fn();
 const participantFindOne = vi.fn();
+// B-PR3a normalized events — mocked as a seam so the legacy emit assertions
+// below stay exact; the realtime fan-out itself is covered by the DB-backed
+// realtime-conversation-events integration suite.
+const emitUpsert = vi.fn(async () => undefined);
+const emitCreated = vi.fn();
 
 const repo = (name: string) => ({
   findOne: name === 'participant' ? participantFindOne : vi.fn(async () => null),
@@ -46,6 +51,10 @@ vi.mock('../../database/data-source', () => ({
 }));
 vi.mock('../../utils/encryption', () => ({ encrypt: (v: string) => `enc(${v})` }));
 vi.mock('../../websocket/socket.handler', () => ({ emitToSession: (...a: unknown[]) => emit(...(a as [])) }));
+vi.mock('../../realtime/conversation-events', () => ({
+  emitConversationUpsert: (...a: unknown[]) => emitUpsert(...(a as [])),
+  emitMessageCreated: (...a: unknown[]) => emitCreated(...(a as [])),
+}));
 vi.mock('../../services/turn-coalescer', () => ({ scheduleTurn: (...a: unknown[]) => schedule(...(a as [])) }));
 vi.mock('../../utils/logger', () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 
@@ -120,6 +129,16 @@ describe('ingestWidgetCustomerMessage', () => {
     expect(countedSession('sess-1')).toBe(true);
     expect(emit).toHaveBeenCalledTimes(1);
     expect(schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits the B-PR3a normalized events after the write (agents-room gap closed)', async () => {
+    await ingestWidgetCustomerMessage(session() as never, 'hello');
+    expect(emitCreated).toHaveBeenCalledTimes(1);
+    const [, createdDto] = emitCreated.mock.calls[0] as [unknown, { content: string; senderType: string }];
+    expect(createdDto).toMatchObject({ content: 'hello', senderType: 'user' });
+    expect(emitUpsert).toHaveBeenCalledTimes(1);
+    const [, upsertOpts] = emitUpsert.mock.calls[0] as unknown as [unknown, { lastMessage: { content: string } }];
+    expect(upsertOpts.lastMessage).toMatchObject({ content: 'hello', senderType: 'user' });
   });
 
   it('still returns the message when scheduling fails', async () => {

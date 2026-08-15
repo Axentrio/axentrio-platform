@@ -482,9 +482,11 @@ function handleAgentLeave(socket: TenantSocket, data: { sessionId: string }): vo
 }
 
 /**
- * Handle message send event
+ * Handle message send event.
+ * Exported for the realtime-emit integration tests (B-PR3a) — production wiring
+ * stays via setupEventHandlers.
  */
-async function handleMessageSend(socket: TenantSocket, data: MessageSendData): Promise<void> {
+export async function handleMessageSend(socket: TenantSocket, data: MessageSendData): Promise<void> {
   const { sessionId, content, type = 'text', metadata } = data;
   const user = socket.data.user;
   const tenantId = socket.data.tenantId;
@@ -572,6 +574,25 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
       io?.to(`agents:${tenantId}`).emit('message:new', {
         sessionId,
         message: messageData,
+      });
+
+      // B-PR3a: the normalized events, alongside the legacy pair (additive).
+      // Post-commit: message save + counter UPDATE are done above. Lazy import
+      // keeps socket.handler out of a static cycle with the realtime module.
+      const { emitMessageCreated, emitConversationUpsert } = await import(
+        '../realtime/conversation-events'
+      );
+      emitMessageCreated(session, {
+        id: savedMessage.id,
+        sessionId,
+        type: savedMessage.type,
+        content,
+        senderType,
+        status: savedMessage.status,
+        createdAt: savedMessage.createdAt,
+      });
+      await emitConversationUpsert(session, {
+        lastMessage: { content, senderType },
       });
 
       logger.debug(`Message sent in room ${roomName}`, {
@@ -702,7 +723,7 @@ async function handleHandoffRequest(
     // (The old handler's save(session) also wrote every stale in-memory column
     // back — the dropped-value bug class this service exists to end.)
     const { conversationCommands } = await import('../services/conversation-command.service');
-    await conversationCommands.requestHandoff(sessionId, 'user_request', 'socket', undefined, {
+    const commandResult = await conversationCommands.requestHandoff(sessionId, 'user_request', 'socket', undefined, {
       tenantId,
       note: reason || 'User requested',
     });
@@ -726,6 +747,12 @@ async function handleHandoffRequest(
       reason,
       requestedAt: new Date().toISOString(),
     });
+
+    // B-PR3a: normalized ownership event, post-commit, when the state moved.
+    if (commandResult.outcome === 'requested') {
+      const { emitConversationUpsertForSession } = await import('../realtime/conversation-events');
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
 
     // Confirm to requester
     socket.emit('handoff:request:ack', {
@@ -789,6 +816,12 @@ async function handleHandoffAccept(
       agentId: agentId || user?.id,
     });
 
+    // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+    {
+      const { emitConversationUpsertForSession } = await import('../realtime/conversation-events');
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
+
     logger.info(`Handoff accepted for session ${sessionId}`, {
       agentId: agentId || user?.id,
     });
@@ -812,7 +845,7 @@ async function handleHandoffReject(
     // Operator decline = the atomic HANDOFF_REQUESTED -> BOT_OWNED cancel
     // (plan B1). The old handler only broadcast, so the state never moved back.
     const { conversationCommands } = await import('../services/conversation-command.service');
-    await conversationCommands.cancelHandoff(
+    const cancelResult = await conversationCommands.cancelHandoff(
       sessionId,
       socket.data.user?.id
         ? { kind: 'agent', agentId: socket.data.user.id }
@@ -826,6 +859,12 @@ async function handleHandoffReject(
       rejectedBy: socket.data.user?.id,
       rejectedAt: new Date().toISOString(),
     });
+
+    // B-PR3a: normalized ownership event, post-commit, when the state moved.
+    if (cancelResult.outcome === 'cancelled') {
+      const { emitConversationUpsertForSession } = await import('../realtime/conversation-events');
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
 
     logger.info(`Handoff rejected for session ${sessionId}`);
   } catch (error) {

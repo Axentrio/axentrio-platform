@@ -18,6 +18,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
 import { validate } from '../middleware/validate';
@@ -111,6 +112,11 @@ router.post(
       message: 'Waiting for an agent to join...',
     });
 
+    // B-PR3a: normalized ownership event, post-commit, when the state moved.
+    if (result.outcome === 'requested') {
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
+
     logger.info(`Handoff requested for session ${sessionId}`, {
       tenantId,
       reason,
@@ -182,6 +188,9 @@ router.post(
       agentId: agent!.id,
     });
 
+    // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+    await emitConversationUpsertForSession(sessionId, tenantId);
+
     logger.info(`Handoff accepted for session ${sessionId}`, {
       agentId: agent!.id,
     });
@@ -232,6 +241,11 @@ router.post(
       rejectedAt: new Date().toISOString(),
     });
 
+    // B-PR3a: normalized ownership event, post-commit, when the state moved.
+    if (result.outcome === 'cancelled') {
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
+
     logger.info(`Handoff rejected for session ${sessionId}`, {
       agentId: agent!.id,
     });
@@ -277,6 +291,12 @@ router.post(
       reason,
       returnedAt: new Date().toISOString(),
     });
+
+    // B-PR3a: a return/release previously reached ONLY the session room — the
+    // agents-room gap this PR closes. Emit when the state moved.
+    if (result.outcome === 'released') {
+      await emitConversationUpsertForSession(sessionId, tenantId);
+    }
 
     logger.info(`Session ${sessionId} returned to bot`, {
       agentId: agent!.id,
@@ -390,6 +410,9 @@ router.post(
       {},
     );
 
+    // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+    await emitConversationUpsertForSession(handoff.sessionId, handoff.tenantId);
+
     const updated = await handoffRepository.findOneOrFail({ where: { id } });
 
     logger.info(`Handoff ${id} accepted by agent ${agentId}`);
@@ -437,6 +460,9 @@ router.post(
       undefined,
       { reason: reason || 'Declined by agent' },
     );
+
+    // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+    await emitConversationUpsertForSession(handoff.sessionId, handoff.tenantId);
 
     const updated = await handoffRepository.findOneOrFail({ where: { id } });
 

@@ -21,6 +21,7 @@ import { MAX_MESSAGE_CONTENT_CHARS, classifyMessage } from '../guardrails/classi
 import { isGuardrailsEnforcing } from '../guardrails/inbound-guardrails.service';
 import { scheduleTurn } from '../services/turn-coalescer';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { logger } from '../utils/logger';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
 import { ServiceType } from '../database/entities/ServiceType';
@@ -261,6 +262,21 @@ export async function processInboundEvent(
       },
     });
 
+    // B-PR3a: the normalized events, alongside the legacy pair (additive).
+    // Post-commit: the message save and the counter UPDATE are done above.
+    emitMessageCreated(session, {
+      id: savedMessage.id,
+      sessionId: session.id,
+      type: savedMessage.type,
+      content,
+      senderType: 'user',
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+    });
+    await emitConversationUpsert(session, {
+      lastMessage: { content, senderType: 'user' },
+    });
+
     // ── 7. Schedule a (coalesced) agent turn ─────────────────────────────
     // scheduleTurn is fast (Redis write + delayed-job add); the await keeps the
     // channel-inbound processor's backpressure. Falls back to inline forwarding
@@ -419,7 +435,7 @@ export async function findOrCreateConversation(
 
   if (existingBinding && (!existingBinding.session || existingBinding.session.status === 'closed')) {
     // Session is closed — create new session and update existing binding
-    return AppDataSource.transaction(async (manager: EntityManager) => {
+    const reopened = await AppDataSource.transaction(async (manager: EntityManager) => {
       const now = new Date();
 
       // Plan-gate (step 10, count 2): live COUNT on chat_sessions for cap.
@@ -490,10 +506,14 @@ export async function findOrCreateConversation(
         sessionCreated: true, // but this IS a new conversation → must be linked
       };
     });
+    // B-PR3a: announce the new conversation row AFTER the transaction commits.
+    // `lastMessage: null` — the session has no messages yet.
+    await emitConversationUpsert(reopened.session, { lastMessage: null });
+    return reopened;
   }
 
   // No existing binding — create new session + participant + binding in a transaction
-  return AppDataSource.transaction(async (manager: EntityManager) => {
+  const created = await AppDataSource.transaction(async (manager: EntityManager) => {
     const now = new Date();
 
     // Plan-gate (step 10, count 2): live COUNT on chat_sessions for cap.
@@ -562,6 +582,9 @@ export async function findOrCreateConversation(
       sessionCreated: true,
     };
   });
+  // B-PR3a: announce the new conversation row AFTER the transaction commits.
+  await emitConversationUpsert(created.session, { lastMessage: null });
+  return created;
 }
 
 /**

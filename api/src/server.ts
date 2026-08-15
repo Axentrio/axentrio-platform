@@ -615,7 +615,15 @@ async function startServer(): Promise<void> {
                 row.id,
                 { kind: 'system', source: 'stale_handoff_sweep' },
               );
-              if (result.outcome === 'cancelled') returnedBatch++;
+              if (result.outcome === 'cancelled') {
+                returnedBatch++;
+                // B-PR3a: normalized ownership event, post-commit — a swept
+                // conversation must leave the operators' pending list live.
+                const { emitConversationUpsertForSession } = await import(
+                  './realtime/conversation-events'
+                );
+                await emitConversationUpsertForSession(row.id);
+              }
             } catch (err) {
               // A concurrent claim/close between SELECT and cancel is expected;
               // the command's own state checks make the sweep re-entrant.

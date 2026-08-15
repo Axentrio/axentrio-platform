@@ -21,6 +21,7 @@ import { sendSuccess } from '../../utils/response';
 import { inviteMemberSchema } from '../../schemas';
 import { releaseAgentSessions } from '../../utils/releaseAgentSessions';
 import { emitToSession, emitToTenantAgents } from '../../websocket/socket.handler';
+import { emitConversationUpsertForSession } from '../../realtime/conversation-events';
 
 const router = Router();
 
@@ -210,6 +211,9 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
       sessionId,
       reason: 'agent_deactivated',
     });
+    // B-PR3a: normalized ownership event (the release moved every affected
+    // conversation back to handoff_requested).
+    await emitConversationUpsertForSession(sessionId, user.tenantId);
   }
   if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
     emitToTenantAgents(user.tenantId, 'handoff:queue_updated', {
@@ -338,6 +342,7 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
   const agent = await agentRepo.findOne({ where: { userId, deletedAt: IsNull() } });
 
   // Single transaction: anonymize + soft-delete + cleanup references
+  let deleteReleaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
   await AppDataSource.transaction(async (manager) => {
     // 1. Anonymize user PII
     user.name = 'Deleted User';
@@ -354,7 +359,7 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
       await manager.save(Agent, agent);
 
       // 3. Release agent sessions + handoff requests
-      await releaseAgentSessions(userId, tenantId!, manager);
+      deleteReleaseResult = await releaseAgentSessions(userId, tenantId!, manager);
     }
 
     // 5. Delete pending invites created by this user
@@ -365,6 +370,12 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
       .where('invited_by = :userId', { userId })
       .execute();
   });
+
+  // B-PR3a: normalized ownership events for the released conversations,
+  // after the transaction committed.
+  for (const sessionId of deleteReleaseResult.affectedSessionIds) {
+    await emitConversationUpsertForSession(sessionId, tenantId!);
+  }
 
   // Post-transaction: remove from Clerk org (non-blocking)
   if (clerkUserId && tenant?.clerkOrgId) {

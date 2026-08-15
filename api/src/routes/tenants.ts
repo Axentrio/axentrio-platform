@@ -25,6 +25,7 @@ import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { invalidate } from '../utils/cache';
 import { releaseAgentSessions } from '../utils/releaseAgentSessions';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { requireFeature } from '../billing/enforce';
 import {
   getAnchorBotConfig,
@@ -895,6 +896,9 @@ router.post(
         sessionId,
         reason: 'agent_deactivated',
       });
+      // B-PR3a: normalized ownership event (the release moved every affected
+      // conversation back to handoff_requested).
+      await emitConversationUpsertForSession(sessionId, tenantId);
     }
     if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
       emitToTenantAgents(tenantId, 'handoff:queue_updated', {

@@ -16,6 +16,7 @@ import { asyncHandler, BadRequestError, ForbiddenError, UnauthorizedError } from
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { widgetAuthSchema } from '../schemas';
+import { emitConversationUpsert } from '../realtime/conversation-events';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -102,6 +103,8 @@ router.post(
           },
         });
         await sessionRepository.save(session);
+        // B-PR3a: announce the new conversation row (post-commit, no messages yet).
+        await emitConversationUpsert(session, { lastMessage: null });
       }
     } else {
       // Create new session
@@ -120,6 +123,8 @@ router.post(
         },
       });
       await sessionRepository.save(session);
+      // B-PR3a: announce the new conversation row (post-commit, no messages yet).
+      await emitConversationUpsert(session, { lastMessage: null });
     }
 
     // Generate widget token

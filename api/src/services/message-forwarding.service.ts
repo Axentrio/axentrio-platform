@@ -24,6 +24,7 @@ import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { composeSystemPrompt } from '../llm/compose-system-prompt';
 import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
+import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
 import { storedAffordance } from '../agent/tool-adapter';
@@ -1387,6 +1388,27 @@ async function routeBotMessageOutbound(
   offer?: OfferMeasurement,
 ): Promise<void> {
   const metadata = replyMetadata(extras ?? {});
+
+  // B-PR3a: the reply is already COMMITTED (finalizeReply's transaction, which
+  // also did message_count+1 / last_activity_at=now() in the DB) — announce it
+  // to BOTH rooms before attempting external delivery. Bot replies previously
+  // never reached the agents room (the scope-audit gap this PR closes). Keep
+  // the in-memory copy in step for the serialized summary, exactly like the
+  // ingest paths do.
+  session.incrementMessageCount();
+  emitMessageCreated(session, {
+    id: savedId,
+    sessionId: session.id,
+    type: 'text',
+    content,
+    senderType: 'bot',
+    status: 'sent',
+    ...(metadata ? { metadata } : {}),
+  });
+  await emitConversationUpsert(session, {
+    lastMessage: { content, senderType: 'bot' },
+  });
+
   const outbound = renderChannelAddressControls(
     { type: 'text', content, ...(extras?.quickReplies?.length ? { quickReplies: extras.quickReplies } : {}), ...(offer ? { offer } : {}) },
     extras?.affordance,
@@ -1786,6 +1808,24 @@ async function sendBotMessage(
   await sessionRepository.increment({ id: session.id }, 'messageCount', 1);
   await sessionRepository.update(session.id, { lastActivityAt: new Date() });
 
+  // B-PR3a: reply committed above — announce to BOTH rooms before external
+  // delivery (bot replies previously never reached the agents room). In-memory
+  // bump keeps the serialized summary in step, like the ingest paths.
+  session.incrementMessageCount();
+  emitMessageCreated(session, {
+    id: saved.id,
+    sessionId: session.id,
+    type: 'text',
+    content,
+    senderType: 'bot',
+    status: saved.status,
+    createdAt: saved.createdAt,
+    ...(metadata ? { metadata } : {}),
+  });
+  await emitConversationUpsert(session, {
+    lastMessage: { content, senderType: 'bot' },
+  });
+
   // Route through outbound router — handles both WebSocket and external channels.
   // Quick replies go to BOTH: the widget renders them as chips (via socketEvent
   // metadata below), and external channels (Messenger/IG/WhatsApp/Telegram) get
@@ -1888,6 +1928,10 @@ async function handleBotHandoff(
     reason,
     requestedAt: new Date().toISOString(),
   });
+
+  // B-PR3a: normalized ownership event to BOTH rooms, post-commit. The in-hand
+  // entity's ownership/status/version were just synced from the command result.
+  await emitConversationUpsert(session);
 
   // Push notification to operators (fire-and-forget; never blocks handoff).
   void notificationService

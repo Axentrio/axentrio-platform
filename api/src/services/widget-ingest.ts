@@ -24,6 +24,7 @@ import { Message, type MessageType } from '../database/entities/Message';
 import { Participant } from '../database/entities/Participant';
 import { encrypt } from '../utils/encryption';
 import { emitToSession } from '../websocket/socket.handler';
+import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { scheduleTurn } from './turn-coalescer';
 import { logger } from '../utils/logger';
 import { touchAddressBinding } from '../booking/travel/address-binding';
@@ -102,6 +103,23 @@ export async function ingestWidgetCustomerMessage(
     content,
     metadata: message.metadata,
     timestamp: message.createdAt.toISOString(),
+  });
+
+  // B-PR3a: the normalized events, to BOTH rooms — this path previously never
+  // reached the agents room at all (the scope-audit gap this PR closes).
+  // Post-commit: the message save and the counter UPDATE are done above.
+  emitMessageCreated(session, {
+    id: message.id,
+    sessionId: message.sessionId,
+    type: message.type,
+    content,
+    senderType: 'user',
+    status: message.status,
+    createdAt: message.createdAt,
+    ...(metadata ? { metadata } : {}),
+  });
+  await emitConversationUpsert(session, {
+    lastMessage: { content, senderType: 'user' },
   });
 
   // The address binding's window measures SILENCE, not the age of the choice - a customer forty

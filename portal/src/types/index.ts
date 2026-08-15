@@ -23,11 +23,6 @@ export interface User {
 
 export interface UserPreferences {
   theme: 'light' | 'dark' | 'system';
-  notifications: {
-    sound: boolean;
-    desktop: boolean;
-    handsoffOnly: boolean;
-  };
   language: string;
 }
 
@@ -547,4 +542,3 @@ export interface FileUpload {
   status: 'pending' | 'uploading' | 'completed' | 'error';
   error?: string;
 }
-

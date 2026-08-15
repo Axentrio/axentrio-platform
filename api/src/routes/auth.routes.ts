@@ -190,7 +190,7 @@ router.get(
     const user = userId
       ? await AppDataSource.getRepository(User).findOne({
           where: { id: userId },
-          select: ['locale'],
+          select: ['locale', 'notificationPreferences'],
         })
       : null;
 
@@ -201,6 +201,7 @@ router.get(
       tenantName: req.tenantName,
       email: req.user?.email,
       locale: user?.locale ?? null,
+      notificationPreferences: user?.notificationPreferences ?? null,
     });
   })
 );

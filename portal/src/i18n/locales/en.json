@@ -359,14 +359,28 @@
         "description": "Play sounds for new messages and handoffs"
       },
       "volume": "Volume",
+      "platform": {
+        "title": "Platform notifications",
+        "description": "Show notifications inside the portal"
+      },
+      "email": {
+        "title": "Email notifications",
+        "description": "Send notification emails for new handoffs"
+      },
+      "handoffRequest": {
+        "title": "Handoff requests",
+        "description": "Notify me when a visitor requests help"
+      },
+      "newMessage": {
+        "title": "New messages",
+        "description": "Notify me when a new message arrives"
+      },
       "desktop": {
         "title": "Desktop Notifications",
-        "description": "Show browser notifications"
+        "description": "Show browser notifications",
+        "permissionDenied": "Desktop notifications were not enabled. Please allow them in your browser settings."
       },
-      "handsoffOnly": {
-        "title": "Handoff Notifications Only",
-        "description": "Only notify for handoff requests"
-      }
+      "saveFailed": "Failed to save notification preferences. Please try again."
     },
     "appearance": {
       "title": "Theme",

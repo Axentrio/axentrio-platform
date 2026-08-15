@@ -357,14 +357,28 @@
         "description": "Diffuser des sons pour les nouveaux messages et les transferts"
       },
       "volume": "Volume",
+      "platform": {
+        "title": "Notifications de la plateforme",
+        "description": "Afficher les notifications dans le portail"
+      },
+      "email": {
+        "title": "Notifications par e-mail",
+        "description": "Envoyer des e-mails pour les nouveaux transferts"
+      },
+      "handoffRequest": {
+        "title": "Demandes de transfert",
+        "description": "M'avertir lorsqu'un visiteur demande de l'aide"
+      },
+      "newMessage": {
+        "title": "Nouveaux messages",
+        "description": "M'avertir lorsqu'un nouveau message arrive"
+      },
       "desktop": {
         "title": "Notifications de bureau",
-        "description": "Afficher les notifications du navigateur"
+        "description": "Afficher les notifications du navigateur",
+        "permissionDenied": "Les notifications de bureau n'ont pas été activées. Autorisez-les dans les paramètres de votre navigateur."
       },
-      "handsoffOnly": {
-        "title": "Notifications de transfert uniquement",
-        "description": "Notifier uniquement pour les demandes de transfert"
-      }
+      "saveFailed": "Échec de l'enregistrement des préférences de notification. Veuillez réessayer."
     },
     "appearance": {
       "title": "Thème",

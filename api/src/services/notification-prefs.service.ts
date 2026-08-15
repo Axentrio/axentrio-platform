@@ -18,8 +18,8 @@ export function resolveNotificationPrefs(
   };
 
   return {
-    handoffPlatform: p.handoffRequest,
+    handoffPlatform: p.handoffRequest && p.push,
     handoffEmail: p.handoffRequest && p.email,
-    newMessagePlatform: p.newMessage,
+    newMessagePlatform: p.newMessage && p.push,
   };
 }

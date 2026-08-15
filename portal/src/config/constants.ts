@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   USER: 'handsoff_user',
   PREFERENCES: 'handsoff_preferences',
   THEME: 'handsoff_theme',
+  DESKTOP_NOTIFICATIONS: 'handsoff_desktop_notifications',
 } as const;
 
 // WebSocket Events

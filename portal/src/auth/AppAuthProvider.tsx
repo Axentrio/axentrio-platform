@@ -6,8 +6,10 @@
 import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useUser, useAuth, useOrganization } from '@clerk/clerk-react';
 import type { User, UserRole } from '@app-types/index';
+import { DEFAULT_NOTIFICATION_PREFERENCES, type NotificationPreferences } from '@contracts/notification-preferences';
 import { API_CONFIG, ENDPOINTS } from '@config/api.config';
 import { setTokenProvider } from '@services/apiClient';
+import { setSoundMuted } from '@websocket/notificationSound';
 import { useTenantContextStore } from '../stores/tenantContextStore';
 import i18n, { isSupportedLocale } from '../i18n';
 
@@ -61,6 +63,8 @@ export interface AppAuthContextValue {
   agentId: string | null;
   tenantId: string | null;
   tenantName: string | null;
+  notificationPreferences: Required<NotificationPreferences>;
+  setNotificationPreferences: (preferences: Required<NotificationPreferences>) => void;
 }
 
 export const AppAuthContext = createContext<AppAuthContextValue | null>(null);
@@ -71,6 +75,9 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const { organization, isLoaded: orgLoaded } = useOrganization();
 
   const [dbIds, setDbIds] = useState<DbIds | null>(null);
+  const [notificationPreferences, setNotificationPreferences] = useState<Required<NotificationPreferences>>(
+    DEFAULT_NOTIFICATION_PREFERENCES,
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +90,7 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     if (!isSignedIn || !organization) {
       setDbIds(null);
+      setNotificationPreferences(DEFAULT_NOTIFICATION_PREFERENCES);
       setIsLoading(false);
       return;
     }
@@ -107,6 +115,10 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // API returns { success, data: { ... } } envelope
         const data = json.data ?? json;
         if (!cancelled) {
+          const foldedNotificationPreferences: Required<NotificationPreferences> = {
+            ...DEFAULT_NOTIFICATION_PREFERENCES,
+            ...(data.notificationPreferences ?? {}),
+          };
           setDbIds({
             agentId: data.agentId,
             tenantId: data.tenantId,
@@ -114,6 +126,8 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
             tenantName: data.tenantName,
             email: data.email,
           });
+          setNotificationPreferences(foldedNotificationPreferences);
+          setSoundMuted(!foldedNotificationPreferences.sound);
           // Apply server-saved locale so users see their preferred language
           // immediately after sign-in on any device. If no server locale is
           // set, leave i18next on whatever the browser detector picked.
@@ -210,7 +224,6 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
             updatedAt: clerkUser.updatedAt?.toISOString() || new Date().toISOString(),
             preferences: {
               theme: 'system',
-              notifications: { sound: true, desktop: true, handsoffOnly: false },
               language: 'en',
             },
           }
@@ -242,6 +255,8 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
     agentId: dbIds?.agentId || null,
     tenantId: dbIds?.tenantId || null,
     tenantName: dbIds?.tenantName || null,
+    notificationPreferences,
+    setNotificationPreferences,
   };
 
   return (

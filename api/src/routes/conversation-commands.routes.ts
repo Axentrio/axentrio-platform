@@ -27,6 +27,10 @@ import { verifyToken } from '../middleware/auth.middleware';
 import { asyncHandler, BadRequestError } from '../middleware/error-handler';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import {
+  emitConversationUpsertForSession,
+  emitMessageCreatedForSession,
+} from '../realtime/conversation-events';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { conversationCommands } from '../services/conversation-command.service';
@@ -118,6 +122,8 @@ router.post(
         sessionId: req.params.sessionId,
         agentId: req.user!.id,
       });
+      // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
     }
 
     sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
@@ -148,6 +154,9 @@ router.post(
         reason,
         returnedAt: new Date().toISOString(),
       });
+      // B-PR3a: a release previously reached ONLY the session room — the
+      // agents-room gap this PR closes.
+      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
     }
 
     sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
@@ -177,6 +186,8 @@ router.post(
         rejectedBy: req.user!.id,
         rejectedAt: new Date().toISOString(),
       });
+      // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
     }
 
     sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
@@ -209,6 +220,9 @@ router.post(
         endedAt: new Date().toISOString(),
         closedBy: 'agent',
       });
+      // B-PR3a: a close previously reached ONLY the session room — the
+      // agents-room gap this PR closes.
+      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
     }
 
     sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
@@ -263,6 +277,20 @@ router.post(
       if (result.autoClaimed) {
         emitToTenantAgents(req.tenant!.id, 'handoff:assigned', { sessionId, agentId: req.user!.id });
       }
+      // B-PR3a: normalized events, post-commit. Only ids are in hand here —
+      // the helper re-selects a fresh row (it also carries an auto-claim's
+      // committed ownership) and is fail-safe END TO END: a DB hiccup on the
+      // re-select or the emits is logged, never a 500 on a request whose
+      // message already committed.
+      await emitMessageCreatedForSession(sessionId, req.tenant!.id, {
+        id: result.message.id,
+        sessionId,
+        type: 'text',
+        content,
+        senderType: 'agent',
+        status: 'sent',
+        createdAt: result.message.createdAt,
+      });
       // External channels get the reply post-commit (mirrors the socket path,
       // including Meta's HUMAN_AGENT tag). Failure is logged, never a rollback:
       // the persisted message is the source of truth; PR 3 surfaces per-message

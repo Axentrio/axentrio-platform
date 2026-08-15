@@ -43,6 +43,12 @@ import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
 import { sendMessageSchema, chatListQuerySchema } from '../schemas';
 import { emitWebhookEvent } from '../webhooks/webhook.emitter';
+import { serializeConversationSummary, previewFromRaw } from '../realtime/conversation-serializer';
+import {
+  emitConversationUpsert,
+  emitConversationUpsertForSession,
+  emitMessageCreated,
+} from '../realtime/conversation-events';
 
 /** Safely serialise a message for API responses, decrypting content if needed. */
 function serialiseMessage(m: Message) {
@@ -214,6 +220,20 @@ router.post(
 
     emitToSession(tenantId!, sessionId, 'message:receive', messageData);
 
+    // B-PR3a: the normalized events, alongside the legacy emit (additive).
+    emitMessageCreated(session, {
+      id: savedMessage.id,
+      sessionId,
+      type: savedMessage.type,
+      content: plainContent,
+      senderType: 'user',
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+    });
+    await emitConversationUpsert(session, {
+      lastMessage: { content: plainContent, senderType: 'user' },
+    });
+
     scheduleTurn(session, savedMessage).catch((err) => {
       logger.error('Error scheduling turn:', err);
     });
@@ -342,6 +362,11 @@ router.post(
       endedAt,
     });
 
+    // B-PR3a: normalized lifecycle event to BOTH rooms (the legacy
+    // session:closed only reached the session room). Fresh re-select — the
+    // in-hand entity predates the close.
+    await emitConversationUpsertForSession(sessionId, tenantId);
+
     logger.info(`Session ${sessionId} closed`, { reason });
 
     sendSuccess(res, {
@@ -406,36 +431,22 @@ router.get(
         .getRawMany();
 
       for (const row of msgs) {
-        let content = row.content || '';
-        if (row.encrypted && content) {
-          try { content = decrypt(content, row.id); } catch { content = '[encrypted]'; }
-        }
-        lastMessages[row.session_id] = {
-          content: content.substring(0, 80),
-          senderType: row.sender_type || 'user',
-        };
+        lastMessages[row.session_id] = previewFromRaw({
+          id: row.id,
+          content: row.content,
+          encrypted: row.encrypted,
+          senderType: row.sender_type,
+        });
       }
     }
 
+    // ONE mapper for this row and the conversation:upsert socket payload
+    // (B-PR3a): the shapes cannot diverge because they are the same code.
     sendPaginated(
       res,
-      result.data.map((s) => ({
-        id: s.id,
-        sessionId: s.id,
-        status: s.status,
-        aiAutoReplyEnabled: s.aiAutoReplyEnabled,
-        guardrailStatus: s.guardrailStatus,
-        userName: `Visitor ${s.visitorId?.substring(0, 8) || 'Anonymous'}`,
-        assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
-        assignedAgentName: s.assignedAgent?.userId ?? null,
-        messageCount: s.messageCount,
-        lastMessage: lastMessages[s.id]?.content || null,
-        lastMessageSender: lastMessages[s.id]?.senderType || null,
-        lastMessageAt: s.lastActivityAt,
-        lastActivityAt: s.lastActivityAt,
-        source: s.source,
-        createdAt: s.createdAt,
-      })),
+      result.data.map((s) =>
+        serializeConversationSummary(s, { lastMessage: lastMessages[s.id] ?? null }),
+      ),
       result.meta
     );
   })
@@ -545,6 +556,9 @@ router.post(
       { tenantId: req.user?.tenantId },
     );
 
+    // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+    await emitConversationUpsertForSession(id, req.user?.tenantId);
+
     logger.info(`Session ${id} transferred to agent ${targetAgentId}`);
 
     sendSuccess(res, {
@@ -591,6 +605,9 @@ router.post(
       endedAt: session.endedAt,
       closedBy: 'agent',
     });
+
+    // B-PR3a: normalized lifecycle event to BOTH rooms, post-commit.
+    await emitConversationUpsertForSession(id, req.user?.tenantId);
 
     // Fire conversation.ended webhook — non-blocking, errors handled internally
     emitWebhookEvent({

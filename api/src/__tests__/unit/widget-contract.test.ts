@@ -37,6 +37,15 @@ vi.mock('../../middleware/rate-limit', () => ({
 }));
 
 vi.mock('../../websocket/socket.handler', () => ({ emitToSession: vi.fn() }));
+// B-PR3a normalized events — mocked as a seam (this suite's data-source stub
+// carries no session columns; the realtime payloads have their own DB-backed
+// integration suite).
+vi.mock('../../realtime/conversation-events', () => ({
+  emitConversationUpsert: vi.fn(async () => undefined),
+  emitConversationUpsertForSession: vi.fn(async () => undefined),
+  emitMessageCreated: vi.fn(),
+  loadConversationForEmit: vi.fn(async () => null),
+}));
 vi.mock('../../services/message-forwarding.service', () => ({ forwardMessageToN8n: vi.fn() }));
 vi.mock('../../widget/widget-version', () => ({ widgetVersionHash: 'test', widgetPath: '/tmp/widget.js' }));
 vi.mock('../../billing/enforce', () => ({

@@ -1958,6 +1958,16 @@
         "timeout": "Délai de conversation dépassé"
       }
     },
+    "thread": {
+      "truncated": "Seules les conversations antérieures les plus récentes sont affichées",
+      "boundaryClosed": "Conversation antérieure - fermée le {{date}}",
+      "boundaryOpen": "Conversation antérieure - commencée le {{date}}",
+      "messageCount": "{{count}} messages",
+      "earlierBadge": "{{count}} antérieures",
+      "earlierTooltip": "Ce client a des conversations antérieures",
+      "duplicatesTitle": "Peut-être le même client - non fusionné",
+      "open": "Ouvrir"
+    },
     "window": {
       "backToList": "Retour à la liste des conversations",
       "header": {

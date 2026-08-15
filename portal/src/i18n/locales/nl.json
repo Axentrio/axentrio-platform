@@ -1959,6 +1959,16 @@
         "timeout": "Time-out van gesprek"
       }
     },
+    "thread": {
+      "truncated": "Alleen de nieuwste eerdere gesprekken worden getoond",
+      "boundaryClosed": "Eerder gesprek - gesloten op {{date}}",
+      "boundaryOpen": "Eerder gesprek - gestart op {{date}}",
+      "messageCount": "{{count}} berichten",
+      "earlierBadge": "{{count}} eerder",
+      "earlierTooltip": "Deze klant heeft eerdere gesprekken",
+      "duplicatesTitle": "Mogelijk dezelfde klant - niet samengevoegd",
+      "open": "Openen"
+    },
     "window": {
       "backToList": "Terug naar gesprekkenlijst",
       "header": {

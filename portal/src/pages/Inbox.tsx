@@ -218,6 +218,23 @@ const Inbox: React.FC = () => {
     setSelectedChat(chat);
   };
 
+  // B-PR4b: open a session from the possible-duplicates audit by id. The
+  // freshest cached row wins; a GET is only the fallback (audit entries can
+  // reference sessions no cached list variant holds).
+  const handleOpenSessionById = async (sessionId: string) => {
+    const cached = findCachedChat(queryClient, sessionId);
+    if (cached) {
+      setSelectedChat(cached);
+      return;
+    }
+    try {
+      const chat = normalizeChatDetail(await api.get<Chat>(`/chats/${sessionId}`)) as Chat;
+      setSelectedChat(chat);
+    } catch {
+      toast.error(t('inbox.toasts.loadFailed'));
+    }
+  };
+
   /**
    * Select a conversation after a command, patched from the POST RESPONSE
    * summary instead of a follow-up GET. The reduced summary carries no
@@ -641,6 +658,7 @@ const Inbox: React.FC = () => {
                 <ChatWindow
                   chat={selectedChat}
                   onTransfer={() => setIsTransferModalOpen(true)}
+                  onOpenSession={handleOpenSessionById}
                   className="h-full rounded-none border-0 shadow-none"
                 />
               </div>

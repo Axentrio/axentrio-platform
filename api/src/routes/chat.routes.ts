@@ -7,7 +7,7 @@
  */
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
-import { IsNull, DeepPartial } from 'typeorm';
+import { IsNull, DeepPartial, Brackets } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message, MessageStatus } from '../database/entities/Message';
@@ -46,6 +46,7 @@ import { emitWebhookEvent } from '../webhooks/webhook.emitter';
 import {
   serializeConversationSummary,
   previewFromRaw,
+  computeCustomerThreadId,
   type CustomerThreadBinding,
 } from '../realtime/conversation-serializer';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -478,6 +479,368 @@ router.get(
       ),
       result.meta
     );
+  })
+);
+
+// ---------------------------------------------------------------------------
+// B-PR4b §1 - one-customer thread (read-only). NEVER merges rows.
+// ---------------------------------------------------------------------------
+
+/** Prior sessions returned per thread (the NEWEST are kept); more ⇒ `truncated`. */
+export const THREAD_PRIOR_SESSION_CAP = 20;
+/** Per-session message page - the same size the detail GET serves. */
+const THREAD_MESSAGES_PER_SESSION = 50;
+/** Cap on the weaker-signal possible-duplicates audit list. */
+const THREAD_DUPLICATE_CAP = 10;
+
+/**
+ * The customer identity a thread groups on. Mirrors computeCustomerThreadId
+ * (B-PR4a): widget identity lives on the session row; external identity is the
+ * conversation_bindings triple. `session` = unresolvable (an external session
+ * with no binding row and no identity facts on the row) - the thread is then
+ * just the one session, per spec.
+ */
+type ThreadIdentity =
+  | { kind: 'widget'; botId: string; visitorId: string }
+  | { kind: 'external'; binding: CustomerThreadBinding }
+  | { kind: 'session' };
+
+/**
+ * Resolve the selected session's customer identity.
+ *
+ * External note: the inbound pipeline REASSIGNS the binding row to the new
+ * session when a closed conversation reopens (findOrCreateConversation), so
+ * only the newest session of an external customer still holds a binding. When
+ * the selected session lost its binding that way, fall back to the identity
+ * facts the pipeline stamps on every session row it creates:
+ * channelConnectionId + visitorId(=externalUserId) +
+ * metadata.customData.externalThreadId.
+ */
+async function resolveThreadIdentity(session: ChatSession): Promise<ThreadIdentity> {
+  if (session.source === 'widget') {
+    if (!session.visitorId) return { kind: 'session' };
+    return { kind: 'widget', botId: session.botId, visitorId: session.visitorId };
+  }
+  const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
+    where: { sessionId: session.id },
+    order: { createdAt: 'DESC' },
+  });
+  const metaThreadId = session.metadata?.customData?.externalThreadId;
+  const candidate: CustomerThreadBinding | null = binding
+    ? {
+        channelConnectionId: binding.channelConnectionId,
+        externalUserId: binding.externalUserId,
+        externalThreadId: binding.externalThreadId,
+      }
+    : session.channelConnectionId && session.visitorId && typeof metaThreadId === 'string'
+      ? {
+          channelConnectionId: session.channelConnectionId,
+          externalUserId: session.visitorId,
+          externalThreadId: metaThreadId,
+        }
+      : null;
+  // An INCOMPLETE identity must degrade to the one-session fallback, never to
+  // a `= ''`/`= NULL` match that silently drops related sessions and
+  // mis-classifies them as possibleDuplicates.
+  if (
+    !candidate ||
+    !candidate.channelConnectionId ||
+    !candidate.externalUserId ||
+    !candidate.externalThreadId
+  ) {
+    return { kind: 'session' };
+  }
+  return { kind: 'external', binding: candidate };
+}
+
+/** The `(started_at, id)` SQL of the conversation_bindings identity-triple
+ *  subquery, shared by the thread query and the duplicates exclusion. Params:
+ *  :bcc / :beu / :bet. */
+function bindingTripleSubQuery(): string {
+  return AppDataSource.getRepository(ConversationBinding)
+    .createQueryBuilder('b')
+    .select('b.sessionId')
+    .where('b.channelConnectionId = :bcc')
+    .andWhere('b.externalUserId = :beu')
+    .andWhere('b.externalThreadId = :bet')
+    .getQuery();
+}
+
+/**
+ * The sessions sharing the identity that are STRICTLY OLDER than the selected
+ * one - TENANT-SCOPED on every branch. The strict `(started_at, id)` cut means
+ * a NEWER (possibly still ACTIVE) session of the same identity can never
+ * render as read-only "earlier history" above an old selected session; the
+ * timeline always ends at the selected session's live thread.
+ *
+ * widget:   same (tenant_id, bot_id, visitor_id) AND source='widget' - the
+ *           exact predicate of the B-PR4a partial unique index.
+ * external: the binding triple (matches the CURRENTLY-bound session) OR the
+ *           identity facts stamped on the row (matches PRIOR sessions whose
+ *           binding was reassigned on reopen). The strict externalThreadId
+ *           equality keeps e.g. a Telegram group chat out of the same user's
+ *           DM thread. Legacy rows missing the metadata fall out of the strict
+ *           thread and surface via possibleDuplicates instead.
+ */
+function threadSessionsQuery(
+  tenantId: string,
+  identity: Exclude<ThreadIdentity, { kind: 'session' }>,
+  selected: ChatSession,
+) {
+  const qb = sessionRepository
+    .createQueryBuilder('s')
+    .leftJoinAndSelect('s.assignedAgent', 'agent')
+    .where('s.tenantId = :tenantId', { tenantId })
+    // Strictly older than the selected session (row-value comparison, id
+    // tie-break) - never the selected row itself, never a newer sibling.
+    .andWhere('(s.startedAt, s.id) < (:selStartedAt, :selId)', {
+      selStartedAt: selected.startedAt ?? selected.createdAt,
+      selId: selected.id,
+    });
+
+  if (identity.kind === 'widget') {
+    return qb
+      .andWhere("s.source = 'widget'")
+      .andWhere('s.botId = :botId', { botId: identity.botId })
+      .andWhere('s.visitorId = :visitorId', { visitorId: identity.visitorId });
+  }
+
+  return qb
+    .andWhere("s.source <> 'widget'")
+    .andWhere(
+      new Brackets((w) => {
+        w.where(`s.id IN (${bindingTripleSubQuery()})`).orWhere(
+          `(s.channelConnectionId = :bcc AND s.visitorId = :beu AND s.metadata -> 'customData' ->> 'externalThreadId' = :bet)`,
+        );
+      }),
+    )
+    .setParameters({
+      bcc: identity.binding.channelConnectionId,
+      beu: identity.binding.externalUserId,
+      bet: identity.binding.externalThreadId,
+    });
+}
+
+/**
+ * Weaker-signal sessions an operator should eyeball but the thread must NOT
+ * absorb: the same widget visitor on a DIFFERENT bot, or the same external
+ * user on the connection OUTSIDE the strict identity (another
+ * externalThreadId, or a legacy row missing the thread facts). The exclusion
+ * is the WHOLE identity - not just the rows the (older-than-selected, capped)
+ * thread returned - so a newer sibling of the same identity is never
+ * mis-classified as a duplicate. Read-only; never auto-merged.
+ */
+async function findPossibleDuplicates(
+  tenantId: string,
+  session: ChatSession,
+  identity: ThreadIdentity,
+): Promise<ChatSession[]> {
+  if (identity.kind === 'widget') {
+    return sessionRepository
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.assignedAgent', 'agent')
+      .where('s.tenantId = :tenantId', { tenantId })
+      .andWhere("s.source = 'widget'")
+      .andWhere('s.visitorId = :visitorId', { visitorId: identity.visitorId })
+      .andWhere('s.botId != :botId', { botId: identity.botId })
+      .orderBy('s.lastActivityAt', 'DESC')
+      .take(THREAD_DUPLICATE_CAP)
+      .getMany();
+  }
+  // External (resolved or fallback): same user on the same connection. Works
+  // even when the strict triple could not be resolved - exactly the legacy
+  // scatter the audit exists for.
+  const channelConnectionId =
+    identity.kind === 'external'
+      ? identity.binding.channelConnectionId
+      : session.channelConnectionId;
+  const externalUserId =
+    identity.kind === 'external' ? identity.binding.externalUserId : session.visitorId;
+  if (!channelConnectionId || !externalUserId) return [];
+  const qb = sessionRepository
+    .createQueryBuilder('s')
+    .leftJoinAndSelect('s.assignedAgent', 'agent')
+    .where('s.tenantId = :tenantId', { tenantId })
+    .andWhere("s.source <> 'widget'")
+    .andWhere('s.channelConnectionId = :cc', { cc: channelConnectionId })
+    .andWhere('s.visitorId = :eu', { eu: externalUserId });
+  if (identity.kind === 'external') {
+    // Exclude every session of the strict identity (bound to the triple OR
+    // stamped with its externalThreadId), whatever its age.
+    qb.andWhere(`s.id NOT IN (${bindingTripleSubQuery()})`)
+      .andWhere(
+        `s.metadata -> 'customData' ->> 'externalThreadId' IS DISTINCT FROM :bet`,
+      )
+      .setParameters({
+        bcc: identity.binding.channelConnectionId,
+        beu: identity.binding.externalUserId,
+        bet: identity.binding.externalThreadId,
+      });
+  } else {
+    // Unresolvable identity ('session' fallback): everything but itself.
+    qb.andWhere('s.id != :selfId', { selfId: session.id });
+  }
+  return qb.orderBy('s.lastActivityAt', 'DESC').take(THREAD_DUPLICATE_CAP).getMany();
+}
+
+/** Same per-message shape the detail GET serves (serialiseMessage + the
+ *  participant facts), plus sessionId so a multi-session payload stays
+ *  attributable to its boundary block. */
+function serialiseThreadMessage(m: Message) {
+  return {
+    ...serialiseMessage(m),
+    sessionId: m.sessionId,
+    sender: m.participant?.type ?? 'user',
+    senderName: m.participant?.name ?? 'Unknown',
+    participantId: m.participantId,
+  };
+}
+
+/** The boundary label facts for one thread block. */
+function threadBoundary(row: ChatSession) {
+  return {
+    startedAt: row.startedAt ?? row.createdAt,
+    endedAt: row.endedAt ?? null,
+    status: row.status,
+  };
+}
+
+/**
+ * GET /chat/:sessionId/thread  (agent endpoint, read-only)
+ *
+ * The selected session's customer thread UP TO the selected session: the
+ * strictly-older sessions sharing its identity, oldest→newest, each with its
+ * messages + a boundary label, ending at the selected session (isCurrent) -
+ * a newer sibling never renders as read-only history. Plus a
+ * possibleDuplicates audit list of weaker-signal sessions. Rows are never
+ * physically merged. Prior sessions are capped (newest THREAD_PRIOR_SESSION_CAP);
+ * `truncated` signals the cut.
+ */
+router.get(
+  '/:sessionId/thread',
+  requireClerkAuth, autoProvision, resolveTenantContext,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { sessionId } = req.params;
+    const tenantId = req.user?.tenantId;
+
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+      relations: ['assignedAgent'],
+    });
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    const identity = await resolveThreadIdentity(session);
+
+    // 1. The prior sessions: STRICTLY OLDER identity-siblings only (newest
+    // THREAD_PRIOR_SESSION_CAP of them), then the selected session last. A
+    // newer - possibly still active - sibling is never part of this history.
+    let rows: ChatSession[] = [session];
+    let totalSessions = 1;
+    if (identity.kind !== 'session') {
+      const [olderDesc, olderTotal] = await threadSessionsQuery(tenantId!, identity, session)
+        .orderBy('s.startedAt', 'DESC')
+        .addOrderBy('s.id', 'DESC')
+        .take(THREAD_PRIOR_SESSION_CAP)
+        .getManyAndCount();
+      totalSessions = olderTotal + 1; // priors + the selected session
+      rows = [...olderDesc, session];
+      const startedMs = (r: ChatSession) => new Date(r.startedAt ?? r.createdAt).getTime();
+      rows.sort((a, b) => startedMs(a) - startedMs(b) || a.id.localeCompare(b.id));
+    }
+    const truncated = totalSessions > rows.length;
+
+    // 2. Messages for every returned session in ONE round trip, capped per
+    // session via a window function (no per-session N+1), then hydrated as
+    // entities so the decrypt/serialize path is byte-for-byte the detail GET's.
+    const rowIds = rows.map((r) => r.id);
+    // Defense-in-depth: BOTH message queries are tenant-scoped too, so this
+    // decrypt-and-return path across up to 21 sessions can never surface a
+    // mis-associated cross-tenant message row.
+    const cappedIdRows = (await AppDataSource.query(
+      `SELECT id FROM (
+         SELECT m.id, ROW_NUMBER() OVER (
+           PARTITION BY m.session_id ORDER BY m.created_at DESC, m.id DESC
+         ) AS rn
+         FROM messages m
+         WHERE m.session_id = ANY($1::uuid[])
+           AND m.tenant_id = $3
+       ) ranked
+       WHERE rn <= $2`,
+      [rowIds, THREAD_MESSAGES_PER_SESSION, tenantId],
+    )) as Array<{ id: string }>;
+
+    const messagesBySession = new Map<string, ReturnType<typeof serialiseThreadMessage>[]>();
+    if (cappedIdRows.length > 0) {
+      const msgs = await messageRepository
+        .createQueryBuilder('m')
+        .leftJoinAndSelect('m.participant', 'p')
+        .where('m.id IN (:...mids)', { mids: cappedIdRows.map((r) => r.id) })
+        .andWhere('m.tenantId = :tenantId', { tenantId })
+        .orderBy('m.createdAt', 'ASC')
+        .addOrderBy('m.id', 'ASC')
+        .getMany();
+      for (const m of msgs) {
+        const list = messagesBySession.get(m.sessionId) ?? [];
+        list.push(serialiseThreadMessage(m));
+        messagesBySession.set(m.sessionId, list);
+      }
+    }
+
+    // 3. Serialize. Every session in an external thread shares the resolved
+    // binding facts - by construction they are the same customer identity, so
+    // the summaries agree on one customerThreadId even for prior sessions
+    // whose binding row was reassigned.
+    const threadBinding = identity.kind === 'external' ? identity.binding : null;
+    const sessions = rows.map((row) => {
+      const msgs = messagesBySession.get(row.id) ?? [];
+      const last = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+      return {
+        summary: serializeConversationSummary(row, {
+          lastMessage: last ? { content: last.content, senderType: last.sender } : null,
+          binding: threadBinding,
+        }),
+        boundary: threadBoundary(row),
+        isCurrent: row.id === session.id,
+        messages: msgs,
+      };
+    });
+
+    // 4. The weaker-signal audit list. These are a DIFFERENT identity by
+    // definition, so their customerThreadId comes from their OWN binding
+    // (batch-fetched like the list route), never from the thread's.
+    const duplicates = await findPossibleDuplicates(tenantId!, session, identity);
+    const dupBindings: Record<string, CustomerThreadBinding> = {};
+    const dupExternalIds = duplicates.filter((d) => d.source !== 'widget').map((d) => d.id);
+    if (dupExternalIds.length > 0) {
+      const bindingRows = await AppDataSource.getRepository(ConversationBinding)
+        .createQueryBuilder('b')
+        .where('b.sessionId IN (:...ids)', { ids: dupExternalIds })
+        .orderBy('b.createdAt', 'ASC')
+        .getMany();
+      for (const b of bindingRows) {
+        dupBindings[b.sessionId] = {
+          channelConnectionId: b.channelConnectionId,
+          externalUserId: b.externalUserId,
+          externalThreadId: b.externalThreadId,
+        };
+      }
+    }
+    const possibleDuplicates = duplicates.map((d) => ({
+      summary: serializeConversationSummary(d, { binding: dupBindings[d.id] ?? null }),
+      boundary: threadBoundary(d),
+    }));
+
+    sendSuccess(res, {
+      sessionId: session.id,
+      customerThreadId: computeCustomerThreadId(session, threadBinding),
+      identity: identity.kind,
+      totalSessions,
+      truncated,
+      sessions,
+      possibleDuplicates,
+    });
   })
 );
 

@@ -1997,6 +1997,16 @@
         "timeout": "Conversation timeout"
       }
     },
+    "thread": {
+      "truncated": "Only the newest earlier conversations are shown",
+      "boundaryClosed": "Earlier conversation - closed {{date}}",
+      "boundaryOpen": "Earlier conversation - started {{date}}",
+      "messageCount": "{{count}} messages",
+      "earlierBadge": "{{count}} earlier",
+      "earlierTooltip": "This customer has earlier conversations",
+      "duplicatesTitle": "Possible same customer - not merged",
+      "open": "Open"
+    },
     "window": {
       "backToList": "Back to chat list",
       "header": {

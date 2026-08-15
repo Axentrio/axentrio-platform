@@ -238,6 +238,7 @@ export const SchedulerSettings: React.FC = () => {
   const [venue, setVenue] = useState<VenueAddress>({
     street: null, postalCode: null, city: null, country: null, placeId: null,
   });
+  const [reviewingVenue, setReviewingVenue] = useState(false);
   /**
    * Any hand-edit invalidates a selection, so every field goes through here rather than calling
    * `setVenue` directly. Four call sites each remembering to null the id is three chances to
@@ -262,6 +263,10 @@ export const SchedulerSettings: React.FC = () => {
    */
   const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
   const showVenue = workLocation !== 'no_location' || hasStoredVenue;
+  const storedVenueSummary = [venue.street, venue.postalCode, venue.city, venue.country]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(', ') || 'Saved address';
   /** Does this business go TO its customers? The only shape geographic grouping applies to. */
   const travelsToCustomers = workLocation === 'on_the_road' || workLocation === 'both';
   /**
@@ -852,9 +857,46 @@ export const SchedulerSettings: React.FC = () => {
 
                 {/* Venue — where customers come TO, and where the van sets out FROM. Never the
                     VAT/legal address. Hidden only when no Service is physical AND nothing is
-                    stored; a stored address always stays visible and editable. */}
+                    stored; a stored address always stays visible, with editing one click away. */}
                 {showVenue && (
                 <div className="space-y-3 border-t border-edge pt-4">
+                  {workLocation === 'no_location' && hasStoredVenue && !reviewingVenue ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-medium text-text-primary">Your address</h3>
+                        <p className="mt-1 truncate text-xs text-text-secondary" title={storedVenueSummary}>
+                          {storedVenueSummary}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          onClick={() => setReviewingVenue(true)}
+                        >
+                          Review
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          onClick={() =>
+                            setVenue({
+                              street: null,
+                              postalCode: null,
+                              city: null,
+                              country: null,
+                              placeId: null,
+                            })
+                          }
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   <div>
                     <h3 className="text-sm font-medium text-text-primary">Your address</h3>
                     {/* #79 (LP1): this copy used to end "It is not used for jobs where you travel
@@ -971,14 +1013,18 @@ export const SchedulerSettings: React.FC = () => {
                       </span>
                     </p>
                   )}
+                    </>
+                  )}
                 </div>
                 )}
 
                 {/*
                   Travel time. AFTER the address deliberately: the day's first job is measured
                   from it, so an owner who has not filled it in is looking at the field this
-                  section depends on.
+                  section depends on. C2: no-location services have no address-to-address journey,
+                  so this preference has nothing to measure and is gated on workLocation alone.
                 */}
+                {workLocation !== 'no_location' && (
                 <div className="space-y-3 border-t border-edge pt-4">
                   <div>
                     <h3 className="text-sm font-medium text-text-primary">Travel time</h3>
@@ -1142,6 +1188,7 @@ export const SchedulerSettings: React.FC = () => {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Date overrides — holidays / closures / one-off hours */}
                 <div className="space-y-3 border-t border-edge pt-4">

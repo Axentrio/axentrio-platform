@@ -241,7 +241,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
    * deleting it. The component's rule is therefore "hide only when there is nothing stored to
    * hide", which makes a populated-but-hidden control impossible rather than merely handled.
    */
-  it('never hides a control that holds something, even where it does not apply (#79)', async () => {
+  it('keeps a stored address reviewable without showing the full form by default (#79, C2)', async () => {
     const remoteOnly = {
       ...CONFIG,
       services: [{ id: 's1', isActive: true, locationType: 'google_meet', customerAddressRequired: false }],
@@ -249,9 +249,11 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     };
     const body = await saveUntouched(remoteOnly);
 
-    // Still on screen, because it holds an address. This is the assertion that makes the
-    // round-trip below mean something: a test that only checked the payload would pass just as
-    // happily against a hidden control whose state happened to survive.
+    // The stored value is collapsed, but remains reviewable. This is the assertion that makes
+    // the round-trip below mean something: a test that only checked the payload would pass just
+    // as happily against a hidden control whose state happened to survive.
+    expect(document.getElementById('venue-street')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
     expect(document.getElementById('venue-street')).not.toBeNull();
     expect(body.venueAddress).toEqual(VENUE);
     expect(body.serviceArea).toEqual(AREA);
@@ -313,6 +315,37 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     // And an absent control still sends its empty value, so nothing about the save changes.
     expect(body.venueAddress).toEqual({ placeId: null, street: null, postalCode: null, city: null, country: null });
     expect(body.serviceArea).toEqual([]);
+  });
+
+  it('hides travel time for an owner with no location', async () => {
+    await saveUntouched({
+      ...CONFIG,
+      workLocation: 'no_location',
+      venueAddress: { placeId: null, street: null, postalCode: null, city: null, country: null },
+      serviceArea: [],
+    });
+
+    expect(screen.queryByLabelText(/only offer times i can reach/i)).toBeNull();
+  });
+
+  it('collapses a stored no-location address and hides travel time', async () => {
+    await saveUntouched({ ...CONFIG, workLocation: 'no_location', venueAddress: VENUE });
+
+    expect(screen.getByRole('button', { name: /review/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/only offer times i can reach/i)).toBeNull();
+  });
+
+  it('clears a collapsed no-location address from the form', async () => {
+    await saveUntouched({ ...CONFIG, workLocation: 'no_location', venueAddress: VENUE });
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /review/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /clear/i })).toBeNull();
+      expect(document.getElementById('venue-street')).toBeNull();
+    });
   });
 
   it('returns the venue address unchanged when the owner saves without editing', async () => {

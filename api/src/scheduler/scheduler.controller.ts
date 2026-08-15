@@ -361,20 +361,9 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     let rule = await repo.findOne({ where: { botId: bot.id } });
     if (!rule) rule = repo.create({ tenantId, botId: bot.id });
     Object.assign(rule, data.availability);
-    // Tolerant cutover (PR 1a): a client-sent `timezone` is ACCEPTED but
-    // IGNORED — the rule's denormalized timezone is always written equal to the
-    // bot's canonical, geography-derived businessTimezone. Old deployed clients
-    // still send `availability.timezone` (their schema requires it), so the
-    // server must not fail on it; it just can no longer change business time.
+    // The rule timezone is never client-writable: it is always the bot's canonical,
+    // geography-derived businessTimezone (server-owned authority, TZ PR1a).
     const derivedTimezone = bot.businessTimezone || DEFAULT_BUSINESS_TIMEZONE;
-    if (data.availability.timezone && data.availability.timezone !== derivedTimezone) {
-      logger.warn('[BusinessTimezone] client-sent availability.timezone conflicts with the derived value — ignored', {
-        tenantId,
-        botId: bot.id,
-        received: data.availability.timezone,
-        derived: derivedTimezone,
-      });
-    }
     rule.timezone = derivedTimezone;
     await repo.save(rule);
   }

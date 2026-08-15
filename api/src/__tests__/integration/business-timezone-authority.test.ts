@@ -30,7 +30,6 @@ import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
-import { logger } from '../../utils/logger';
 import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import type { Tenant } from '../../database/entities/Tenant';
 
@@ -39,7 +38,6 @@ const BRUSSELS = 'Europe/Brussels';
 
 let tenant: Tenant;
 let anchor: Bot;
-const warnSpy = vi.spyOn(logger, 'warn');
 
 const botRow = (id: string) =>
   AppDataSource.getRepository(Bot).findOneOrFail({ where: { id } });
@@ -78,10 +76,6 @@ describe('a legacy conflicting timezone payload cannot change business time (A4 
     expect(res.body.data.availability.timezone).toBe(BRUSSELS);
     // Persisted value is the DERIVED one.
     expect((await ruleRow(anchor.id))!.timezone).toBe(BRUSSELS);
-    const conflictWarnings = warnSpy.mock.calls.filter(([message]) =>
-      String(message).includes('[BusinessTimezone]') && String(message).includes('availability.timezone'),
-    );
-    expect(conflictWarnings).toHaveLength(1);
   });
 
   it('a NEW tolerant client may omit timezone entirely — the rule still gets the derived value', async () => {

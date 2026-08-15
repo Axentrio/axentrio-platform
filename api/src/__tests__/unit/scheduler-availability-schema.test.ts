@@ -55,20 +55,25 @@ describe('availabilityInputSchema — split shifts', () => {
 
 describe('availabilityInputSchema — timezone', () => {
   it('accepts a missing timezone for new clients', () => {
-    expect(availabilityInputSchema.safeParse({ weeklyHours: {} }).success).toBe(true);
-  });
-
-  it('accepts real IANA zones', () => {
-    for (const tz of ['Europe/Brussels', 'UTC', 'America/New_York']) {
-      expect(availabilityInputSchema.safeParse({ ...base, timezone: tz, weeklyHours: {} }).success).toBe(true);
+    const r = availabilityInputSchema.safeParse({ weeklyHours: {} });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data).not.toHaveProperty('timezone');
+      expect(r.data.weeklyHours).toEqual({});
     }
   });
 
-  it('REJECTS a typo instead of silently emptying the calendar', () => {
-    // 'Europe/Brusselz' used to save fine; luxon then returned an invalid DateTime and the
-    // slot engine skipped every window, so the owner saw no availability and no error.
-    const r = availabilityInputSchema.safeParse({ ...base, timezone: 'Europe/Brusselz', weeklyHours: {} });
-    expect(r.success).toBe(false);
+  it('strips a stray timezone of any shape without validating it', () => {
+    const r = availabilityInputSchema.safeParse({
+      ...base,
+      timezone: { not: 'an IANA timezone' },
+      weeklyHours: { wed: nineToFive },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data).not.toHaveProperty('timezone');
+      expect(r.data.weeklyHours).toEqual({ wed: nineToFive });
+    }
   });
 
   it('isValidTimezone is the shared judge for owner input and preset seeds alike', () => {

@@ -129,7 +129,7 @@ export function useCreateBot() {
 export function useUpdateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: BusinessHours }) =>
+    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: Omit<BusinessHours, 'timezone'> }) =>
       api.patch<BotListItem>(`/bots/${id}`, patch),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });

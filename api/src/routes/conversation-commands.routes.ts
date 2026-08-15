@@ -24,7 +24,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { verifyToken } from '../middleware/auth.middleware';
-import { asyncHandler, BadRequestError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError } from '../middleware/error-handler';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import {
@@ -79,37 +79,46 @@ function optionalIdempotencyKey(body: unknown): string | undefined {
 
 /**
  * POST /chats/:sessionId/takeover
- * Claim the conversation for the calling operator. Only `mode: "indefinite"` is
- * exposed: the timed-expiry worker ships in PR 5, and a timed control that can
- * never expire must not exist (codex-locked ordering).
+ * Claim the conversation for the calling operator, with
+ * `mode: 'indefinite' | 'timed'` (B-PR5a exposes 'timed' now that the expiry
+ * worker exists - the codex-locked ordering). A timed claim requires an
+ * integer `hours` 1..24 (the DB CHECK range); anything else is a 400 with the
+ * stable code `invalid_takeover_hours`.
+ *
+ * A same-owner re-claim that carries an EXPLICIT mode updates the
+ * human_control_* policy in place (the B-PR5b "change duration" action).
  *
  * Backward compat (B2 fix): the SHIPPED portal posts here with an EMPTY body
  * (Inbox.tsx:198), so key and mode are optional — absent mode defaults to
- * 'indefinite', absent key executes non-idempotently.
+ * 'indefinite' (and can never rewrite an existing policy), absent key executes
+ * non-idempotently.
  */
 router.post(
   '/:sessionId/takeover',
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const idempotencyKey = optionalIdempotencyKey(req.body);
-    const { mode = 'indefinite', hours } = req.body as { mode?: string; hours?: number };
+    const { mode = 'indefinite', hours } = req.body as { mode?: string; hours?: unknown };
+    const modeIsExplicit = (req.body as { mode?: unknown })?.mode !== undefined;
 
     if (mode !== 'indefinite' && mode !== 'timed') {
       throw new BadRequestError("mode must be 'indefinite' or 'timed'");
     }
-    if (mode === 'timed') {
-      throw new BadRequestError(
-        'Timed takeover is not available yet',
-        { code: 'timed_takeover_not_available', hours },
+    if (mode === 'timed' && (typeof hours !== 'number' || !Number.isInteger(hours) || hours < 1 || hours > 24)) {
+      throw new ApiError(
+        'A timed takeover requires an integer hours value between 1 and 24',
+        400,
+        'invalid_takeover_hours',
+        { hours },
       );
     }
 
     const result = await conversationCommands.claimConversation(
       req.params.sessionId,
       req.user!.id,
-      { mode: 'indefinite' },
+      mode === 'timed' ? { mode: 'timed', hours: hours as number } : { mode: 'indefinite' },
       idempotencyKey,
-      { tenantId: req.tenant!.id },
+      { tenantId: req.tenant!.id, updatePolicyIfOwned: modeIsExplicit },
     );
 
     if (result.outcome === 'claimed' && !result.replayed) {
@@ -123,6 +132,11 @@ router.post(
         agentId: req.user!.id,
       });
       // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
+      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+    } else if (result.policyUpdated && !result.replayed) {
+      // Policy changed on an already-owned conversation: no legacy handoff
+      // emits (nothing was accepted or assigned), but the portal countdown
+      // needs the committed upsert.
       await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
     }
 

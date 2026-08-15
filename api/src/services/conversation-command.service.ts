@@ -39,6 +39,7 @@ import { Message } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
 import { User } from '../database/entities/User';
 import { deriveStatusFromOwnership } from './session-ownership';
+import { returningRows } from '../utils/raw-sql';
 import {
   getBotConfigForSession,
   BotPausedConfigError,
@@ -89,10 +90,10 @@ export class OperatorNotInTenantError extends ApiError {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-/** 1–24h timed control or an indefinite AI block. The timed EXPIRY worker is
- *  PR 5; the service accepts and persists both modes, but the REST layer keeps
- *  'timed' unexposed until the worker exists (codex fix: never expose a timed
- *  claim that can't expire). */
+/** 1–24h timed control or an indefinite AI block. B-PR5a ships the expiry
+ *  worker (server.ts sweep + the inbound check in message-forwarding), so the
+ *  REST layer now exposes 'timed' as well (codex ordering satisfied: a timed
+ *  claim only exists together with a working expiry path). */
 export type HumanControlPolicy = { mode: 'indefinite' } | { mode: 'timed'; hours: number };
 
 export type ConversationActor =
@@ -127,6 +128,9 @@ export interface RequestHandoffResult {
 
 export interface ClaimResult {
   outcome: 'claimed' | 'already_owned';
+  /** B-PR5a: true when a same-owner re-claim carried an explicit policy and the
+   *  human_control_* columns were rewritten (the "change duration" path). */
+  policyUpdated?: boolean;
   conversation: ConversationSummary;
   replayed?: boolean;
 }
@@ -141,6 +145,18 @@ export interface SendHumanMessageResult {
 
 export interface ReleaseResult {
   outcome: 'released' | 'already_bot_owned';
+  conversation: ConversationSummary;
+  replayed?: boolean;
+}
+
+export interface ExpireHumanControlResult {
+  /** 'released' = the timed deadline had passed and the conversation went back
+   *  to the bot. 'not_expired' = the locked row's deadline is in the future (an
+   *  operator re-claimed or a committed human reply slid it; the caller's read
+   *  was stale). 'not_applicable' = not human_owned / not timed anymore (an
+   *  operator released or closed it meanwhile). The last two are the no-op
+   *  outcomes that make the expiry sweep and the inbound check re-entrant. */
+  outcome: 'released' | 'not_expired' | 'not_applicable';
   conversation: ConversationSummary;
   replayed?: boolean;
 }
@@ -357,25 +373,72 @@ function summarize(session: ChatSession, openHandoffId: string | null): Conversa
   };
 }
 
-function humanControlColumns(policy: HumanControlPolicy, now: Date): Record<string, unknown> {
+/**
+ * Targeted-UPDATE column values for a human-control policy. DB-CLOCK AUTHORITY
+ * (codex review fix 1): started_at and until are SQL expressions (`now()` plus
+ * an interval), never JS dates, so ONE clock - Postgres - governs the claim,
+ * the slide, the policy update, the worker's expiry SELECT, and the expiry
+ * re-check alike. A node whose JS clock runs behind or ahead of the DB can
+ * therefore neither starve the sweep ('not_expired' forever) nor release
+ * early. `hours` is validated to an integer 1..24 BEFORE it is interpolated
+ * into the raw expression (no injection surface).
+ *
+ * The function-valued entries are skipped by applyOwnershipTransition's
+ * in-memory patch loop - callers re-read the committed timestamps via
+ * syncHumanControlTimestamps so the returned summary carries DB values.
+ */
+function humanControlColumns(policy: HumanControlPolicy): Record<string, unknown> {
   if (policy.mode === 'timed') {
     if (!Number.isInteger(policy.hours) || policy.hours < 1 || policy.hours > 24) {
       throw new BadRequestError('Timed control requires an integer hours value between 1 and 24');
     }
+    const hours = policy.hours;
     return {
       humanControlMode: 'timed',
-      humanControlDurationHours: policy.hours,
-      humanControlStartedAt: now,
-      humanControlUntil: new Date(now.getTime() + policy.hours * 3_600_000),
+      humanControlDurationHours: hours,
+      humanControlStartedAt: () => 'now()',
+      humanControlUntil: () => `now() + make_interval(hours => ${hours})`,
     };
   }
   return {
     humanControlMode: 'indefinite',
     humanControlDurationHours: null,
-    humanControlStartedAt: now,
+    humanControlStartedAt: () => 'now()',
     humanControlUntil: null,
   };
 }
+
+/** Re-read the SQL-computed control timestamps from the (locked) row so the
+ *  in-memory entity - and thus the summary the caller returns - reflects the
+ *  committed DB-clock values, not a JS approximation. */
+async function syncHumanControlTimestamps(
+  manager: EntityManager,
+  session: ChatSession,
+): Promise<void> {
+  const [row] = (await manager.query(
+    `SELECT human_control_started_at AS started_at, human_control_until AS until
+       FROM chat_sessions WHERE id = $1`,
+    [session.id],
+  )) as Array<{ started_at: Date | string | null; until: Date | string | null }>;
+  session.humanControlStartedAt = row?.started_at ? new Date(row.started_at) : undefined;
+  session.humanControlUntil = row?.until ? new Date(row.until) : undefined;
+}
+
+/** True when the LOCKED row's timed deadline has passed ON THE DB CLOCK. The
+ *  one expiry predicate (codex review fix 1): the JS clock never decides. */
+async function timedDeadlinePassed(manager: EntityManager, sessionId: string): Promise<boolean> {
+  const [row] = (await manager.query(
+    `SELECT (human_control_until <= now()) AS expired
+       FROM chat_sessions WHERE id = $1`,
+    [sessionId],
+  )) as Array<{ expired: boolean | null }>;
+  return row?.expired === true;
+}
+
+/** The one wording for a materialized expiry, shared by the worker/inbound
+ *  release and the post-deadline reply / policy-update paths. */
+const EXPIRY_EVENT_TEXT =
+  'Timed human control expired and the conversation was returned to the assistant';
 
 const CLEAR_HUMAN_CONTROL: Record<string, unknown> = {
   humanControlMode: null,
@@ -405,14 +468,45 @@ async function applyClaim(
   }
   await applyOwnershipTransition(manager, session, 'human_owned', {
     assignedAgentId: agentId,
-    ...humanControlColumns(policy, now),
+    ...humanControlColumns(policy),
   });
+  // The control timestamps were computed by the DB clock (function-valued
+  // patch entries, skipped by the in-memory sync above) - re-read them so the
+  // summary carries the committed values.
+  await syncHumanControlTimestamps(manager, session);
   // NO currentChatCount increment (review fix S2): nothing ever decremented it,
   // so the legacy /accept parity write was a monotonically-growing counter —
   // and the only cross-row session→agent write in a command. Nothing reads the
   // counter as authoritative.
   await persistSystemEvent(manager, session, 'An agent has joined the conversation');
   return open?.id ?? null;
+}
+
+/** Shared HUMAN_OWNED -> BOT_OWNED transition, used by releaseConversation and
+ *  releaseExpiredHumanControl. SAME rules either way: complete the accepted
+ *  handoff, clear assignment + human-control, bump the version, one event.
+ *  Caller has validated the state machine. */
+async function applyRelease(
+  manager: EntityManager,
+  session: ChatSession,
+  eventText: string,
+): Promise<void> {
+  const accepted = await lockHandoff(manager, session.id, ['accepted']);
+  if (accepted) {
+    const now = new Date();
+    await manager.update(HandoffRequest, accepted.id, {
+      status: 'completed',
+      completedAt: now,
+      handleTimeSeconds: accepted.acceptedAt
+        ? Math.max(0, Math.floor((now.getTime() - new Date(accepted.acceptedAt).getTime()) / 1000))
+        : 0,
+    });
+  }
+  await applyOwnershipTransition(manager, session, 'bot_owned', {
+    assignedAgentId: null,
+    ...CLEAR_HUMAN_CONTROL,
+  });
+  await persistSystemEvent(manager, session, eventText);
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -524,7 +618,17 @@ export const conversationCommands = {
     agentId: string,
     policy: HumanControlPolicy,
     idempotencyKey?: string,
-    opts: CommandOpts = {},
+    opts: CommandOpts & {
+      /**
+       * B-PR5a "change duration": a same-owner re-claim REWRITES the
+       * human_control_* columns from `policy` instead of no-opping. Set only
+       * when the caller carried an EXPLICIT mode (the REST route), so the
+       * shipped portal's empty-body /takeover retry can never silently rewrite
+       * a timed policy to indefinite. Ownership does not move, so (like the
+       * reply slide) the ownership_version stays put.
+       */
+      updatePolicyIfOwned?: boolean;
+    } = {},
   ): Promise<ClaimResult> {
     return withConversation(sessionId, 'claim', idempotencyKey, opts, async (manager, session) => {
       await requireTenantAgent(manager, session.tenantId, agentId);
@@ -532,6 +636,45 @@ export const conversationCommands = {
       if (session.ownership === 'closed') throw new ConversationClosedError();
       if (session.ownership === 'human_owned') {
         if (session.assignedAgentId === agentId) {
+          if (opts.updatePolicyIfOwned) {
+            // Codex review fix 2 (no resurrection): an EXPIRED timed control
+            // cannot be silently renewed. If the locked row's deadline has
+            // already passed ON THE DB CLOCK, the old control is over -
+            // materialize the expiry and make the new policy a FRESH takeover
+            // instead of an in-place rewrite.
+            if (
+              session.humanControlMode === 'timed' &&
+              session.humanControlUntil &&
+              (await timedDeadlinePassed(manager, session.id))
+            ) {
+              await applyRelease(manager, session, EXPIRY_EVENT_TEXT);
+              const handoffId = await applyClaim(manager, session, agentId, policy);
+              logger.info(
+                `Conversation ${session.id} re-claimed fresh by agent ${agentId} after timed expiry`,
+                { policy: policy.mode },
+              );
+              return { outcome: 'claimed' as const, conversation: summarize(session, handoffId) };
+            }
+
+            const columns = humanControlColumns(policy);
+            await manager.update(
+              ChatSession,
+              session.id,
+              columns as QueryDeepPartialEntity<ChatSession>,
+            );
+            // Plain values sync directly; the DB-computed timestamps re-read.
+            session.humanControlMode = policy.mode;
+            session.humanControlDurationHours = policy.mode === 'timed' ? policy.hours : undefined;
+            await syncHumanControlTimestamps(manager, session);
+            logger.info(`Conversation ${session.id} human-control policy updated by agent ${agentId}`, {
+              policy: policy.mode,
+            });
+            return {
+              outcome: 'already_owned' as const,
+              policyUpdated: true,
+              conversation: summarize(session, null),
+            };
+          }
           // Same operator re-claiming: idempotent by state — no re-apply.
           return { outcome: 'already_owned' as const, conversation: summarize(session, null) };
         }
@@ -547,9 +690,13 @@ export const conversationCommands = {
   /**
    * Operator reply (B2): insert the human message; dedupe on
    * (session_id, clientMessageId) under the session row lock; auto-claim an
-   * unclaimed conversation IN THE SAME transaction (operator default policy =
-   * indefinite until the PR 5 timed exposure); 409 keep-draft when another
-   * operator owns it.
+   * unclaimed conversation IN THE SAME transaction (auto-claim policy =
+   * indefinite; a timed policy is chosen explicitly via /takeover); 409
+   * keep-draft when another operator owns it. A committed reply on a TIMED
+   * session slides the deadline forward by the full duration (B-PR5a item 4) -
+   * but ONLY while the deadline is still in the future on the DB clock; a
+   * post-deadline reply materializes the expiry and re-establishes control as
+   * a FRESH auto-claim (codex review fix 2: no resurrection).
    */
   async sendHumanMessage(
     sessionId: string,
@@ -587,11 +734,36 @@ export const conversationCommands = {
         if (session.assignedAgentId !== agentId) {
           throw new ConversationAlreadyClaimedError(session.assignedAgentId);
         }
-        // Committed human reply slides a timed deadline; indefinite stays put.
+        // Committed human reply slides a TIMED deadline; indefinite stays put.
+        // Codex review fixes 1+2: the slide condition AND the new deadline are
+        // evaluated in SQL on the locked row, so the DB clock governs, and the
+        // slide only applies while the deadline is still in the future - a
+        // reply that lands after the deadline must not resurrect the expired
+        // control (the hard-deadline invariant).
         if (session.humanControlMode === 'timed' && session.humanControlDurationHours) {
-          const until = new Date(Date.now() + session.humanControlDurationHours * 3_600_000);
-          await manager.update(ChatSession, session.id, { humanControlUntil: until });
-          session.humanControlUntil = until;
+          const slid = returningRows<{ human_control_until: Date | string }>(
+            await manager.query(
+              `UPDATE chat_sessions
+                  SET human_control_until = now() + make_interval(hours => $2::int)
+                WHERE id = $1
+                  AND human_control_mode = 'timed'
+                  AND human_control_until > now()
+                RETURNING human_control_until`,
+              [session.id, session.humanControlDurationHours],
+            ),
+          );
+          if (slid.length) {
+            session.humanControlUntil = new Date(slid[0].human_control_until);
+          } else {
+            // The deadline passed before this reply committed: the old control
+            // is OVER. Materialize the expiry, then re-establish control FRESH
+            // through the same auto-claim path a reply on a bot-owned session
+            // takes (indefinite). A post-deadline reply re-establishes control
+            // anew - it never silently renews the expired one.
+            await applyRelease(manager, session, EXPIRY_EVENT_TEXT);
+            await applyClaim(manager, session, agentId, { mode: 'indefinite' });
+            autoClaimed = true;
+          }
         }
       } else {
         // bot_owned or handoff_requested → typing a reply takes over (B2).
@@ -670,28 +842,53 @@ export const conversationCommands = {
       }
       if (session.assignedAgentId !== agentId) throw new NotConversationOwnerError();
 
-      const accepted = await lockHandoff(manager, session.id, ['accepted']);
-      if (accepted) {
-        const now = new Date();
-        await manager.update(HandoffRequest, accepted.id, {
-          status: 'completed',
-          completedAt: now,
-          handleTimeSeconds: accepted.acceptedAt
-            ? Math.max(0, Math.floor((now.getTime() - new Date(accepted.acceptedAt).getTime()) / 1000))
-            : 0,
-        });
-      }
-      await applyOwnershipTransition(manager, session, 'bot_owned', {
-        assignedAgentId: null,
-        ...CLEAR_HUMAN_CONTROL,
-      });
-      await persistSystemEvent(
+      await applyRelease(
         manager,
         session,
         `Agent has left the conversation.${opts.reason ? ` ${opts.reason}` : ''}`,
       );
 
       logger.info(`Conversation ${session.id} released to bot by agent ${agentId}`);
+      return { outcome: 'released' as const, conversation: summarize(session, null) };
+    });
+  },
+
+  /**
+   * Timed-control expiry (B-PR5a): HUMAN_OWNED + mode 'timed' + deadline passed
+   * -> BOT_OWNED, by a SYSTEM actor (the server.ts sweep, or the inbound-message
+   * check in message-forwarding). The expiry predicate is re-checked HERE, on
+   * the row locked FOR UPDATE, and that is the fence: a caller acting on a stale
+   * read (the sweep's SELECT, an ingress-loaded entity) can never release a
+   * conversation whose deadline an operator re-claim or a committed human reply
+   * (the slide) has since pushed into the future. The no-op outcomes make it
+   * re-entrant: releasing an already-released / re-claimed / closed session
+   * changes nothing.
+   */
+  async releaseExpiredHumanControl(
+    sessionId: string,
+    opts: CommandOpts & { source?: string } = {},
+  ): Promise<ExpireHumanControlResult> {
+    return withConversation(sessionId, 'release', undefined, opts, async (manager, session) => {
+      if (
+        session.ownership !== 'human_owned' ||
+        session.humanControlMode !== 'timed' ||
+        !session.humanControlUntil
+      ) {
+        return { outcome: 'not_applicable' as const, conversation: summarize(session, null) };
+      }
+      // Codex review fix 1: the expiry comparison runs in SQL on the locked
+      // row, never on the JS clock. A node running behind the DB would
+      // otherwise answer 'not_expired' for rows the worker keeps re-selecting
+      // (starving later batches); a node running ahead would release early.
+      if (!(await timedDeadlinePassed(manager, session.id))) {
+        return { outcome: 'not_expired' as const, conversation: summarize(session, null) };
+      }
+
+      await applyRelease(manager, session, EXPIRY_EVENT_TEXT);
+
+      logger.info(`Timed human control expired for session ${session.id} - released to bot`, {
+        source: opts.source ?? 'unknown',
+      });
       return { outcome: 'released' as const, conversation: summarize(session, null) };
     });
   },
@@ -831,15 +1028,19 @@ export const conversationCommands = {
         });
       }
       // Preserve an existing human-control policy across a transfer; start an
-      // indefinite one when the conversation wasn't human-owned yet.
+      // indefinite one when the conversation wasn't human-owned yet. (An
+      // expired timed policy that survives a transfer is not resurrected: its
+      // deadline is untouched, so the sweep or the next inbound message
+      // releases it on the same DB-clock predicate.)
       const control =
         session.ownership === 'human_owned' && session.humanControlMode
           ? {}
-          : humanControlColumns({ mode: 'indefinite' }, now);
+          : humanControlColumns({ mode: 'indefinite' });
       await applyOwnershipTransition(manager, session, 'human_owned', {
         assignedAgentId: targetAgentId,
         ...control,
       });
+      await syncHumanControlTimestamps(manager, session);
       await persistSystemEvent(manager, session, 'Conversation transferred to another agent');
 
       logger.info(`Conversation ${session.id} transferred to agent ${targetAgentId}`);

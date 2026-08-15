@@ -646,6 +646,25 @@ async function startServer(): Promise<void> {
     };
     setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
 
+    // Timed human-control expiry (B-PR5a): return sessions whose timed takeover
+    // deadline (`human_control_until`) has passed to the bot. Every release goes
+    // through the transactional command service (candidate rows locked FOR
+    // UPDATE SKIP LOCKED, expiry re-checked on the locked row, emit after
+    // commit) - see timed-control-expiry.service.ts. Runs every 60s as a
+    // LIVENESS floor; the inbound-message check in message-forwarding releases
+    // an expired session the moment a customer writes, so correctness does not
+    // wait on this tick. Unflagged: a timed claim without a running expiry
+    // worker must not exist (the codex-locked ordering that gated B-PR2b).
+    const sweepTimedControl = async () => {
+      try {
+        const { sweepExpiredTimedControl } = await import('./services/timed-control-expiry.service');
+        await sweepExpiredTimedControl();
+      } catch (error) {
+        logger.error('Timed-control expiry sweep failed', { error });
+      }
+    };
+    setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
+
     // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
     // platform LLM budget, and a background pass on this budget previously caused
     // customer-facing 429s on live replies. Enable per-environment only after the

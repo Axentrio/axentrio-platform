@@ -135,7 +135,7 @@ export async function loadConversationForEmit(
   const { ChatSession: ChatSessionEntity } = await import('../database/entities/ChatSession');
   return AppDataSource.getRepository(ChatSessionEntity).findOne({
     where: tenantId ? { id: sessionId, tenantId } : { id: sessionId },
-    relations: ['assignedAgent'],
+    relations: ['assignedAgent', 'assignedAgent.user'],
   });
 }
 

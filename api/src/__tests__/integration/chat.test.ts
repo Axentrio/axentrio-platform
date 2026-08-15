@@ -52,6 +52,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import {
   createTestTenant,
   createTestUser,
+  createTestAgent,
   createTestSession,
   createTestParticipant,
   createTestMessage,
@@ -115,6 +116,33 @@ describe('Chat Lifecycle', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.aiAutoReplyEnabled).toBe(false);
       expect(res.body.data.guardrailStatus).toBe('scam');
+    });
+
+    it('GET /chats/sessions resolves the assigned agent display name', async () => {
+      const user = await createTestUser(tenantId, { name: 'List Operator' });
+      const agent = await createTestAgent(tenantId, user.id);
+      const session = await createTestSession(tenantId, {
+        status: 'bot',
+        assignedAgentId: agent.id,
+      });
+
+      const res = await request(app).get('/api/v1/chats/sessions?limit=100');
+      expect(res.status).toBe(200);
+      const row = res.body.data.find((candidate: { id: string }) => candidate.id === session.id);
+      expect(row.assignedAgentName).toBe(user.name);
+    });
+
+    it('GET /chats/:id resolves the assigned agent display name', async () => {
+      const user = await createTestUser(tenantId, { name: 'Detail Operator' });
+      const agent = await createTestAgent(tenantId, user.id);
+      const session = await createTestSession(tenantId, {
+        status: 'bot',
+        assignedAgentId: agent.id,
+      });
+
+      const res = await request(app).get(`/api/v1/chats/${session.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.assignedAgentName).toBe(user.name);
     });
   });
 

@@ -494,6 +494,51 @@ describe('REST command routes', () => {
     expect(cancelNoKey.status).toBe(400);
   });
 
+  it('POST /transfer replays idempotently, supports keyless calls, and validates present keys', async () => {
+    const tenant = await makeTenantWithAi();
+    const source = await makeOperator(tenant.id);
+    const target = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    configureMockAuth(auth, { userId: source.agent.id, tenantId: tenant.id, role: 'admin' });
+
+    const first = await request(app)
+      .post(`/api/v1/chats/${session.id}/transfer`)
+      .send({ agentId: target.agent.id, idempotencyKey: 'xfer-1' });
+    expect(first.status).toBe(200);
+    expect(first.body.data.session.assignedAgentId).toBe(target.agent.id);
+
+    const retry = await request(app)
+      .post(`/api/v1/chats/${session.id}/transfer`)
+      .send({ agentId: target.agent.id, idempotencyKey: 'xfer-1' });
+    expect(retry.status).toBe(200);
+    expect(retry.body.data).toEqual(first.body.data);
+
+    const keyedRows = await AppDataSource.query(
+      `SELECT id FROM conversation_commands
+        WHERE session_id = $1 AND command = 'transfer'`,
+      [session.id],
+    );
+    expect(keyedRows).toHaveLength(1);
+
+    const keyless = await request(app)
+      .post(`/api/v1/chats/${session.id}/transfer`)
+      .send({ agentId: source.agent.id });
+    expect(keyless.status).toBe(200);
+    expect(keyless.body.data.session.assignedAgentId).toBe(source.agent.id);
+
+    const rowsAfterKeyless = await AppDataSource.query(
+      `SELECT id FROM conversation_commands
+        WHERE session_id = $1 AND command = 'transfer'`,
+      [session.id],
+    );
+    expect(rowsAfterKeyless).toHaveLength(1);
+
+    const invalid = await request(app)
+      .post(`/api/v1/chats/${session.id}/transfer`)
+      .send({ agentId: target.agent.id, idempotencyKey: '' });
+    expect(invalid.status).toBe(400);
+  });
+
   it('POST /messages sends + auto-claims; /release and /close complete the lifecycle', async () => {
     const tenant = await makeTenantWithAi();
     const { agent } = await makeOperator(tenant.id);

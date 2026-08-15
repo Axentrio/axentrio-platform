@@ -25,6 +25,7 @@ import { conversationCommands } from '../services/conversation-command.service';
 import { encrypt, decrypt, DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
+import { optionalIdempotencyKey } from './conversation-commands.routes';
 
 /**
  * Widget tokens are bound to exactly one session (req.widget.sessionId). Enforce
@@ -45,6 +46,7 @@ import { sendMessageSchema, chatListQuerySchema } from '../schemas';
 import { emitWebhookEvent } from '../webhooks/webhook.emitter';
 import {
   serializeConversationSummary,
+  resolveAssignedAgentName,
   previewFromRaw,
   computeCustomerThreadId,
   type CustomerThreadBinding,
@@ -403,6 +405,7 @@ router.get(
     const qb = sessionRepository
       .createQueryBuilder('session')
       .leftJoinAndSelect('session.assignedAgent', 'agent')
+      .leftJoinAndSelect('agent.user', 'agentUser')
       .where('session.tenantId = :tenantId', { tenantId });
 
     if (status && ['active', 'closed', 'waiting', 'handoff', 'bot'].includes(status)) {
@@ -860,7 +863,7 @@ router.get(
     const [session, messages] = await Promise.all([
       sessionRepository.findOne({
         where: { id, tenantId },
-        relations: ['assignedAgent'],
+        relations: ['assignedAgent', 'assignedAgent.user'],
       }),
       messageRepository
         .createQueryBuilder('m')
@@ -887,7 +890,7 @@ router.get(
       guardrailStatus: session.guardrailStatus,
       visitorId: session.visitorId,
       assignedAgentId: session.assignedAgentId,
-      assignedAgentName: session.assignedAgent?.userId ?? null,
+      assignedAgentName: resolveAssignedAgentName(session.assignedAgent ?? null),
       // Ownership + human-control facts so a deep-linked (GET-first) timed chat
       // renders the "AI paused - resumes in ..." countdown immediately, not only
       // after the first socket upsert. Same shape the list row + upsert emit.
@@ -924,6 +927,7 @@ router.post(
   requireClerkAuth, autoProvision, resolveTenantContext,
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
+    const idempotencyKey = optionalIdempotencyKey(req.body);
     const { agentId: targetAgentId } = req.body;
 
     if (!targetAgentId) {
@@ -954,7 +958,7 @@ router.post(
     const result = await conversationCommands.transferConversation(
       id,
       targetAgentId,
-      undefined,
+      idempotencyKey,
       { tenantId: req.user?.tenantId },
     );
 

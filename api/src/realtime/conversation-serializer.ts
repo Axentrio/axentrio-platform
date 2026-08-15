@@ -15,6 +15,7 @@
  */
 
 import type { ChatSession } from '../database/entities/ChatSession';
+import type { Agent } from '../database/entities/Agent';
 import { decrypt } from '../utils/encryption';
 
 /** Same truncation the REST list has always applied to the preview column. */
@@ -88,6 +89,12 @@ export function computeCustomerThreadId(
     return `e:${binding.channelConnectionId}:${binding.externalUserId}:${binding.externalThreadId}`;
   }
   return `s:${session.id}`;
+}
+
+export function resolveAssignedAgentName(agent: Agent | null | undefined): string | null {
+  if (!agent) return null;
+  if (agent.user === undefined) return agent.userId;
+  return agent.user.name || agent.user.email || agent.userId;
 }
 
 export interface ConversationSummaryDto {
@@ -168,7 +175,7 @@ export function serializeConversationSummary(
     guardrailStatus: session.guardrailStatus,
     userName: `Visitor ${session.visitorId?.substring(0, 8) || 'Anonymous'}`,
     assignedAgent: assignedAgentId ? { id: assignedAgentId } : null,
-    ...(agentRelationLoaded ? { assignedAgentName: session.assignedAgent?.userId ?? null } : {}),
+    ...(agentRelationLoaded ? { assignedAgentName: resolveAssignedAgentName(session.assignedAgent) } : {}),
     messageCount: session.messageCount,
     lastMessage: last ? last.content.substring(0, CONVERSATION_PREVIEW_CHARS) : null,
     lastMessageSender: last ? last.senderType || 'user' : null,

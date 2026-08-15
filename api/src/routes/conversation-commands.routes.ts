@@ -68,7 +68,7 @@ function requireIdempotencyKey(body: unknown): string {
  * the command executes non-idempotently (transactional state change only, no
  * conversation_commands replay row). New clients (PR 3) always send a key.
  */
-function optionalIdempotencyKey(body: unknown): string | undefined {
+export function optionalIdempotencyKey(body: unknown): string | undefined {
   const key = (body as { idempotencyKey?: unknown })?.idempotencyKey;
   if (key === undefined || key === null) return undefined;
   if (typeof key !== 'string' || !key.trim() || key.length > 128) {

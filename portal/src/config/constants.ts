@@ -25,20 +25,21 @@ export const WS_EVENTS = {
   AGENT_UPDATE: 'agent:update',
   
   // Chat Events — names must match backend socket.handler.ts
-  CHAT_NEW: 'chat:new',
-  CHAT_UPDATE: 'chat:update',
   CHAT_JOIN: 'session:join',
   CHAT_LEAVE: 'session:leave',
-  CHAT_MESSAGE: 'message:send',
-  CHAT_MESSAGE_RECEIVED: 'message:receive',
   CHAT_TYPING: 'typing:indicator',
   CHAT_TYPING_UPDATE: 'typing:indicator',
-  
-  // Handoff Events
+
+  // Normalized conversation events (B-PR3a contract) — the ONLY events the
+  // Inbox list/detail consume. The legacy chat:new/chat:update names were
+  // NEVER emitted by the backend; message:receive still is (adapter) but the
+  // portal listens to message:created only to avoid double-handling.
+  CONVERSATION_UPSERT: 'conversation:upsert',
+  MESSAGE_CREATED: 'message:created',
+
+  // Handoff Events (inbound only — accept/decline go over REST commands now)
   HANDOFF_NEW: 'handoff:requested',
   HANDOFF_UPDATE: 'handoff:update',
-  HANDOFF_ACCEPT: 'handoff:accept',
-  HANDOFF_DECLINE: 'handoff:decline',
   
   // Notification Events
   NOTIFICATION: 'notification',

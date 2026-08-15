@@ -1928,7 +1928,9 @@
   "inbox": {
     "header": {
       "subtitle": "Geünificeerde werkplek voor alle gesprekken",
-      "live": "Live"
+      "live": "Live",
+      "reconnecting": "Opnieuw verbinden",
+      "offline": "Offline"
     },
     "tabs": {
       "all": "Alle",
@@ -1964,7 +1966,9 @@
       },
       "composer": {
         "placeholder": "Typ een bericht…",
-        "send": "Bericht verzenden"
+        "send": "Bericht verzenden",
+        "conflictTaken": "Een andere agent heeft dit gesprek. Het bericht is niet verzonden. Uw tekst blijft hieronder staan.",
+        "conflictClosed": "Dit gesprek is gesloten. Het bericht is niet verzonden. Uw tekst blijft hieronder staan."
       },
       "sender": {
         "agent": "Agent",
@@ -1973,7 +1977,10 @@
       },
       "message": {
         "image": "Afbeelding",
-        "file": "Bestand"
+        "file": "Bestand",
+        "sending": "Verzenden…",
+        "failed": "Niet afgeleverd",
+        "retry": "Opnieuw"
       },
       "transferChat": "Chat overdragen",
       "empty": {

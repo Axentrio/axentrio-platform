@@ -1,11 +1,20 @@
 /**
  * useChatQueries
- * Hybrid Socket.IO + React Query hooks for chat list and chat detail.
+ * React Query hooks for the chat list and the chat detail (B-PR3b).
  *
  * Strategy:
  *  - React Query owns server state (initial fetch, background refetch, cache).
- *  - Socket events patch the cache directly via queryClient.setQueryData so
- *    the UI stays in sync between polls without an extra network round-trip.
+ *  - The live feed (conversation:upsert / message:created) is folded into the
+ *    cache by useLiveConversationSync (see ./conversationLive), which the
+ *    Inbox mounts ONCE — the hooks here register no list/message socket
+ *    handlers of their own anymore.
+ *  - Everything entering the cache is normalized to the PORTAL status
+ *    vocabulary (normalizeChatStatus); requests are remapped to the backend
+ *    vocabulary by buildChatListParams. One vocabulary per side, everywhere.
+ *  - Operator replies go over the acknowledged REST command
+ *    POST /chats/:sessionId/messages (auto-claims + dedupes on
+ *    clientMessageId) with an optimistic pending bubble — the socket
+ *    `message:send` fire-and-forget emit is gone.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -14,11 +23,23 @@ import {
   useQueryClient,
   queryOptions,
 } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
+import axios from 'axios';
+import { api, handleApiError } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 import { useSocket } from '@websocket/SocketContext';
-import { useNotificationSound } from '@websocket/notificationSound';
-import type { Chat, Message, TypingIndicator, ChatFilters } from '@app-types/index';
+import {
+  applyCommandConversation,
+  newUuid,
+  normalizeChatStatus,
+  type ChatDetailCacheEntry,
+} from './conversationLive';
+import type {
+  Chat,
+  Message,
+  TypingIndicator,
+  ChatFilters,
+  CommandConversationSummary,
+} from '@app-types/index';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,9 +54,7 @@ interface ChatListResponse {
   pagination?: { total: number; totalPages: number };
 }
 
-interface ChatDetailResponse extends Omit<Chat, 'messages'> {
-  messages?: Message[];
-}
+type ChatDetailResponse = ChatDetailCacheEntry;
 
 interface UseChatsQueryOptions {
   filters?: ChatFilters & { page?: number; limit?: number };
@@ -55,6 +74,14 @@ interface UseChatsQueryReturn {
   };
 }
 
+/** Composer send outcome — drives the ChatWindow state machine. */
+export interface SendMessageResult {
+  status: 'sent' | 'conflict' | 'failed';
+  /** 409 code: 'conversation_already_claimed' | 'conversation_closed' | ... */
+  code?: string;
+  message?: string;
+}
+
 interface UseChatDetailReturn {
   chat: Chat | null;
   messages: Message[];
@@ -63,10 +90,45 @@ interface UseChatDetailReturn {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  sendMessage: (content: string, type?: Message['type']) => void;
+  sendMessage: (content: string) => Promise<SendMessageResult>;
+  retryMessage: (clientMessageId: string) => Promise<SendMessageResult>;
   sendTyping: (typing: boolean) => void;
   refetch: () => void;
   markAsRead: () => void;
+}
+
+/** POST /chats/:sessionId/messages response (after envelope unwrap). */
+interface SendReplyResponse {
+  outcome: 'sent' | 'duplicate';
+  autoClaimed: boolean;
+  message: { id: string; createdAt: string };
+  conversation?: CommandConversationSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization of REST payloads into the cache (portal status vocabulary)
+// ---------------------------------------------------------------------------
+
+function normalizeChatRow(row: Chat): Chat {
+  return { ...row, status: normalizeChatStatus(row.status as string) };
+}
+
+/** Normalize a GET /chats/:id payload: status vocabulary + per-message
+ *  delivery state (server message.status 'failed' → retryable FAILED). */
+export function normalizeChatDetail<T extends { status?: string; messages?: Any[] }>(raw: T): T {
+  return {
+    ...raw,
+    status: normalizeChatStatus(raw.status),
+    ...(raw.messages
+      ? {
+          messages: raw.messages.map((m: Any) => ({
+            ...m,
+            chatId: m.chatId ?? m.sessionId,
+            ...(m.status === 'failed' ? { deliveryState: 'failed' as const } : {}),
+          })),
+        }
+      : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -74,10 +136,16 @@ interface UseChatDetailReturn {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds a URLSearchParams string from ChatFilters + pagination so the
- * query key changes whenever any filter changes (React Query will refetch).
+ * Builds the request params from ChatFilters + pagination so the query key
+ * changes whenever any filter changes (React Query will refetch).
+ *
+ * The status REMAP is the single portal→backend vocabulary crossing: the
+ * portal filter values 'handsoff'/'human' become the backend column values
+ * 'handoff'/'active'. The resulting params ARE the query key, which is what
+ * lets the live upsert admission (conversationLive.matchesVariant) compare
+ * backend-vocabulary payloads directly against each cached variant's params.
  */
-function buildChatListParams(
+export function buildChatListParams(
   filters?: ChatFilters & { page?: number; limit?: number },
 ): Record<string, string> {
   const params: Record<string, string> = {};
@@ -96,7 +164,7 @@ function buildChatListParams(
   return params;
 }
 
-const chatOptions = {
+export const chatOptions = {
   /**
    * Chat list query — accepts the full filters + pagination bag so that the
    * React Query cache key is tightly coupled to what was actually fetched.
@@ -105,10 +173,10 @@ const chatOptions = {
     const params = buildChatListParams(filters);
     return queryOptions({
       queryKey: queryKeys.chats.list(params as Record<string, unknown>),
-      queryFn: () =>
-        api.get<Any>('/chats/sessions', {
-          params,
-        }) as Promise<ChatListResponse>,
+      queryFn: async () => {
+        const res = (await api.get<Any>('/chats/sessions', { params })) as ChatListResponse;
+        return { ...res, data: (res?.data ?? []).map(normalizeChatRow) };
+      },
     });
   },
 
@@ -116,36 +184,28 @@ const chatOptions = {
   detail: (chatId: string) =>
     queryOptions({
       queryKey: queryKeys.chats.detail(chatId),
-      queryFn: () =>
-        api.get<Any>(`/chats/${chatId}`) as Promise<ChatDetailResponse>,
+      queryFn: async () => {
+        const raw = (await api.get<Any>(`/chats/${chatId}`)) as ChatDetailResponse;
+        return normalizeChatDetail(raw) as ChatDetailResponse;
+      },
       enabled: !!chatId,
       staleTime: 5 * 60 * 1000,
     }),
 };
 
 // ---------------------------------------------------------------------------
-// Mutation hooks
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Hybrid chat list hook
+// Chat list hook
 // ---------------------------------------------------------------------------
 
 /**
  * useChatsQuery
  *
- * Combines React Query for server state with Socket.IO for live updates.
- * - Initial data + background refetch handled by React Query.
- * - `onChatNew` / `onChatUpdate` socket events patch the cache so consumers
- *   see live updates without waiting for the next poll.
- * - Filter matching mirrors the original `useChats` hook exactly.
- * - Notification sound is played for new `handsoff` chats (matches original).
+ * React Query for the list; the live cache patches come from
+ * useLiveConversationSync (mounted once by the Inbox), which patches EVERY
+ * cached list variant — so this hook needs no socket wiring of its own.
  */
 export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQueryReturn {
   const { filters } = options;
-  const queryClient = useQueryClient();
-  const { registerHandlers, unregisterHandlers } = useSocket();
-  const { playHandoff } = useNotificationSound();
 
   const opts = chatOptions.list(filters);
   const { data, isLoading, isFetching, error, refetch } = useQuery(opts);
@@ -159,86 +219,6 @@ export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQuery
     (filters?.limit ? Math.ceil(total / filters.limit) : 1) ??
     1;
   const page = filters?.page ?? 1;
-
-  // Keep a stable ref to filters so the socket handler closure always sees the
-  // latest value without needing to be re-registered on every filter change.
-  const filtersRef = useRef(filters);
-  useEffect(() => {
-    filtersRef.current = filters;
-  }, [filters]);
-
-  // Socket-driven cache patches
-  useEffect(() => {
-    const handlerId = registerHandlers({
-      onChatNew: (newChat: Chat) => {
-        const currentFilters = filtersRef.current;
-
-        // Apply same filter guards as the original hook
-        if (currentFilters?.status && newChat.status !== currentFilters.status) return;
-        if (currentFilters?.tenantId && newChat.tenantId !== currentFilters.tenantId) return;
-
-        // Play sound for new handoff requests
-        if (newChat.status === 'handsoff') {
-          playHandoff();
-        }
-
-        queryClient.setQueryData<ChatListResponse>(opts.queryKey, (old) => {
-          if (!old) return old;
-          const existing = old.data ?? [];
-          // Avoid duplicates
-          if (existing.some((c) => c.id === newChat.id)) return old;
-          return {
-            ...old,
-            data: [newChat, ...existing],
-          };
-        });
-      },
-
-      onChatUpdate: (updatedChat: Chat) => {
-        const currentFilters = filtersRef.current;
-
-        queryClient.setQueryData<ChatListResponse>(opts.queryKey, (old) => {
-          if (!old) return old;
-          const existing = old.data ?? [];
-          const index = existing.findIndex((c) => c.id === updatedChat.id);
-
-          if (index === -1) {
-            // Chat not in list — check if it passes current filters before adding
-            if (currentFilters?.status && updatedChat.status !== currentFilters.status) return old;
-            if (currentFilters?.tenantId && updatedChat.tenantId !== currentFilters.tenantId) return old;
-            return { ...old, data: [updatedChat, ...existing] };
-          }
-
-          // Update existing entry and re-sort by lastMessageAt (newest first)
-          const updated = [...existing];
-          updated[index] = updatedChat;
-          updated.sort((a, b) => {
-            const timeA = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
-            const timeB = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
-            return timeB - timeA;
-          });
-
-          return { ...old, data: updated };
-        });
-
-        // Also patch the detail cache if it's loaded
-        queryClient.setQueryData<ChatDetailResponse>(
-          queryKeys.chats.detail(updatedChat.id),
-          (old) => {
-            if (!old) return old;
-            return { ...old, ...updatedChat };
-          },
-        );
-      },
-    });
-
-    return () => {
-      unregisterHandlers(handlerId);
-    };
-    // opts.queryKey is intentionally excluded — the handler only patches
-    // whichever cache entry is currently active, re-registered on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient, registerHandlers, unregisterHandlers, playHandoff]);
 
   return {
     chats,
@@ -256,35 +236,42 @@ export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQuery
 }
 
 // ---------------------------------------------------------------------------
-// Hybrid chat detail hook
+// Chat detail hook
 // ---------------------------------------------------------------------------
+
+/** Read the 409 command-conflict code from an error, if it is one. */
+function conflictCodeOf(err: unknown): string | undefined {
+  if (!axios.isAxiosError(err) || err.response?.status !== 409) return undefined;
+  const data = err.response.data as
+    | { error?: { code?: string } | string }
+    | undefined;
+  if (data?.error && typeof data.error === 'object' && typeof data.error.code === 'string') {
+    return data.error.code;
+  }
+  return 'conflict';
+}
 
 /**
  * useChatDetail
  *
  * Manages a single open chat conversation.
- * - React Query fetches the chat + messages.
+ * - React Query fetches the chat + messages; message appends and summary
+ *   patches arrive via the shared live sync (conversationLive).
  * - On mount the agent joins the socket room; on unmount they leave.
- * - Incoming messages are deduped and appended to the React Query cache.
  * - Typing indicators are tracked in local state (ephemeral, not cached).
- * - `sendMessage` fires over the socket (same as original hook).
- * - `sendTyping` includes auto-clear after 3 s (same as original hook).
+ * - `sendMessage` posts to the acknowledged command route with an optimistic
+ *   pending bubble; `retryMessage` re-sends a FAILED bubble with the SAME
+ *   clientMessageId (server-side idempotent).
  */
-export function useChatDetail(
-  chatId: string,
-  options: { enableSound?: boolean } = {},
-): UseChatDetailReturn {
-  const { enableSound = true } = options;
+export function useChatDetail(chatId: string): UseChatDetailReturn {
   const queryClient = useQueryClient();
   const {
     registerHandlers,
     unregisterHandlers,
     joinChat,
     leaveChat,
-    sendMessage: socketSendMessage,
     sendTyping: socketSendTyping,
   } = useSocket();
-  const { playMessage } = useNotificationSound();
 
   // Local ephemeral state for typing indicators
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -300,7 +287,7 @@ export function useChatDetail(
     refetch: detailRefetch,
   } = useQuery(chatOptions.detail(chatId));
   const raw = detailData as ChatDetailResponse | undefined;
-  const chat: Chat | null = raw ? (raw as Chat) : null;
+  const chat: Chat | null = raw ? (raw as unknown as Chat) : null;
   const messages: Message[] = raw?.messages ?? [];
 
   // Join / leave socket room when chatId changes
@@ -312,42 +299,11 @@ export function useChatDetail(
     };
   }, [chatId, joinChat, leaveChat]);
 
-  // Socket event handlers
+  // Typing indicator events (messages/summaries arrive via the shared sync)
   useEffect(() => {
     if (!chatId) return;
 
     const handlerId = registerHandlers({
-      onChatUpdate: (updatedChat: Chat) => {
-        if (updatedChat.id !== chatId) return;
-        queryClient.setQueryData<ChatDetailResponse>(
-          queryKeys.chats.detail(chatId),
-          (old) => {
-            if (!old) return old;
-            return { ...old, ...updatedChat };
-          },
-        );
-      },
-
-      onMessageReceived: (message: Message) => {
-        if (message.chatId !== chatId) return;
-
-        queryClient.setQueryData<ChatDetailResponse>(
-          queryKeys.chats.detail(chatId),
-          (old) => {
-            if (!old) return old;
-            const existing = old.messages ?? [];
-            // Avoid duplicates
-            if (existing.some((m) => m.id === message.id)) return old;
-            return { ...old, messages: [...existing, message] };
-          },
-        );
-
-        // Play sound for messages from user or bot
-        if (enableSound && (message.sender === 'user' || message.sender === 'bot')) {
-          playMessage();
-        }
-      },
-
       onTypingUpdate: (typing: TypingIndicator) => {
         if (typing.chatId !== chatId) return;
         setTypingUsers((prev) => {
@@ -362,14 +318,7 @@ export function useChatDetail(
     return () => {
       unregisterHandlers(handlerId);
     };
-  }, [
-    chatId,
-    queryClient,
-    registerHandlers,
-    unregisterHandlers,
-    enableSound,
-    playMessage,
-  ]);
+  }, [chatId, registerHandlers, unregisterHandlers]);
 
   // Cleanup typing timeout on unmount
   useEffect(() => {
@@ -380,18 +329,153 @@ export function useChatDetail(
     };
   }, []);
 
-  // Send a message over the socket
-  const sendMessage = useCallback(
-    (content: string, type: Message['type'] = 'text') => {
-      if (!chatId || !content.trim()) return;
-      const message: Partial<Message> = {
-        content: content.trim(),
-        type,
-        sender: 'agent',
-      };
-      socketSendMessage(chatId, message);
+  const patchMessages = useCallback(
+    (updater: (messages: Message[]) => Message[]) => {
+      queryClient.setQueryData<ChatDetailResponse>(queryKeys.chats.detail(chatId), (old) => {
+        if (!old) return old;
+        return { ...old, messages: updater(old.messages ?? []) };
+      });
     },
-    [chatId, socketSendMessage],
+    [chatId, queryClient],
+  );
+
+  /**
+   * POST the reply and reconcile the optimistic bubble.
+   *
+   * Composer state machine (per clientMessageId):
+   *   pending  → sent      201: bubble takes the server id (or is dropped if
+   *                        the socket copy already brought it); draft cleared
+   *                        by the caller. Auto-claim ownership is folded in
+   *                        from the response conversation.
+   *   pending  → (removed) 409 on a FIRST send: the message was NOT persisted
+   *                        — the bubble is removed and the caller KEEPS the
+   *                        draft (the text still sits in the composer).
+   *   failed   → failed    409 on a RETRY (keepBubbleOnConflict): the draft
+   *                        was already cleared, so the bubble is KEPT in its
+   *                        retryable failed state — the text is never lost.
+   *   pending  → failed    network/5xx: bubble flips to FAILED with a retry
+   *                        that re-sends the SAME clientMessageId. A bubble
+   *                        the socket already confirmed ('sent') is NEVER
+   *                        downgraded by a late rejection.
+   *   failed   → pending   retryMessage(): same id, same content.
+   */
+  const postReply = useCallback(
+    async (
+      clientMessageId: string,
+      content: string,
+      opts: { keepBubbleOnConflict?: boolean } = {},
+    ): Promise<SendMessageResult> => {
+      try {
+        const res = await api.post<SendReplyResponse>(`/chats/${chatId}/messages`, {
+          clientMessageId,
+          content,
+        });
+        const serverId = res.message.id;
+        patchMessages((msgs) => {
+          if (msgs.some((m) => m.id === serverId)) {
+            // The socket copy arrived first (it reconciled the bubble or
+            // appended) — drop any leftover optimistic duplicate. Single pass:
+            // drop-or-map in one reduce instead of filter().map().
+            const next: Message[] = [];
+            for (const m of msgs) {
+              if (m.clientMessageId === clientMessageId && m.id !== serverId) continue;
+              next.push(
+                m.id === serverId ? { ...m, clientMessageId, deliveryState: 'sent' as const } : m,
+              );
+            }
+            return next;
+          }
+          const idx = msgs.findIndex((m) => m.clientMessageId === clientMessageId);
+          if (idx === -1) return msgs; // cache was replaced (refetch) — REST copy owns it
+          const next = [...msgs];
+          next[idx] = {
+            ...next[idx],
+            id: serverId,
+            createdAt: res.message.createdAt ?? next[idx].createdAt,
+            deliveryState: 'sent',
+          };
+          return next;
+        });
+        // The auto-claim means ownership flipped to this operator — fold the
+        // response summary into the list + detail caches (no follow-up GET).
+        applyCommandConversation(queryClient, res.conversation);
+        return { status: 'sent' };
+      } catch (err) {
+        const code = conflictCodeOf(err);
+        if (code) {
+          if (opts.keepBubbleOnConflict) {
+            // 409 on a retry: the composer draft is long gone, so the bubble
+            // is the ONLY copy of the text — keep it retryable, never remove.
+            patchMessages((msgs) =>
+              msgs.map((m) =>
+                m.clientMessageId === clientMessageId && m.deliveryState === 'pending'
+                  ? { ...m, deliveryState: 'failed' as const }
+                  : m,
+              ),
+            );
+          } else {
+            // 409 on a first send: not persisted; the caller keeps the draft.
+            // A bubble the socket already confirmed is never removed.
+            patchMessages((msgs) =>
+              msgs.filter(
+                (m) => !(m.clientMessageId === clientMessageId && m.deliveryState !== 'sent'),
+              ),
+            );
+          }
+          return { status: 'conflict', code, message: handleApiError(err) };
+        }
+        // Only a still-pending bubble may become FAILED — a socket-confirmed
+        // ('sent') bubble is never downgraded by a late rejection.
+        patchMessages((msgs) =>
+          msgs.map((m) =>
+            m.clientMessageId === clientMessageId && m.deliveryState === 'pending'
+              ? { ...m, deliveryState: 'failed' as const }
+              : m,
+          ),
+        );
+        return { status: 'failed', message: handleApiError(err) };
+      }
+    },
+    [chatId, patchMessages, queryClient],
+  );
+
+  const sendMessage = useCallback(
+    async (content: string): Promise<SendMessageResult> => {
+      const trimmed = content.trim();
+      if (!chatId || !trimmed) return { status: 'failed', message: 'Empty message' };
+      const clientMessageId = newUuid();
+      const optimistic: Message = {
+        id: clientMessageId,
+        clientMessageId,
+        chatId,
+        type: 'text',
+        content: trimmed,
+        sender: 'agent',
+        isRead: true,
+        createdAt: new Date().toISOString(),
+        deliveryState: 'pending',
+      };
+      patchMessages((msgs) => [...msgs, optimistic]);
+      return postReply(clientMessageId, trimmed, { keepBubbleOnConflict: false });
+    },
+    [chatId, patchMessages, postReply],
+  );
+
+  const retryMessage = useCallback(
+    async (clientMessageId: string): Promise<SendMessageResult> => {
+      const entry = queryClient.getQueryData<ChatDetailResponse>(queryKeys.chats.detail(chatId));
+      const target = (entry?.messages ?? []).find(
+        (m) => m.clientMessageId === clientMessageId && m.deliveryState === 'failed',
+      );
+      if (!target) return { status: 'failed', message: 'Nothing to retry' };
+      patchMessages((msgs) =>
+        msgs.map((m) =>
+          m.clientMessageId === clientMessageId ? { ...m, deliveryState: 'pending' as const } : m,
+        ),
+      );
+      return postReply(clientMessageId, target.content, { keepBubbleOnConflict: true });
+    },
+    [chatId, patchMessages, postReply, queryClient],
   );
 
   // Send typing indicator with 3 s auto-clear
@@ -430,6 +514,7 @@ export function useChatDetail(
     isFetching: detailIsFetching,
     error: detailError,
     sendMessage,
+    retryMessage,
     sendTyping,
     refetch: detailRefetch,
     markAsRead,

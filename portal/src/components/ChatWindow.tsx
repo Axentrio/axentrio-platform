@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, ArrowRightLeft, User, Mail, Globe } from 'lucide-react';
+import { Send, ArrowRightLeft, User, Mail, Globe, Loader2, RotateCw, AlertTriangle } from 'lucide-react';
 import { useChatDetail } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedResponsePicker';
@@ -39,15 +39,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const { t } = useTranslation();
   const [messageInput, setMessageInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  // Non-destructive composer notice: 409 conflicts keep the typed draft.
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [slashQuery, setSlashQuery] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
 
-  const { messages, typingUsers, sendMessage, sendTyping } = useChatDetail(chat.id, {
-    enableSound: true,
-  });
+  const { messages, typingUsers, sendMessage, retryMessage, sendTyping } = useChatDetail(chat.id);
 
   useNotificationSound();
 
@@ -72,17 +73,61 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Send message
+  // Send message through the acknowledged command route. The draft stays in
+  // the composer until the POST resolves:
+  //  - sent     → clear the draft (the optimistic bubble was reconciled).
+  //  - conflict → KEEP the draft + show a non-destructive notice (another
+  //               agent owns the conversation / it closed); nothing is lost.
+  //  - failed   → the bubble flips to FAILED with a Retry (same
+  //               clientMessageId); the composer clears so retry is the one
+  //               path (no accidental duplicate send with a new id).
   const handleSend = async () => {
-    if (!messageInput.trim()) return;
+    if (!messageInput.trim() || isSending) return;
 
-    await sendMessage(messageInput.trim());
-    setMessageInput('');
-    sendTyping(false);
+    // Snapshot the draft being sent: the operator may keep typing during the
+    // POST, and only THIS text may ever be cleared from the composer.
+    const sentText = messageInput;
 
-    // Reset textarea height
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
+    setSendNotice(null);
+    setIsSending(true);
+    let result: Awaited<ReturnType<typeof sendMessage>>;
+    try {
+      result = await sendMessage(sentText.trim());
+    } finally {
+      setIsSending(false);
+    }
+
+    if (result.status === 'conflict') {
+      setSendNotice(conflictNoticeFor(result.code));
+      return; // keep the draft (and anything typed since)
+    }
+
+    // Clear ONLY the sent draft. If the composer changed while the POST was
+    // in flight, the operator's newer text stays untouched (on a failure the
+    // sent text itself stays recoverable via the bubble's Retry).
+    if ((inputRef.current?.value ?? messageInput) === sentText) {
+      setMessageInput('');
+      sendTyping(false);
+      // Reset textarea height
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+      }
+    }
+  };
+
+  const conflictNoticeFor = (code?: string) =>
+    code === 'conversation_closed'
+      ? t('inbox.window.composer.conflictClosed')
+      : t('inbox.window.composer.conflictTaken');
+
+  // A retry that hits a 409 keeps the bubble (the hook holds it in the failed
+  // state — the text is never lost) and surfaces the same non-destructive
+  // notice as a first-send conflict.
+  const handleRetry = async (clientMessageId: string) => {
+    setSendNotice(null);
+    const result = await retryMessage(clientMessageId);
+    if (result.status === 'conflict') {
+      setSendNotice(conflictNoticeFor(result.code));
     }
   };
 
@@ -112,10 +157,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     const isAgent = message.sender === 'agent';
     const isBot = message.sender === 'bot';
     const isVisitor = !isAgent && !isBot;
+    const isPending = message.deliveryState === 'pending';
+    const isFailed = message.deliveryState === 'failed';
 
     return (
       <div
-        key={message.id}
+        key={message.clientMessageId ?? message.id}
         className={`flex ${isVisitor ? 'justify-end' : 'justify-start'} mb-4`}
       >
         <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
@@ -146,7 +193,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   ? 'bg-primary-600 text-white rounded-br-md'
                   : isBot
                     ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'
-                    : 'bg-surface-3 text-text-primary rounded-bl-md'
+                    : 'bg-surface-3 text-text-primary rounded-bl-md',
+                isPending && 'opacity-60',
+                isFailed && 'border border-red-500/50'
               )}
             >
               {message.type === 'text' ? (
@@ -169,10 +218,30 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               )}
             </div>
 
-            {/* Timestamp */}
-            <span className="text-xs text-text-muted mt-1">
-              {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            {/* Timestamp / delivery state */}
+            {isPending ? (
+              <span className="text-xs text-text-muted mt-1">
+                {t('inbox.window.message.sending')}
+              </span>
+            ) : isFailed ? (
+              <span className="text-xs text-red-500 mt-1 flex items-center gap-1.5">
+                {t('inbox.window.message.failed')}
+                {message.clientMessageId && (
+                  <button
+                    type="button"
+                    onClick={() => handleRetry(message.clientMessageId!)}
+                    className="inline-flex items-center gap-1 font-medium text-red-500 hover:text-red-400 underline"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                    {t('inbox.window.message.retry')}
+                  </button>
+                )}
+              </span>
+            ) : (
+              <span className="text-xs text-text-muted mt-1">
+                {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -269,6 +338,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Input area */}
       <div className="px-4 py-3 border-t border-edge bg-surface-2">
+        {/* Non-destructive send-conflict notice — the draft below is KEPT */}
+        {sendNotice && (
+          <div
+            role="status"
+            className="mb-2 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="flex-1">{sendNotice}</span>
+            <button
+              type="button"
+              onClick={() => setSendNotice(null)}
+              className="font-medium hover:text-amber-500"
+              aria-label={t('common.close')}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <CannedResponsePickerButton onSelect={handleCannedResponseSelect} />
 
@@ -297,13 +384,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           <Button
             onClick={handleSend}
-            disabled={!messageInput.trim()}
+            disabled={!messageInput.trim() || isSending}
             className="p-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
             size="icon"
             aria-label={t('inbox.window.composer.send')}
             title={t('inbox.window.composer.send')}
           >
-            <Send className="w-5 h-5" />
+            {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </Button>
         </div>
 

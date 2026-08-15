@@ -1927,7 +1927,9 @@
   "inbox": {
     "header": {
       "subtitle": "Espace de travail unifié pour toutes les conversations",
-      "live": "En direct"
+      "live": "En direct",
+      "reconnecting": "Reconnexion",
+      "offline": "Hors ligne"
     },
     "tabs": {
       "all": "Tous",
@@ -1963,7 +1965,9 @@
       },
       "composer": {
         "placeholder": "Écrivez un message…",
-        "send": "Envoyer le message"
+        "send": "Envoyer le message",
+        "conflictTaken": "Un autre agent a pris cette conversation. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous.",
+        "conflictClosed": "Cette conversation est fermée. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous."
       },
       "sender": {
         "agent": "Agent",
@@ -1972,7 +1976,10 @@
       },
       "message": {
         "image": "Image",
-        "file": "Fichier"
+        "file": "Fichier",
+        "sending": "Envoi…",
+        "failed": "Non remis",
+        "retry": "Réessayer"
       },
       "transferChat": "Transférer la conversation",
       "empty": {

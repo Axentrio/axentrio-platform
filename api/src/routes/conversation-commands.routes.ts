@@ -290,6 +290,11 @@ router.post(
         senderType: 'agent',
         status: 'sent',
         createdAt: result.message.createdAt,
+        // The message row stores clientMessageId in metadata (the dedupe key).
+        // Putting it on the wire lets the sender's portal reconcile its
+        // optimistic bubble by IDENTITY instead of a content heuristic (B-PR3b
+        // fix 1). serializeMessage passes metadata through as-is.
+        metadata: { clientMessageId },
       });
       // External channels get the reply post-commit (mirrors the socket path,
       // including Meta's HUMAN_AGENT tag). Failure is logged, never a rollback:

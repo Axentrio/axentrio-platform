@@ -40,6 +40,7 @@ import {
 import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge, PriorityBadge } from '@components/StatusBadge';
+import { ConnectionIndicator } from '@components/ConnectionIndicator';
 import { Modal } from '@components/Modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -48,15 +49,25 @@ import { api } from '@services/apiClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../queries/queryKeys';
 import { useNotificationSound } from '@websocket/notificationSound';
+import { useSocket } from '@websocket/SocketContext';
 import {
   useHandoffsQuery,
   useAcceptHandoff,
   useRejectHandoff,
 } from '../queries/useHandoffQueries';
+import {
+  useLiveConversationSync,
+  applyCommandConversation,
+  commandSummaryToChatPatch,
+  findCachedChat,
+  mergeDefined,
+  newUuid,
+} from '../queries/conversationLive';
+import { normalizeChatDetail } from '../queries/useChatQueries';
 import { agentOptions } from '../queries/useAgentQueries';
 import { useTenantSettings } from '../queries/useTenantQueries';
 import { cn } from '@/lib/utils';
-import type { Chat, ChatStatus, Agent } from '@app-types/index';
+import type { Chat, ChatStatus, Agent, CommandConversationSummary } from '@app-types/index';
 import type { HandoffRequest } from '@app-types/index';
 
 // ---------------------------------------------------------------------------
@@ -160,6 +171,7 @@ const Inbox: React.FC = () => {
   const [confirmClose, setConfirmClose] = useState(false);
 
   const queryClient = useQueryClient();
+  const { isConnected, isConnecting } = useSocket();
 
   // Handoff queue data
   const { handoffs, pendingCount } = useHandoffsQuery('pending');
@@ -167,11 +179,24 @@ const Inbox: React.FC = () => {
   const rejectHandoffMutation = useRejectHandoff();
   useNotificationSound();
 
+  // ONE live-sync mount: folds conversation:upsert / message:created into
+  // every cached list variant + the detail cache, plays the message sound for
+  // the open thread, and invalidates on reconnect + window focus. The open
+  // chat lives in component state, so upserts for it are merged here too
+  // (defined fields only — a partial summary never clobbers a known value).
+  useLiveConversationSync({
+    selectedChatId: selectedChat?.id,
+    onSelectedUpsert: (patch) => {
+      setSelectedChat((prev) => (prev && prev.id === patch.id ? mergeDefined(prev, patch) : prev));
+    },
+  });
+
   // Auto-load chat from query param (deep-link from redirect)
   React.useEffect(() => {
     if (initialChatId && !selectedChat) {
       api.get<{ data: Chat }>(`/chats/${initialChatId}`).then((res) => {
-        setSelectedChat(res.data ?? (res as unknown as Chat));
+        const chat = (res.data ?? (res as unknown as Chat)) as Chat;
+        setSelectedChat(normalizeChatDetail(chat) as Chat);
       }).catch(() => {
         toast.error(t('inbox.toasts.loadFailed'));
       });
@@ -193,13 +218,37 @@ const Inbox: React.FC = () => {
     setSelectedChat(chat);
   };
 
+  /**
+   * Select a conversation after a command, patched from the POST RESPONSE
+   * summary instead of a follow-up GET. The reduced summary carries no
+   * display fields, so the base row comes from the cache; the GET only runs
+   * as a fallback when nothing is cached (e.g. a deep link).
+   */
+  const selectFromCommandResponse = async (
+    chatId: string,
+    conversation: CommandConversationSummary | undefined,
+  ) => {
+    const patch = conversation ? commandSummaryToChatPatch(conversation) : null;
+    const base =
+      (selectedChat?.id === chatId ? selectedChat : null) ?? findCachedChat(queryClient, chatId);
+    if (base) {
+      setSelectedChat(patch ? mergeDefined(base, patch) : base);
+      return;
+    }
+    const chat = normalizeChatDetail(await api.get<Chat>(`/chats/${chatId}`)) as Chat;
+    setSelectedChat(patch ? mergeDefined(chat, patch) : chat);
+  };
+
   const handleTakeover = async (chatId: string) => {
     try {
-      await api.post(`/chats/${chatId}/takeover`);
-      // Refresh chat data after takeover. api.get already unwraps the
-      // { success, data } envelope, so it returns the Chat directly.
-      const chat = await api.get<Chat>(`/chats/${chatId}`);
-      setSelectedChat(chat);
+      const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
+        `/chats/${chatId}/takeover`,
+        { idempotencyKey: newUuid() },
+      );
+      // The response carries the committed ownership — fold it into the list
+      // + detail caches and the open pane; no refetch-after-mutation.
+      applyCommandConversation(queryClient, res.conversation);
+      await selectFromCommandResponse(chatId, res.conversation);
       toast.success(t('inbox.toasts.takeoverSuccess'));
     } catch (error) {
       console.error('Failed to takeover chat:', error);
@@ -213,7 +262,7 @@ const Inbox: React.FC = () => {
     try {
       await api.post('/handoff/resume-ai', { sessionId: selectedChat.id });
       // api.get unwraps the { success, data } envelope → returns the Chat directly.
-      const chat = await api.get<Chat>(`/chats/${selectedChat.id}`);
+      const chat = normalizeChatDetail(await api.get<Chat>(`/chats/${selectedChat.id}`)) as Chat;
       setSelectedChat(chat);
       // Refresh the conversation list so the paused badge clears on the row too.
       queryClient.invalidateQueries({ queryKey: queryKeys.chats.all() });
@@ -224,11 +273,13 @@ const Inbox: React.FC = () => {
     }
   };
 
+  // Accept = the ONE acknowledged takeover command (no separate socket
+  // handoff:accept emit, no optimistic queue removal — the resulting
+  // conversation:upsert + the handoff refetch reconcile the queue).
   const handleAcceptHandoff = async (handoff: HandoffRequest) => {
     try {
-      await acceptHandoffMutation.mutateAsync(handoff.id);
-      // After accepting, take over the chat and show it
-      await handleTakeover(handoff.chatId);
+      const res = await acceptHandoffMutation.mutateAsync({ chatId: handoff.chatId });
+      await selectFromCommandResponse(handoff.chatId, res?.conversation);
       toast.success(t('inbox.toasts.handoffAccepted'));
     } catch (error) {
       console.error('Failed to accept handoff:', error);
@@ -236,9 +287,10 @@ const Inbox: React.FC = () => {
     }
   };
 
-  const handleDeclineHandoff = async (handoffId: string) => {
+  // Decline = the acknowledged cancel command (HANDOFF_REQUESTED → BOT_OWNED).
+  const handleDeclineHandoff = async (handoff: HandoffRequest) => {
     try {
-      await rejectHandoffMutation.mutateAsync({ handoffId, reason: 'Agent unavailable' });
+      await rejectHandoffMutation.mutateAsync({ chatId: handoff.chatId, reason: 'Agent unavailable' });
     } catch (error) {
       console.error('Failed to decline handoff:', error);
       toast.error(t('inbox.toasts.handoffDeclineFailed'));
@@ -252,7 +304,7 @@ const Inbox: React.FC = () => {
     setIsTransferModalOpen(false);
     setSelectedChat(null);
     try {
-      await api.post(`/chats/${prev.id}/transfer`, { agentId });
+      await api.post(`/chats/${prev.id}/transfer`, { agentId, idempotencyKey: newUuid() });
       toast.success(t('inbox.toasts.transferSuccess'));
     } catch (error) {
       console.error('Failed to transfer chat:', error);
@@ -269,7 +321,11 @@ const Inbox: React.FC = () => {
     setSelectedChat(null);
     setConfirmClose(false);
     try {
-      await api.post(`/chats/${prev.id}/close`);
+      const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
+        `/chats/${prev.id}/close`,
+        { idempotencyKey: newUuid() },
+      );
+      applyCommandConversation(queryClient, res.conversation);
       toast.success(t('inbox.toasts.closeSuccess'));
     } catch (error) {
       console.error('Failed to close chat:', error);
@@ -286,7 +342,11 @@ const Inbox: React.FC = () => {
     // Optimistic: deselect immediately
     setSelectedChat(null);
     try {
-      await api.post(`/chats/${prev.id}/release`);
+      const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
+        `/chats/${prev.id}/release`,
+        { idempotencyKey: newUuid() },
+      );
+      applyCommandConversation(queryClient, res.conversation);
       toast.success(t('inbox.toasts.returnToBotSuccess'));
     } catch (error) {
       console.error('Failed to return to bot:', error);
@@ -325,10 +385,7 @@ const Inbox: React.FC = () => {
             <p className="text-text-secondary">{t('inbox.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-sm text-text-muted">
-              <span className="w-2 h-2 bg-status-online rounded-full animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              {t('inbox.header.live')}
-            </div>
+            <ConnectionIndicator isConnected={isConnected} isConnecting={isConnecting} />
           </div>
         </div>
 
@@ -419,7 +476,7 @@ const Inbox: React.FC = () => {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeclineHandoff(handoff.id);
+                            handleDeclineHandoff(handoff);
                           }}
                           disabled={rejectHandoffMutation.isPending || acceptHandoffMutation.isPending}
                           className="text-xs h-7 px-2"

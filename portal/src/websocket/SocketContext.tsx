@@ -9,21 +9,24 @@ import { WS_CONFIG } from '@config/api.config';
 import { WS_EVENTS } from '@config/constants';
 import { useAuth } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
-import type { 
-  Chat, 
-  Message, 
-  HandoffRequest, 
-  TypingIndicator, 
+import type {
+  TypingIndicator,
   Agent,
   DashboardMetrics,
-  Notification 
+  Notification,
+  HandoffRequest,
+  ConversationUpsertEvent,
+  MessageCreatedEvent,
 } from '@app-types/index';
 
 // Event handler types
 interface SocketEventHandlers {
-  onChatNew?: (chat: Chat) => void;
-  onChatUpdate?: (chat: Chat) => void;
-  onMessageReceived?: (message: Message) => void;
+  /** Normalized B-PR3a events — the ONLY list/detail/message feed the portal
+   *  consumes. The legacy chat:new/chat:update were never emitted, and
+   *  message:receive is left to the widget (listening to both would
+   *  double-handle every message). */
+  onConversationUpsert?: (event: ConversationUpsertEvent) => void;
+  onMessageCreated?: (event: MessageCreatedEvent) => void;
   onTypingUpdate?: (typing: TypingIndicator) => void;
   onHandoffNew?: (handoff: HandoffRequest) => void;
   onHandoffUpdate?: (handoff: HandoffRequest) => void;
@@ -44,10 +47,7 @@ interface SocketContextType {
   unregisterHandlers: (handlerId: string) => void;
   joinChat: (chatId: string) => void;
   leaveChat: (chatId: string) => void;
-  sendMessage: (chatId: string, message: Partial<Message>) => void;
   sendTyping: (chatId: string, isTyping: boolean) => void;
-  acceptHandoff: (handoffId: string) => void;
-  declineHandoff: (handoffId: string, reason?: string) => void;
   updateStatus: (status: Agent['status']) => void;
   reconnect: () => void;
 }
@@ -147,22 +147,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     socket.io.on('reconnect_attempt', () => setIsConnecting(true));
     socket.io.on('reconnect', () => setIsConnecting(false));
 
-    // Chat events
-    socket.on(WS_EVENTS.CHAT_NEW, (chat: Chat) => {
+    // Normalized conversation events (B-PR3a) — list + detail + messages.
+    socket.on(WS_EVENTS.CONVERSATION_UPSERT, (event: ConversationUpsertEvent) => {
       handlersRef.current.forEach((handlers) => {
-        handlers.onChatNew?.(chat);
+        handlers.onConversationUpsert?.(event);
       });
     });
 
-    socket.on(WS_EVENTS.CHAT_UPDATE, (chat: Chat) => {
+    socket.on(WS_EVENTS.MESSAGE_CREATED, (event: MessageCreatedEvent) => {
       handlersRef.current.forEach((handlers) => {
-        handlers.onChatUpdate?.(chat);
-      });
-    });
-
-    socket.on(WS_EVENTS.CHAT_MESSAGE_RECEIVED, (message: Message) => {
-      handlersRef.current.forEach((handlers) => {
-        handlers.onMessageReceived?.(message);
+        handlers.onMessageCreated?.(event);
       });
     });
 
@@ -291,37 +285,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isConnected, user?.id]);
 
-  // Send a message — backend expects { sessionId, content, type }
-  const sendMessage = useCallback((chatId: string, message: Partial<Message>) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.CHAT_MESSAGE, {
-        sessionId: chatId,
-        content: message.content,
-        type: message.type || 'text',
-      });
-    }
-  }, [isConnected]);
-
   // Send typing indicator — backend expects { sessionId, isTyping }
   const sendTyping = useCallback((chatId: string, isTyping: boolean) => {
     if (socketRef.current && isConnected) {
       socketRef.current.emit(WS_EVENTS.CHAT_TYPING, { sessionId: chatId, isTyping });
     }
   }, [isConnected]);
-
-  // Accept handoff
-  const acceptHandoff = useCallback((handoffId: string) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.HANDOFF_ACCEPT, { handoffId, agentId: user?.id });
-    }
-  }, [isConnected, user?.id]);
-
-  // Decline handoff
-  const declineHandoff = useCallback((handoffId: string, reason?: string) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.HANDOFF_DECLINE, { handoffId, agentId: user?.id, reason });
-    }
-  }, [isConnected, user?.id]);
 
   // Update agent status
   const updateStatus = useCallback((status: Agent['status']) => {
@@ -345,10 +314,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     unregisterHandlers,
     joinChat,
     leaveChat,
-    sendMessage,
     sendTyping,
-    acceptHandoff,
-    declineHandoff,
     updateStatus,
     reconnect,
   };

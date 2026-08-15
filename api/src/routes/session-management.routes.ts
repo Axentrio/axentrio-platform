@@ -15,10 +15,15 @@ router.post('/bulk-close', requireRole('admin'), asyncHandler(async (req: Reques
   const tenantId = req.user!.tenantId;
   const { sessionIds, olderThanHours } = req.body;
 
+  // Bulk admin sweep, deliberately NOT per-row through the command service.
+  // ownership + version move in the SAME statement so the columns never desync
+  // and any in-flight AI commit is fenced (B-PR2b).
   let result;
   if (sessionIds && Array.isArray(sessionIds)) {
     result = await AppDataSource.query(
-      `UPDATE chat_sessions SET status = 'closed', ended_at = NOW(), updated_at = NOW()
+      `UPDATE chat_sessions SET status = 'closed', ownership = 'closed',
+              ownership_version = ownership_version + 1,
+              ended_at = NOW(), updated_at = NOW()
        WHERE tenant_id = $1 AND id = ANY($2) AND status != 'closed'
        RETURNING id`,
       [tenantId, sessionIds]
@@ -26,7 +31,9 @@ router.post('/bulk-close', requireRole('admin'), asyncHandler(async (req: Reques
   } else if (olderThanHours && typeof olderThanHours === 'number') {
     const cutoff = new Date(Date.now() - olderThanHours * 60 * 60 * 1000);
     result = await AppDataSource.query(
-      `UPDATE chat_sessions SET status = 'closed', ended_at = NOW(), updated_at = NOW()
+      `UPDATE chat_sessions SET status = 'closed', ownership = 'closed',
+              ownership_version = ownership_version + 1,
+              ended_at = NOW(), updated_at = NOW()
        WHERE tenant_id = $1 AND status IN ('bot', 'waiting') AND last_activity_at < $2
        RETURNING id`,
       [tenantId, cutoff]

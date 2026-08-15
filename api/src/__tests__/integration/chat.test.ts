@@ -191,14 +191,21 @@ describe('Chat Lifecycle', () => {
     it('should close an active session (session status updated in DB)', async () => {
       const session = await createTestSession(tenantId, { status: 'active' });
 
-      // The widget close route saves session.close() first, then tries to create
-      // a system message which may fail due to FK. But session state is persisted.
+      // A REAL widget token: the conversation-command router shares this path
+      // (operator close) and dispatches on the token type — a widget JWT is
+      // passed through to this legacy widget route, exactly as deployed widgets
+      // (which always send their Bearer token) are.
+      const { generateWidgetToken } = await import('../../middleware/auth.middleware');
+      const token = generateWidgetToken(session.id, tenantId);
+
       await request(app)
         .post(`/api/v1/chats/${session.id}/close`)
+        .set('Authorization', `Bearer ${token}`)
         .send({});
 
       const updated = await AppDataSource.getRepository(ChatSession).findOneBy({ id: session.id });
       expect(updated!.status).toBe('closed');
+      expect(updated!.ownership).toBe('closed'); // B-PR2b: columns move together
     });
   });
 });

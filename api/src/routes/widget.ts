@@ -18,6 +18,8 @@ import { ApiError } from '../middleware/error-handler';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
+import { conversationCommands } from '../services/conversation-command.service';
+import type { HandoffReason } from '../database/entities/HandoffRequest';
 import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
 import {
@@ -230,10 +232,12 @@ router.post(
     });
 
     if (existingSession) {
-      // Bind a botId to legacy sessions that pre-date the column.
+      // Bind a botId to legacy sessions that pre-date the column. Targeted
+      // UPDATE, never save(existingSession): a full-entity write would revert a
+      // human takeover committed since the load (B-PR2b fix B1).
       if (!existingSession.botId) {
         existingSession.botId = resolvedBot.id;
-        await sessionRepository.save(existingSession);
+        await sessionRepository.update(existingSession.id, { botId: resolvedBot.id });
       }
       const token = generateWidgetToken(existingSession.id, tenant.id, visitorId);
 
@@ -638,26 +642,40 @@ router.post(
       throw new ValidationError('Session not initialized');
     }
 
-    const sessionRepository = AppDataSource.getRepository(ChatSession);
-    const session = await sessionRepository.findOne({
-      where: { id: sessionId, tenantId },
-    });
+    // The ONE transactional handoff-creation path (B-PR2b): ownership + legacy
+    // status + the open HandoffRequest row + the system event move together.
+    // The old handler wrote status='handoff' directly and created NO
+    // HandoffRequest row, so this path was invisible to the /handoffs/queue.
+    const validReasons: HandoffReason[] = ['user_request', 'bot_confidence_low', 'escalation_trigger', 'business_hours'];
+    const result = await conversationCommands.requestHandoff(
+      sessionId,
+      validReasons.includes(reason as HandoffReason) ? (reason as HandoffReason) : 'user_request',
+      'widget',
+      undefined,
+      { tenantId },
+    );
 
-    if (!session) {
-      throw new NotFoundError('Session not found');
+    if (result.outcome === 'handoff_disabled') {
+      // Deployed widgets expect a 200 envelope; a disabled bot simply reports
+      // that nobody is coming instead of silently parking the customer forever.
+      sendSuccess(res, {
+        sessionId,
+        status: 'handoff_unavailable',
+        message: 'Human handoff is not available for this assistant',
+      });
+      return;
     }
 
-    // Update session status
-    session.status = 'handoff';
-    await sessionRepository.save(session);
-
-    // Emit handoff request to tenant
-    emitToSession(tenantId, sessionId, 'handoff:requested', {
-      sessionId,
-      reason,
-      priority,
-      timestamp: new Date().toISOString(),
-    });
+    // Emit only for a genuinely open request — a human already owning the
+    // conversation must not re-ring the operator bell.
+    if (result.outcome === 'requested' || result.outcome === 'already_requested') {
+      emitToSession(tenantId, sessionId, 'handoff:requested', {
+        sessionId,
+        reason,
+        priority,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     logger.info('Handoff requested from widget', {
       sessionId,
@@ -703,9 +721,11 @@ router.post(
       throw new NotFoundError('Session not found');
     }
 
-    session.satisfactionRating = rating;
-    session.satisfactionFeedback = feedback;
-    await sessionRepository.save(session);
+    // Targeted UPDATE, never save(session) — B-PR2b fix B1.
+    await sessionRepository.update(session.id, {
+      satisfactionRating: rating,
+      satisfactionFeedback: feedback,
+    });
 
     logger.info('Session rated', {
       sessionId,

@@ -36,7 +36,13 @@ export async function releaseAgentSessions(
 
   const affectedSessionIds = sessions.map(s => s.id);
 
-  // 2. Null out agent + set status to waiting
+  // 2. Null out agent + re-queue. ONE atomic UPDATE that also moves ownership
+  // and bumps ownership_version (B-PR2b fix B3): the handoff row goes back to
+  // 'requested' below, so the session is pending-agent again —
+  // ownership='handoff_requested' with the derived status 'handoff'. Without
+  // the ownership/version move, an unassigned session kept
+  // ownership='human_owned' (split-brain) and an in-flight AI run was not
+  // fenced. Human-control ends with the assignment, so those columns clear too.
   let releasedSessions = 0;
   if (affectedSessionIds.length > 0) {
     const result = await manager
@@ -44,7 +50,13 @@ export async function releaseAgentSessions(
       .update(ChatSession)
       .set({
         assignedAgentId: null as unknown as string | undefined,
-        status: 'waiting' as const,
+        status: 'handoff' as const,
+        ownership: 'handoff_requested' as const,
+        ownershipVersion: () => 'ownership_version + 1',
+        humanControlMode: null as unknown as undefined,
+        humanControlDurationHours: null as unknown as undefined,
+        humanControlUntil: null as unknown as undefined,
+        humanControlStartedAt: null as unknown as undefined,
       })
       .where('assigned_agent_id = :agentId', { agentId: agent.id })
       .andWhere('status IN (:...statuses)', { statuses: ['active', 'handoff'] })

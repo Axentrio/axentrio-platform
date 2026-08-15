@@ -28,6 +28,7 @@ import { xssMiddleware } from './security/xss-protection';
 // Routes
 import authRoutes from './routes/auth.routes';
 import chatRoutes from './routes/chat.routes';
+import conversationCommandRoutes from './routes/conversation-commands.routes';
 import handoffRoutes from './routes/handsoff.routes';
 import agentRoutes from './routes/agents.routes';
 import { tenantRouter as tenantRoutes } from './routes/tenants';
@@ -311,6 +312,9 @@ apiRouter.use('/onboarding', onboardingRoutes);
 apiRouter.use('/copilot', timeoutMiddleware(90000), copilotRoutes);
 apiRouter.use(timeoutMiddleware(30000));
 apiRouter.use('/auth', authRoutes);
+// Command routes FIRST: /takeover|/release|/cancel|/messages don't exist in
+// chat.routes; the shared /close path forwards widget-token requests through.
+apiRouter.use('/chats', conversationCommandRoutes);
 apiRouter.use('/chats', chatRoutes);
 apiRouter.use('/chats', sessionManagementRoutes);
 apiRouter.use('/handoffs', handoffRoutes);
@@ -553,8 +557,13 @@ async function startServer(): Promise<void> {
         let batches = 0;
         do {
           const rows = returningRows<{ id: string }>(await AppDataSource.query(
+            // Bulk sweep, deliberately NOT per-row through the command service
+            // (thousands of rows). ownership + version move in the SAME statement
+            // so the columns can never desync and an in-flight AI commit is fenced.
             `UPDATE chat_sessions
-             SET status = 'closed', ended_at = NOW(), updated_at = NOW()
+             SET status = 'closed', ownership = 'closed',
+                 ownership_version = ownership_version + 1,
+                 ended_at = NOW(), updated_at = NOW()
              WHERE id IN (
                SELECT id FROM chat_sessions
                WHERE status IN ('bot', 'waiting')
@@ -578,31 +587,44 @@ async function startServer(): Promise<void> {
           logger.info(`Auto-closed ${totalClosed} stale sessions`);
         }
 
-        // Return stale handoffs to bot — a conversation parked in 'handoff' with no
-        // activity for 60 minutes is released back to the bot (mirrors releaseHandoff:
-        // status -> 'bot', agent unassigned) so the customer's next message gets an AI
-        // reply instead of the thread sitting silent forever. Uses a longer window than
-        // the close cutoff to give agents time before the bot reclaims an idle thread.
+        // Return stale UNACCEPTED handoffs to bot — a queue timeout, NOT a
+        // human-control duration (D3): only `handoff_requested` qualifies, so a
+        // CLAIMED conversation (ownership human_owned, whose legacy status is
+        // also 'handoff') is never swept back mid-conversation. Each return is
+        // an atomic ownership transition through the command service
+        // (cancelHandoff also times out the open HandoffRequest row, which the
+        // old raw UPDATE left dangling as 'requested' forever).
         const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
+        const { conversationCommands } = await import('./services/conversation-command.service');
         let totalReturned = 0;
         let returnedBatch: number;
         batches = 0;
         do {
-          const rows = returningRows<{ id: string }>(await AppDataSource.query(
-            `UPDATE chat_sessions
-             SET status = 'bot', assigned_agent_id = NULL, updated_at = NOW()
-             WHERE id IN (
-               SELECT id FROM chat_sessions
-               WHERE status = 'handoff'
-               AND last_activity_at < $1
-               AND last_activity_at IS NOT NULL
-               LIMIT $2
-               FOR UPDATE SKIP LOCKED
-             )
-             RETURNING id`,
+          const stale = (await AppDataSource.query(
+            `SELECT id FROM chat_sessions
+             WHERE ownership = 'handoff_requested'
+             AND last_activity_at < $1
+             AND last_activity_at IS NOT NULL
+             LIMIT $2`,
             [handoffCutoff, STALE_BATCH_SIZE]
-          ));
-          returnedBatch = rows.length;
+          )) as Array<{ id: string }>;
+          returnedBatch = 0;
+          for (const row of stale) {
+            try {
+              const result = await conversationCommands.cancelHandoff(
+                row.id,
+                { kind: 'system', source: 'stale_handoff_sweep' },
+              );
+              if (result.outcome === 'cancelled') returnedBatch++;
+            } catch (err) {
+              // A concurrent claim/close between SELECT and cancel is expected;
+              // the command's own state checks make the sweep re-entrant.
+              logger.debug('Stale handoff sweep skipped a session', {
+                sessionId: row.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
           totalReturned += returnedBatch;
           batches++;
         } while (returnedBatch === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);

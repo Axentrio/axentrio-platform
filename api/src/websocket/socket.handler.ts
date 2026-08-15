@@ -539,10 +539,16 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
 
       const savedMessage = await messageRepository.save(message);
 
-      // Update session last activity and message count
+      // Update session last activity and message count — targeted UPDATE, never
+      // save(session): the entity was loaded before this message, and a full
+      // write would revert a human takeover (ownership/status/version) that
+      // committed in between (B-PR2b fix B1).
       session.messageCount = (session.messageCount || 0) + 1;
       session.updateActivity();
-      await sessionRepository.save(session);
+      await sessionRepository.query(
+        `UPDATE chat_sessions SET message_count = message_count + 1, last_activity_at = now() WHERE id = $1`,
+        [session.id],
+      );
 
       // Broadcast message to room — use original plain text
       const roomName = `${tenantId}:${sessionId}`;
@@ -691,16 +697,28 @@ async function handleHandoffRequest(
       return;
     }
 
-    // Update session status
-    session.requestHandoff();
-    session.metadata = {
-      ...session.metadata,
-      customData: {
-        ...session.metadata?.customData,
-        handoffReason: reason || 'User requested',
-      },
-    };
-    await sessionRepository.save(session);
+    // The ONE transactional handoff-creation path (B-PR2b): ownership + legacy
+    // status + the open HandoffRequest row + the system event move together.
+    // (The old handler's save(session) also wrote every stale in-memory column
+    // back — the dropped-value bug class this service exists to end.)
+    const { conversationCommands } = await import('../services/conversation-command.service');
+    await conversationCommands.requestHandoff(sessionId, 'user_request', 'socket', undefined, {
+      tenantId,
+      note: reason || 'User requested',
+    });
+
+    // Display-only free-text reason (not ownership state). DB-side deep merge —
+    // spreading the in-memory copy would persist a stale metadata snapshot.
+    await sessionRepository.query(
+      `UPDATE chat_sessions
+          SET metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{customData}',
+            COALESCE(metadata->'customData', '{}'::jsonb) || $2::jsonb
+          )
+        WHERE id = $1`,
+      [sessionId, JSON.stringify({ handoffReason: reason || 'User requested' })],
+    );
 
     // Notify agents about handoff request
     io?.to(`agents:${tenantId}`).emit('handoff:requested', {
@@ -743,9 +761,17 @@ async function handleHandoffAccept(
       return;
     }
 
-    // Update session
-    session.assignAgent(agentId || user?.id || '');
-    await sessionRepository.save(session);
+    // One transactional claim through the command service. It also verifies the
+    // claiming agent belongs to this tenant — the old handler assigned any
+    // payload-supplied agentId unchecked.
+    const { conversationCommands } = await import('../services/conversation-command.service');
+    await conversationCommands.claimConversation(
+      sessionId,
+      agentId || user?.id || '',
+      { mode: 'indefinite' },
+      undefined,
+      { tenantId },
+    );
 
     const roomName = `${tenantId}:${sessionId}`;
 
@@ -783,7 +809,18 @@ async function handleHandoffReject(
     const { sessionId } = data;
     const tenantId = socket.data.tenantId;
 
-    // Just notify that an agent rejected - session stays pending
+    // Operator decline = the atomic HANDOFF_REQUESTED -> BOT_OWNED cancel
+    // (plan B1). The old handler only broadcast, so the state never moved back.
+    const { conversationCommands } = await import('../services/conversation-command.service');
+    await conversationCommands.cancelHandoff(
+      sessionId,
+      socket.data.user?.id
+        ? { kind: 'agent', agentId: socket.data.user.id }
+        : { kind: 'system', source: 'socket' },
+      undefined,
+      { tenantId },
+    );
+
     io?.to(`agents:${tenantId}`).emit('handoff:rejected', {
       sessionId,
       rejectedBy: socket.data.user?.id,

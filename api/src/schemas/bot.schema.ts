@@ -10,7 +10,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 // per-bot config; absent/empty schedule = always "in hours".
 export const businessHoursSchema = z.object({
   enabled: z.boolean(),
-  timezone: z.string().min(1).max(100),
+  timezone: z.string().min(1).max(100).optional(),
   schedule: z
     .array(
       z.object({

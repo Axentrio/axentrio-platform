@@ -127,7 +127,6 @@ export function BookingsStep({ submit }: StepProps) {
       await updateScheduler.mutateAsync({
         provider: 'internal',
         availability: {
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
           availabilityMode: 'business_hours',
           weeklyHours,
           dateOverrides: [],

@@ -4,11 +4,19 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AiBotForm from './AiBotForm';
 
-const { mockMutate, mockBind, readinessState } = vi.hoisted(() => ({
+const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = vi.hoisted(() => ({
   mockMutate: vi.fn(),
   mockBind: vi.fn(),
+  mockUpdateBot: vi.fn(),
   // Entitled-but-undelivered skills returned by GET /bots/readiness — set per test.
   readinessState: { unselectedEntitledSkills: [] as { feature: string; skillId: string; skillName: string }[] },
+  botDetailState: {
+    businessHours: null as {
+      enabled: boolean;
+      timezone?: string;
+      schedule: { day: string; open: string; close: string; closed: boolean }[];
+    } | null,
+  },
 }));
 
 vi.mock('@/auth/useAppAuth', () => ({
@@ -58,8 +66,8 @@ vi.mock('@/queries/useBotsQueries', () => ({
   }),
   useBindBotTemplate: () => ({ mutate: mockBind, isPending: false }),
   useSkillReadiness: () => ({ data: [] }),
-  useBotDetail: () => ({ data: { businessHours: null } }),
-  useUpdateBot: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useBotDetail: () => ({ data: botDetailState }),
+  useUpdateBot: () => ({ mutateAsync: mockUpdateBot, isPending: false }),
 }));
 
 vi.mock('@/queries/useReadinessQueries', () => ({
@@ -88,6 +96,8 @@ describe('AiBotForm', () => {
   beforeEach(() => {
     mockMutate.mockReset();
     mockBind.mockReset();
+    mockUpdateBot.mockReset().mockResolvedValue(undefined);
+    botDetailState.businessHours = null;
     readinessState.unselectedEntitledSkills = [];
   });
 
@@ -144,6 +154,26 @@ describe('AiBotForm', () => {
     await waitFor(() => expect(mockMutate).toHaveBeenCalled());
     const payload = mockMutate.mock.calls[0][0] as { brandVoice: Record<string, unknown> };
     expect(payload.brandVoice).not.toHaveProperty('templateId');
+  });
+
+  it('shows the server timezone read-only and omits it from business-hours writes', async () => {
+    botDetailState.businessHours = {
+      enabled: true,
+      timezone: 'Europe/Brussels',
+      schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+    };
+    const { user } = renderForm();
+
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    expect(await screen.findByText('Europe/Brussels')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('America/New_York')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('switch', { name: 'monday open' }));
+    await user.click(screen.getByRole('button', { name: /save business hours/i }));
+
+    await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
+    const payload = mockUpdateBot.mock.calls[0][0] as { businessHours: Record<string, unknown> };
+    expect(payload.businessHours).not.toHaveProperty('timezone');
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

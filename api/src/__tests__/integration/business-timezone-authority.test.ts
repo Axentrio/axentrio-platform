@@ -30,6 +30,7 @@ import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
+import { logger } from '../../utils/logger';
 import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import type { Tenant } from '../../database/entities/Tenant';
 
@@ -38,6 +39,7 @@ const BRUSSELS = 'Europe/Brussels';
 
 let tenant: Tenant;
 let anchor: Bot;
+const warnSpy = vi.spyOn(logger, 'warn');
 
 const botRow = (id: string) =>
   AppDataSource.getRepository(Bot).findOneOrFail({ where: { id } });
@@ -76,6 +78,10 @@ describe('a legacy conflicting timezone payload cannot change business time (A4 
     expect(res.body.data.availability.timezone).toBe(BRUSSELS);
     // Persisted value is the DERIVED one.
     expect((await ruleRow(anchor.id))!.timezone).toBe(BRUSSELS);
+    const conflictWarnings = warnSpy.mock.calls.filter(([message]) =>
+      String(message).includes('[BusinessTimezone]') && String(message).includes('availability.timezone'),
+    );
+    expect(conflictWarnings).toHaveLength(1);
   });
 
   it('a NEW tolerant client may omit timezone entirely — the rule still gets the derived value', async () => {
@@ -181,7 +187,10 @@ describe('multi-bot: one bot cannot move another bot\'s business time (A4 #7)', 
 
     const res = await request(app)
       .put(`${CONFIG_URL}?botId=${second.id}`)
-      .send({ venueAddress: { street: 'Meir 12', city: 'Antwerpen', country: 'BE' } });
+      .send({
+        availability: { weeklyHours: {} },
+        venueAddress: { street: 'Meir 12', city: 'Antwerpen', country: 'BE' },
+      });
     expect(res.status).toBe(200);
 
     // The named Agent is repaired…
@@ -208,5 +217,25 @@ describe('operational businessHours writes are equally tolerant (A2/A3)', () => 
     const stored = (await botRow(anchor.id)).settings?.businessHours;
     expect(stored?.timezone).toBe(BRUSSELS);
     expect(stored?.schedule?.[0]?.open).toBe('09:00');
+  });
+
+  it('PATCH /bots/:id accepts a missing timezone and keeps operational + booking hours aligned', async () => {
+    const botRes = await request(app)
+      .patch(`/api/v1/bots/${anchor.id}`)
+      .send({
+        businessHours: {
+          enabled: true,
+          schedule: [{ day: 'tuesday', open: '08:00', close: '12:00', closed: false }],
+        },
+      });
+    expect(botRes.status).toBe(200);
+
+    const schedulerRes = await request(app)
+      .put(CONFIG_URL)
+      .send({ availability: { weeklyHours: { tue: [{ start: '08:00', end: '12:00' }] } } });
+    expect(schedulerRes.status).toBe(200);
+    expect(schedulerRes.body.data.availability.timezone).toBe(BRUSSELS);
+    expect((await botRow(anchor.id)).settings?.businessHours?.timezone).toBe(BRUSSELS);
+    expect((await ruleRow(anchor.id))!.timezone).toBe(BRUSSELS);
   });
 });

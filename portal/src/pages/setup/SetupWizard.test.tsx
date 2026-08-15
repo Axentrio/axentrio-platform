@@ -339,6 +339,7 @@ describe('the bookings step', () => {
 
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/scheduler/config', expect.anything()));
     const payload = apiPut.mock.calls.find((c) => c[0] === '/scheduler/config')![1];
+    expect(payload.availability).not.toHaveProperty('timezone');
     expect(payload.availability.slotGranularityMin).toBe(30);
     // SHORT weekday keys — this asserted `monday`/`sunday`, which the scheduler zod enum
     // (mon|tue|…) rejects, so the step 422'd on every real save while this test passed

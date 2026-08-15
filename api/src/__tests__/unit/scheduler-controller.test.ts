@@ -201,6 +201,18 @@ describe('scheduler.controller', () => {
     expect(sendSuccess).toHaveBeenCalled();
   });
 
+  it('accepts availability without timezone and derives the server-owned value', async () => {
+    const req: any = {
+      tenantId: 'ten-1',
+      body: { availability: { weeklyHours: { fri: [{ start: '09:00', end: '17:00' }] } } },
+    };
+
+    await updateSchedulerConfig(req, res);
+
+    expect(ruleSave).toHaveBeenCalledOnce();
+    expect(ruleSave.mock.calls[0][0]).toMatchObject({ timezone: 'Europe/Brussels' });
+  });
+
   it('gates every write and normalizes a legacy calcom provider input to internal', async () => {
     // Cal.com is shelved: a `provider: 'calcom'` payload is still Pro+-gated and
     // persisted as internal rather than re-enabling the Cal.com path.

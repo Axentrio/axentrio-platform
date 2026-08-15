@@ -85,7 +85,6 @@ export function ChatbotStep({ submit }: StepProps) {
       await api.patch('/tenants/me', {
         businessHours: {
           enabled: true,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
           schedule: WEEK_DAYS.map((day) => ({
             day,
             open: opensAt,

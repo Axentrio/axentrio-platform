@@ -170,8 +170,17 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     const availability = payload.availability as typeof AVAILABILITY;
     expect(availability.weeklyHours).toEqual(AVAILABILITY.weeklyHours);
     expect(availability.dateOverrides).toEqual(AVAILABILITY.dateOverrides);
-    expect(availability.timezone).toBe('Europe/Brussels');
+    expect(availability).not.toHaveProperty('timezone');
     expect(availability.slotGranularityMin).toBe(30);
+  });
+
+  it('displays the server timezone read-only and omits it from the save payload', async () => {
+    const payload = await saveUntouched(CONFIG);
+
+    expect(payload.availability).not.toHaveProperty('timezone');
+    expect(document.getElementById('scheduler-timezones')).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /^timezone$/i })).toBeNull();
+    expect(screen.getByText('Europe/Brussels')).toBeInTheDocument();
   });
 
   it('sends an empty area as [] rather than dropping the key', async () => {

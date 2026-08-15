@@ -53,26 +53,6 @@ const DAYS: { key: Weekday; label: string }[] = [
   { key: 'sun', label: 'Sunday' },
 ];
 
-const TIMEZONES = [
-  'Europe/Brussels',
-  'Europe/Amsterdam',
-  'Europe/Paris',
-  'Europe/London',
-  'Europe/Berlin',
-  'UTC',
-];
-
-// Full IANA list where the browser supports it (modern Chromium/Safari/FF),
-// falling back to the short curated list. Feeds a searchable <datalist>.
-const ALL_TIMEZONES: string[] = (() => {
-  try {
-    const sv = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
-    return typeof sv === 'function' ? sv('timeZone') : TIMEZONES;
-  } catch {
-    return TIMEZONES;
-  }
-})();
-
 const DEFAULT_WINDOW: TimeWindow = { start: '09:00', end: '17:00' };
 
 interface DayRow {
@@ -249,7 +229,6 @@ export const SchedulerSettings: React.FC = () => {
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, [queryClient]);
 
-  const [timezone, setTimezone] = useState('Europe/Brussels');
   const [availabilityMode, setAvailabilityMode] = useState<AvailabilityMode>('business_hours');
   const [slotGranularityMin, setSlotGranularityMin] = useState(30);
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
@@ -330,7 +309,6 @@ export const SchedulerSettings: React.FC = () => {
   useEffect(() => {
     if (!data || hydrated) return;
     if (data.availability) {
-      setTimezone(data.availability.timezone);
       setAvailabilityMode(data.availability.availabilityMode ?? 'business_hours');
       setSlotGranularityMin(data.availability.slotGranularityMin);
       setDays(rowsFromWeeklyHours(data.availability.weeklyHours));
@@ -480,7 +458,7 @@ export const SchedulerSettings: React.FC = () => {
     });
     return {
       provider: 'internal',
-      availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
+      availability: { availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
       // Always sent, including when empty — [] is how the owner clears their area.
       serviceArea,
       // Whole object every time: a null clears one rule, an omitted key would leave the
@@ -688,19 +666,10 @@ export const SchedulerSettings: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <Label className="text-text-secondary mb-1 block">Timezone</Label>
-                      <Input
-                        list="scheduler-timezones"
-                        aria-label="Timezone"
-                        value={timezone}
-                        onChange={(e) => setTimezone(e.target.value)}
-                        placeholder="Search timezone…"
-                      />
-                      <datalist id="scheduler-timezones">
-                        {ALL_TIMEZONES.map((tz) => (
-                          <option key={tz} value={tz}>{tz}</option>
-                        ))}
-                      </datalist>
+                      <span className="mb-1 block text-sm text-text-secondary">Timezone</span>
+                      <span className="text-sm text-text-primary">
+                        {data?.availability?.timezone ?? '—'}
+                      </span>
                     </div>
                     <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
                   </div>
@@ -1260,7 +1229,7 @@ export const SchedulerSettings: React.FC = () => {
                       <Eye className="w-3.5 h-3.5" /> {showPreview ? 'Hide' : 'Show'} next 7 days
                     </Button>
                   </div>
-                  {showPreview && <SlotPreview timezone={timezone} />}
+                  {showPreview && <SlotPreview timezone={data?.availability?.timezone ?? 'Europe/Brussels'} />}
                 </div>
 
             {errors.length > 0 && (
@@ -1454,4 +1423,3 @@ const NumberField: React.FC<{
     />
   </div>
 );
-

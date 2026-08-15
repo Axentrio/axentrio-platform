@@ -293,7 +293,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setBhSchedule((prev) => prev.map((d) => (d.day === day ? { ...d, ...patch } : d)));
 
   const saveBusinessHours = async () => {
-    await updateBot.mutateAsync({ id: botId, businessHours: { enabled: bhEnabled, timezone: bhTimezone, schedule: bhSchedule } });
+    await updateBot.mutateAsync({ id: botId, businessHours: { enabled: bhEnabled, schedule: bhSchedule } });
     setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule));
   };
 
@@ -865,13 +865,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                       </div>
                     )}
                     <div className="max-w-xs">
-                      <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.businessHours.timezone')}</Label>
-                      <Input
-                        value={bhTimezone}
-                        onChange={(e) => setBhTimezone(e.target.value)}
-                        placeholder="America/New_York"
-                        disabled={readOnly}
-                      />
+                      <span className="mb-1 block text-xs text-text-secondary">
+                        {t('ai.bot.operational.businessHours.timezone')}
+                      </span>
+                      <span className="text-sm text-text-primary">{bhTimezone}</span>
                     </div>
                     <div className="space-y-1.5">
                       {bhSchedule.map((d) => (

@@ -52,7 +52,7 @@ export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday'
 
 export interface BusinessHours {
   enabled: boolean;
-  timezone: string;
+  timezone?: string;
   schedule: Array<{ day: WeekDay; open: string; close: string; closed: boolean }>;
 }
 

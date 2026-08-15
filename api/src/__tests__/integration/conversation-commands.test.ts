@@ -434,16 +434,29 @@ describe('REST command routes', () => {
     expect(conflict.body.error.code).toBe('conversation_already_claimed');
   });
 
-  it('POST /takeover rejects mode timed (unexposed until the PR 5 expiry worker)', async () => {
+  it('POST /takeover accepts mode timed now that the expiry worker exists (B-PR5a), and validates hours', async () => {
     const tenant = await makeTenantWithAi();
     const { agent } = await makeOperator(tenant.id);
     const session = await createTestSession(tenant.id, { status: 'bot' });
     configureMockAuth(auth, { userId: agent.id, tenantId: tenant.id, role: 'admin' });
 
+    const invalid = await request(app)
+      .post(`/api/v1/chats/${session.id}/takeover`)
+      .send({ idempotencyKey: 'tk-bad', mode: 'timed', hours: 25 });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe('invalid_takeover_hours');
+
     const timed = await request(app)
       .post(`/api/v1/chats/${session.id}/takeover`)
       .send({ idempotencyKey: 'tk-t', mode: 'timed', hours: 2 });
-    expect(timed.status).toBe(400);
+    expect(timed.status).toBe(200);
+    expect(timed.body.data.outcome).toBe('claimed');
+    expect(timed.body.data.conversation).toMatchObject({
+      ownership: 'human_owned',
+      humanControlMode: 'timed',
+      humanControlDurationHours: 2,
+    });
+    expect(timed.body.data.conversation.humanControlUntil).toBeTruthy();
   });
 
   it('B2 compat: the SHIPPED portal posts takeover/close/release with an EMPTY body — they must work (non-idempotently)', async () => {

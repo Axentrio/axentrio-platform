@@ -124,6 +124,12 @@ export interface ConversationSummaryDto {
   // ── B-PR4a addition (additive; shipped clients ignore unknown keys) ───────
   /** Durable customer-thread key - see computeCustomerThreadId. */
   customerThreadId: string;
+  // ── B-PR5a additions (additive; shipped clients ignore unknown keys) ──────
+  // The timed human-control facts, so the portal countdown (B-PR5b) can render
+  // and update from the same conversation:upsert every ownership change emits.
+  humanControlMode: 'timed' | 'indefinite' | null;
+  humanControlDurationHours: number | null;
+  humanControlUntil: Date | null;
 }
 
 /**
@@ -179,6 +185,9 @@ export function serializeConversationSummary(
     assignedAgentId,
     channel: session.channel,
     customerThreadId: computeCustomerThreadId(session, opts.binding ?? null),
+    humanControlMode: session.humanControlMode ?? null,
+    humanControlDurationHours: session.humanControlDurationHours ?? null,
+    humanControlUntil: session.humanControlUntil ?? null,
   };
 }
 

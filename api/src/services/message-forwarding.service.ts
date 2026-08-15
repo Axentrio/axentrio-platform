@@ -141,6 +141,72 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
 }
 
 /**
+ * Timed human-control expiry, checked ON THE INBOUND PATH (B-PR5a item 3) so
+ * correctness never depends on the 60s server sweep: a customer message that
+ * arrives after the timed-takeover deadline must be answered by the AI, not
+ * sit in a silently-expired human session. Runs BEFORE the bot-vs-human
+ * routing gates in forwardMessageToN8n and runTurn.
+ *
+ * Fencing: the in-memory pre-check is ADVISORY ONLY - it decides whether to
+ * ATTEMPT the locked release, never whether the control is expired. The
+ * release itself goes through `conversationCommands.releaseExpiredHumanControl`,
+ * which locks the session row and re-checks the expiry predicate INSIDE the
+ * transaction ON THE DB CLOCK (codex review fix 1) - so a deadline that an
+ * operator re-claim or a reply-slide pushed forward since this entity was
+ * loaded is honored (no release), a skewed JS clock can never release early,
+ * and a concurrent sweep/inbound release converges on the command's no-op
+ * outcomes (re-entrant). A JS clock running BEHIND the DB can at worst skip
+ * the attempt here; the worker's DB-clock SELECT still releases within its
+ * tick. Fail-safe: on an error the message keeps its current routing (stays
+ * with the human) and the sweep repairs within its tick.
+ *
+ * Exported for the DB-backed integration tests.
+ */
+export async function releaseExpiredHumanControlOnInbound(session: ChatSession): Promise<void> {
+  if (
+    session.ownership !== 'human_owned' ||
+    session.humanControlMode !== 'timed' ||
+    !session.humanControlUntil ||
+    new Date(session.humanControlUntil).getTime() > Date.now()
+  ) {
+    return;
+  }
+  try {
+    const result = await conversationCommands.releaseExpiredHumanControl(session.id, {
+      source: 'inbound_message_expiry',
+    });
+    // Keep the caller's in-memory copy consistent with the LOCKED row the
+    // command read - the routing gates below read these fields. (The command
+    // only does targeted column UPDATEs, so the coalescer watermark can never
+    // be clobbered.) Synced on EVERY outcome: for the no-op outcomes the
+    // summary is simply a fresher read than the ingress-loaded entity.
+    const c = result.conversation;
+    session.ownership = c.ownership;
+    session.status = c.status;
+    session.ownershipVersion = c.ownershipVersion;
+    session.assignedAgentId = c.assignedAgentId ?? undefined;
+    session.humanControlMode = c.humanControlMode ?? undefined;
+    session.humanControlDurationHours = c.humanControlDurationHours ?? undefined;
+    session.humanControlUntil = c.humanControlUntil ? new Date(c.humanControlUntil) : undefined;
+    session.humanControlStartedAt = c.humanControlStartedAt ? new Date(c.humanControlStartedAt) : undefined;
+
+    if (result.outcome === 'released') {
+      logger.info(
+        `[timed-control] expired human control released on inbound message for session ${session.id}`,
+      );
+      // B-PR3a discipline: normalized ownership event post-commit (the command's
+      // transaction is done), so the inbox drops the "human control" state live.
+      await emitConversationUpsert(session);
+    }
+  } catch (err) {
+    logger.error('[timed-control] inbound expiry release failed - message keeps its current routing', {
+      sessionId: session.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Forward a visitor message to n8n if applicable.
  * Called after the message is saved to DB and broadcast via WebSocket.
  *
@@ -150,6 +216,11 @@ export async function forwardMessageToN8n(
   session: ChatSession,
   savedMessage: Message,
 ): Promise<boolean> {
+  // B-PR5a: an EXPIRED timed human control is released to the bot BEFORE the
+  // routing gate below, so this just-arrived message is handled by the AI
+  // instead of waiting on the 60s expiry sweep.
+  await releaseExpiredHumanControlOnInbound(session);
+
   // Only forward visitor messages when session is in bot or waiting status
   if (session.status !== 'bot' && session.status !== 'waiting') {
     return false;
@@ -1446,6 +1517,11 @@ async function routeBotMessageOutbound(
  * 'noop' so the coalescer can clear state or re-arm.
  */
 export async function runTurn(session: ChatSession, pending: Message): Promise<RunTurnStatus> {
+  // B-PR5a: mirror forwardMessageToN8n - release an EXPIRED timed human control
+  // before the routing gates, so a coalesced turn on an expired session is
+  // answered by the AI instead of noop-ing until the 60s sweep.
+  await releaseExpiredHumanControlOnInbound(session);
+
   // Status gate — mirror forwardMessageToN8n: never run the agent on a session a
   // human owns ('active'/'handoff') or that's closed. Without this the coalescer
   // path would bypass human takeover (R11/AC9).

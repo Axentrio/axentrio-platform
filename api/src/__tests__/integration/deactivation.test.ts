@@ -52,7 +52,7 @@ describe('Deactivation + Session Cleanup', () => {
   });
 
   describe('POST /api/v1/admin/users/:id/deactivate', () => {
-    it('should deactivate user and set active sessions to waiting with null assignedAgentId', async () => {
+    it('should deactivate user and re-queue their sessions (handoff_requested) with null assignedAgentId', async () => {
       // Create target user + agent
       const targetUser = await createTestUser(tenantId, { role: 'agent' });
       const agent = await createTestAgent(tenantId, targetUser.id);
@@ -77,15 +77,21 @@ describe('Deactivation + Session Cleanup', () => {
       const updatedUser = await AppDataSource.getRepository(User).findOneBy({ id: targetUser.id });
       expect(updatedUser!.isActive).toBe(false);
 
-      // Verify sessions are now waiting with null assignedAgentId
+      // B-PR2b fix B3: releasing an agent RE-QUEUES their conversations —
+      // ownership='handoff_requested' with the derived status 'handoff'
+      // (consistent with the handoff rows returning to 'requested'), agent
+      // unassigned, and the ownership_version bumped so any in-flight AI run
+      // against the pre-release state is fenced.
       const sessionRepo = AppDataSource.getRepository(ChatSession);
       const s1 = await sessionRepo.findOneBy({ id: session1.id });
       const s2 = await sessionRepo.findOneBy({ id: session2.id });
 
-      expect(s1!.status).toBe('waiting');
-      expect(s1!.assignedAgentId).toBeNull();
-      expect(s2!.status).toBe('waiting');
-      expect(s2!.assignedAgentId).toBeNull();
+      for (const s of [s1!, s2!]) {
+        expect(s.status).toBe('handoff');
+        expect(s.ownership).toBe('handoff_requested');
+        expect(s.assignedAgentId).toBeNull();
+        expect(s.ownershipVersion).toBeGreaterThan(0);
+      }
     });
 
     it('should reset accepted handoff requests to requested with null assignedAgentId', async () => {

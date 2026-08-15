@@ -139,9 +139,11 @@ router.post(
     const session = await repo.findOne({ where: { id } });
     if (!session) throw new NotFoundError('Conversation not found');
 
+    // Targeted UPDATE, never save(session): a full-entity write from this stale
+    // copy would revert a concurrent ownership command (B-PR2b fix B1).
     session.aiAutoReplyEnabled = true;
     session.guardrailStatus = 'normal';
-    await repo.save(session);
+    await repo.update(session.id, { aiAutoReplyEnabled: true, guardrailStatus: 'normal' });
     await redisLoopStore.clear(id).catch(() => {});
 
     await logAudit(req.userId!, 'guardrails.resume_ai', 'chat_session', id, session.tenantId, {

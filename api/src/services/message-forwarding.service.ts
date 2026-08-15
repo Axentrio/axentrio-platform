@@ -40,6 +40,7 @@ import {
   BotPausedConfigError,
   BotNotFoundConfigError,
 } from './bot-config.service';
+import { conversationCommands } from './conversation-command.service';
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
@@ -53,7 +54,6 @@ const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
 const tenantRepository = AppDataSource.getRepository(Tenant);
 const participantRepository = AppDataSource.getRepository(Participant);
-const handoffRepository = AppDataSource.getRepository(HandoffRequest);
 
 // Module-level service reference, set via initializeAgentService().
 let agentService: AgentService | null = null;
@@ -225,7 +225,19 @@ export async function forwardMessageToN8n(
       // Localize the canned off-hours/escalation message to the customer's
       // language (fail-open to the original).
       const autoMsg = await localizeMessage(auto.message, plainContent, session);
-      await sendBotMessage(session, botParticipant.id, autoMsg);
+      try {
+        // Fenced on the ingress-loaded entity's version: a takeover between the
+        // message arriving and this canned reply suppresses it.
+        await sendBotMessage(session, botParticipant.id, autoMsg, undefined, undefined, {
+          ownershipVersion: session.ownershipVersion ?? 0,
+        });
+      } catch (err) {
+        if (err instanceof OwnershipChangedError) {
+          logger.info(`[legacy] canned reply suppressed for session ${session.id} — ownership changed`);
+          return true;
+        }
+        throw err;
+      }
       if (auto.kind === 'escalation') {
         await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
       }
@@ -612,11 +624,16 @@ async function platformAgentPath(
       // forwardMessageToN8n entry (above), so the drain only coalesces
       // already-gated messages. Re-gating would double-count loop counters.
       // But re-check the guardrail pause each turn — a concurrent spam message
-      // could have disabled the session mid-drain.
+      // could have disabled the session mid-drain. Ownership is re-read too:
+      // a human claim mid-drain ends the bot's turn-taking (B2), and the
+      // version is the fence base for this turn's commit.
       const live = await sessionRepository.findOne({
-        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
+        where: { id: session.id },
+        select: { id: true, aiAutoReplyEnabled: true, ownership: true, ownershipVersion: true } as never,
       });
       if (live && live.aiAutoReplyEnabled === false) break;
+      if (live && live.ownership !== 'bot_owned') break;
+      const turnOwnershipVersion = live?.ownershipVersion ?? session.ownershipVersion ?? 0;
 
       // Show typing indicator while AI processes — portal + widget over the
       // WebSocket, and the end user on their external channel (best-effort).
@@ -652,14 +669,23 @@ async function platformAgentPath(
       );
 
       // In-flight pause: a concurrent guardrail block may have disabled the
-      // session while the agent was thinking — don't send the reply.
+      // session while the agent was thinking — don't send the reply. A moved
+      // ownership_version (human takeover, even a claim→release ABA) equally
+      // suppresses it; the sendBotMessage fence below closes the remaining
+      // read-to-commit race transactionally.
       const liveAfter = await sessionRepository.findOne({
-        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
+        where: { id: session.id },
+        select: { id: true, aiAutoReplyEnabled: true, ownershipVersion: true } as never,
       });
       if (liveAfter && liveAfter.aiAutoReplyEnabled === false) {
         emitToSession(session.tenantId, session.id, 'typing:stop', {});
         break;
       }
+      if (liveAfter && (liveAfter.ownershipVersion ?? 0) !== turnOwnershipVersion) {
+        emitToSession(session.tenantId, session.id, 'typing:stop', {});
+        break;
+      }
+      const fence = { ownershipVersion: turnOwnershipVersion };
 
       let handedOff = false;
       // An upstream failure sends the fallback but writes NO handoff (the bot keeps
@@ -673,6 +699,7 @@ async function platformAgentPath(
       // INCLUDING `infraFailure` (which otherwise does not hand off): a provider
       // outage is no reason to lose a human the customer explicitly asked for.
       const explicitHandoff = result.handoffRequested === true;
+      try {
       switch (result.type) {
         case 'response': {
           // Output guardrails (AC14): a blocked AI reply is treated like an agent
@@ -682,7 +709,7 @@ async function platformAgentPath(
             content: result.content, fallbackMessage, generationPath: 'legacy',
           });
           if (guard.blocked) {
-            await sendBotMessage(session, botParticipant.id, guard.content);
+            await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
             if (!explicitHandoff) {
               await handleBotHandoff(session, botParticipant.id, 'bot_error');
               handedOff = true;
@@ -694,6 +721,7 @@ async function platformAgentPath(
               result.content,
               { quickReplies: result.quickReplies, affordance: result.affordance },
               result.offer,
+              fence,
             );
           }
           break;
@@ -701,7 +729,7 @@ async function platformAgentPath(
 
         case 'error':
           logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
           // Mirror the coalescer path: an UPSTREAM failure (out of credit, throttled,
           // provider down, queue/Redis unreachable) hits every conversation at once.
           // Handing it to a human parks the whole inbox and SILENCES the bot for the
@@ -717,7 +745,7 @@ async function platformAgentPath(
 
         case 'budget_exceeded':
           logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
           if (!explicitHandoff) {
             await handleBotHandoff(session, botParticipant.id, 'bot_error');
             handedOff = true;
@@ -726,7 +754,7 @@ async function platformAgentPath(
 
         case 'max_iterations':
           logger.warn(`Platform agent max iterations for session ${session.id}`);
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
           if (!explicitHandoff) {
             await handleBotHandoff(session, botParticipant.id, 'bot_error');
             handedOff = true;
@@ -741,13 +769,13 @@ async function platformAgentPath(
             content: result.message, fallbackMessage, generationPath: 'legacy',
           });
           if (guard.blocked) {
-            await sendBotMessage(session, botParticipant.id, guard.content);
+            await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
             if (!explicitHandoff) {
               await handleBotHandoff(session, botParticipant.id, 'bot_error');
               handedOff = true;
             }
           } else {
-            await sendBotMessage(session, botParticipant.id, result.message);
+            await sendBotMessage(session, botParticipant.id, result.message, undefined, undefined, fence);
           }
           break;
         }
@@ -757,6 +785,18 @@ async function platformAgentPath(
       if (explicitHandoff) {
         await handleBotHandoff(session, botParticipant.id, 'escalation_trigger');
         handedOff = true;
+      }
+      } catch (err) {
+        // The commit-time fence: ownership moved between the liveAfter read and
+        // the reply's persist transaction (a human claimed the conversation).
+        // Suppress the reply AND the follow-up handoff, and stop draining — the
+        // human owns the turn-taking now.
+        if (err instanceof OwnershipChangedError) {
+          logger.info(`[legacy] bot reply suppressed for session ${session.id} — ownership changed mid-run`);
+          emitToSession(session.tenantId, session.id, 'typing:stop', {});
+          break;
+        }
+        throw err;
       }
 
       // Stop typing indicator
@@ -791,11 +831,28 @@ async function platformAgentPath(
   } catch (error) {
     emitToSession(session.tenantId, session.id, 'typing:stop', {});
     logger.error(`Platform agent unexpected error for session ${session.id}`, error);
-    const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
-      "We're connecting you to an agent. Please hold on.";
-    const bp = await ensureBotParticipant(session, aiSettings);
-    await sendBotMessage(session, bp.id, fallbackContent);
-    await handleBotHandoff(session, bp.id, 'bot_error');
+    // Emergency fallback goes through the SAME transactional fence as the
+    // ordinary replies (S1): re-read ownership + version, then let the
+    // FOR UPDATE check in sendBotMessage close the read-to-commit race — an
+    // ownership check alone is blind to a claim→release ABA mid-failure.
+    const ownNow = await sessionRepository.findOne({
+      where: { id: session.id },
+      select: { id: true, ownership: true, ownershipVersion: true } as never,
+    });
+    if (ownNow && ownNow.ownership === 'bot_owned') {
+      const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
+        "We're connecting you to an agent. Please hold on.";
+      const bp = await ensureBotParticipant(session, aiSettings);
+      try {
+        await sendBotMessage(session, bp.id, fallbackContent, undefined, undefined, {
+          ownershipVersion: ownNow.ownershipVersion ?? 0,
+        });
+        await handleBotHandoff(session, bp.id, 'bot_error');
+      } catch (err) {
+        if (!(err instanceof OwnershipChangedError)) throw err;
+        logger.info(`[legacy] emergency fallback suppressed for session ${session.id} — ownership changed`);
+      }
+    }
     return true;
   } finally {
     await releaseSessionLock(session.id, lockToken);
@@ -1200,6 +1257,11 @@ async function finalizeReply(
   extras: ReplyExtras | undefined,
   hwmId: string,
   staleGuard: boolean,
+  /** ownership_version read at RUN START (B2 fence): if any ownership command
+   *  (claim/release/cancel/close) landed mid-run, the commit predicate fails
+   *  and the in-flight AI reply is rolled back. Catches the claim→release ABA
+   *  the status-only check is blind to. */
+  ownershipVersionAtRunStart: number,
 ): Promise<{ status: 'answered'; savedId: string } | { status: 'stale' }> {
   try {
     const result = await AppDataSource.transaction(async (manager) => {
@@ -1239,6 +1301,9 @@ async function finalizeReply(
       //  - ai_auto_reply was disabled mid-run (guardrail block), OR
       //  - a human took over mid-run (status left 'bot'/'waiting' → 'active'/'handoff'/
       //    'closed'); without this a coalesced reply could land after takeover, OR
+      //  - ANY ownership command committed mid-run (ownership_version moved) —
+      //    the status check alone is blind to a claim→release ABA that ends
+      //    back on 'bot', OR
       //  - another run already advanced past hwm, OR
       //  - (staleGuard) a NEWER user message arrived between the stale-check and
       //    here — closes the READ COMMITTED race so no stale reply commits/sends.
@@ -1257,12 +1322,13 @@ async function finalizeReply(
           WHERE s.id = $1 AND m.id = $2
             AND s.ai_auto_reply_enabled = true
             AND s.status IN ('bot','waiting')
+            AND s.ownership_version = $3
             AND (s.last_coalesced_answer_at IS NULL
                  OR (s.last_coalesced_answer_at, s.last_coalesced_answer_message_id)
                     < (m.created_at, m.id))
             ${noNewerClause}
           RETURNING s.id`,
-        [session.id, hwmId],
+        [session.id, hwmId, ownershipVersionAtRunStart],
       );
       if (returningRows<{ id: string }>(upd).length !== 1) {
         // One of the finalize conditions failed at commit time (human takeover,
@@ -1363,6 +1429,12 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // path would bypass human takeover (R11/AC9).
   if (session.status !== 'bot' && session.status !== 'waiting') return 'noop';
 
+  // Ownership gate + fence snapshot (B2). `session` is loaded fresh by the
+  // coalescer right before this call; if ownership moves after this read, the
+  // finalize predicate (ownership_version = this value) rolls the reply back.
+  if (session.ownership !== 'bot_owned') return 'noop';
+  const ownershipVersionAtRunStart = session.ownershipVersion ?? 0;
+
   // Guardrail pause: a sibling message may have tripped the gate and disabled the
   // session after this one was scheduled. `session` is loaded fresh by the
   // coalescer right before this call, so the in-memory flag is current.
@@ -1452,7 +1524,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     // language (fail-open to the original) so an English customer doesn't get the
     // Dutch-configured fallback.
     const autoMsg = await localizeMessage(auto.message, pendingPlain, session);
-    const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard);
+    const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
     if (fin.status === 'stale') return 'stale';
     await routeBotMessageOutbound(session, fin.savedId, autoMsg);
     if (auto.kind === 'escalation') await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
@@ -1562,7 +1634,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   }
 
   const extras: ReplyExtras = { quickReplies, affordance };
-  const fin = await finalizeReply(session, botParticipant.id, content, extras, pending.id, staleGuard);
+  const fin = await finalizeReply(session, botParticipant.id, content, extras, pending.id, staleGuard, ownershipVersionAtRunStart);
   if (fin.status === 'stale') return 'stale';
 
   await routeBotMessageOutbound(session, fin.savedId, content, extras, result.type === 'response' ? result.offer : undefined);
@@ -1653,6 +1725,16 @@ async function getConversationHistory(
   });
 }
 
+/** The legacy path's commit-time fence tripped: an ownership command
+ *  (claim/release/cancel/close) landed while the agent was thinking, so the
+ *  computed reply must not reach the customer. */
+export class OwnershipChangedError extends Error {
+  constructor() {
+    super('Conversation ownership changed while the reply was being computed');
+    this.name = 'OwnershipChangedError';
+  }
+}
+
 /**
  * Create a bot Message and emit via WebSocket
  */
@@ -1662,10 +1744,25 @@ async function sendBotMessage(
   content: string,
   extras?: ReplyExtras,
   /** #80: forwarded to `routeOutboundMessage`, where both reply paths converge. */
-  offer?: OfferMeasurement
+  offer?: OfferMeasurement,
+  /** B2 fence for the LEGACY path (the coalescer has finalizeReply's predicate):
+   *  when set, the persist transaction locks the session row and rolls the reply
+   *  back with OwnershipChangedError if ownership_version moved since run start.
+   *  FOR UPDATE serializes against the command service's row lock, so a claim
+   *  committing concurrently is always observed. */
+  fence?: { ownershipVersion: number },
 ): Promise<Message> {
   const metadata = replyMetadata(extras ?? {});
   const saved = await AppDataSource.transaction(async (manager) => {
+    if (fence) {
+      const rows = (await manager.query(
+        `SELECT ownership_version FROM chat_sessions WHERE id = $1 FOR UPDATE`,
+        [session.id],
+      )) as Array<{ ownership_version: number }>;
+      if (!rows.length || Number(rows[0].ownership_version) !== fence.ownershipVersion) {
+        throw new OwnershipChangedError();
+      }
+    }
     const repo = manager.getRepository(Message);
     const botMsg = repo.create({
       sessionId: session.id,
@@ -1723,7 +1820,14 @@ async function sendBotMessage(
 }
 
 /**
- * Transition session to handoff and create a HandoffRequest
+ * Transition session to handoff and create a HandoffRequest.
+ *
+ * B-PR2b: the actual transition goes through the conversation command service —
+ * the ONE transactional ownership writer (ownership + derived legacy status +
+ * ownership_version + the open-handoff row move together, and a duplicate
+ * request converges on the one open HandoffRequest). This function keeps the
+ * customer-facing behaviour identical: the handoff-disabled fallback message
+ * and the post-commit socket/notification fan-out live here.
  */
 async function handleBotHandoff(
   session: ChatSession,
@@ -1731,7 +1835,9 @@ async function handleBotHandoff(
   reason: HandoffRequest['reason']
 ): Promise<void> {
   // Check if handoff is enabled for this bot (multi-bot Phase 4 #16d:
-  // features + ai now live on Bot.settings, not Tenant.settings).
+  // features + ai now live on Bot.settings, not Tenant.settings). The command
+  // service re-checks this authoritatively; the pre-check is kept because only
+  // this caller knows the template-resolved fallback wording to send.
   let botSettings: BotSettings | undefined;
   let handoffBot: Bot | undefined;
   try {
@@ -1758,28 +1864,27 @@ async function handleBotHandoff(
     return;
   }
 
-  // Update session status — targeted column UPDATE, NOT a full-entity save().
-  // save(session) would write back every column from the in-memory entity,
-  // including a stale last_coalesced_answer_message_id loaded before finalizeReply
-  // advanced it — clobbering the watermark and re-opening the answered turn.
-  session.requestHandoff(); // keep the in-memory copy consistent for the caller
-  await sessionRepository.update(session.id, { status: 'handoff' });
-
-  // Create handoff request
-  const handoff = handoffRepository.create({
-    sessionId: session.id,
-    tenantId: session.tenantId,
+  const result = await conversationCommands.requestHandoff(session.id, reason, 'bot', undefined, {
     requestedBy: botParticipantId,
-    requestedAt: new Date(),
-    reason,
-    priority: 'medium',
-  } as Partial<HandoffRequest>);
-  await handoffRepository.save(handoff);
+  });
+  // Keep the caller's in-memory copy consistent (the service only does targeted
+  // column UPDATEs, so the coalescer watermark can never be clobbered).
+  session.status = result.conversation.status;
+  session.ownership = result.conversation.ownership;
+  session.ownershipVersion = result.conversation.ownershipVersion;
+
+  if (result.outcome !== 'requested') {
+    // Disabled (raced a config change), already requested, or a human already
+    // owns it — nothing new to announce.
+    logger.info(`Bot handoff not re-created for session ${session.id} (${result.outcome})`, { reason });
+    return;
+  }
+  const handoffId = result.handoffId!;
 
   // Notify agents
   emitToTenantAgents(session.tenantId, 'handoff:requested', {
     sessionId: session.id,
-    handoffId: handoff.id,
+    handoffId,
     reason,
     requestedAt: new Date().toISOString(),
   });
@@ -1793,8 +1898,8 @@ async function handleBotHandoff(
       message: reason
         ? `A visitor needs help: ${reason}`
         : 'A visitor is requesting a human agent.',
-      data: { sessionId: session.id, handoffId: handoff.id },
-      dedupeBase: `handoff:${handoff.id}`,
+      data: { sessionId: session.id, handoffId },
+      dedupeBase: `handoff:${handoffId}`,
     })
     .catch(() => {});
 

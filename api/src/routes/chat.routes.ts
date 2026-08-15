@@ -21,6 +21,7 @@ import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { scheduleTurn } from '../services/turn-coalescer';
+import { conversationCommands } from '../services/conversation-command.service';
 import { encrypt, decrypt, DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
@@ -190,8 +191,14 @@ router.post(
 
     const savedMessage = await AppDataSource.transaction(async (manager) => {
       const msg = await manager.save(message);
-      session.updateActivity();
-      await manager.save(session);
+      // Targeted UPDATE, never save(session): a full-entity write from this
+      // stale copy would revert a human takeover that committed since the load
+      // (B-PR2b fix B1).
+      session.updateActivity(); // keep the in-memory copy for the response
+      await manager.query(
+        `UPDATE chat_sessions SET last_activity_at = now() WHERE id = $1`,
+        [session.id],
+      );
       return msg;
     });
 
@@ -293,9 +300,17 @@ router.post(
       throw new BadRequestError('Session is already closed');
     }
 
-    // Close session
-    session.close();
-    await sessionRepository.save(session);
+    // Ownership write goes through the ONE command service (B-PR2b): status +
+    // ownership + version + the open handoff's closure + the system event move
+    // in one transaction. (The old inline system message wrote
+    // participant_id='system' — an invalid uuid — and never landed.)
+    const result = await conversationCommands.closeConversation(
+      sessionId,
+      { kind: 'customer' },
+      undefined,
+      { tenantId, reason },
+    );
+    const endedAt = new Date();
 
     // Fire conversation.ended webhook — non-blocking, errors handled internally
     emitWebhookEvent({
@@ -311,28 +326,20 @@ router.post(
         messageCount: session.messageCount || 0,
       },
       conversation: {
-        durationSeconds: session.durationSeconds || null,
+        durationSeconds: session.startedAt
+          ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)
+          : null,
         messageCount: session.messageCount || 0,
         finalStatus: 'closed',
         assignedAgentId: session.assignedAgentId || undefined,
       },
     });
 
-    // Add system message
-    const systemMessage = messageRepository.create({
-      sessionId,
-      tenantId: tenantId!,
-      participantId: 'system',
-      type: 'system',
-      content: `Session closed: ${reason || 'User closed the chat'}`,
-    } as DeepPartial<Message>);
-    await messageRepository.save(systemMessage);
-
     // Notify via WebSocket
     emitToSession(tenantId!, sessionId, 'session:closed', {
       sessionId,
       reason,
-      endedAt: session.endedAt,
+      endedAt,
     });
 
     logger.info(`Session ${sessionId} closed`, { reason });
@@ -340,9 +347,9 @@ router.post(
     sendSuccess(res, {
       message: 'Session closed successfully',
       session: {
-        id: session.id,
-        status: session.status,
-        endedAt: session.endedAt,
+        id: result.conversation.sessionId,
+        status: result.conversation.status,
+        endedAt,
       },
     });
   })
@@ -528,17 +535,23 @@ router.post(
       throw new NotFoundError('Target agent not found');
     }
 
-    session.assignedAgentId = targetAgentId;
-    session.status = 'active';
-    await sessionRepository.save(session);
+    // Ownership write goes through the ONE command service (B-PR2b): the
+    // reassignment, the derived legacy status, the version bump and the open
+    // handoff's accept move in one transaction.
+    const result = await conversationCommands.transferConversation(
+      id,
+      targetAgentId,
+      undefined,
+      { tenantId: req.user?.tenantId },
+    );
 
     logger.info(`Session ${id} transferred to agent ${targetAgentId}`);
 
     sendSuccess(res, {
       message: 'Session transferred',
       session: {
-        id: session.id,
-        status: session.status,
+        id: result.conversation.sessionId,
+        status: result.conversation.status,
         assignedAgentId: targetAgentId,
       },
     });
@@ -563,9 +576,15 @@ router.post(
       throw new NotFoundError('Session not found');
     }
 
-    session.status = 'closed';
+    // Ownership write goes through the ONE command service (B-PR2b).
+    const result = await conversationCommands.closeConversation(
+      id,
+      { kind: 'agent', agentId: req.user!.id },
+      undefined,
+      { tenantId: req.user?.tenantId },
+    );
+    session.status = result.conversation.status;
     session.endedAt = new Date();
-    await sessionRepository.save(session);
 
     emitToSession(req.user?.tenantId!, id, 'session:closed', {
       sessionId: id,

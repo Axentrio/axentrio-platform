@@ -10,11 +10,7 @@ import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
-import { Agent } from '../database/entities/Agent';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
-import { Tenant } from '../database/entities/Tenant';
-import { KnowledgeBase } from '../database/entities/KnowledgeBase';
-import { IsNull } from 'typeorm';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
@@ -29,11 +25,11 @@ import { sendSuccess } from '../utils/response';
 import { requestHandoffSchema } from '../schemas';
 import { requireFeature } from '../billing/enforce';
 import { redisLoopStore } from '../guardrails/loop-store';
+import { conversationCommands } from '../services/conversation-command.service';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
-const agentRepository = AppDataSource.getRepository(Agent);
 const handoffRepository = AppDataSource.getRepository(HandoffRequest);
 
 /**
@@ -60,7 +56,7 @@ router.post(
     // tenant's tier doesn't include human handoff (currently Free).
     await requireFeature(tenantId, 'handoff', 'plan_limit_handoff');
 
-    // Find session
+    // Find session (parity pre-checks; the command service re-validates under lock)
     const session = await sessionRepository.findOne({
       where: { id: sessionId, tenantId },
     });
@@ -78,26 +74,32 @@ router.post(
       throw new BadRequestError('Session is already in handoff mode');
     }
 
-    // Update session status to handoff
-    session.requestHandoff();
-    if (session.metadata) {
-      (session.metadata as Record<string, unknown>).handoffReason = reason || 'User requested';
-    }
-    await sessionRepository.save(session);
-
-    // Add system message
-    const systemMessage = messageRepository.create({
+    // The ONE transactional handoff-creation path (B6): ownership + legacy
+    // status + the open HandoffRequest row + the system event move together.
+    const result = await conversationCommands.requestHandoff(
       sessionId,
-      tenantId: tenantId!,
-      participantId: 'system',
-      type: 'system',
-      content: `Handoff requested: ${reason || 'User requested human assistance'}`,
-    } as Partial<Message>);
-    await messageRepository.save(systemMessage);
+      'user_request',
+      'widget',
+      undefined,
+      { tenantId, note: reason || 'User requested human assistance' },
+    );
+    if (result.outcome === 'handoff_disabled') {
+      throw new BadRequestError('Human handoff is not enabled for this assistant');
+    }
+    session.status = result.conversation.status;
+
+    // Display-only free-text reason for the inbox list (not ownership state).
+    // DB-side jsonb merge — spreading the in-memory copy would persist a stale
+    // metadata snapshot loaded before the command ran.
+    await sessionRepository.query(
+      `UPDATE chat_sessions SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [sessionId, JSON.stringify({ handoffReason: reason || 'User requested' })],
+    );
 
     // Notify agents via WebSocket
     emitToTenantAgents(tenantId!, 'handoff:requested', {
       sessionId,
+      handoffId: result.handoffId,
       reason: reason || 'User requested',
       requestedAt: new Date().toISOString(),
     });
@@ -141,10 +143,9 @@ router.post(
       throw new BadRequestError('Session ID is required');
     }
 
-    // Find session
+    // Find session (parity pre-check; the command service re-validates under lock)
     const session = await sessionRepository.findOne({
       where: { id: sessionId, tenantId },
-      relations: ['assignedAgent'],
     });
 
     if (!session) {
@@ -155,32 +156,16 @@ router.post(
       throw new BadRequestError('Session is not pending handoff');
     }
 
-    // Get agent details
-    const agentDetails = await agentRepository.findOne({
-      where: { id: agent!.id },
-    });
-
-    if (!agentDetails) {
-      throw new NotFoundError('Agent not found');
-    }
-
-    // Update session - assign agent
-    session.assignAgent(agent!.id);
-    await sessionRepository.save(session);
-
-    // Update agent status
-    agentDetails.incrementChatCount();
-    await agentRepository.save(agentDetails);
-
-    // Add system message
-    const systemMessage = messageRepository.create({
+    // One transactional claim: session lock + open-handoff accept + assignment +
+    // agent chat-count + the single system event. Two concurrent accepts yield
+    // one winner and one `conversation_already_claimed` 409.
+    const result = await conversationCommands.claimConversation(
       sessionId,
-      tenantId: tenantId!,
-      participantId: agent!.id,
-      type: 'system',
-      content: `An agent has joined the conversation`,
-    } as Partial<Message>);
-    await messageRepository.save(systemMessage);
+      agent!.id,
+      { mode: 'indefinite' },
+      undefined,
+      { tenantId },
+    );
 
     // Notify session
     emitToSession(tenantId!, sessionId, 'handoff:accepted', {
@@ -204,8 +189,8 @@ router.post(
     sendSuccess(res, {
       message: 'Handoff accepted',
       session: {
-        id: session.id,
-        status: session.status,
+        id: result.conversation.sessionId,
+        status: result.conversation.status,
         assignedAgent: {
           id: agent!.id,
         },
@@ -225,13 +210,22 @@ router.post(
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const tenantId = req.tenant?.id;
     const agent = req.user;
-    const { sessionId } = req.body;
+    const { sessionId, reason } = req.body;
 
     if (!sessionId) {
       throw new BadRequestError('Session ID is required');
     }
 
-    // Just notify other agents about rejection
+    // An operator decline is an ATOMIC HANDOFF_REQUESTED -> BOT_OWNED transition
+    // (plan B1: the old handler only broadcast, so the state never moved back and
+    // the customer sat in a queue nobody was going to serve).
+    const result = await conversationCommands.cancelHandoff(
+      sessionId,
+      { kind: 'agent', agentId: agent!.id },
+      undefined,
+      { tenantId, reason },
+    );
+
     emitToTenantAgents(tenantId!, 'handoff:rejected', {
       sessionId,
       rejectedBy: agent!.id,
@@ -242,7 +236,10 @@ router.post(
       agentId: agent!.id,
     });
 
-    sendSuccess(res, { message: 'Handoff rejected' });
+    sendSuccess(res, {
+      message: 'Handoff rejected',
+      session: { id: sessionId, status: result.conversation.status },
+    });
   })
 );
 
@@ -263,43 +260,16 @@ router.post(
       throw new BadRequestError('Session ID is required');
     }
 
-    // Find session
-    const session = await sessionRepository.findOne({
-      where: { id: sessionId, tenantId },
-    });
-
-    if (!session) {
-      throw new NotFoundError('Session not found');
-    }
-
-    if (session.status !== 'active') {
-      throw new BadRequestError('Session is not actively handled by an agent');
-    }
-
-    // Verify agent is assigned to session
-    if (session.assignedAgentId !== agent!.id) {
-      throw new ForbiddenError('You are not assigned to this session');
-    }
-
-    // Update session - return to bot if AI enabled, otherwise waiting
-    const tenantForAi = await AppDataSource.getRepository(Tenant).findOne({ where: { id: session.tenantId } });
-    const aiEnabled = (tenantForAi as any)?.settings?.ai?.enabled;
-    const kb = aiEnabled
-      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: session.tenantId, status: 'active', botId: IsNull() } })
-      : null;
-    session.status = (aiEnabled && kb) ? 'bot' : 'waiting';
-    session.assignedAgentId = undefined;
-    await sessionRepository.save(session);
-
-    // Add system message
-    const systemMessage = messageRepository.create({
+    // One transactional release: HUMAN_OWNED -> BOT_OWNED, assignment +
+    // human-control cleared, the accepted handoff completed, one system event.
+    // Ownership (not the legacy 'active' status) is the authority on who may
+    // release; the service 403s a non-assigned agent.
+    const result = await conversationCommands.releaseConversation(
       sessionId,
-      tenantId: tenantId!,
-      participantId: agent!.id,
-      type: 'system',
-      content: `Agent has left the conversation. ${reason || ''}`,
-    } as Partial<Message>);
-    await messageRepository.save(systemMessage);
+      agent!.id,
+      undefined,
+      { tenantId, reason },
+    );
 
     // Notify session
     emitToSession(tenantId!, sessionId, 'handoff:returned', {
@@ -308,16 +278,16 @@ router.post(
       returnedAt: new Date().toISOString(),
     });
 
-    logger.info(`Session ${sessionId} returned to waiting`, {
+    logger.info(`Session ${sessionId} returned to bot`, {
       agentId: agent!.id,
       reason,
     });
 
     sendSuccess(res, {
-      message: 'Session returned to waiting',
+      message: 'Session returned to bot',
       session: {
-        id: session.id,
-        status: session.status,
+        id: result.conversation.sessionId,
+        status: result.conversation.status,
       },
     });
   })
@@ -337,7 +307,11 @@ router.get(
 
     const qb = sessionRepository.createQueryBuilder('session')
       .where('session.tenantId = :tenantId', { tenantId })
-      .andWhere('session.status = :status', { status: 'handoff' });
+      .andWhere('session.status = :status', { status: 'handoff' })
+      // A CLAIMED conversation keeps legacy status 'handoff' (human_owned maps
+      // there), so "pending" must key on ownership or accepted chats would
+      // reappear in the queue.
+      .andWhere('session.ownership = :ownership', { ownership: 'handoff_requested' });
 
     if (!params.sortBy) {
       qb.orderBy('session.createdAt', 'ASC');
@@ -403,27 +377,30 @@ router.post(
       throw new BadRequestError('Handoff request is no longer pending');
     }
 
-    handoff.accept(agentId!);
-    await handoffRepository.save(handoff);
+    // Accepting a queue item IS the claim command, keyed by sessionId (plan B1:
+    // no second takeover call, no handoff-id/session-id translation anywhere
+    // else). The service accepts the open handoff row in the same transaction —
+    // and it verifies the agent belongs to the session's tenant, which this
+    // legacy route never did.
+    await conversationCommands.claimConversation(
+      handoff.sessionId,
+      agentId!,
+      { mode: 'indefinite' },
+      undefined,
+      {},
+    );
 
-    // Also update the session
-    const session = await sessionRepository.findOne({
-      where: { id: handoff.sessionId },
-    });
-    if (session) {
-      session.assignAgent(agentId!);
-      await sessionRepository.save(session);
-    }
+    const updated = await handoffRepository.findOneOrFail({ where: { id } });
 
     logger.info(`Handoff ${id} accepted by agent ${agentId}`);
 
     sendSuccess(res, {
       message: 'Handoff accepted',
       handoff: {
-        id: handoff.id,
-        status: handoff.status,
-        assignedAgentId: handoff.assignedAgentId,
-        acceptedAt: handoff.acceptedAt,
+        id: updated.id,
+        status: updated.status,
+        assignedAgentId: updated.assignedAgentId,
+        acceptedAt: updated.acceptedAt,
       },
     });
   })
@@ -452,17 +429,24 @@ router.post(
       throw new BadRequestError('Handoff request is no longer pending');
     }
 
-    handoff.status = 'rejected';
-    handoff.rejectionReason = reason || 'Declined by agent';
-    await handoffRepository.save(handoff);
+    // A decline is the atomic HANDOFF_REQUESTED -> BOT_OWNED cancel: the old
+    // handler rejected the row but left the SESSION parked in handoff forever.
+    await conversationCommands.cancelHandoff(
+      handoff.sessionId,
+      { kind: 'agent', agentId: req.user!.id },
+      undefined,
+      { reason: reason || 'Declined by agent' },
+    );
+
+    const updated = await handoffRepository.findOneOrFail({ where: { id } });
 
     logger.info(`Handoff ${id} declined by agent ${req.user?.id}`);
 
     sendSuccess(res, {
       message: 'Handoff declined',
       handoff: {
-        id: handoff.id,
-        status: handoff.status,
+        id: updated.id,
+        status: updated.status,
       },
     });
   })
@@ -533,9 +517,12 @@ router.post(
       throw new NotFoundError('Session not found');
     }
 
-    session.aiAutoReplyEnabled = true;
-    session.guardrailStatus = 'normal';
-    await sessionRepository.save(session);
+    // Targeted UPDATE, never save(session): a full-entity write from this stale
+    // copy would revert a concurrent ownership command (B-PR2b fix B1).
+    await sessionRepository.update(session.id, {
+      aiAutoReplyEnabled: true,
+      guardrailStatus: 'normal',
+    });
 
     // Clear the ephemeral bot-loop counters so a resumed conversation starts fresh.
     await redisLoopStore.clear(sessionId).catch(() => {});

@@ -14,6 +14,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const saved: Record<string, unknown[]> = { message: [], participant: [], session: [] };
+// Raw targeted UPDATEs (B-PR2b fix B1): the session counter moves via a
+// column-scoped SQL UPDATE, never a full-entity save that could clobber a
+// concurrently committed ownership change.
+const rawQueries: Array<{ sql: string; params: unknown[] }> = [];
 const emit = vi.fn();
 const schedule = vi.fn();
 const participantFindOne = vi.fn();
@@ -24,6 +28,10 @@ const repo = (name: string) => ({
   save: vi.fn(async (v: unknown) => {
     saved[name].push(v);
     return v;
+  }),
+  query: vi.fn(async (sql: string, params: unknown[] = []) => {
+    rawQueries.push({ sql, params });
+    return [];
   }),
 });
 
@@ -49,9 +57,13 @@ const session = () => ({
   incrementMessageCount: vi.fn(),
 });
 
+const countedSession = (id: string) =>
+  rawQueries.some((q) => q.sql.includes('message_count = message_count + 1') && q.params[0] === id);
+
 beforeEach(() => {
   vi.clearAllMocks();
   for (const k of Object.keys(saved)) saved[k] = [];
+  rawQueries.length = 0;
   participantFindOne.mockResolvedValue({ id: 'part-1' });
   // Detached with `.catch`, so it must be a promise even in the happy path.
   schedule.mockResolvedValue(undefined);
@@ -85,11 +97,14 @@ describe('ingestWidgetCustomerMessage', () => {
     expect(payload.content).toBe('My address is Grote Markt 1');
   });
 
-  it('counts the message on the session', async () => {
+  it('counts the message on the session — via a targeted UPDATE, never save(session)', async () => {
     const s = session();
     await ingestWidgetCustomerMessage(s as never, 'hello');
     expect(s.incrementMessageCount).toHaveBeenCalledTimes(1);
-    expect(saved.session).toHaveLength(1);
+    // B-PR2b fix B1: a full-entity save from a stale copy could revert a human
+    // takeover that committed after the entity was loaded.
+    expect(countedSession('sess-1')).toBe(true);
+    expect(saved.session).toHaveLength(0);
   });
 
   it('schedules the turn, so the bot actually answers', async () => {
@@ -102,7 +117,7 @@ describe('ingestWidgetCustomerMessage', () => {
     // every test above except this one.
     await ingestWidgetCustomerMessage(session() as never, 'hello');
     expect(saved.message).toHaveLength(1);
-    expect(saved.session).toHaveLength(1);
+    expect(countedSession('sess-1')).toBe(true);
     expect(emit).toHaveBeenCalledTimes(1);
     expect(schedule).toHaveBeenCalledTimes(1);
   });

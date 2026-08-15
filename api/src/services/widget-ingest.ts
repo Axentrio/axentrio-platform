@@ -81,8 +81,15 @@ export async function ingestWidgetCustomerMessage(
   });
   await messageRepository.save(message);
 
-  session.incrementMessageCount();
-  await sessionRepository.save(session);
+  // Targeted UPDATE, never save(session): this entity was loaded before the
+  // message arrived, and a full-entity write would clobber any ownership
+  // command (human takeover) that committed in between — reverting ownership /
+  // ownership_version / status and re-arming the AI fence with a stale base.
+  session.incrementMessageCount(); // keep the in-memory copy for the emit below
+  await sessionRepository.query(
+    `UPDATE chat_sessions SET message_count = message_count + 1, last_activity_at = now() WHERE id = $1`,
+    [session.id],
+  );
 
   // Plaintext on the wire: this is the live feed an operator is reading, and a dashboard showing
   // ciphertext is a dashboard nobody can use.

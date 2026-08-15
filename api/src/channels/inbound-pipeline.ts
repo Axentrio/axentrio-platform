@@ -229,10 +229,17 @@ export async function processInboundEvent(
       }),
     );
 
-    // Update session activity
-    session.incrementMessageCount();
+    // Update session activity — targeted UPDATE, never save(session): the
+    // entity was loaded before this message, and a full-entity write would
+    // revert a human takeover (ownership/status/version) that committed in
+    // between (B-PR2b fix B1). A customer message racing a claim is the
+    // COMMON case on external channels.
+    session.incrementMessageCount(); // keep the in-memory copy for downstream reads
     const sessionRepo = getRepository(ChatSession);
-    await sessionRepo.save(session);
+    await sessionRepo.query(
+      `UPDATE chat_sessions SET message_count = message_count + 1, last_activity_at = now() WHERE id = $1`,
+      [session.id],
+    );
 
     // ── 6. Broadcast to portal agents via WebSocket ──────────────────────
     emitToSession(connection.tenantId, session.id, 'message:receive', {

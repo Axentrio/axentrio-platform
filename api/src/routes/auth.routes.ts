@@ -75,12 +75,16 @@ router.post(
 
       if (existingSession && existingSession.isActive()) {
         session = existingSession;
-        // Bind the resolved bot to legacy sessions that pre-date botId.
+        // Targeted UPDATE, never save(session): a full-entity write from this
+        // stale copy would revert a concurrent human takeover (B-PR2b fix B1).
+        // Only botId-if-missing + activity are this handler's to write.
+        session.updateActivity();
         if (!existingSession.botId) {
           session.botId = bot.id;
+          await sessionRepository.update(session.id, { botId: bot.id, lastActivityAt: new Date() });
+        } else {
+          await sessionRepository.update(session.id, { lastActivityAt: new Date() });
         }
-        session.updateActivity();
-        await sessionRepository.save(session);
       } else {
         // Create new session if not found or closed
         session = sessionRepository.create({

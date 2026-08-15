@@ -213,6 +213,8 @@ export interface ConversationSummaryPayload {
   ownershipVersion?: number;
   assignedAgentId?: string | null;
   channel?: string;
+  /** Durable customer-thread key (B-PR4a computeCustomerThreadId). */
+  customerThreadId?: string;
 }
 
 export interface ConversationUpsertEvent {
@@ -239,6 +241,61 @@ export interface MessageCreatedEvent {
   sessionId: string;
   message: MessageCreatedPayload;
   conversationRevision: number;
+}
+
+// ============================================
+// Customer thread (B-PR4b wire contract)
+// ============================================
+
+/** Per-session boundary facts for a thread block (start / end / status). */
+export interface ThreadBoundary {
+  startedAt: string;
+  endedAt: string | null;
+  status: string;
+}
+
+/**
+ * GET /chats/:sessionId/thread per-message shape - the detail-GET message
+ * (decrypted plaintext) + the participant facts + its sessionId.
+ */
+export interface ThreadMessagePayload {
+  id: string;
+  sessionId: string;
+  type: string;
+  content: string;
+  status?: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+  sender: string;
+  senderName?: string;
+  participantId?: string;
+}
+
+/** One session block in the customer thread, oldest→newest server-side. */
+export interface ThreadSessionEntry {
+  summary: ConversationSummaryPayload;
+  boundary: ThreadBoundary;
+  isCurrent: boolean;
+  messages: ThreadMessagePayload[];
+}
+
+/** A weaker-signal session the operator can eyeball - NEVER auto-merged. */
+export interface ThreadDuplicateEntry {
+  summary: ConversationSummaryPayload;
+  boundary: ThreadBoundary;
+}
+
+/** GET /chats/:sessionId/thread response (after envelope unwrap). */
+export interface ChatThreadResponse {
+  sessionId: string;
+  customerThreadId: string;
+  identity: 'widget' | 'external' | 'session';
+  /** Total sessions in the thread BEFORE the cap. */
+  totalSessions: number;
+  /** True when prior sessions were cut to the newest-N cap. */
+  truncated: boolean;
+  sessions: ThreadSessionEntry[];
+  possibleDuplicates: ThreadDuplicateEntry[];
 }
 
 /**

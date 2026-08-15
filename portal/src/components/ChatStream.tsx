@@ -5,8 +5,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, MessageSquare, Clock, User, ShieldAlert } from 'lucide-react';
-import { useChatsQuery } from '../queries/useChatQueries';
+import { Search, MessageSquare, Clock, User, ShieldAlert, History } from 'lucide-react';
+import { useChatsQuery, useChatThread } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
 import { TenantSelector } from './TenantSelector';
 import { useDebounce } from '@hooks/useDebounce';
@@ -83,6 +83,11 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
   // Hide sessions with no messages
   const chats = allChats.filter((c: any) => c.messageCount > 0 || c.lastMessage);
+
+  // B-PR4b list badge: derived from the thread endpoint's count for the
+  // SELECTED row only (the same cache entry ChatWindow fetches - one request,
+  // no per-row thread fetches).
+  const { earlierCount } = useChatThread(selectedChatId);
 
   const formatTime = (dateString?: string) => {
     if (!dateString) return '';
@@ -216,6 +221,15 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                       {chat.userName || t('inbox.chat.anonymous')}
                     </span>
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
+                    {chat.id === selectedChatId && earlierCount > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                        title={t('inbox.thread.earlierTooltip')}
+                      >
+                        <History className="w-3 h-3" />
+                        {t('inbox.thread.earlierBadge', { count: earlierCount })}
+                      </span>
+                    )}
                     {chat.aiAutoReplyEnabled === false && (
                       <span
                         className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"

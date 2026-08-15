@@ -20,6 +20,17 @@ const { useChatDetailMock, sendMessageMock, retryMessageMock } = vi.hoisted(() =
 
 vi.mock('../queries/useChatQueries', () => ({
   useChatDetail: useChatDetailMock,
+  // B-PR4b: ChatWindow also mounts the thread hook - an empty thread here
+  // keeps these composer tests focused on the live-session behavior.
+  useChatThread: () => ({
+    thread: null,
+    earlierSessions: [],
+    earlierCount: 0,
+    truncated: false,
+    possibleDuplicates: [],
+    isLoading: false,
+    error: null,
+  }),
 }));
 
 vi.mock('@websocket/notificationSound', () => ({

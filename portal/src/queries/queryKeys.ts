@@ -21,6 +21,9 @@ export const queryKeys = {
     list: (filters?: Record<string, unknown>) => [...queryKeys.chats.all(), 'list', filters] as const,
     detail: (id: string) => [...queryKeys.chats.all(), 'detail', id] as const,
     messages: (id: string) => [...queryKeys.chats.detail(id), 'messages'] as const,
+    /** B-PR4b read-only customer-thread history - a SIBLING of detail(id), so
+     *  the live detail cache patches (exact-key setQueryData) never touch it. */
+    thread: (id: string) => [...queryKeys.chats.all(), 'thread', id] as const,
   },
   handoffs: {
     all: () => ['handoffs'] as const,

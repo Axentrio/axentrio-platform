@@ -17,7 +17,7 @@
  *    `message:send` fire-and-forget emit is gone.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   useQuery,
   useQueryClient,
@@ -35,10 +35,17 @@ import {
 } from './conversationLive';
 import type {
   Chat,
+  ChatStatus,
   Message,
+  MessageSender,
+  MessageType,
   TypingIndicator,
   ChatFilters,
+  ChatThreadResponse,
   CommandConversationSummary,
+  ThreadBoundary,
+  ThreadDuplicateEntry,
+  ThreadMessagePayload,
 } from '@app-types/index';
 
 // ---------------------------------------------------------------------------
@@ -191,6 +198,21 @@ export const chatOptions = {
       enabled: !!chatId,
       staleTime: 5 * 60 * 1000,
     }),
+
+  /**
+   * B-PR4b read-only customer-thread history. Deliberately a SEPARATE cache
+   * entry from `detail` - the live detail cache (conversationLive) stays the
+   * ONE authoritative, composable thread for the CURRENT session; this query
+   * only supplies prior closed sessions + the possible-duplicates audit.
+   * Fetched on selection only (never per list row - no N+1).
+   */
+  thread: (chatId: string) =>
+    queryOptions({
+      queryKey: queryKeys.chats.thread(chatId),
+      queryFn: async () => (await api.get<Any>(`/chats/${chatId}/thread`)) as ChatThreadResponse,
+      enabled: !!chatId,
+      staleTime: 60 * 1000,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -232,6 +254,83 @@ export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQuery
       totalPages,
       hasMore: page < totalPages,
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Customer thread hook (B-PR4b)
+// ---------------------------------------------------------------------------
+
+/** Map a thread message (detail-GET shape) to the portal Message. */
+export function threadMessageToMessage(m: ThreadMessagePayload): Message {
+  return {
+    id: m.id,
+    chatId: m.sessionId,
+    type: (m.type || 'text') as MessageType,
+    content: m.content,
+    sender: (m.sender || 'user') as MessageSender,
+    ...(m.senderName ? { senderName: m.senderName } : {}),
+    isRead: true,
+    createdAt: m.createdAt,
+  };
+}
+
+/** One prior (non-current) session, portal-shaped for read-only rendering. */
+export interface EarlierThreadSession {
+  id: string;
+  boundary: ThreadBoundary;
+  /** Portal status vocabulary (normalizeChatStatus of boundary.status). */
+  status: ChatStatus;
+  messages: Message[];
+}
+
+export interface UseChatThreadReturn {
+  thread: ChatThreadResponse | null;
+  /** Sessions OTHER than the selected one, oldest→newest. */
+  earlierSessions: EarlierThreadSession[];
+  /** TRUE count of earlier conversations (pre-cap) - drives the list badge. */
+  earlierCount: number;
+  /** True when the cap cut older sessions out of `earlierSessions`. */
+  truncated: boolean;
+  possibleDuplicates: ThreadDuplicateEntry[];
+  isLoading: boolean;
+  error: Error | null;
+}
+
+/**
+ * useChatThread - the read-only whole-customer thread for a selected session.
+ *
+ * Separate from useChatDetail on purpose: the current session's live messages
+ * and composer stay owned by the detail cache + conversationLive (B-PR3b);
+ * this hook only contributes the labelled history ABOVE it and the
+ * possible-duplicates audit. Runs only when a chat is selected.
+ */
+export function useChatThread(chatId: string | undefined): UseChatThreadReturn {
+  const { data, isLoading, error } = useQuery(chatOptions.thread(chatId ?? ''));
+  const thread = (data as ChatThreadResponse | undefined) ?? null;
+
+  const earlierSessions = useMemo<EarlierThreadSession[]>(() => {
+    const result: EarlierThreadSession[] = [];
+    for (const s of thread?.sessions ?? []) {
+      if (s.isCurrent) continue;
+      result.push({
+        id: s.summary.sessionId ?? s.summary.id,
+        boundary: s.boundary,
+        status: normalizeChatStatus(s.boundary.status),
+        messages: s.messages.map(threadMessageToMessage),
+      });
+    }
+    return result;
+  }, [thread]);
+
+  return {
+    thread,
+    earlierSessions,
+    earlierCount: Math.max(earlierSessions.length, (thread?.totalSessions ?? 1) - 1),
+    truncated: thread?.truncated ?? false,
+    possibleDuplicates: thread?.possibleDuplicates ?? [],
+    isLoading,
+    error,
   };
 }
 

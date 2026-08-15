@@ -5,8 +5,20 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, ArrowRightLeft, User, Mail, Globe, Loader2, RotateCw, AlertTriangle } from 'lucide-react';
-import { useChatDetail } from '../queries/useChatQueries';
+import {
+  Send,
+  ArrowRightLeft,
+  User,
+  Users,
+  Mail,
+  Globe,
+  Loader2,
+  RotateCw,
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+import { useChatDetail, useChatThread, type EarlierThreadSession } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedResponsePicker';
 import { ChatStatusBadge } from './StatusBadge';
@@ -21,7 +33,14 @@ interface ChatWindowProps {
   chat: Chat;
   onClose?: () => void;
   onTransfer?: (chatId: string) => void;
+  /** Open another session read-only from the possible-duplicates audit. */
+  onOpenSession?: (sessionId: string) => void;
   className?: string;
+}
+
+/** Boundary/audit date label. Pure - hoisted to module scope. */
+function formatBoundaryDate(iso: string): string {
+  return new Date(iso).toLocaleDateString();
 }
 
 /** Auto-grow a textarea up to a max height. Pure — hoisted to module scope. */
@@ -35,6 +54,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   chat,
   onClose,
   onTransfer,
+  onOpenSession,
   className = '',
 }) => {
   const { t } = useTranslation();
@@ -49,6 +69,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
 
   const { messages, typingUsers, sendMessage, retryMessage, sendTyping } = useChatDetail(chat.id);
+
+  // B-PR4b: read-only customer-thread history - SEPARATE from the live detail
+  // cache. Prior closed sessions render as collapsed boundary blocks ABOVE the
+  // live thread; the current session stays the composable one. Expansion state
+  // is keyed by `${chat.id}:${session.id}`, so switching chats naturally
+  // starts collapsed again without a reset effect.
+  const { earlierSessions, truncated, possibleDuplicates } = useChatThread(chat.id);
+  const [expandedEarlier, setExpandedEarlier] = useState<Record<string, boolean>>({});
 
   useNotificationSound();
 
@@ -248,6 +276,46 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     );
   };
 
+  // B-PR4b: one prior session as a labelled boundary block - collapsed by
+  // default, expandable, strictly read-only. Rendered ABOVE the live thread.
+  const renderEarlierSession = (session: EarlierThreadSession) => {
+    const expansionKey = `${chat.id}:${session.id}`;
+    const isExpanded = !!expandedEarlier[expansionKey];
+    const label =
+      session.status === 'closed'
+        ? t('inbox.thread.boundaryClosed', { date: formatBoundaryDate(session.boundary.endedAt ?? session.boundary.startedAt) })
+        : t('inbox.thread.boundaryOpen', { date: formatBoundaryDate(session.boundary.startedAt) });
+
+    return (
+      <div key={session.id} className="mb-4" data-testid={`earlier-session-${session.id}`}>
+        <button
+          type="button"
+          onClick={() =>
+            setExpandedEarlier((prev) => ({ ...prev, [expansionKey]: !prev[expansionKey] }))
+          }
+          aria-expanded={isExpanded}
+          className="w-full flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors"
+        >
+          <span className="flex-1 border-t border-edge" aria-hidden="true" />
+          {isExpanded ? (
+            <ChevronDown className="w-3 h-3 flex-shrink-0" />
+          ) : (
+            <ChevronRight className="w-3 h-3 flex-shrink-0" />
+          )}
+          <span>
+            {label} · {t('inbox.thread.messageCount', { count: session.messages.length })}
+          </span>
+          <span className="flex-1 border-t border-edge" aria-hidden="true" />
+        </button>
+        {isExpanded && (
+          <div className="mt-3 opacity-80">
+            {session.messages.map(renderMessage)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
       {/* Header */}
@@ -314,10 +382,54 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       ) : null}
 
+      {/* Possible-duplicates audit (B-PR4b §4): read-only, never merged */}
+      {possibleDuplicates.length > 0 && (
+        <div className="px-4 py-2 border-b border-edge bg-amber-500/5 text-xs" role="note">
+          <p className="flex items-center gap-1.5 font-medium text-amber-600">
+            <Users className="w-3 h-3 flex-shrink-0" />
+            {t('inbox.thread.duplicatesTitle')}
+          </p>
+          <ul className="mt-1 space-y-1">
+            {possibleDuplicates.map((dup) => (
+              <li
+                key={dup.summary.id}
+                className="flex items-center gap-2 text-text-secondary"
+              >
+                <span className="truncate flex-1">
+                  {dup.summary.userName || t('inbox.chat.anonymousUser')}
+                  {' · '}
+                  {dup.summary.channel ?? dup.summary.source ?? ''}
+                  {' · '}
+                  {formatBoundaryDate(dup.boundary.startedAt)}
+                </span>
+                {onOpenSession && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSession(dup.summary.sessionId ?? dup.summary.id)}
+                    className="flex-shrink-0 font-medium text-primary-400 hover:text-primary-300 underline"
+                  >
+                    {t('inbox.thread.open')}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 bg-surface-1">
-        {messages.length > 0 ? (
+        {messages.length > 0 || earlierSessions.length > 0 ? (
           <>
+            {/* B-PR4b: prior sessions of the same customer, oldest→newest,
+                as collapsed boundary blocks ABOVE the live thread */}
+            {truncated && (
+              <p className="mb-3 text-center text-xs text-text-muted">
+                {t('inbox.thread.truncated')}
+              </p>
+            )}
+            {earlierSessions.map(renderEarlierSession)}
+
             {messages.map(renderMessage)}
 
             {/* Typing indicator */}

@@ -19,7 +19,6 @@
  * router untouched.
  */
 import { Router, Request, Response, NextFunction } from 'express';
-import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
@@ -31,7 +30,7 @@ import {
   emitConversationUpsertForSession,
   emitMessageCreatedForSession,
 } from '../realtime/conversation-events';
-import { routeOutboundMessage } from '../channels/outbound-router';
+import { deliverOperatorReply, claimFailedForRetry } from '../channels/delivery-state';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { conversationCommands } from '../services/conversation-command.service';
 
@@ -315,13 +314,34 @@ router.post(
       // the persisted message is the source of truth; PR 3 surfaces per-message
       // delivery state.
       if (result.conversation && (await isExternalChannel(sessionId, req.tenant!.id))) {
-        routeOutboundMessage(
-          { type: 'text', content },
-          { sessionId, tenantId: req.tenant!.id, messageId: result.message.id },
-          undefined, // WebSocket already emitted above
-          { humanAgent: true },
-        ).catch((err) => {
-          logger.error('Error routing operator reply to external channel:', err);
+        // Deliver + reconcile per-message delivery state (#128). Fire-and-forget:
+        // the outcome reaches the composer over the socket, not via this response.
+        void deliverOperatorReply({
+          sessionId,
+          tenantId: req.tenant!.id,
+          messageId: result.message.id,
+          clientMessageId,
+          content,
+          createdAt: result.message.createdAt,
+        });
+      }
+    } else if (result.outcome === 'duplicate') {
+      // A retry re-POSTs the same clientMessageId. Re-attempt external delivery
+      // ONLY while the original is still failed — claimFailedForRetry flips
+      // failed -> sending atomically — so a duplicate of a delivered reply can
+      // never double-send to the customer. #128.
+      const sessionId = req.params.sessionId;
+      if (
+        (await isExternalChannel(sessionId, req.tenant!.id)) &&
+        (await claimFailedForRetry(result.message.id))
+      ) {
+        void deliverOperatorReply({
+          sessionId,
+          tenantId: req.tenant!.id,
+          messageId: result.message.id,
+          clientMessageId,
+          content,
+          createdAt: result.message.createdAt,
         });
       }
     }

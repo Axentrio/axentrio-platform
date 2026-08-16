@@ -1256,6 +1256,25 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   const utils = {
     generateId: () => Math.random().toString(36).substr(2, 9),
 
+    // Cryptographically strong 128-bit id (hex). Used for the durable visitorId so
+    // it cannot be guessed, predicted, or enumerated - Math.random is neither
+    // high-entropy nor unpredictable, and the visitorId is the identity a widget
+    // session token is minted against (#21 hardening). Falls back to the weak
+    // generator only where WebCrypto is unavailable.
+    strongId: () => {
+      try {
+        const c = typeof window !== 'undefined' && (window.crypto || window.msCrypto);
+        if (c && c.getRandomValues) {
+          const a = new Uint8Array(16);
+          c.getRandomValues(a);
+          return Array.prototype.map.call(a, (b) => ('0' + b.toString(16)).slice(-2)).join('');
+        }
+      } catch (e) {
+        /* fall through to the weak generator */
+      }
+      return utils.generateId() + utils.generateId();
+    },
+
     hashString: (value = '') => {
       let hash = 0;
 
@@ -1485,7 +1504,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
       if (!this.visitorId) {
-        this.visitorId = 'widget-' + utils.generateId();
+        // #21: crypto-strong so a visitorId cannot be guessed or enumerated.
+        this.visitorId = 'widget-' + utils.strongId();
       }
       try {
         localStorage.setItem(this.visitorKey, this.visitorId);

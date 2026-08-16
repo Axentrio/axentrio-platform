@@ -43,6 +43,8 @@ import { forwardMessageToN8n, initializeAgentService } from '../../services/mess
 import type { AgentService } from '../../agent/agent.service';
 import { emailDeliveryService } from '../../services/email-delivery.service';
 import { notificationService } from '../../services/notification.service';
+import { notifyOverdueHandoff } from '../../services/handoff-notification.service';
+import { randomUUID } from 'crypto';
 
 beforeEach(() => {
   send.mockReset();
@@ -248,5 +250,36 @@ describe('widget-initiated handoff notifications', () => {
       idempotencyKey: `handoff:${handoff.id}:${operator.id}`,
       status: 'sent',
     });
+  });
+});
+
+describe('notifyOverdueHandoff (#131)', () => {
+  it('emails opted-in operators once per bucket, skips opt-outs, escalates on the next bucket', async () => {
+    const tenant = await createTestTenant({ name: 'Overdue Co' });
+    const inUser = await createTestUser(tenant.id, { email: 'in@example.com', notificationPreferences: null });
+    const outUser = await createTestUser(tenant.id, {
+      email: 'out@example.com',
+      notificationPreferences: { handoffRequest: false },
+    });
+    const overdueId = randomUUID();
+    const sessionId = randomUUID();
+    const emailRepo = AppDataSource.getRepository(EmailDelivery);
+
+    // Two ticks in the same bucket -> exactly one email (sendDurable idempotency).
+    await notifyOverdueHandoff({ tenantId: tenant.id, overdueId, sessionId, bucket: 0, ageMinutes: 12 });
+    await notifyOverdueHandoff({ tenantId: tenant.id, overdueId, sessionId, bucket: 0, ageMinutes: 12 });
+
+    const bucket0 = await emailRepo.find({ where: { tenantId: tenant.id, kind: 'handoff_overdue' } });
+    expect(bucket0).toHaveLength(1);
+    expect(bucket0[0]).toMatchObject({
+      recipientUserId: inUser.id,
+      idempotencyKey: `handoff_overdue:${overdueId}:0:${inUser.id}`,
+      status: 'sent',
+    });
+    expect(bucket0.some((r) => r.recipientUserId === outUser.id)).toBe(false);
+
+    // The next bucket escalates again.
+    await notifyOverdueHandoff({ tenantId: tenant.id, overdueId, sessionId, bucket: 1, ageMinutes: 45 });
+    expect(await emailRepo.count({ where: { tenantId: tenant.id, kind: 'handoff_overdue' } })).toBe(2);
   });
 });

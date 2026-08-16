@@ -22,6 +22,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { notificationService } from '../services/notification.service';
+import { notifyOverdueHandoff } from '../services/handoff-notification.service';
 import { logger } from '../utils/logger';
 
 const SLA_MIN = 10; // overdue once unacknowledged this long
@@ -135,6 +136,27 @@ async function alertAll(
         id: r.id,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+
+    // Email escalation for overdue HANDOFFS only (#131), decoupled from the
+    // platform alert above so a mail failure never suppresses the toast/push.
+    // sendDurable's per-(id,bucket,user) idempotency key bounds it to one email
+    // per bucket per recipient, honouring the same handoffEmail preference.
+    if (kind === 'handoff') {
+      try {
+        await notifyOverdueHandoff({
+          tenantId: r.tenantId,
+          overdueId: r.id,
+          sessionId: r.sessionId,
+          bucket,
+          ageMinutes: ageMin,
+        });
+      } catch (err) {
+        logger.warn('[sla-sweep] overdue handoff email failed', {
+          id: r.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
   return n;

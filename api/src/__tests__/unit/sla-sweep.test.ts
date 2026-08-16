@@ -20,6 +20,11 @@ vi.mock('../../services/notification.service', () => ({
   notificationService: { createForTenant: (...a: unknown[]) => mockCreateForTenant(...a) },
 }));
 
+const mockNotifyOverdue = vi.fn();
+vi.mock('../../services/handoff-notification.service', () => ({
+  notifyOverdueHandoff: (...a: unknown[]) => mockNotifyOverdue(...a),
+}));
+
 vi.mock('../../utils/logger', () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
@@ -30,6 +35,8 @@ beforeEach(() => {
   mockGetRawMany.mockReset();
   mockCreateForTenant.mockReset();
   mockCreateForTenant.mockResolvedValue(undefined);
+  mockNotifyOverdue.mockReset();
+  mockNotifyOverdue.mockResolvedValue(undefined);
 });
 
 describe('sweepOverdueHandoffsAndPauses', () => {
@@ -63,6 +70,15 @@ describe('sweepOverdueHandoffsAndPauses', () => {
     expect(mockCreateForTenant).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'guardrail.overdue', dedupeBase: 'guardrail_overdue:s4:2' }),
     );
+
+    // #131: overdue HANDOFFS also escalate by email (bucketed); guardrail pauses do not.
+    expect(mockNotifyOverdue).toHaveBeenCalledTimes(2);
+    expect(mockNotifyOverdue).toHaveBeenCalledWith(
+      expect.objectContaining({ overdueId: 'hr1', sessionId: 's1', bucket: 0, ageMinutes: 12 }),
+    );
+    expect(mockNotifyOverdue).toHaveBeenCalledWith(
+      expect.objectContaining({ overdueId: 's2', sessionId: 's2', bucket: 1, ageMinutes: 45 }),
+    );
   });
 
   it('no-ops when nothing is overdue', async () => {
@@ -70,5 +86,6 @@ describe('sweepOverdueHandoffsAndPauses', () => {
     const res = await sweepOverdueHandoffsAndPauses();
     expect(res.alerted).toBe(0);
     expect(mockCreateForTenant).not.toHaveBeenCalled();
+    expect(mockNotifyOverdue).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,7 @@
  * Calendar connection, the event type, and weekly availability. (Cal.com is
  * shelved; the built-in scheduler is the only provider.)
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { CalendarClock, Save, Check, Plus, Trash2, Eye, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -150,6 +150,87 @@ const WindowList: React.FC<{
   </div>
 );
 
+type SchedulerFormState = {
+  availabilityMode: AvailabilityMode;
+  slotGranularityMin: number;
+  days: DayState;
+  overrides: OverrideRow[];
+  serviceArea: ServiceAreaEntry[];
+  venue: VenueAddress;
+  reviewingVenue: boolean;
+  travelEnabled: boolean;
+  travelSlack: number | null;
+  travelStartFromBase: boolean;
+  travelBaseDepart: number;
+  travelGroupingPeriod: 'none' | 'half_day' | 'full_day';
+  travelMaxDetourMin: string;
+  bookingsPaused: boolean;
+  rules: BookingRules;
+  showPreview: boolean;
+  hydrated: boolean;
+};
+
+function createSchedulerForm(): SchedulerFormState {
+  return {
+    availabilityMode: 'business_hours',
+    slotGranularityMin: 30,
+    days: rowsFromWeeklyHours(undefined),
+    overrides: [],
+    serviceArea: [],
+    venue: { street: null, postalCode: null, city: null, country: null, placeId: null },
+    reviewingVenue: false,
+    travelEnabled: false,
+    travelSlack: null,
+    travelStartFromBase: false,
+    travelBaseDepart: 0,
+    travelGroupingPeriod: 'none',
+    travelMaxDetourMin: '',
+    bookingsPaused: false,
+    rules: {
+      maxBookingsPerDay: null,
+      maxBookedMinutesPerDay: null,
+      minGapMin: null,
+      defaultBufferBeforeMin: null,
+      defaultBufferAfterMin: null,
+      defaultMinNoticeMin: null,
+      defaultMaxHorizonDays: null,
+    },
+    showPreview: false,
+    hydrated: false,
+  };
+}
+
+// A single field update that replicates useState exactly: a plain value replaces,
+// a function updates from the previous value. Form fields never hold functions,
+// so the typeof check can only ever mean "updater".
+type SchedulerFormAction = { type: 'setField'; field: keyof SchedulerFormState; value: unknown };
+
+function schedulerFormReducer(
+  state: SchedulerFormState,
+  action: SchedulerFormAction,
+): SchedulerFormState {
+  switch (action.type) {
+    case 'setField': {
+      const prev = state[action.field];
+      const next =
+        typeof action.value === 'function'
+          ? (action.value as (p: unknown) => unknown)(prev)
+          : action.value;
+      return { ...state, [action.field]: next };
+    }
+    default:
+      return state;
+  }
+}
+
+/** A useState-shaped setter for one form field (a value or an updater function). */
+function makeFieldSetter<K extends keyof SchedulerFormState>(
+  dispatch: React.Dispatch<SchedulerFormAction>,
+  field: K,
+): (value: SchedulerFormState[K] | ((prev: SchedulerFormState[K]) => SchedulerFormState[K])) => void {
+  return (value) => dispatch({ type: 'setField', field, value });
+}
+
 export const SchedulerSettings: React.FC = () => {
   const { data: bots } = useBots();
   const agents = bots?.bots ?? [];
@@ -229,16 +310,69 @@ export const SchedulerSettings: React.FC = () => {
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, [queryClient]);
 
-  const [availabilityMode, setAvailabilityMode] = useState<AvailabilityMode>('business_hours');
-  const [slotGranularityMin, setSlotGranularityMin] = useState(30);
-  const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
-  const [overrides, setOverrides] = useState<OverrideRow[]>([]);
-  const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
-
-  const [venue, setVenue] = useState<VenueAddress>({
-    street: null, postalCode: null, city: null, country: null, placeId: null,
-  });
-  const [reviewingVenue, setReviewingVenue] = useState(false);
+  // One reducer for the whole scheduler form (react-doctor prefer-useReducer).
+  // Field state + hydration live in `form`; the `setX` wrappers below keep the
+  // exact useState API, so every existing call site is unchanged.
+  const [form, dispatch] = useReducer(schedulerFormReducer, undefined, createSchedulerForm);
+  const {
+    availabilityMode,
+    slotGranularityMin,
+    days,
+    overrides,
+    serviceArea,
+    venue,
+    reviewingVenue,
+    travelEnabled,
+    travelSlack,
+    travelStartFromBase,
+    travelBaseDepart,
+    travelGroupingPeriod,
+    travelMaxDetourMin,
+    bookingsPaused,
+    rules,
+    showPreview,
+    hydrated,
+  } = form;
+  const {
+    setAvailabilityMode,
+    setSlotGranularityMin,
+    setDays,
+    setOverrides,
+    setServiceArea,
+    setVenue,
+    setReviewingVenue,
+    setTravelEnabled,
+    setTravelSlack,
+    setTravelStartFromBase,
+    setTravelBaseDepart,
+    setTravelGroupingPeriod,
+    setTravelMaxDetourMin,
+    setBookingsPaused,
+    setRules,
+    setShowPreview,
+    setHydrated,
+  } = useMemo(
+    () => ({
+      setAvailabilityMode: makeFieldSetter(dispatch, 'availabilityMode'),
+      setSlotGranularityMin: makeFieldSetter(dispatch, 'slotGranularityMin'),
+      setDays: makeFieldSetter(dispatch, 'days'),
+      setOverrides: makeFieldSetter(dispatch, 'overrides'),
+      setServiceArea: makeFieldSetter(dispatch, 'serviceArea'),
+      setVenue: makeFieldSetter(dispatch, 'venue'),
+      setReviewingVenue: makeFieldSetter(dispatch, 'reviewingVenue'),
+      setTravelEnabled: makeFieldSetter(dispatch, 'travelEnabled'),
+      setTravelSlack: makeFieldSetter(dispatch, 'travelSlack'),
+      setTravelStartFromBase: makeFieldSetter(dispatch, 'travelStartFromBase'),
+      setTravelBaseDepart: makeFieldSetter(dispatch, 'travelBaseDepart'),
+      setTravelGroupingPeriod: makeFieldSetter(dispatch, 'travelGroupingPeriod'),
+      setTravelMaxDetourMin: makeFieldSetter(dispatch, 'travelMaxDetourMin'),
+      setBookingsPaused: makeFieldSetter(dispatch, 'bookingsPaused'),
+      setRules: makeFieldSetter(dispatch, 'rules'),
+      setShowPreview: makeFieldSetter(dispatch, 'showPreview'),
+      setHydrated: makeFieldSetter(dispatch, 'hydrated'),
+    }),
+    [],
+  );
   /**
    * Any hand-edit invalidates a selection, so every field goes through here rather than calling
    * `setVenue` directly. Four call sites each remembering to null the id is three chances to
@@ -290,26 +424,7 @@ export const SchedulerSettings: React.FC = () => {
   // config. Holding it in state would let a stale value keep the switch enabled after a
   // calendar change made it harmful.
   const travelBlockedReason = data?.travel?.blockedReason ?? null;
-  const [travelEnabled, setTravelEnabled] = useState(false);
-  const [travelSlack, setTravelSlack] = useState<number | null>(null);
-  const [travelStartFromBase, setTravelStartFromBase] = useState(false);
-  const [travelBaseDepart, setTravelBaseDepart] = useState(0);
-  const [travelGroupingPeriod, setTravelGroupingPeriod] = useState<
-    'none' | 'half_day' | 'full_day'
-  >('none');
-  const [travelMaxDetourMin, setTravelMaxDetourMin] = useState<string>('');
-  const [bookingsPaused, setBookingsPaused] = useState(false);
-  const [rules, setRules] = useState<BookingRules>({
-    maxBookingsPerDay: null,
-    maxBookedMinutesPerDay: null,
-    minGapMin: null,
-    defaultBufferBeforeMin: null,
-    defaultBufferAfterMin: null,
-    defaultMinNoticeMin: null,
-    defaultMaxHorizonDays: null,
-  });
-  const [showPreview, setShowPreview] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  // travel*, bookingsPaused, rules, showPreview and hydrated now live in `form` above.
 
   useEffect(() => {
     if (!data || hydrated) return;

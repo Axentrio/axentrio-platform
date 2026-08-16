@@ -161,6 +161,7 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
       if (dbIds) {
         socket.data.user = {
           id: dbIds.agentId,
+          userId: dbIds.userId,
           name: dbIds.userName || '',
           email: dbIds.email || '',
           tenantId: dbIds.tenantId,
@@ -185,6 +186,7 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
 
     socket.data.user = {
       id: agent.id,
+      userId: user.id,
       name: user.name || user.email?.split('@')[0] || '',
       email: user.email || '',
       tenantId: user.tenantId,
@@ -327,8 +329,16 @@ function handleConnection(socket: TenantSocket): void {
 function handleAgentConnection(socket: TenantSocket): void {
   const user = socket.data.user;
 
-  // Join agent-specific room
+  // Join agent-specific room (keyed by Agent.id)
   socket.join(`agent:${user!.id}`);
+
+  // Join the per-USER room (keyed by User.id). Operator notifications are
+  // per-recipient by User.id, which is a DIFFERENT id space from Agent.id, so
+  // this is the room `emitToUser` targets. Without it a user-keyed emit lands
+  // in an empty room and the operator never sees the toast (#129 regression).
+  if (user!.userId) {
+    socket.join(`user:${user!.userId}`);
+  }
 
   // Join agents pool for tenant
   if (socket.data.tenantId) {
@@ -1097,4 +1107,17 @@ export function emitToAgent(
   data: Record<string, unknown>
 ): void {
   emitToRoom(`agent:${agentId}`, event, data);
+}
+
+/**
+ * Emit to one USER's room (keyed by User.id), across every socket that user has
+ * open. This is the id space operator notifications use — NOT Agent.id. See the
+ * `user:` room join in `handleAgentConnection`.
+ */
+export function emitToUser(
+  userId: string,
+  event: string,
+  data: Record<string, unknown>
+): void {
+  emitToRoom(`user:${userId}`, event, data);
 }

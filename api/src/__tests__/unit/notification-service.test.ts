@@ -23,7 +23,7 @@ vi.mock('../../queue/message-queue', () => ({
 
 const mockEmit = vi.fn();
 vi.mock('../../websocket/socket.handler', () => ({
-  emitToAgent: (...a: unknown[]) => mockEmit(...a),
+  emitToUser: (...a: unknown[]) => mockEmit(...a),
 }));
 
 vi.mock('../../utils/logger', () => ({

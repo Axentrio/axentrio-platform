@@ -9,6 +9,12 @@
 
 export interface RequestUser {
   id: string;
+  /**
+   * The User.id — set for a support-agent principal whose `id` is the Agent.id
+   * (a distinct uuid). Lets an agent socket join its per-user room so user-keyed
+   * notifications reach it. Undefined for widget principals.
+   */
+  userId?: string;
   name?: string;
   email: string;
   role: UserRole;

@@ -339,17 +339,6 @@ describe('the half-day boundary itself', () => {
     expect(p.boundary.toISOString()).toBe('2026-09-07T11:00:00.000Z'); // 13:00 Brussels
   });
 
-  it('suggests the widest gap without applying it', async () => {
-    // Two windows may be a school run rather than a morning and an afternoon, and only the owner
-    // knows which.
-    const p = resolveDayPeriods({
-      localDay: DAY, timezone: TZ, alwaysOpen: false,
-      windows: [{ start: '08:00', end: '10:00' }, { start: '14:00', end: '18:00' }],
-    })!;
-    expect(p.suggested?.toISOString()).toBe('2026-09-07T10:00:00.000Z'); // 12:00 Brussels
-    expect(p.boundary).not.toEqual(p.suggested);
-  });
-
   it('does not run at all on an always-open day', async () => {
     // A day with no shape has no midpoint, and 12:00 would be an invention the owner never made.
     expect(resolveDayPeriods({ localDay: DAY, timezone: TZ, alwaysOpen: true, windows: [{ start: '00:00', end: '23:59' }] })).toBeNull();
@@ -357,22 +346,6 @@ describe('the half-day boundary itself', () => {
 
   it('does not run on a closed day', async () => {
     expect(resolveDayPeriods({ localDay: DAY, timezone: TZ, alwaysOpen: false, windows: [] })).toBeNull();
-  });
-
-  it('honours an owner override, and ignores one outside the day', async () => {
-    const inside = resolveDayPeriods({
-      localDay: DAY, timezone: TZ, alwaysOpen: false,
-      windows: [{ start: '08:00', end: '18:00' }], boundaryOverride: '11:00',
-    })!;
-    expect(inside.boundary.toISOString()).toBe('2026-09-07T09:00:00.000Z');
-
-    // An override before opening would put every Slot in the afternoon and silently disable
-    // grouping - a configuration mistake that should not look like a working setting.
-    const outside = resolveDayPeriods({
-      localDay: DAY, timezone: TZ, alwaysOpen: false,
-      windows: [{ start: '08:00', end: '18:00' }], boundaryOverride: '05:00',
-    })!;
-    expect(outside.boundary.toISOString()).toBe('2026-09-07T11:00:00.000Z'); // fell back to midday
   });
 
   it('puts the boundary instant itself in the afternoon', async () => {

@@ -27,7 +27,7 @@ import { requestHandoffSchema } from '../schemas';
 import { requireFeature } from '../billing/enforce';
 import { redisLoopStore } from '../guardrails/loop-store';
 import { conversationCommands } from '../services/conversation-command.service';
-import { notifyNewHandoff } from '../services/handoff-notification.service';
+import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -83,7 +83,7 @@ router.post(
       'user_request',
       'widget',
       undefined,
-      { tenantId, note: reason || 'User requested human assistance' },
+      { tenantId, note: reason || 'User requested human assistance', notify: true },
     );
     if (result.outcome === 'handoff_disabled') {
       throw new BadRequestError('Human handoff is not enabled for this assistant');
@@ -116,7 +116,7 @@ router.post(
     // B-PR3a: normalized ownership event, post-commit, when the state moved.
     if (result.outcome === 'requested') {
       await emitConversationUpsertForSession(sessionId, tenantId);
-      void notifyNewHandoff({
+      void deliverHandoffNotification({
         tenantId: tenantId!,
         handoffId: result.handoffId!,
         sessionId,

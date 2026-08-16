@@ -63,6 +63,7 @@ import { Notification } from './entities/Notification';
 import { MobileDevice } from './entities/MobileDevice';
 import { NotificationDelivery } from './entities/NotificationDelivery';
 import { EmailDelivery } from './entities/EmailDelivery';
+import { NotificationOutbox } from './entities/NotificationOutbox';
 import { CanonicalTopic } from './entities/CanonicalTopic';
 import { Judgment } from './entities/Judgment';
 import { Gap } from './entities/Gap';
@@ -145,6 +146,7 @@ export const AppDataSource = new DataSource({
     MobileDevice,
     NotificationDelivery,
     EmailDelivery,
+    NotificationOutbox,
     CanonicalTopic,
     Judgment,
     Gap,

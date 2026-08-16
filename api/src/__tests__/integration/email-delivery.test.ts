@@ -51,6 +51,8 @@ describe('emailDeliveryService.sendDurable', () => {
       to: 'operator@example.com',
       subject: 'New handoff request',
       body: '<p>A new handoff request needs attention.</p>',
+      // Provider-level idempotency (ADR-0018): same key as the ledger row.
+      idempotencyKey: 'handoff:h1:user-1',
     });
   });
 

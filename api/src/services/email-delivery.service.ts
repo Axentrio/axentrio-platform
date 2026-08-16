@@ -116,6 +116,10 @@ export const emailDeliveryService = {
           to: input.recipientEmail,
           subject: input.subject,
           body: input.body,
+          // Provider-level idempotency (ADR-0018): the same key that guards the
+          // ledger row also guards Resend, so a retry after a crash between
+          // provider-accept and our commit cannot produce a second email.
+          idempotencyKey: input.idempotencyKey,
         });
       } catch (error) {
         delivery.status = 'failed' as EmailDeliveryStatus;

@@ -33,6 +33,7 @@ import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialE
 import { AppDataSource } from '../database/data-source';
 import { ChatSession, SessionStatus, SessionOwnership } from '../database/entities/ChatSession';
 import { HandoffRequest, HandoffReason } from '../database/entities/HandoffRequest';
+import { NotificationOutbox, HANDOFF_OUTBOX_GRACE_MS } from '../database/entities/NotificationOutbox';
 import { ConversationCommand } from '../database/entities/ConversationCommand';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
@@ -523,7 +524,7 @@ export const conversationCommands = {
     reason: HandoffReason,
     source: HandoffSource,
     idempotencyKey?: string,
-    opts: CommandOpts & { requestedBy?: string; note?: string } = {},
+    opts: CommandOpts & { requestedBy?: string; note?: string; notify?: boolean } = {},
   ): Promise<RequestHandoffResult> {
     return withConversation(sessionId, 'request_handoff', idempotencyKey, opts, async (manager, session) => {
       if (session.ownership === 'closed') throw new ConversationClosedError();
@@ -598,6 +599,29 @@ export const conversationCommands = {
         session,
         `Handoff requested: ${opts.note || reason.replace(/_/g, ' ')}`,
       );
+
+      // Durable notification intent (ADR-0018), written IN this transaction so an
+      // operator alert cannot be lost to a crash between the commit and the
+      // immediate notify. Distribution still happens OUTSIDE this service (the
+      // call-site notify + the outbox worker), preserving "commands mutate,
+      // callers distribute". Gated: only paths that alert operators pass `notify`.
+      if (opts.notify) {
+        await manager.insert(NotificationOutbox, {
+          tenantId: session.tenantId,
+          kind: 'handoff',
+          relatedId: handoff.id,
+          payload: {
+            tenantId: session.tenantId,
+            handoffId: handoff.id,
+            sessionId: session.id,
+            reason,
+            requestedAt: handoff.requestedAt.toISOString(),
+          },
+          status: 'pending',
+          attemptCount: 0,
+          nextAttemptAt: new Date(Date.now() + HANDOFF_OUTBOX_GRACE_MS),
+        });
+      }
 
       logger.info(`Handoff requested for session ${session.id}`, { reason, source, handoffId: handoff.id });
       return {

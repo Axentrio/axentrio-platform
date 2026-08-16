@@ -46,7 +46,7 @@ import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
 import { isOutsideBusinessHours } from '../utils/format-business-hours';
 import { renderChannelAddressControls } from '../channels/address-controls';
-import { notifyNewHandoff } from './handoff-notification.service';
+import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -1982,6 +1982,8 @@ async function handleBotHandoff(
 
   const result = await conversationCommands.requestHandoff(session.id, reason, 'bot', undefined, {
     requestedBy: botParticipantId,
+    // Write the durable notification outbox row in the handoff transaction (ADR-0018).
+    notify: true,
   });
   // Keep the caller's in-memory copy consistent (the service only does targeted
   // column UPDATEs, so the coalescer watermark can never be clobbered).
@@ -2009,8 +2011,9 @@ async function handleBotHandoff(
   // entity's ownership/status/version were just synced from the command result.
   await emitConversationUpsert(session);
 
-  // Durable platform/email notification fan-out (fire-and-forget; never blocks handoff).
-  void notifyNewHandoff({
+  // Immediate best-effort notify (fire-and-forget; never blocks handoff). The outbox
+  // row written in the handoff transaction is the durable backstop (ADR-0018).
+  void deliverHandoffNotification({
     tenantId: session.tenantId,
     handoffId,
     sessionId: session.id,

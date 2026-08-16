@@ -665,6 +665,22 @@ async function startServer(): Promise<void> {
     };
     setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
 
+    // Handoff-notification outbox backstop (ADR-0018). The handoff call sites
+    // dispatch the alert immediately for latency and retire the row; this sweep
+    // only picks up rows a crash left behind (past their grace), replays the
+    // idempotent notify, and parks a row as dead after the attempt cap.
+    // Re-entrancy-guarded like the sweeps above and safe on every instance
+    // (FOR UPDATE SKIP LOCKED claims disjoint rows).
+    const sweepHandoffOutboxTick = async () => {
+      try {
+        const { sweepHandoffOutbox } = await import('./notifications/notification-outbox.worker');
+        await sweepHandoffOutbox();
+      } catch (error) {
+        logger.error('Handoff-notification outbox sweep failed', { error });
+      }
+    };
+    setInterval(sweepHandoffOutboxTick, 30 * 1000); // Run every 30 seconds
+
     // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
     // platform LLM budget, and a background pass on this budget previously caused
     // customer-facing 429s on live replies. Enable per-environment only after the

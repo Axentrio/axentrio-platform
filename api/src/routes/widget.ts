@@ -28,7 +28,7 @@ import {
 } from '../services/widget-session-identity';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
 import { conversationCommands } from '../services/conversation-command.service';
-import { notifyNewHandoff } from '../services/handoff-notification.service';
+import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
 import type { HandoffReason } from '../database/entities/HandoffRequest';
 import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
@@ -693,7 +693,7 @@ router.post(
       handoffReason,
       'widget',
       undefined,
-      { tenantId },
+      { tenantId, notify: true },
     );
 
     if (result.outcome === 'handoff_disabled') {
@@ -721,7 +721,7 @@ router.post(
     // B-PR3a: normalized ownership event, post-commit, only when the state moved.
     if (result.outcome === 'requested') {
       await emitConversationUpsertForSession(sessionId, tenantId);
-      void notifyNewHandoff({
+      void deliverHandoffNotification({
         tenantId,
         handoffId: result.handoffId!,
         sessionId,

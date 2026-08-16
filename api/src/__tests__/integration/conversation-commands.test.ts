@@ -56,6 +56,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
+import { NotificationOutbox } from '../../database/entities/NotificationOutbox';
 import { Agent } from '../../database/entities/Agent';
 import { BotSettings } from '../../database/entities/Bot';
 import {
@@ -86,6 +87,7 @@ import { CreateConversationCommands1791400000000 } from '../../database/migratio
 const sessionRepo = AppDataSource.getRepository(ChatSession);
 const messageRepo = AppDataSource.getRepository(Message);
 const handoffRepo = AppDataSource.getRepository(HandoffRequest);
+const outboxRepo = AppDataSource.getRepository(NotificationOutbox);
 const agentRepo = AppDataSource.getRepository(Agent);
 
 const AI = {
@@ -286,6 +288,26 @@ describe('requestHandoff / cancelHandoff', () => {
     expect(second.outcome).toBe('already_requested');
     expect(second.handoffId).toBe(first.handoffId);
     expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(1);
+  });
+
+  it('writes a pending notification-outbox row atomically ONLY when notify is set (ADR-0018)', async () => {
+    const tenant = await makeTenantWithAi();
+
+    // Default (no notify): the handoff is created but no outbox row — behaviour unchanged.
+    const quiet = await createTestSession(tenant.id, { status: 'bot' });
+    const noNotify = await conversationCommands.requestHandoff(quiet.id, 'user_request', 'widget', undefined, {});
+    expect(noNotify.outcome).toBe('requested');
+    expect(await outboxRepo.count({ where: { relatedId: noNotify.handoffId! } })).toBe(0);
+
+    // notify: true — one pending outbox row, in the same transaction as the handoff.
+    const loud = await createTestSession(tenant.id, { status: 'bot' });
+    const notified = await conversationCommands.requestHandoff(
+      loud.id, 'user_request', 'widget', undefined, { notify: true },
+    );
+    const rows = await outboxRepo.find({ where: { relatedId: notified.handoffId! } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'handoff', status: 'pending', tenantId: tenant.id });
+    expect(rows[0].payload).toMatchObject({ handoffId: notified.handoffId, sessionId: loud.id, reason: 'user_request' });
   });
 
   it('a handoffEnabled:false bot creates NO handoff and does not move ownership', async () => {

@@ -5,12 +5,12 @@ createAuthMocks();
 
 vi.mock('@clerk/express', () => ({ clerkMiddleware: () => (_req: any, _res: any, next: any) => next() }));
 
-const { send, routeOutboundMessage, emitToTenantAgents, emitToSession, emitToAgent } = vi.hoisted(() => ({
+const { send, routeOutboundMessage, emitToTenantAgents, emitToSession, emitToUser } = vi.hoisted(() => ({
   send: vi.fn(),
   routeOutboundMessage: vi.fn(),
   emitToTenantAgents: vi.fn(),
   emitToSession: vi.fn(),
-  emitToAgent: vi.fn(),
+  emitToUser: vi.fn(),
 }));
 
 vi.mock('../../automations', () => ({ getEmailService: () => ({ send }) }));
@@ -20,7 +20,7 @@ vi.mock('../../queue/message-queue', () => ({
 vi.mock('../../websocket/socket.handler', () => ({
   emitToTenantAgents: (...args: unknown[]) => emitToTenantAgents(...args),
   emitToSession: (...args: unknown[]) => emitToSession(...args),
-  emitToAgent: (...args: unknown[]) => emitToAgent(...args),
+  emitToUser: (...args: unknown[]) => emitToUser(...args),
 }));
 vi.mock('../../channels/outbound-router', () => ({
   routeOutboundMessage: (...args: unknown[]) => routeOutboundMessage(...args),
@@ -52,7 +52,7 @@ beforeEach(() => {
   routeOutboundMessage.mockReset().mockResolvedValue({ success: true });
   emitToTenantAgents.mockReset();
   emitToSession.mockReset();
-  emitToAgent.mockReset();
+  emitToUser.mockReset();
   initializeAgentService({ run: vi.fn() } as unknown as AgentService);
 });
 
@@ -132,8 +132,8 @@ describe('bot-triggered handoff notifications', () => {
     expect(notifications.some((n) => n.recipientUserId === optedOutUser.id)).toBe(false);
 
     // #129: the realtime toast follows the pref-filtered recipient list — each
-    // opted-in operator gets one in their OWN room; the opted-out one gets none.
-    const toastedUserIds = emitToAgent.mock.calls
+    // opted-in operator gets one in their OWN user room; the opted-out one gets none.
+    const toastedUserIds = emitToUser.mock.calls
       .filter((c) => c[1] === 'notification')
       .map((c) => c[0]);
     expect(toastedUserIds).toEqual(expect.arrayContaining([defaultUser.id, platformOnlyUser.id]));

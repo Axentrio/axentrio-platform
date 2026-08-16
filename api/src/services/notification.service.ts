@@ -129,21 +129,23 @@ export const notificationService = {
     // Real-time desktop delivery, PER RECIPIENT (#129). The push worker only
     // covers mobile (which most staff don't have), so the toast is how a desktop
     // operator learns of a handoff / guardrail pause / channel-down. It is
-    // emitted to each created recipient's OWN room rather than the tenant room,
-    // so it follows the (already preference-filtered) recipient list: an operator
-    // who opted out gets no row, no push, and now no toast/sound either. One
-    // event per recipient room is exactly one toast each — never N-duplicated.
-    // Best-effort: a socket hiccup must never fail the write. Lazy import avoids
-    // a load-time notification.service↔socket.handler edge.
+    // emitted to each created recipient's OWN user room rather than the tenant
+    // room, so it follows the (already preference-filtered) recipient list: an
+    // operator who opted out gets no row, no push, and now no toast/sound either.
+    // One event per recipient room is exactly one toast each — never N-duplicated.
+    // Keyed by User.id via `emitToUser` (NOT Agent.id — a different id space; the
+    // recipient list is User.ids, so an Agent-keyed emit would reach an empty
+    // room). Best-effort: a socket hiccup must never fail the write. Lazy import
+    // avoids a load-time notification.service↔socket.handler edge.
     try {
-      const { emitToAgent } = await import('../websocket/socket.handler');
+      const { emitToUser } = await import('../websocket/socket.handler');
       const payload = {
         type: input.type,
         title: input.title,
         message: input.message,
         data: input.data ?? null,
       };
-      for (const userId of created) emitToAgent(userId, 'notification', payload);
+      for (const userId of created) emitToUser(userId, 'notification', payload);
     } catch (err) {
       logger.warn('Failed to emit notification WS event', {
         tenantId: input.tenantId,

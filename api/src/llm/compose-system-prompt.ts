@@ -68,7 +68,10 @@ const GENERIC_SERVICE_CORE = `You help customers of {businessName}. Answer their
 const DEFAULT_TENANT_BLOCK = GENERIC_SERVICE_CORE;
 
 /** One-line hygiene for owner text in the prompt: collapse whitespace → drop `·`/`"` → trim. */
-function sanitizeForLine(value: string): string {
+// Exported for direct testing (#36): a display name reaches the system prompt
+// through here, so newlines/quotes that could break out of the `## CUSTOMER`
+// line or inject instructions must be neutralised before it lands.
+export function sanitizeForLine(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
 }
 

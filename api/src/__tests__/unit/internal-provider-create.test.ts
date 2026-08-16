@@ -329,6 +329,44 @@ describe('InternalProvider.createBooking', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 0 });
   });
 
+  // ── #36 booking-agent regressions ─────────────────────────────────────────
+  const bookingInsertCall = (): [string, unknown[]] => {
+    const c = managerQuery.mock.calls.find((x: unknown[]) =>
+      String((x as [string])[0]).includes('INSERT INTO chatbot_bookings'),
+    );
+    if (!c) throw new Error('no booking INSERT ran');
+    return c as [string, unknown[]];
+  };
+
+  it('#36/#2 checkAvailability hard-stops a request-only service (never offers slots)', async () => {
+    const requestService = { ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' };
+    eventTypeFindOne.mockResolvedValue(requestService);
+    serviceTypeFind.mockResolvedValue([requestService]);
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', 'svc-req'),
+    ).rejects.toMatchObject({ code: 'REQUEST_ONLY_SERVICE' });
+  });
+
+  it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {
+    const waCtx = { ...ctx, session: { id: 'sess-1', channel: 'whatsapp', visitorId: '31470123456' } };
+    const res = await provider.createBooking(waCtx, 'idem-wa', OFFERED_START, {
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+    expect(res.success).toBe(true);
+    expect(insertParam(bookingInsertCall(), 'customer_phone')).toBe('+31470123456');
+  });
+
+  it('#36/#4 Messenger (PSID) does NOT capture the session id as a phone', async () => {
+    const fbCtx = { ...ctx, session: { id: 'sess-1', channel: 'messenger', visitorId: 'PSID-abc123' } };
+    const res = await provider.createBooking(fbCtx, 'idem-fb', OFFERED_START, {
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+    expect(res.success).toBe(true);
+    expect(insertParam(bookingInsertCall(), 'customer_phone')).toBeFalsy();
+  });
+
   it('consumes the exact Address Binding generation before inserting the booking', async () => {
     const ref = { version: 7, formattedAddress: 'Meir 78, 2000 Antwerpen' };
     managerQuery.mockImplementation(async (sql: string) => {

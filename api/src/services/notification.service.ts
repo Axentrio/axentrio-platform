@@ -79,14 +79,14 @@ async function enqueueDelivery(notificationId: string): Promise<void> {
 export const notificationService = {
   /**
    * Create one notification per recipient (idempotent) and queue push delivery.
-   * Returns the number of rows actually created (skips deduped/raced recipients),
-   * so callers can avoid re-emitting a real-time event for a fully-deduped retry.
+   * Returns the recipient ids actually written (skips deduped/raced recipients),
+   * so the caller toasts only those and never re-toasts a fully-deduped retry.
    */
   async createForUsers(
     input: CreateNotificationInput & { recipientUserIds: string[] },
-  ): Promise<number> {
+  ): Promise<string[]> {
     const repo = AppDataSource.getRepository(Notification);
-    let created = 0;
+    const created: string[] = [];
     for (const recipientUserId of input.recipientUserIds) {
       const dedupeKey = input.dedupeBase ? `${input.dedupeBase}:${recipientUserId}` : undefined;
       if (dedupeKey) {
@@ -106,7 +106,7 @@ export const notificationService = {
           }),
         );
         await enqueueDelivery(n.id);
-        created += 1;
+        created.push(recipientUserId);
       } catch (err) {
         // Unique dedupe_key violation under a race → already created; ignore.
         logger.debug('Notification create skipped', {
@@ -117,30 +117,33 @@ export const notificationService = {
     return created;
   },
 
-  /** Create for an explicit recipient list, then emit one tenant-wide WS event. */
+  /** Create for an explicit recipient list, then toast each created recipient. */
   async createForRecipients(
     input: CreateNotificationInput & { recipientUserIds: string[] },
   ): Promise<void> {
     const created = await this.createForUsers(input);
     // Nothing new was written (a fully-deduped retry of the same dedupeBase) →
     // don't re-toast/re-sound desktops for an event they were already alerted to.
-    if (created === 0) return;
+    if (created.length === 0) return;
 
-    // Real-time desktop delivery. The push worker only covers mobile (which most
-    // staff don't have), and nothing else surfaced notifications on desktop — so a
-    // handoff / guardrail pause / channel-down could go unnoticed. Emit ONE
-    // tenant-level event to all agents (not per-recipient, which would N-duplicate
-    // the toast/sound). Best-effort: a socket hiccup must never fail the write.
-    // Lazy import to avoid a load-time notification.service↔socket.handler edge
-    // (the static import reordered the module graph and broke unrelated test mocks).
+    // Real-time desktop delivery, PER RECIPIENT (#129). The push worker only
+    // covers mobile (which most staff don't have), so the toast is how a desktop
+    // operator learns of a handoff / guardrail pause / channel-down. It is
+    // emitted to each created recipient's OWN room rather than the tenant room,
+    // so it follows the (already preference-filtered) recipient list: an operator
+    // who opted out gets no row, no push, and now no toast/sound either. One
+    // event per recipient room is exactly one toast each — never N-duplicated.
+    // Best-effort: a socket hiccup must never fail the write. Lazy import avoids
+    // a load-time notification.service↔socket.handler edge.
     try {
-      const { emitToTenantAgents } = await import('../websocket/socket.handler');
-      emitToTenantAgents(input.tenantId, 'notification', {
+      const { emitToAgent } = await import('../websocket/socket.handler');
+      const payload = {
         type: input.type,
         title: input.title,
         message: input.message,
         data: input.data ?? null,
-      });
+      };
+      for (const userId of created) emitToAgent(userId, 'notification', payload);
     } catch (err) {
       logger.warn('Failed to emit notification WS event', {
         tenantId: input.tenantId,

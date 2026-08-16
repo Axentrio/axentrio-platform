@@ -23,7 +23,7 @@ vi.mock('../../queue/message-queue', () => ({
 
 const mockEmit = vi.fn();
 vi.mock('../../websocket/socket.handler', () => ({
-  emitToTenantAgents: (...a: unknown[]) => mockEmit(...a),
+  emitToAgent: (...a: unknown[]) => mockEmit(...a),
 }));
 
 vi.mock('../../utils/logger', () => ({
@@ -46,17 +46,19 @@ beforeEach(() => {
 const input = { tenantId: 't1', type: 'channel.error', title: 'A channel needs attention', message: 'Reconnect it.', data: { connectionId: 'c1' } };
 
 describe('notificationService.createForTenant — desktop WS delivery', () => {
-  it('emits ONE tenant-level notification event regardless of recipient count', async () => {
+  it('toasts each created recipient in their own room, never tenant-wide (#129)', async () => {
     mockFind.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
     await notificationService.createForTenant(input);
     expect(mockSave).toHaveBeenCalledTimes(2); // one row per recipient
-    expect(mockEmit).toHaveBeenCalledTimes(1); // but only ONE WS event (not per-row)
-    expect(mockEmit).toHaveBeenCalledWith('t1', 'notification', {
+    expect(mockEmit).toHaveBeenCalledTimes(2); // one toast PER created recipient (own room)
+    const payload = {
       type: 'channel.error',
       title: 'A channel needs attention',
       message: 'Reconnect it.',
       data: { connectionId: 'c1' },
-    });
+    };
+    expect(mockEmit).toHaveBeenCalledWith('u1', 'notification', payload);
+    expect(mockEmit).toHaveBeenCalledWith('u2', 'notification', payload);
   });
 
   it('does not emit when the tenant has no active operators', async () => {

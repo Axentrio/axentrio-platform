@@ -69,7 +69,8 @@ describe('widget.js — New conversation control', () => {
     // Resolution order: durable key → adopt from stored session blob → mint.
     expect(ensure).toMatch(/localStorage\.getItem\(this\.visitorKey\)/);
     expect(ensure).toMatch(/readStoredSession\(\)/);
-    expect(ensure).toMatch(/'widget-'\s*\+\s*utils\.generateId\(\)/);
+    // #21: the durable visitorId uses the crypto-strong generator (not Math.random).
+    expect(ensure).toMatch(/'widget-'\s*\+\s*utils\.strongId\(\)/);
     expect(ensure).toMatch(/localStorage\.setItem\(this\.visitorKey/);
     // _initSession must never regenerate the id (the old per-load mint).
     const initSession = from('async _initSession(epoch) {').slice(0, 3000);

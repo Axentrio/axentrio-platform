@@ -112,7 +112,6 @@ export async function scoreOfferedSlots(input: {
   neighbours: TravelNeighbour[];
   /** Base and its departure instant, per day, from the gate's own resolution. */
   baseFor: (candidateStart: Date) => { base: { at: Date; location: NeighbourLocation } | null };
-  boundaryOverride?: string | null;
 }): Promise<OfferScoring | null> {
   if (!input.slots.length) return null;
 
@@ -245,7 +244,6 @@ export async function scoreOfferedSlots(input: {
           // the boundary sits, and reading the weekly grid would put it on a day that is shut.
           windows: windowsForDay(input.rule as Parameters<typeof windowsForDay>[0], day),
           alwaysOpen: input.rule.availabilityMode === 'always_open',
-          boundaryOverride: input.boundaryOverride ?? null,
         });
 
         // Anchors for THIS day only, CONFIRMED only, and only those with a trusted position.

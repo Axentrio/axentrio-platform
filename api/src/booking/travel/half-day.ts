@@ -20,11 +20,6 @@ export interface DayPeriods {
   /** The day's first opening instant and last closing instant, in UTC. */
   dayStart: Date;
   dayEnd: Date;
-  /**
-   * A boundary worth OFFERING the owner, when the day has a gap that looks more like their real
-   * division than the clock does. Suggested only - see `suggestedBoundary` below.
-   */
-  suggested?: Date;
 }
 
 /** Minutes past midnight for an `HH:MM` window edge, or null when it is malformed. */
@@ -53,7 +48,7 @@ const instantAt = (localDay: string, minutes: number, timezone: string): Date =>
  *     invention - the owner never said it. Full Day would still apply to such a day, because a day
  *     is still a day; Half Day does not.
  *
- * The default boundary is the MIDPOINT BETWEEN THE FIRST OPENING AND THE LAST CLOSING, not the
+ * The boundary is the MIDPOINT BETWEEN THE FIRST OPENING AND THE LAST CLOSING, not the
  * midpoint of elapsed open time across the union of windows. An owner who says "morning" means the
  * clock. A business open 08:00-10:00 and 14:00-18:00 has six open hours whose midpoint sits at
  * 16:00, which no one would call the start of their afternoon; the clock midpoint is 13:00.
@@ -66,8 +61,6 @@ export function resolveDayPeriods(input: {
   windows: TimeWindow[];
   /** `always_open` disables Half Day entirely. */
   alwaysOpen: boolean;
-  /** The owner's explicit boundary as `HH:MM`, when they have set one. */
-  boundaryOverride?: string | null;
 }): DayPeriods | null {
   if (input.alwaysOpen) return null;
 
@@ -80,47 +73,15 @@ export function resolveDayPeriods(input: {
   const first = edges[0].start;
   const last = edges[edges.length - 1].end;
 
-  const override = minutesOf(input.boundaryOverride ?? undefined);
-  // An override outside the day is ignored rather than honoured: a boundary before opening or
-  // after closing would put every Slot in one period and silently disable grouping, which is a
-  // configuration mistake that should not look like a working setting.
-  const useOverride = override !== null && override > first && override < last;
-  const boundaryMinutes = useOverride ? override : Math.round((first + last) / 2);
+  // The clock midpoint between the first opening and the last closing. Not owner-settable
+  // (see CONTEXT.md, Geographic Grouping), so there is nothing to override it.
+  const boundaryMinutes = Math.round((first + last) / 2);
 
-  const periods: DayPeriods = {
+  return {
     boundary: instantAt(input.localDay, boundaryMinutes, input.timezone),
     dayStart: instantAt(input.localDay, first, input.timezone),
     dayEnd: instantAt(input.localDay, last, input.timezone),
   };
-
-  const suggestion = suggestedBoundary(edges);
-  // Only worth suggesting when it differs from what is already in force. Offering the owner the
-  // boundary they already have is noise.
-  if (suggestion !== null && suggestion !== boundaryMinutes) {
-    periods.suggested = instantAt(input.localDay, suggestion, input.timezone);
-  }
-  return periods;
-}
-
-/**
- * The largest gap between windows, as a boundary to OFFER the owner. Never applied automatically.
- *
- * Two windows may be a school run rather than a morning and an afternoon, and the system cannot
- * tell which. Applying it would silently redefine the owner's day around a gap that means
- * something else entirely; offering it lets the person who knows decide.
- */
-function suggestedBoundary(edges: Array<{ start: number; end: number }>): number | null {
-  if (edges.length < 2) return null;
-  let widest = 0;
-  let midpoint: number | null = null;
-  for (let i = 1; i < edges.length; i += 1) {
-    const gap = edges[i].start - edges[i - 1].end;
-    if (gap > widest) {
-      widest = gap;
-      midpoint = Math.round((edges[i - 1].end + edges[i].start) / 2);
-    }
-  }
-  return widest > 0 ? midpoint : null;
 }
 
 /**

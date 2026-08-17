@@ -931,7 +931,16 @@
           "presetEveryday": "Elke dag 9–17",
           "timezone": "Tijdzone (IANA, bijv. America/New_York)",
           "closed": "Gesloten",
-          "save": "Openingstijden opslaan"
+          "save": "Openingstijden opslaan",
+          "overrides": {
+            "label": "Gesloten dagen en eenmalige uren",
+            "helper": "Feestdagen of andere uren op een specifieke datum. Die vervangen het weekschema voor het buiten-openingstijdenbericht.",
+            "add": "Gesloten dag toevoegen",
+            "empty": "Geen uitzonderingen. Het weekschema geldt elke week.",
+            "to": "tot",
+            "closed": "Gesloten",
+            "remove": "Deze uitzondering verwijderen"
+          }
         }
       },
       "advanced": {

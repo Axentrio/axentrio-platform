@@ -50,10 +50,18 @@ export interface BotEmbedResponse {
 
 export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
+export interface BusinessHoursDateOverride {
+  date: string;
+  endDate?: string | null;
+  closed?: boolean;
+  windows?: Array<{ start: string; end: string }>;
+}
+
 export interface BusinessHours {
   enabled: boolean;
   timezone?: string;
   schedule: Array<{ day: WeekDay; open: string; close: string; closed: boolean }>;
+  dateOverrides?: BusinessHoursDateOverride[];
 }
 
 export interface BotDetail extends BotListItem {

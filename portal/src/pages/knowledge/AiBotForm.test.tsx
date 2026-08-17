@@ -15,6 +15,7 @@ const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = 
       enabled: boolean;
       timezone?: string;
       schedule: { day: string; open: string; close: string; closed: boolean }[];
+      dateOverrides?: Array<{ date: string; endDate?: string; closed?: boolean; windows?: Array<{ start: string; end: string }> }>;
     } | null,
   },
 }));
@@ -174,6 +175,29 @@ describe('AiBotForm', () => {
     await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
     const payload = mockUpdateBot.mock.calls[0][0] as { businessHours: Record<string, unknown> };
     expect(payload.businessHours).not.toHaveProperty('timezone');
+  });
+
+  it('saves a closed date on the business-hours payload', async () => {
+    botDetailState.businessHours = {
+      enabled: true,
+      timezone: 'Europe/Brussels',
+      schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+      dateOverrides: [{ date: '2026-12-25', closed: true }],
+    };
+    const { user } = renderForm();
+
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    expect(await screen.findByRole('checkbox', { name: /closed/i })).toBeChecked();
+    // Flip a weekly day so Save is dirty, then persist — the stored closed date
+    // must ride along rather than being dropped.
+    await user.click(screen.getByRole('switch', { name: 'monday open' }));
+    await user.click(screen.getByRole('button', { name: /save business hours/i }));
+
+    await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
+    const payload = mockUpdateBot.mock.calls[0][0] as {
+      businessHours: { dateOverrides?: Array<{ closed?: boolean; date?: string }> };
+    };
+    expect(payload.businessHours.dateOverrides).toEqual([{ date: '2026-12-25', closed: true }]);
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

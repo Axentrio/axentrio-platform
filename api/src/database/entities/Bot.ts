@@ -58,6 +58,13 @@ export interface BotSettings {
       close: string;
       closed: boolean;
     }>;
+    /** Closed-day / holiday exceptions — same Date Override shape as AvailabilityRule. */
+    dateOverrides?: Array<{
+      date: string;
+      endDate?: string;
+      closed?: boolean;
+      windows?: Array<{ start: string; end: string }>;
+    }>;
   };
   ai?: {
     enabled: boolean;

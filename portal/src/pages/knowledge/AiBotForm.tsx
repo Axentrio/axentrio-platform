@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine, MessagesSquare } from 'lucide-react';
+import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine, MessagesSquare, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,8 +36,11 @@ import {
   useBotDetail,
   useUpdateBot,
   type BusinessHours,
+  type BusinessHoursDateOverride,
   type WeekDay,
 } from '@/queries/useBotsQueries';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DatePicker } from '@/components/ui/date-picker';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { SkillStateCard } from '@/components/SkillStateCard';
@@ -65,8 +68,41 @@ function buildSchedule(stored: BusinessHours['schedule'] | undefined): DaySchedu
   );
 }
 
-const businessHoursKey = (enabled: boolean, tz: string, schedule: DaySchedule[]): string =>
-  JSON.stringify({ enabled, tz, schedule });
+const DEFAULT_OVERRIDE_WINDOW = { start: '09:00', end: '17:00' };
+
+type OverrideRow = {
+  date: string;
+  endDate: string;
+  closed: boolean;
+  windows: Array<{ start: string; end: string }>;
+};
+
+function overridesFromStored(raw: BusinessHoursDateOverride[] | undefined): OverrideRow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) => ({
+    date: o.date ?? '',
+    endDate: o.endDate ?? '',
+    closed: !!o.closed,
+    windows: Array.isArray(o.windows) && o.windows.length ? o.windows : [{ ...DEFAULT_OVERRIDE_WINDOW }],
+  }));
+}
+
+function overridesForPayload(rows: OverrideRow[]): BusinessHoursDateOverride[] {
+  return rows.flatMap((o) => {
+    if (!o.date) return [];
+    const row: BusinessHoursDateOverride = { date: o.date, closed: o.closed };
+    if (o.endDate) row.endDate = o.endDate;
+    if (!o.closed) row.windows = o.windows;
+    return [row];
+  });
+}
+
+const businessHoursKey = (
+  enabled: boolean,
+  tz: string,
+  schedule: DaySchedule[],
+  overrides: OverrideRow[],
+): string => JSON.stringify({ enabled, tz, schedule, overrides });
 
 // Quick-set presets so the common cases don't require touching the 7-row grid.
 const PRESET_WEEKDAYS: DaySchedule[] = WEEK_DAYS.map((day) => ({ day, open: '09:00', close: '17:00', closed: day === 'saturday' || day === 'sunday' }));
@@ -200,6 +236,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [bhEnabled, setBhEnabled] = useState(false);
   const [bhTimezone, setBhTimezone] = useState('UTC');
   const [bhSchedule, setBhSchedule] = useState<DaySchedule[]>(() => buildSchedule(undefined));
+  const [bhOverrides, setBhOverrides] = useState<OverrideRow[]>([]);
   const [bhBaseline, setBhBaseline] = useState<string | null>(null);
   const bhHydratedKeyRef = useRef<string | null>(null);
   // Baseline snapshot captured at hydration. Stays fixed until tenant change;
@@ -281,20 +318,25 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     bhHydratedKeyRef.current = hydrationKey;
     const bh = botDetail.businessHours;
     const sched = buildSchedule(bh?.schedule);
+    const overrides = overridesFromStored(bh?.dateOverrides);
     setBhEnabled(bh?.enabled ?? false);
     setBhTimezone(bh?.timezone || 'UTC');
     setBhSchedule(sched);
-    setBhBaseline(businessHoursKey(bh?.enabled ?? false, bh?.timezone || 'UTC', sched));
+    setBhOverrides(overrides);
+    setBhBaseline(businessHoursKey(bh?.enabled ?? false, bh?.timezone || 'UTC', sched, overrides));
   }, [botDetail, tenantId, hydrationKey]);
 
-  const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule) !== bhBaseline;
+  const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides) !== bhBaseline;
 
   const setDay = (day: WeekDay, patch: Partial<DaySchedule>) =>
     setBhSchedule((prev) => prev.map((d) => (d.day === day ? { ...d, ...patch } : d)));
 
   const saveBusinessHours = async () => {
-    await updateBot.mutateAsync({ id: botId, businessHours: { enabled: bhEnabled, schedule: bhSchedule } });
-    setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule));
+    await updateBot.mutateAsync({
+      id: botId,
+      businessHours: { enabled: bhEnabled, schedule: bhSchedule, dateOverrides: overridesForPayload(bhOverrides) },
+    });
+    setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides));
   };
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
@@ -891,6 +933,113 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                           )}
                         </div>
                       ))}
+                    </div>
+                    <div className="space-y-2 border-t border-edge pt-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.overrides.label')}</Label>
+                          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.overrides.helper')}</p>
+                        </div>
+                        {!readOnly && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() =>
+                              setBhOverrides((prev) => [
+                                ...prev,
+                                { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_OVERRIDE_WINDOW }] },
+                              ])
+                            }
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {t('ai.bot.operational.businessHours.overrides.add')}
+                          </Button>
+                        )}
+                      </div>
+                      {bhOverrides.length === 0 ? (
+                        <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.overrides.empty')}</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {bhOverrides.map((o, i) => (
+                            // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
+                            <div key={i} className="flex items-center gap-2 flex-wrap">
+                              <DatePicker
+                                value={o.date}
+                                onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))}
+                                className="w-44"
+                                disabled={readOnly}
+                              />
+                              <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.overrides.to')}</span>
+                              <DatePicker
+                                value={o.endDate}
+                                onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))}
+                                className="w-44"
+                                disabled={readOnly}
+                              />
+                              <label htmlFor={`bh-override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox
+                                  id={`bh-override-closed-${i}`}
+                                  checked={o.closed}
+                                  disabled={readOnly}
+                                  onCheckedChange={(c) =>
+                                    setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
+                                  }
+                                />
+                                <span className="text-xs text-text-secondary">{t('ai.bot.operational.businessHours.overrides.closed')}</span>
+                              </label>
+                              {!o.closed && (
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    type="time"
+                                    className="h-8 w-28"
+                                    value={o.windows[0]?.start ?? '09:00'}
+                                    disabled={readOnly}
+                                    onChange={(e) =>
+                                      setBhOverrides((prev) =>
+                                        prev.map((x, j) =>
+                                          j === i
+                                            ? { ...x, windows: [{ start: e.target.value, end: x.windows[0]?.end ?? '17:00' }] }
+                                            : x,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  <span className="text-text-muted">–</span>
+                                  <Input
+                                    type="time"
+                                    className="h-8 w-28"
+                                    value={o.windows[0]?.end ?? '17:00'}
+                                    disabled={readOnly}
+                                    onChange={(e) =>
+                                      setBhOverrides((prev) =>
+                                        prev.map((x, j) =>
+                                          j === i
+                                            ? { ...x, windows: [{ start: x.windows[0]?.start ?? '09:00', end: e.target.value }] }
+                                            : x,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </div>
+                              )}
+                              {!readOnly && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-red-400 hover:text-red-300"
+                                  aria-label={t('ai.bot.operational.businessHours.overrides.remove')}
+                                  onClick={() => setBhOverrides((prev) => prev.filter((_, j) => j !== i))}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

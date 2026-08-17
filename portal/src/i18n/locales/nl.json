@@ -955,8 +955,8 @@
         },
         "businessHours": {
           "label": "Openingstijden",
-          "helper": "Buiten deze tijden krijgen bezoekers het buiten-openingstijdenbericht in plaats van een botantwoord.",
-          "alwaysOnHint": "Laat uit voor 24/7 beschikbaarheid.",
+          "helper": "Als dit aan staat, kent de assistent je openingstijden en kan die met bezoekers delen. Buiten deze uren blijft de assistent helpen.",
+          "alwaysOnHint": "Laat uit als je niet wilt dat de openingstijden worden genoemd.",
           "presetsLabel": "Snel instellen:",
           "presetWeekdays": "Werkdagen 9–17",
           "presetEveryday": "Elke dag 9–17",
@@ -965,7 +965,7 @@
           "save": "Openingstijden opslaan",
           "overrides": {
             "label": "Gesloten dagen en eenmalige uren",
-            "helper": "Feestdagen of andere uren op een specifieke datum. Die vervangen het weekschema voor het buiten-openingstijdenbericht.",
+            "helper": "Feestdagen of andere uren op een specifieke datum. Die vervangen het weekschema.",
             "add": "Gesloten dag toevoegen",
             "empty": "Geen uitzonderingen. Het weekschema geldt elke week.",
             "to": "tot",

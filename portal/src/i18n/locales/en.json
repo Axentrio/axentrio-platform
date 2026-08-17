@@ -962,8 +962,8 @@
         },
         "businessHours": {
           "label": "Business hours",
-          "helper": "Outside these hours, visitors get the off-hours message instead of a bot reply.",
-          "alwaysOnHint": "Leave off for 24/7 availability.",
+          "helper": "When on, the assistant knows your opening hours and can share them with visitors. It keeps helping visitors outside these hours.",
+          "alwaysOnHint": "Leave off if you don't want hours mentioned.",
           "presetsLabel": "Quick set:",
           "presetWeekdays": "Weekdays 9–5",
           "presetEveryday": "Every day 9–5",
@@ -972,7 +972,7 @@
           "save": "Save business hours",
           "overrides": {
             "label": "Closed dates & one-off hours",
-            "helper": "Holidays or different hours on a specific date. These override the weekly schedule for the off-hours reply.",
+            "helper": "Holidays or different hours on a specific date. These override the weekly schedule.",
             "add": "Add closed date",
             "empty": "No exceptions. The weekly schedule applies every week.",
             "to": "to",

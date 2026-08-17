@@ -64,9 +64,18 @@ export interface BusinessHours {
   dateOverrides?: BusinessHoursDateOverride[];
 }
 
+export interface QuotedAddress {
+  enabled: boolean;
+  street?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  country?: string | null;
+}
+
 export interface BotDetail extends BotListItem {
   embedSnippet: string;
   businessHours: BusinessHours | null;
+  quotedAddress?: QuotedAddress;
 }
 
 /**
@@ -137,7 +146,7 @@ export function useCreateBot() {
 export function useUpdateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: Omit<BusinessHours, 'timezone'> }) =>
+    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: Omit<BusinessHours, 'timezone'>; quotedAddress?: QuotedAddress }) =>
       api.patch<BotListItem>(`/bots/${id}`, patch),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });

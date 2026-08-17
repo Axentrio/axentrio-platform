@@ -273,6 +273,7 @@ router.get(
       businessHours: bot.settings?.businessHours
         ? { ...bot.settings.businessHours, timezone: bot.businessTimezone || bot.settings.businessHours.timezone }
         : null,
+      quotedAddress: bot.settings?.quotedAddress ?? { enabled: false },
     });
   })
 );
@@ -303,11 +304,12 @@ router.patch(
     const authReq = req as ProvisionedRequest;
     requireMutateRole(authReq.userRole);
     const tenantId = authReq.tenantId!;
-    const { name, assistantName, status, businessHours } = req.body as {
+    const { name, assistantName, status, businessHours, quotedAddress } = req.body as {
       name?: string;
       assistantName?: string;
       status?: 'active' | 'paused';
       businessHours?: NonNullable<Bot['settings']>['businessHours'];
+      quotedAddress?: NonNullable<Bot['settings']>['quotedAddress'];
     };
 
     // Activation (paused → active) must re-check the quota: a tenant could have
@@ -366,6 +368,12 @@ router.patch(
         bot.settings = {
           ...(bot.settings ?? {}),
           businessHours: { ...businessHours, timezone: derivedTimezone },
+        };
+      }
+      if (quotedAddress !== undefined) {
+        bot.settings = {
+          ...(bot.settings ?? {}),
+          quotedAddress,
         };
       }
       return repo.save(bot);

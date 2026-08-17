@@ -959,6 +959,15 @@
             "closed": "Fermé",
             "remove": "Supprimer cette exception"
           }
+        },
+        "quotedAddress": {
+          "label": "Adresse citée par le bot",
+          "helper": "Facultatif. Désactivé par défaut — le bot utilise l'adresse du compte. Activez seulement si ce bot doit citer une autre adresse.",
+          "street": "Rue",
+          "postalCode": "Code postal",
+          "city": "Ville",
+          "country": "Pays",
+          "save": "Enregistrer l'adresse du bot"
         }
       },
       "advanced": {
@@ -2805,7 +2814,13 @@
         "postalCodeLabel": "Code postal",
         "cityLabel": "Commune",
         "verifiedNote": "Confirmé par le registre officiel.",
-        "unverifiedNote": "Non vérifié auprès du registre."
+        "unverifiedNote": "Non vérifié auprès du registre.",
+        "presence": {
+          "label": "Comment les clients vous joignent-ils ?",
+          "helper": "Une boutique en ligne n'aura jamais d'adresse physique forcée sur le bot. Une entreprise physique pourra plus tard donner au bot sa propre adresse.",
+          "physical": "Entreprise physique — les clients viennent ou nous nous déplaçons",
+          "online": "Entreprise en ligne — aucun local à citer"
+        }
       },
       "logo": {
         "title": "Ajoutez votre logo",

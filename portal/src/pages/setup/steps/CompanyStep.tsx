@@ -51,6 +51,9 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
   );
   const [outcome, setOutcome] = React.useState<CompanyLookupStatus | null>(null);
   const [verified, setVerified] = React.useState(stored?.verified ?? false);
+  const [presence, setPresence] = React.useState<'online' | 'physical' | ''>(
+    stored?.presence === 'physical' || stored?.presence === 'online' ? stored.presence : '',
+  );
 
   const set = (key: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
@@ -81,10 +84,12 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
         street: fields.street.trim() || null,
         postalCode: fields.postalCode.trim() || null,
         city: fields.city.trim() || null,
+        presence: presence || undefined,
       },
     });
 
-  const canSave = vat.trim().length > 0 && fields.name.trim().length > 0 && !submit.isPending;
+  const canSave =
+    vat.trim().length > 0 && fields.name.trim().length > 0 && !!presence && !submit.isPending;
 
   return (
     <div className="space-y-6">
@@ -162,6 +167,31 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
           <Input id="setup-city" value={fields.city} onChange={set('city')} />
         </div>
       </div>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-text-secondary">{t('setup.steps.company.presence.label')}</legend>
+        <p className="text-xs text-text-muted">{t('setup.steps.company.presence.helper')}</p>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name="setup-presence"
+            value="physical"
+            checked={presence === 'physical'}
+            onChange={() => setPresence('physical')}
+          />
+          <span className="text-sm text-text-primary">{t('setup.steps.company.presence.physical')}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name="setup-presence"
+            value="online"
+            checked={presence === 'online'}
+            onChange={() => setPresence('online')}
+          />
+          <span className="text-sm text-text-primary">{t('setup.steps.company.presence.online')}</span>
+        </label>
+      </fieldset>
 
       <div className="flex items-center justify-between gap-3">
         <p className="flex items-center gap-1.5 text-xs text-text-muted">

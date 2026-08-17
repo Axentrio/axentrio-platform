@@ -79,6 +79,11 @@ export interface OnboardingCompany {
    * later fraud question has an honest answer instead of a silent assumption.
    */
   verified: boolean;
+  /**
+   * #153 — online shops never activate the per-bot quoted address.
+   * Only `physical` turns that field on. Absent on grandfathered rows.
+   */
+  presence?: 'online' | 'physical';
 }
 
 export interface OnboardingState {

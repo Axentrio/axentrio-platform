@@ -37,6 +37,7 @@ import {
   useUpdateBot,
   type BusinessHours,
   type BusinessHoursDateOverride,
+  type QuotedAddress,
   type WeekDay,
 } from '@/queries/useBotsQueries';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -238,6 +239,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [bhSchedule, setBhSchedule] = useState<DaySchedule[]>(() => buildSchedule(undefined));
   const [bhOverrides, setBhOverrides] = useState<OverrideRow[]>([]);
   const [bhBaseline, setBhBaseline] = useState<string | null>(null);
+  const [qaEnabled, setQaEnabled] = useState(false);
+  const [qaStreet, setQaStreet] = useState('');
+  const [qaPostal, setQaPostal] = useState('');
+  const [qaCity, setQaCity] = useState('');
+  const [qaCountry, setQaCountry] = useState('BE');
+  const [qaBaseline, setQaBaseline] = useState<string | null>(null);
+  const qaHydratedKeyRef = useRef<string | null>(null);
   const bhHydratedKeyRef = useRef<string | null>(null);
   // Baseline snapshot captured at hydration. Stays fixed until tenant change;
   // useAutoSave maintains its own moving "last saved" baseline on top of this.
@@ -326,6 +334,24 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setBhBaseline(businessHoursKey(bh?.enabled ?? false, bh?.timezone || 'UTC', sched, overrides));
   }, [botDetail, tenantId, hydrationKey]);
 
+  useEffect(() => {
+    if (!botDetail || !tenantId) return;
+    if (qaHydratedKeyRef.current === hydrationKey) return;
+    qaHydratedKeyRef.current = hydrationKey;
+    const qa = botDetail.quotedAddress;
+    const enabled = qa?.enabled === true;
+    const street = qa?.street ?? '';
+    const postal = qa?.postalCode ?? '';
+    const city = qa?.city ?? '';
+    const country = qa?.country ?? 'BE';
+    setQaEnabled(enabled);
+    setQaStreet(street);
+    setQaPostal(postal);
+    setQaCity(city);
+    setQaCountry(country);
+    setQaBaseline(JSON.stringify({ enabled, street, postal, city, country }));
+  }, [botDetail, tenantId, hydrationKey]);
+
   const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides) !== bhBaseline;
 
   const setDay = (day: WeekDay, patch: Partial<DaySchedule>) =>
@@ -337,6 +363,22 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       businessHours: { enabled: bhEnabled, schedule: bhSchedule, dateOverrides: overridesForPayload(bhOverrides) },
     });
     setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides));
+  };
+
+  const qaDirty =
+    qaBaseline !== null &&
+    JSON.stringify({ enabled: qaEnabled, street: qaStreet, postal: qaPostal, city: qaCity, country: qaCountry }) !== qaBaseline;
+
+  const saveQuotedAddress = async () => {
+    const payload: QuotedAddress = {
+      enabled: qaEnabled,
+      street: qaStreet.trim() || null,
+      postalCode: qaPostal.trim() || null,
+      city: qaCity.trim() || null,
+      country: qaCountry.trim() || null,
+    };
+    await updateBot.mutateAsync({ id: botId, quotedAddress: payload });
+    setQaBaseline(JSON.stringify({ enabled: qaEnabled, street: qaStreet, postal: qaPostal, city: qaCity, country: qaCountry }));
   };
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
@@ -1048,6 +1090,31 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                   <div className="flex justify-end">
                     <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || updateBot.isPending}>
                       {t('ai.bot.operational.businessHours.save')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-edge p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-text-secondary">{t('ai.bot.operational.quotedAddress.label')}</Label>
+                    <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
+                  </div>
+                  <Switch checked={qaEnabled} onCheckedChange={setQaEnabled} disabled={readOnly} />
+                </div>
+                {qaEnabled && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.country')} value={qaCountry} onChange={(e) => setQaCountry(e.target.value)} disabled={readOnly} />
+                  </div>
+                )}
+                {!readOnly && (
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" onClick={saveQuotedAddress} disabled={!qaDirty || updateBot.isPending}>
+                      {t('ai.bot.operational.quotedAddress.save')}
                     </Button>
                   </div>
                 )}

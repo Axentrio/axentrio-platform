@@ -49,6 +49,18 @@ export interface BotSettings {
     fileUploadEnabled: boolean;
     handoffEnabled: boolean;
   };
+  /**
+   * #153 — optional address the Agent quotes. Default off: an online shop
+   * must not have a physical address forced on. When off or blank, the
+   * account invoice address (#148) is the fallback.
+   */
+  quotedAddress?: {
+    enabled: boolean;
+    street?: string | null;
+    postalCode?: string | null;
+    city?: string | null;
+    country?: string | null;
+  };
   businessHours?: {
     enabled: boolean;
     timezone: string;

@@ -2896,7 +2896,7 @@
         "hoursHint": "Used to tell customers when you'll be back. You can set different hours per day later, under AI & Content.",
         "installTitle": "Install the chat widget",
         "installBody": "Paste this snippet immediately before </body> in your site's HTML template.",
-        "installHint": "On WordPress this is footer.php; on Shopify it's the theme theme.liquid; on Webflow it's Settings → Custom Code → Footer Code.",
+        "installHint": "On WordPress this is footer.php; on Shopify it's the theme's theme.liquid file; on Webflow it's Settings → Custom Code → Footer Code.",
         "opensAt": "Opens at",
         "closesAt": "Closes at",
         "to": "to",

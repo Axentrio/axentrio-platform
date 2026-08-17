@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { logger } from '../../utils/logger';
+import { sanitizeGraphError } from '../../utils/axios-error';
 import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 
 // Simple in-memory cache with TTL
@@ -46,7 +47,11 @@ export async function fetchMetaProfile(
 
     return { displayName, avatarUrl };
   } catch (error) {
-    logger.debug(`[meta-profile] Failed to fetch profile for ${userId}:`, error);
+    logger.debug('[meta-profile] Failed to fetch profile', {
+      userId,
+      channel,
+      ...sanitizeGraphError(error),
+    });
     const fallback = channel === 'messenger' ? 'Facebook User' : 'Instagram User';
     return { displayName: fallback };
   }

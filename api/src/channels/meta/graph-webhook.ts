@@ -22,6 +22,7 @@ import { WebhookEventLog } from '../../database/entities/WebhookEventLog';
 import { processInboundEvent } from '../inbound-pipeline';
 import { getChannelInboundQueue } from '../inbound-queue.processor';
 import { logger } from '../../utils/logger';
+import { sanitizeGraphError } from '../../utils/axios-error';
 
 /** Validate `X-Hub-Signature-256` against an HMAC-SHA256 of the raw body. */
 export function verifyGraphSignature(
@@ -185,7 +186,7 @@ export function createGraphWebhookRouter(config: GraphWebhookConfig): Router {
         }
       } catch (error: any) {
         if (error?.code === '23505') continue; // Duplicate dedupe key
-        logger.error(`${tag} Error processing ${channel} event:`, error);
+        logger.error(`${tag} Error processing ${channel} event`, sanitizeGraphError(error));
       }
     }
 

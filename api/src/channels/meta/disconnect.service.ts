@@ -3,6 +3,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { getMetaPageAccessToken } from '../credential-utils';
 import { logger } from '../../utils/logger';
+import { sanitizeGraphError } from '../../utils/axios-error';
 import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 
 /**
@@ -26,7 +27,10 @@ export async function disconnectMetaConnection(connectionId: string): Promise<vo
         timeout: 10000,
       });
     } catch (error) {
-      logger.warn(`[meta-disconnect] Failed to unsubscribe ${accountId}:`, error);
+      logger.warn('[meta-disconnect] Failed to unsubscribe', {
+        accountId,
+        ...sanitizeGraphError(error),
+      });
     }
   }
 

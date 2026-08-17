@@ -55,7 +55,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
-import { resolveServiceLocationMode } from '../service-location';
+import { resolveServiceLocationMode, serviceNeedsCustomerAddress } from '../service-location';
 import { scoreOfferedSlots, type OfferScoring } from '../travel/score-offer';
 import { applyGrouping } from '../travel/apply-grouping';
 import {
@@ -283,9 +283,16 @@ export function formatBookingDisplayTime(startUtc: Date, timezone: string): stri
 }
 
 /** P5a — which contact fields a service requires. Single mapping for the column-name
- *  wart: customerLocationRequired maps to PHONE (a callback number), not address. */
-function requiredContactFields(service: ServiceType): { address: boolean; phone: boolean } {
-  return { address: !!service.customerAddressRequired, phone: !!service.customerLocationRequired };
+ *  wart: customerLocationRequired maps to PHONE (a callback number), not address.
+ *  #149: a choose-at-booking Service only needs an address when the customer picked theirs. */
+function requiredContactFields(
+  service: ServiceType,
+  extras?: BookingExtras,
+): { address: boolean; phone: boolean } {
+  return {
+    address: serviceNeedsCustomerAddress(service, extras),
+    phone: !!service.customerLocationRequired,
+  };
 }
 
 /** Trim + cap a contact value to its DB column width; empty/whitespace → null. */
@@ -304,7 +311,7 @@ function resolveContactFields(
   extras?: BookingExtras,
   session?: { channel?: string | null; visitorId?: string | null }
 ): { address: string | null; phone: string | null } {
-  const req = requiredContactFields(service);
+  const req = requiredContactFields(service, extras);
   const address = cleanContact(extras?.customerAddress, 512);
   let phone = cleanContact(extras?.customerPhone, 64);
   // Channel fallback: on WhatsApp the customer's own number IS the session identity
@@ -382,7 +389,9 @@ async function evaluateServiceArea(
   service: ServiceType,
   address: string | null
 ): Promise<{ match: ServiceAreaMatch | null; entries: ServiceAreaEntry[] }> {
-  if (!service.customerAddressRequired) return { match: null, entries: [] };
+  if (!serviceNeedsCustomerAddress(service, { customerAddress: address })) {
+    return { match: null, entries: [] };
+  }
   const row = await AppDataSource.getRepository(BookingSettings).findOne({
     where: { botId: ctx.bot.id },
   });
@@ -396,7 +405,7 @@ async function assertInServiceArea(
   service: ServiceType,
   address: string | null
 ): Promise<void> {
-  if (!service.customerAddressRequired) return;
+  if (!serviceNeedsCustomerAddress(service, { customerAddress: address })) return;
   const row = await AppDataSource.getRepository(BookingSettings).findOne({
     where: { botId: ctx.bot.id },
   });
@@ -965,7 +974,8 @@ export class InternalProvider implements BookingProvider {
      * alternative is offering a time and then refusing it — the behaviour this provider has
      * already ruled against once (see the SLOT_UNAVAILABLE note on create).
      */
-    customerAddress?: string
+    customerAddress?: string,
+    locationChoice?: 'business' | 'customer',
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -1061,6 +1071,7 @@ export class InternalProvider implements BookingProvider {
       rangeStart,
       rangeEnd,
       customerAddress,
+      locationChoice,
       excludeBookingId,
     });
     return {
@@ -1112,6 +1123,7 @@ export class InternalProvider implements BookingProvider {
       rangeStart: string;
       rangeEnd: string;
       customerAddress?: string;
+      locationChoice?: 'business' | 'customer';
       excludeBookingId?: string;
     }
   ): Promise<{
@@ -1123,7 +1135,12 @@ export class InternalProvider implements BookingProvider {
     const { service } = input;
     // A phone consultation is not a travel job however the Agent is configured — the cheapest
     // gate, and a fact about the SERVICE rather than about the owner.
-    if (!service.customerAddressRequired) return { slots: input.slots };
+    if (!serviceNeedsCustomerAddress(service, {
+      customerAddress: input.customerAddress,
+      locationChoice: input.locationChoice,
+    })) {
+      return { slots: input.slots };
+    }
 
     const eligibility = await resolveTravelEligibility({
       tenantId: ctx.tenant.id,
@@ -1940,7 +1957,7 @@ export class InternalProvider implements BookingProvider {
     // has already been given its chance to fail first. Outside the transaction for the other
     // reason the whole file cares about: a network call under an advisory lock is the
     // pool-exhaustion pattern documented on `loadBusinessRules`.
-    const travelEligibility = service.customerAddressRequired
+    const travelEligibility = serviceNeedsCustomerAddress(service, extras)
       ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
       : { active: false as const, reason: 'bot_disabled' as const };
     const placement: BookingPlacement =

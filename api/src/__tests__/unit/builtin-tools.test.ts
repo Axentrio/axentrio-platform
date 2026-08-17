@@ -261,9 +261,8 @@ describe('CheckAvailabilityTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(slots);
-    // The trailing undefined is `customerAddress`: only businesses that travel to the
-    // customer collect one, and it is passed straight through when they do.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined);
   });
 
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {

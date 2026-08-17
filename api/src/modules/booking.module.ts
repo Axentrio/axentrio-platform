@@ -400,6 +400,7 @@ export function buildServicesSection(
       const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
       // P5a: customerLocationRequired maps to PHONE (callback number), not address.
       const contact = [
+        s.customerChoosesLocation ? 'customer chooses location' : '',
         s.customerAddressRequired ? 'needs address' : '',
         s.customerLocationRequired ? 'needs phone' : '',
         s.fileUploadAllowed ? 'accepts files' : '',
@@ -427,7 +428,10 @@ export function buildServicesSection(
   // Only inject the ask-intake rule when a service actually renders questions
   // (a service whose questions are all malformed produces no lines → no dangling rule).
   const hasIntake = services.some((s) => intakeLines(s) !== '');
-  const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
+  const hasContact = services.some(
+    (s) => s.customerAddressRequired || s.customerLocationRequired || s.customerChoosesLocation,
+  );
+  const hasChoice = services.some((s) => s.customerChoosesLocation);
   // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
   // emitted for them as well — keyed on per-service caps alone, a bot with only a business
   // cap got the error with no instruction and would tell the customer it was fully booked.
@@ -456,7 +460,11 @@ Then follow these rules IN ORDER:
   }${
     hasContact
       ? `
-5. If the chosen service is flagged "needs address" and/or "needs phone", ask for it before booking or capturing the request, and pass it as customerAddress / customerPhone. If a booking tool returns ADDRESS_REQUIRED or PHONE_REQUIRED, ask for the missing detail and re-call the tool with it.`
+5. If the chosen service is flagged "needs address" and/or "needs phone", ask for it before booking or capturing the request, and pass it as customerAddress / customerPhone. If a booking tool returns ADDRESS_REQUIRED or PHONE_REQUIRED, ask for the missing detail and re-call the tool with it.${
+          hasChoice
+            ? ' If the chosen service is flagged "customer chooses location", FIRST ask whether they want the appointment at the business or at their own address, and pass locationChoice as "business" or "customer". Only ask for (and pass) customerAddress when they chose their own address — the business location needs no address and no travel. Never invent a choice.'
+            : ''
+        }`
       : ''
   }${
     hasCapacity
@@ -469,7 +477,7 @@ Then follow these rules IN ORDER:
 7. For a service shown with a duration RANGE (e.g. "30-90 min"), establish the length FIRST — ask the customer how long they need ("choose length"), or estimate it from what they have described ("AI-estimated") — then pass that as durationMin to check_availability AND the booking tool (same value). Never call create_booking for one of these without a durationMin: an unestablished length is captured as a REQUEST for the owner to scope, not confirmed at the shortest option, because guessing short books the wrong appointment rather than a cautious one. If you genuinely cannot tell, say so and capture it with request_appointment. If a tool returns DURATION_OUT_OF_RANGE, pick a length within the shown range. If create_booking returns SLOT_UNAVAILABLE for a range service, the chosen length didn't fit that start — offer a different start or a shorter length within range; don't retry the same start+length.`
       : ''
   }
-${travelTimeActive && services.some((s) => s.customerAddressRequired) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
+${travelTimeActive && services.some((s) => s.customerAddressRequired || s.customerChoosesLocation) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${

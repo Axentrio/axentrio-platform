@@ -166,6 +166,14 @@ export class ServiceType {
   @Column({ type: 'boolean', name: 'customer_address_required', default: false })
   customerAddressRequired!: boolean;
 
+  /**
+   * #149 — this Service can happen at the premises OR at the Booking Customer's
+   * address; the customer chooses at booking time. A fact the resolver projects
+   * into `customer_choice`. Default false = today's single-mode behaviour.
+   */
+  @Column({ type: 'boolean', name: 'customer_chooses_location', default: false })
+  customerChoosesLocation!: boolean;
+
   @Column({ type: 'boolean', name: 'file_upload_allowed', default: false })
   fileUploadAllowed!: boolean;
 

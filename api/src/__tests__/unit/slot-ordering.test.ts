@@ -6,8 +6,14 @@
  * slots into Requests with no error anywhere - the thing ADR-0017 forbids grouping from causing.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { counterfactualOrder, hasCheaperAlternative, SCORER_VERSION } from '../../booking/travel/slot-ordering';
+import {
+  counterfactualOrder,
+  hasCheaperAlternative,
+  orderSlotsByRoutePriority,
+  SCORER_VERSION,
+} from '../../booking/travel/slot-ordering';
 import type { ScoredCandidate } from '../../booking/travel/insertion-scorer';
+import type { RoutePriority } from '../../contracts/travel';
 
 const at = (hhmm: string) => new Date(`2026-09-07T${hhmm}:00.000Z`);
 const iso = (hhmm: string) => at(hhmm).toISOString();
@@ -88,6 +94,58 @@ describe('whether steering had anywhere better to point', () => {
     // would inflate the very number that decides whether the pilot is worth running.
     const scored = [slot('08:00', null), slot('09:00', 5)];
     expect(hasCheaperAlternative(scored, at('08:00'), 10)).toBe(false);
+  });
+});
+
+describe('Route Priority is a sort, and nothing else', () => {
+  // Mixed list: two scored Slots, one unpreferred-but-scored, one true neutral. Chronological
+  // input is 08 / 09 / 10 / 11. Unpreferred ARE scored and participate; only a missing cost is
+  // a true neutral and must keep its chronological place.
+  const mixed = [
+    slot('08:00', 40),
+    slot('09:00', null),
+    slot('10:00', 5),
+    slot('11:00', 90, false),
+  ];
+  const requestable = [at('14:00')];
+
+  it('leaves auto identical to the existing counterfactual order', () => {
+    const auto = orderSlotsByRoutePriority({
+      scored: mixed,
+      requestable,
+      mode: 'auto',
+    });
+    expect(auto).toEqual(counterfactualOrder({ scored: mixed, requestable }));
+  });
+
+  it('orders nearest by already-computed cost among scored Slots only', () => {
+    // Scored subsequence 08 / 10 / 11 becomes 10 (5), 08 (40), 11 (90). The 09:00
+    // neutral keeps the chronological index it already had.
+    expect(
+      orderSlotsByRoutePriority({ scored: mixed, requestable: [], mode: 'nearest' })
+    ).toEqual([iso('10:00'), iso('09:00'), iso('08:00'), iso('11:00')]);
+  });
+
+  it('inverts that scored-only order for farthest', () => {
+    expect(
+      orderSlotsByRoutePriority({ scored: mixed, requestable: [], mode: 'farthest' })
+    ).toEqual([iso('11:00'), iso('09:00'), iso('08:00'), iso('10:00')]);
+  });
+
+  it('keeps a true neutral in its chronological place for nearest and farthest', () => {
+    // applyGrouping's ?? Infinity would push a missing key to the back. That is illegal here:
+    // a Slot the scorer never measured must not be buried by a sort that never looked at it.
+    // Auto's own neutral placement is left alone — preferred Slots still rise above it.
+    expect(orderSlotsByRoutePriority({ scored: mixed, requestable: [], mode: 'auto' }).indexOf(iso('09:00'))).toBe(2);
+    expect(orderSlotsByRoutePriority({ scored: mixed, requestable: [], mode: 'nearest' }).indexOf(iso('09:00'))).toBe(1);
+    expect(orderSlotsByRoutePriority({ scored: mixed, requestable: [], mode: 'farthest' }).indexOf(iso('09:00'))).toBe(1);
+  });
+
+  it('offers the same Slots in every mode — membership never changes', () => {
+    const members = (mode: RoutePriority) =>
+      [...orderSlotsByRoutePriority({ scored: mixed, requestable, mode })].sort();
+    expect(members('nearest')).toEqual(members('auto'));
+    expect(members('farthest')).toEqual(members('auto'));
   });
 });
 

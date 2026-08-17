@@ -130,3 +130,28 @@ A `prev→next` duration the platform already holds. The gate could route the ba
 whenever it is cheap to do so, or a per-day route cache scoped to the itinerary would make the leg
 free on the second conversation of the day. Either removes the spend without removing the
 capability. Neither is built.
+
+---
+
+## Amendment, 2026-08-17: Route Priority is presentation-only, and it is named here so nobody upgrades it
+
+The spec asked for a **Route Priority** selector — Auto Optimize, Nearest First, Farthest First —
+that orders a mobile business's day by travel efficiency. Read literally, "Auto Optimize" is route
+optimisation, which this ADR forbids. The decision (#151) is that it is not that: **Route Priority
+is a sort applied to the Slot list feasibility has already produced, and nothing else.** The three
+modes choose the sort key; feasibility alone decides membership. Auto orders by the grouping
+scorer's existing preference; Nearest First and Farthest First order by the same already-computed
+detour figures, ascending or descending. A Slot the scorer left neutral — budget exhausted, cache
+miss, no anchors — keeps its chronological position among its neighbours, because an unscored Slot
+must not be pushed to the back of the list by a feature that never measured it.
+
+Every invariant above applies unchanged and none is weakened further: no mode refuses, withholds,
+downgrades, or reclassifies a Slot; no mode buys a single routing element beyond the bounded
+grouping spend of the 2026-08-10 amendment; the feasibility budget is never touched. Farthest First
+exists because the owner asked for it, not because it is efficient — it is the clearest proof the
+feature is presentation, since no optimiser would offer it.
+
+Genuine route optimisation — the selector influencing which Slots are offered — was the considered
+alternative and is rejected, not deferred vaguely: it reverses "efficiency must never become a hard
+block", which is a founder-level rule, and nothing yet shows reorder-only is insufficient. If that
+evidence arrives, the reversal needs a new ADR superseding this one, written before the code.

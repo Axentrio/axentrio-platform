@@ -16,13 +16,24 @@
 
 export interface VenueAddress {
   street: string | null;
+  /** House / street number, kept separate so existing `street` values stay valid. */
+  streetNumber: string | null;
+  /** Box / bus / apartment, when the building has one. */
+  boxNumber: string | null;
   postalCode: string | null;
   city: string | null;
   /** ISO 3166-1 alpha-2, uppercased. Null means "same country as the business". */
   country: string | null;
 }
 
-export const EMPTY_VENUE: VenueAddress = { street: null, postalCode: null, city: null, country: null };
+export const EMPTY_VENUE: VenueAddress = {
+  street: null,
+  streetNumber: null,
+  boxNumber: null,
+  postalCode: null,
+  city: null,
+  country: null,
+};
 
 /** Longest value we will store per component — a venue address, not an essay. */
 export const VENUE_FIELD_MAX = 200;
@@ -40,6 +51,8 @@ const clean = (v: string | null | undefined): string | null => {
 export function normalizeVenue(input: Partial<VenueAddress> | null | undefined): VenueAddress {
   return {
     street: clean(input?.street),
+    streetNumber: clean(input?.streetNumber),
+    boxNumber: clean(input?.boxNumber),
     postalCode: clean(input?.postalCode),
     city: clean(input?.city),
     country: clean(input?.country)?.toUpperCase().slice(0, 2) ?? null,
@@ -66,7 +79,13 @@ export function hasVenue(v: Partial<VenueAddress> | null | undefined): boolean {
 export function formatVenueLine(v: Partial<VenueAddress> | null | undefined): string | null {
   const n = normalizeVenue(v);
   if (!hasVenue(n)) return null;
+  // Belgian line: "Street 12 bus 3". Number/box stay off when absent so legacy
+  // rows that already baked the number into `street` keep printing as they did.
+  const street = [n.street, n.streetNumber].filter(Boolean).join(' ');
+  const streetWithBox = n.boxNumber
+    ? (street ? `${street} bus ${n.boxNumber}` : `bus ${n.boxNumber}`)
+    : street || null;
   const locality = [n.postalCode, n.city].filter(Boolean).join(' ');
-  const parts = [n.street, locality || null, n.country].filter(Boolean);
+  const parts = [streetWithBox, locality || null, n.country].filter(Boolean);
   return parts.length ? parts.join(', ') : null;
 }

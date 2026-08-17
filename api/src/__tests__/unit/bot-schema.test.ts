@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { businessHoursSchema } from '../../schemas/bot.schema';
+import { businessHoursSchema, updateBotSchema } from '../../schemas/bot.schema';
 
 const schedule = [{ day: 'monday' as const, open: '09:00', close: '17:00', closed: false }];
 
@@ -61,5 +61,39 @@ describe('businessHoursSchema — dateOverrides', () => {
     const r = businessHoursSchema.safeParse({ enabled: true, schedule });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.dateOverrides).toBeUndefined();
+  });
+});
+
+describe('updateBotSchema — quotedAddress', () => {
+  it('accepts optional streetNumber / boxNumber and uppercases the country', () => {
+    const r = updateBotSchema.safeParse({
+      quotedAddress: {
+        enabled: true,
+        street: 'Grote Markt',
+        streetNumber: '1',
+        boxNumber: '2',
+        postalCode: '9300',
+        city: 'Aalst',
+        country: 'be',
+      },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.quotedAddress).toMatchObject({
+        enabled: true,
+        street: 'Grote Markt',
+        streetNumber: '1',
+        boxNumber: '2',
+        country: 'BE',
+      });
+    }
+  });
+
+  it('rejects a country that is not ISO alpha-2', () => {
+    expect(
+      updateBotSchema.safeParse({
+        quotedAddress: { enabled: true, street: 'Grote Markt', country: 'België' },
+      }).success,
+    ).toBe(false);
   });
 });

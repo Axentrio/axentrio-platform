@@ -241,6 +241,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [bhBaseline, setBhBaseline] = useState<string | null>(null);
   const [qaEnabled, setQaEnabled] = useState(false);
   const [qaStreet, setQaStreet] = useState('');
+  const [qaStreetNumber, setQaStreetNumber] = useState('');
+  const [qaBoxNumber, setQaBoxNumber] = useState('');
   const [qaPostal, setQaPostal] = useState('');
   const [qaCity, setQaCity] = useState('');
   const [qaCountry, setQaCountry] = useState('BE');
@@ -341,15 +343,19 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const qa = botDetail.quotedAddress;
     const enabled = qa?.enabled === true;
     const street = qa?.street ?? '';
+    const streetNumber = qa?.streetNumber ?? '';
+    const boxNumber = qa?.boxNumber ?? '';
     const postal = qa?.postalCode ?? '';
     const city = qa?.city ?? '';
-    const country = qa?.country ?? 'BE';
+    const country = (qa?.country ?? 'BE').toUpperCase();
     setQaEnabled(enabled);
     setQaStreet(street);
+    setQaStreetNumber(streetNumber);
+    setQaBoxNumber(boxNumber);
     setQaPostal(postal);
     setQaCity(city);
     setQaCountry(country);
-    setQaBaseline(JSON.stringify({ enabled, street, postal, city, country }));
+    setQaBaseline(JSON.stringify({ enabled, street, streetNumber, boxNumber, postal, city, country }));
   }, [botDetail, tenantId, hydrationKey]);
 
   const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides) !== bhBaseline;
@@ -365,20 +371,29 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides));
   };
 
-  const qaDirty =
-    qaBaseline !== null &&
-    JSON.stringify({ enabled: qaEnabled, street: qaStreet, postal: qaPostal, city: qaCity, country: qaCountry }) !== qaBaseline;
+  const qaSnapshot = {
+    enabled: qaEnabled,
+    street: qaStreet,
+    streetNumber: qaStreetNumber,
+    boxNumber: qaBoxNumber,
+    postal: qaPostal,
+    city: qaCity,
+    country: qaCountry,
+  };
+  const qaDirty = qaBaseline !== null && JSON.stringify(qaSnapshot) !== qaBaseline;
 
   const saveQuotedAddress = async () => {
     const payload: QuotedAddress = {
       enabled: qaEnabled,
       street: qaStreet.trim() || null,
+      streetNumber: qaStreetNumber.trim() || null,
+      boxNumber: qaBoxNumber.trim() || null,
       postalCode: qaPostal.trim() || null,
       city: qaCity.trim() || null,
       country: qaCountry.trim() || null,
     };
     await updateBot.mutateAsync({ id: botId, quotedAddress: payload });
-    setQaBaseline(JSON.stringify({ enabled: qaEnabled, street: qaStreet, postal: qaPostal, city: qaCity, country: qaCountry }));
+    setQaBaseline(JSON.stringify(qaSnapshot));
   };
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
@@ -1106,9 +1121,17 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 {qaEnabled && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.streetNumber')} value={qaStreetNumber} onChange={(e) => setQaStreetNumber(e.target.value)} disabled={readOnly} />
+                    <Input placeholder={t('ai.bot.operational.quotedAddress.boxNumber')} value={qaBoxNumber} onChange={(e) => setQaBoxNumber(e.target.value)} disabled={readOnly} />
                     <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
                     <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.country')} value={qaCountry} onChange={(e) => setQaCountry(e.target.value)} disabled={readOnly} />
+                    <Input
+                      placeholder={t('ai.bot.operational.quotedAddress.country')}
+                      value={qaCountry}
+                      maxLength={2}
+                      onChange={(e) => setQaCountry(e.target.value.toUpperCase())}
+                      disabled={readOnly}
+                    />
                   </div>
                 )}
                 {!readOnly && (

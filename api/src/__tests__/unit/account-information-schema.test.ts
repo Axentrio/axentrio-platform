@@ -51,4 +51,26 @@ describe('accountInformationWriteSchema', () => {
   it('rejects a malformed invoice email', () => {
     expect(accountInformationWriteSchema.safeParse({ ...valid, invoiceEmail: 'not-an-email' }).success).toBe(false);
   });
+
+  it('accepts optional streetNumber / boxNumber and uppercases the country', () => {
+    const r = accountInformationWriteSchema.safeParse({
+      ...valid,
+      invoiceAddress: { ...valid.invoiceAddress, streetNumber: '196', boxNumber: '2', country: 'be' },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.invoiceAddress.streetNumber).toBe('196');
+      expect(r.data.invoiceAddress.boxNumber).toBe('2');
+      expect(r.data.invoiceAddress.country).toBe('BE');
+    }
+  });
+
+  it('rejects a country that is not ISO alpha-2', () => {
+    expect(
+      accountInformationWriteSchema.safeParse({
+        ...valid,
+        invoiceAddress: { ...valid.invoiceAddress, country: 'België' },
+      }).success,
+    ).toBe(false);
+  });
 });

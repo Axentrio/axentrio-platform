@@ -49,9 +49,17 @@ export const updateBotSchema = z
       .object({
         enabled: z.boolean(),
         street: z.string().trim().max(255).nullable().optional(),
+        streetNumber: z.string().trim().max(16).nullable().optional(),
+        boxNumber: z.string().trim().max(16).nullable().optional(),
         postalCode: z.string().trim().max(16).nullable().optional(),
         city: z.string().trim().max(120).nullable().optional(),
-        country: z.string().trim().max(2).nullable().optional(),
+        country: z
+          .string()
+          .trim()
+          .toUpperCase()
+          .regex(/^[A-Z]{2}$/, 'Use a 2-letter country code')
+          .nullable()
+          .optional(),
       })
       .optional(),
   })

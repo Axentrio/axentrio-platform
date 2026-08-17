@@ -334,12 +334,16 @@
       "invoiceEmail": "Invoice email",
       "phone": "Phone",
       "street": "Street",
+      "streetNumber": "Street number",
+      "boxNumber": "Box number",
       "postalCode": "Postal code",
       "city": "City",
+      "country": "Country code",
       "saveFailed": "Could not save account information. Please try again.",
       "validation": {
         "required": "This field is required",
-        "email": "Enter a valid email address"
+        "email": "Enter a valid email address",
+        "country": "Use a 2-letter country code"
       }
     },
     "profile": {
@@ -979,9 +983,11 @@
           "label": "Address the bot quotes",
           "helper": "Optional. Off by default — the bot uses the account business address. Turn on only if this bot should quote a different address.",
           "street": "Street",
+          "streetNumber": "Street number",
+          "boxNumber": "Box number",
           "postalCode": "Postal code",
           "city": "City",
-          "country": "Country",
+          "country": "Country code",
           "save": "Save bot address"
         }
       },

@@ -66,6 +66,23 @@ describe('venue address — normalise and flatten', () => {
       .toBe('Rue Neuve 1, 1000 Bruxelles');
   });
 
+  it('appends street number and box only when they are set', () => {
+    expect(
+      formatVenueLine({
+        street: 'Grote Markt',
+        streetNumber: '1',
+        boxNumber: '2',
+        postalCode: '9300',
+        city: 'Aalst',
+        country: null,
+      }),
+    ).toBe('Grote Markt 1 bus 2, 9300 Aalst');
+    // Legacy rows that already baked the number into `street` stay unchanged.
+    expect(
+      formatVenueLine({ street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
   it('returns null rather than an empty string when there is nothing to print', () => {
     // The caller must OMIT the property. An empty LOCATION names the venue "".
     expect(formatVenueLine({ street: '   ', postalCode: '', city: null, country: null })).toBeNull();

@@ -4,11 +4,19 @@ import { parseBelgianVat } from '../integrations/company-lookup/vat-number';
 const requiredText = (max: number) =>
   z.string().trim().min(1).max(max);
 
+const iso2Country = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z]{2}$/, 'Use a 2-letter country code');
+
 export const invoiceAddressSchema = z.object({
   street: requiredText(255),
+  streetNumber: z.string().trim().max(16).optional(),
+  boxNumber: z.string().trim().max(16).optional(),
   postalCode: requiredText(16),
   city: requiredText(120),
-  country: z.string().trim().length(2).default('BE'),
+  country: iso2Country.default('BE'),
 });
 
 export const accountInformationWriteSchema = z.object({

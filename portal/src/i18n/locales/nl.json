@@ -332,12 +332,16 @@
       "invoiceEmail": "Facturatie-e-mail",
       "phone": "Telefoon",
       "street": "Straat",
+      "streetNumber": "Huisnummer",
+      "boxNumber": "Busnummer",
       "postalCode": "Postcode",
       "city": "Gemeente",
+      "country": "Landcode",
       "saveFailed": "Accountgegevens konden niet worden opgeslagen. Probeer opnieuw.",
       "validation": {
         "required": "Dit veld is verplicht",
-        "email": "Voer een geldig e-mailadres in"
+        "email": "Voer een geldig e-mailadres in",
+        "country": "Gebruik een landcode van 2 letters"
       }
     },
     "profile": {
@@ -972,9 +976,11 @@
           "label": "Adres dat de bot noemt",
           "helper": "Optioneel. Standaard uit — de bot gebruikt het bedrijfsadres van het account. Zet alleen aan als deze bot een ander adres moet noemen.",
           "street": "Straat",
+          "streetNumber": "Huisnummer",
+          "boxNumber": "Busnummer",
           "postalCode": "Postcode",
           "city": "Gemeente",
-          "country": "Land",
+          "country": "Landcode",
           "save": "Botadres opslaan"
         }
       },

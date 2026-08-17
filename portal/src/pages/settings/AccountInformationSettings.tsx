@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Building2, Save, Check, Loader2 } from 'lucide-react';
-import { api } from '@services/apiClient';
+import { api, extractApiErrorMessage } from '@services/apiClient';
 import { toast } from 'sonner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,8 @@ import { Label } from '@/components/ui/label';
 
 export interface InvoiceAddress {
   street: string;
+  streetNumber: string;
+  boxNumber: string;
   postalCode: string;
   city: string;
   country: string;
@@ -36,7 +38,7 @@ const empty: AccountInformation = {
   officialBusinessName: '',
   vatNumber: '',
   contactPerson: '',
-  invoiceAddress: { street: '', postalCode: '', city: '', country: 'BE' },
+  invoiceAddress: { street: '', streetNumber: '', boxNumber: '', postalCode: '', city: '', country: 'BE' },
   invoiceEmail: '',
   phone: null,
   vatVerified: false,
@@ -93,6 +95,9 @@ const AccountInformationSettings: React.FC = () => {
     if (!form.invoiceAddress.street.trim()) next['invoiceAddress.street'] = t('settings.account.validation.required');
     if (!form.invoiceAddress.postalCode.trim()) next['invoiceAddress.postalCode'] = t('settings.account.validation.required');
     if (!form.invoiceAddress.city.trim()) next['invoiceAddress.city'] = t('settings.account.validation.required');
+    if (!/^[A-Za-z]{2}$/.test(form.invoiceAddress.country.trim())) {
+      next['invoiceAddress.country'] = t('settings.account.validation.country');
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -112,8 +117,8 @@ const AccountInformationSettings: React.FC = () => {
       if (savedRow) setForm({ ...empty, ...savedRow, invoiceAddress: { ...empty.invoiceAddress, ...savedRow.invoiceAddress } });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch {
-      toast.error(t('settings.account.saveFailed'));
+    } catch (err) {
+      toast.error(extractApiErrorMessage(err) ?? t('settings.account.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -204,6 +209,31 @@ const AccountInformationSettings: React.FC = () => {
                 disabled={saving}
               />
               <Field
+                id="streetNumber"
+                label={t('settings.account.streetNumber')}
+                value={form.invoiceAddress.streetNumber}
+                onChange={(v) => setAddr('streetNumber', v)}
+                disabled={saving}
+              />
+              <Field
+                id="boxNumber"
+                label={t('settings.account.boxNumber')}
+                value={form.invoiceAddress.boxNumber}
+                onChange={(v) => setAddr('boxNumber', v)}
+                disabled={saving}
+              />
+              <Field
+                id="country"
+                label={t('settings.account.country')}
+                required
+                value={form.invoiceAddress.country}
+                onChange={(v) => setAddr('country', v.toUpperCase())}
+                error={errors['invoiceAddress.country']}
+                disabled={saving}
+                maxLength={2}
+                placeholder="BE"
+              />
+              <Field
                 id="postalCode"
                 label={t('settings.account.postalCode')}
                 required
@@ -246,7 +276,9 @@ const Field: React.FC<{
   error?: string;
   disabled?: boolean;
   hint?: string;
-}> = ({ id, label, value, onChange, required, type = 'text', error, disabled, hint }) => (
+  maxLength?: number;
+  placeholder?: string;
+}> = ({ id, label, value, onChange, required, type = 'text', error, disabled, hint, maxLength, placeholder }) => (
   <div className="space-y-1">
     <Label htmlFor={id} className="text-text-secondary">
       {label} {required && <span className="text-red-500">*</span>}
@@ -257,6 +289,8 @@ const Field: React.FC<{
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
+      maxLength={maxLength}
+      placeholder={placeholder}
       className={error ? 'border-red-500' : ''}
     />
     {error && <p className="text-xs text-red-500">{error}</p>}

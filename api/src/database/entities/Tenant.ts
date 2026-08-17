@@ -257,6 +257,8 @@ export class Tenant {
   @Column({ type: 'jsonb', nullable: true, name: 'invoice_address' })
   invoiceAddress?: {
     street: string;
+    streetNumber?: string;
+    boxNumber?: string;
     postalCode: string;
     city: string;
     country: string;

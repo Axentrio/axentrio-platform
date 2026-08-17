@@ -10,6 +10,8 @@ import type { OnboardingCompany } from '../onboarding/onboarding-state';
 
 export interface InvoiceAddress {
   street: string;
+  streetNumber?: string;
+  boxNumber?: string;
   postalCode: string;
   city: string;
   country: string;

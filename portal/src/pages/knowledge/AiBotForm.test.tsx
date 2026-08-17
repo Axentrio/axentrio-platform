@@ -17,7 +17,15 @@ const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = 
       schedule: { day: string; open: string; close: string; closed: boolean }[];
       dateOverrides?: Array<{ date: string; endDate?: string; closed?: boolean; windows?: Array<{ start: string; end: string }> }>;
     } | null,
-    quotedAddress: { enabled: false } as { enabled: boolean; street?: string | null; postalCode?: string | null; city?: string | null; country?: string | null },
+    quotedAddress: { enabled: false } as {
+      enabled: boolean;
+      street?: string | null;
+      streetNumber?: string | null;
+      boxNumber?: string | null;
+      postalCode?: string | null;
+      city?: string | null;
+      country?: string | null;
+    },
   },
 }));
 
@@ -208,12 +216,24 @@ describe('AiBotForm', () => {
     const switches = await screen.findAllByRole('switch');
     // Last switch in operational is the quoted-address enablement (default off).
     await user.click(switches[switches.length - 1]);
-    await user.type(screen.getByPlaceholderText(/street/i), 'Grote Markt 1');
+    await user.type(screen.getByPlaceholderText('Street'), 'Grote Markt');
+    await user.type(screen.getByPlaceholderText('Street number'), '1');
+    await user.type(screen.getByPlaceholderText('Box number'), '2');
+    const country = screen.getByPlaceholderText('Country code');
+    await user.clear(country);
+    await user.type(country, 'belgië');
     await user.click(screen.getByRole('button', { name: /save bot address/i }));
     await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
     expect(mockUpdateBot.mock.calls[0][0]).toMatchObject({
-      quotedAddress: { enabled: true, street: 'Grote Markt 1' },
+      quotedAddress: {
+        enabled: true,
+        street: 'Grote Markt',
+        streetNumber: '1',
+        boxNumber: '2',
+        country: 'BE',
+      },
     });
+    expect(country).toHaveValue('BE');
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

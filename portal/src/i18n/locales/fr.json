@@ -332,12 +332,16 @@
       "invoiceEmail": "E-mail de facturation",
       "phone": "Téléphone",
       "street": "Rue",
+      "streetNumber": "Numéro",
+      "boxNumber": "Boîte",
       "postalCode": "Code postal",
       "city": "Ville",
+      "country": "Code pays",
       "saveFailed": "Impossible d'enregistrer les informations du compte. Réessayez.",
       "validation": {
         "required": "Ce champ est obligatoire",
-        "email": "Saisissez une adresse e-mail valide"
+        "email": "Saisissez une adresse e-mail valide",
+        "country": "Utilisez un code pays à 2 lettres"
       }
     },
     "profile": {
@@ -971,9 +975,11 @@
           "label": "Adresse citée par le bot",
           "helper": "Facultatif. Désactivé par défaut — le bot utilise l'adresse du compte. Activez seulement si ce bot doit citer une autre adresse.",
           "street": "Rue",
+          "streetNumber": "Numéro",
+          "boxNumber": "Boîte",
           "postalCode": "Code postal",
           "city": "Ville",
-          "country": "Pays",
+          "country": "Code pays",
           "save": "Enregistrer l'adresse du bot"
         }
       },

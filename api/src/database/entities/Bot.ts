@@ -57,6 +57,8 @@ export interface BotSettings {
   quotedAddress?: {
     enabled: boolean;
     street?: string | null;
+    streetNumber?: string | null;
+    boxNumber?: string | null;
     postalCode?: string | null;
     city?: string | null;
     country?: string | null;

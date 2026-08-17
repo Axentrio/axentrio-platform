@@ -350,8 +350,11 @@ describe('GET /chats/:sessionId/thread (B-PR4b)', () => {
     const connection = await makeConnection(tenantId);
     const userId = 'psid-2002';
 
-    // The selected session's binding is malformed (empty externalThreadId).
-    const selected = await makeExternalSession(tenant, connection, userId, userId, {
+    // Incomplete identity on BOTH seams: empty binding thread id AND an
+    // empty stamped metadata thread id. #166 made computeCustomerThreadId
+    // fall back to the stamped triple, so a complete stamp would still emit
+    // e: even when the binding is empty.
+    const selected = await makeExternalSession(tenant, connection, userId, '', {
       status: 'waiting',
       startedAt: new Date(),
     });

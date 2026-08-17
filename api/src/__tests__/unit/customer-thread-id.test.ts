@@ -19,6 +19,8 @@ const base = {
   botId: 'bot-1',
   visitorId: 'widget-abc123',
   source: 'widget',
+  channelConnectionId: null,
+  metadata: {},
 };
 
 function fakeSession(overrides: Partial<ChatSession> = {}): ChatSession {

@@ -19,6 +19,7 @@ import {
 } from '../../middleware/error-handler';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import { ERROR_CODES } from '../../middleware/error-codes';
+import { sanitizeGraphError } from '../../utils/axios-error';
 
 const router = Router();
 
@@ -85,7 +86,7 @@ metaOAuthCallbackRouter.get('/callback', async (req: Request, res: Response) => 
       `${getPortalUrl()}/settings/channels?meta_setup=${sessionToken}`,
     );
   } catch (error) {
-    logger.error('[meta-oauth] Callback error:', error);
+    logger.error('[meta-oauth] Callback error', sanitizeGraphError(error));
     return res.redirect(`${getPortalUrl()}/settings/channels?error=auth_failed`);
   }
 });
@@ -162,11 +163,13 @@ router.post(
 
       // Create connections (only the entitled channel types; `skipped` lists
       // the entitlement-locked ones so the portal can surface the filtering).
-      const { connections, skipped } = await setupMetaConnections(tenantId, selectedPages);
+      // `instagramWarnings` is additive: IG subscribe/upsert stays non-fatal
+      // but the portal can show why an expected IG connection is missing.
+      const { connections, skipped, instagramWarnings } = await setupMetaConnections(tenantId, selectedPages);
 
-      sendCreated(res, { connections, skipped });
+      sendCreated(res, { connections, skipped, instagramWarnings });
     } catch (err) {
-      logger.error('[meta-oauth] Connect error:', err);
+      logger.error('[meta-oauth] Connect error', sanitizeGraphError(err));
       // If the underlying service threw a typed ApiError (plan-limit 402,
       // upstream 502, etc.), propagate it so the global handler emits the
       // correct status. Unknown errors fall back to today's legacy 400 envelope

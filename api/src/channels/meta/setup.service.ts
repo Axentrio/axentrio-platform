@@ -3,6 +3,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { encryptCredential } from '../credential-utils';
 import { logger } from '../../utils/logger';
+import { parseAxiosError, sanitizeGraphError } from '../../utils/axios-error';
 import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 import { isChannelEntitled } from '../channel-entitlement';
 import { getEntitlements } from '../../billing/entitlements';
@@ -20,15 +21,26 @@ interface PageToConnect {
   };
 }
 
+export interface InstagramConnectWarning {
+  pageId: string;
+  pageName?: string;
+  reason: string;
+}
+
 /**
  * Set up Messenger (and optionally Instagram) connections for selected Pages.
  */
 export async function setupMetaConnections(
   tenantId: string,
   pages: PageToConnect[],
-): Promise<{ connections: ChannelConnection[]; skipped: Array<'messenger' | 'instagram'> }> {
+): Promise<{
+  connections: ChannelConnection[];
+  skipped: Array<'messenger' | 'instagram'>;
+  instagramWarnings: InstagramConnectWarning[];
+}> {
   const repo = AppDataSource.getRepository(ChannelConnection);
   const connections: ChannelConnection[] = [];
+  const instagramWarnings: InstagramConnectWarning[] = [];
 
   // Per-channel entitlement filter (channels plan D8): resolved ONCE before
   // any external side effect — a locked channel type is never externally
@@ -70,7 +82,10 @@ export async function setupMetaConnections(
         },
       );
     } catch (error) {
-      logger.error(`[meta-setup] Failed to subscribe page ${page.id}:`, error);
+      logger.error('[meta-setup] Failed to subscribe page', {
+        pageId: page.id,
+        ...sanitizeGraphError(error),
+      });
       throw new Error(`Failed to subscribe Page "${page.name}" to webhooks`);
     }
 
@@ -83,8 +98,20 @@ export async function setupMetaConnections(
     }
 
     // 3. If IG account linked, subscribe and create IG connection.
+    // Failures stay non-fatal (Page/Messenger still connect) but are collected
+    // so the portal can tell the tenant Instagram was not set up.
     if (page.instagramAccount && instagramEntitled) {
-      await upsertInstagramConnection(repo, tenantId, page, connections);
+      try {
+        await upsertInstagramConnection(repo, tenantId, page, connections);
+      } catch (error) {
+        const reason = parseAxiosError(error).message;
+        logger.warn('[meta-setup] Failed to subscribe IG account', {
+          pageId: page.id,
+          igBusinessId: page.instagramAccount.id,
+          ...sanitizeGraphError(error),
+        });
+        instagramWarnings.push({ pageId: page.id, pageName: page.name, reason });
+      }
     } else if (page.instagramAccount && !instagramEntitled) {
       logger.info('[meta-setup] instagram not entitled — skipping IG connection', {
         tenantId,
@@ -93,7 +120,7 @@ export async function setupMetaConnections(
     }
   }
 
-  return { connections, skipped };
+  return { connections, skipped, instagramWarnings };
 }
 
 async function upsertMessengerConnection(
@@ -149,69 +176,62 @@ async function upsertInstagramConnection(
   page: PageToConnect,
   connections: ChannelConnection[],
 ): Promise<void> {
-  {
-    if (page.instagramAccount) {
-      try {
-        await axios.post(
-          `${GRAPH_API}/${page.instagramAccount.id}/subscribed_apps`,
-          null,
-          {
-            params: {
-              access_token: page.accessToken,
-              subscribed_fields: 'messages,messaging_postbacks,message_reactions',
-            },
-            timeout: 10000,
-          },
-        );
+  if (!page.instagramAccount) return;
 
-        let igConn = await repo.findOne({
-          where: { platformAccountId: page.instagramAccount.id, channel: 'instagram' as any },
-        });
+  await axios.post(
+    `${GRAPH_API}/${page.instagramAccount.id}/subscribed_apps`,
+    null,
+    {
+      params: {
+        access_token: page.accessToken,
+        subscribed_fields: 'messages,messaging_postbacks,message_reactions',
+      },
+      timeout: 10000,
+    },
+  );
 
-        if (igConn) {
-          igConn.tenantId = tenantId;
-          igConn.status = 'active';
-          igConn.label = page.instagramAccount.username
-            ? `@${page.instagramAccount.username}`
-            : `${page.name} (Instagram)`;
-          igConn.credentials = {
-            pageAccessToken: encryptCredential(page.accessToken),
-            pageId: page.id,
-            igBusinessId: page.instagramAccount.id,
-          };
-          igConn.config = {
-            igUsername: page.instagramAccount.username,
-            igProfilePicUrl: page.instagramAccount.profilePicUrl,
-            linkedPageId: page.id,
-          };
-          igConn.lastError = null;
-        } else {
-          igConn = repo.create({
-            tenantId,
-            channel: 'instagram',
-            status: 'active',
-            label: page.instagramAccount.username
-              ? `@${page.instagramAccount.username}`
-              : `${page.name} (Instagram)`,
-            platformAccountId: page.instagramAccount.id,
-            credentials: {
-              pageAccessToken: encryptCredential(page.accessToken),
-              pageId: page.id,
-              igBusinessId: page.instagramAccount.id,
-            },
-            config: {
-              igUsername: page.instagramAccount.username,
-              igProfilePicUrl: page.instagramAccount.profilePicUrl,
-              linkedPageId: page.id,
-            },
-          });
-        }
-        const savedIg = await repo.save(igConn);
-        connections.push(savedIg);
-      } catch (error) {
-        logger.warn(`[meta-setup] Failed to subscribe IG account ${page.instagramAccount.id}:`, error);
-        // Don't fail the whole operation — Messenger is still connected
-      }
-    }
+  let igConn = await repo.findOne({
+    where: { platformAccountId: page.instagramAccount.id, channel: 'instagram' as any },
+  });
+
+  if (igConn) {
+    igConn.tenantId = tenantId;
+    igConn.status = 'active';
+    igConn.label = page.instagramAccount.username
+      ? `@${page.instagramAccount.username}`
+      : `${page.name} (Instagram)`;
+    igConn.credentials = {
+      pageAccessToken: encryptCredential(page.accessToken),
+      pageId: page.id,
+      igBusinessId: page.instagramAccount.id,
+    };
+    igConn.config = {
+      igUsername: page.instagramAccount.username,
+      igProfilePicUrl: page.instagramAccount.profilePicUrl,
+      linkedPageId: page.id,
+    };
+    igConn.lastError = null;
+  } else {
+    igConn = repo.create({
+      tenantId,
+      channel: 'instagram',
+      status: 'active',
+      label: page.instagramAccount.username
+        ? `@${page.instagramAccount.username}`
+        : `${page.name} (Instagram)`,
+      platformAccountId: page.instagramAccount.id,
+      credentials: {
+        pageAccessToken: encryptCredential(page.accessToken),
+        pageId: page.id,
+        igBusinessId: page.instagramAccount.id,
+      },
+      config: {
+        igUsername: page.instagramAccount.username,
+        igProfilePicUrl: page.instagramAccount.profilePicUrl,
+        linkedPageId: page.id,
+      },
+    });
   }
+  const savedIg = await repo.save(igConn);
+  connections.push(savedIg);
 }

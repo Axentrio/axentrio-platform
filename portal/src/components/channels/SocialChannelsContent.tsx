@@ -184,6 +184,21 @@ export function SocialChannelsContent() {
         }),
       );
     }
+    // IG subscribe/upsert is non-fatal on the API. useConnectMeta only toasts
+    // the Facebook success; this screen surfaces why an expected IG
+    // connection is missing.
+    const igWarnings: Array<{ pageId: string; pageName?: string; reason: string }> =
+      (result as Any)?.instagramWarnings ?? [];
+    for (const warning of igWarnings) {
+      toast.warning(
+        t('ai.social.metaPages.instagramWarning', {
+          defaultValue:
+            'Facebook Page connected, but Instagram could not be set up for {{page}}: {{reason}}',
+          page: warning.pageName || warning.pageId,
+          reason: warning.reason,
+        }),
+      );
+    }
     setSearchParams({});
   };
 

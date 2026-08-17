@@ -97,11 +97,23 @@ export function useMetaOAuthPages(sessionToken: string | null) {
   });
 }
 
+export interface InstagramConnectWarning {
+  pageId: string;
+  pageName?: string;
+  reason: string;
+}
+
+export interface ConnectMetaResult {
+  connections?: unknown[];
+  skipped?: Array<'messenger' | 'instagram' | string>;
+  instagramWarnings?: InstagramConnectWarning[];
+}
+
 export function useConnectMeta() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: { pageIds: string[]; sessionToken: string }) => {
-      return api.post('/channels/meta/oauth/connect', data);
+      return api.post<ConnectMetaResult>('/channels/meta/oauth/connect', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['channels'] });

@@ -196,5 +196,88 @@ describe('setupMetaConnections filtering (D8)', () => {
 
     expect(result.skipped).toEqual(['instagram']);
     expect(result.connections.map((c: { channel: string }) => c.channel)).toEqual(['messenger']);
+    expect(result.instagramWarnings).toEqual([]);
+  });
+
+  it('IG subscribe failure stays non-fatal and is returned as instagramWarnings', async () => {
+    entitled.map = { messenger: true, instagram: true };
+    repoStubs.map.clear();
+    const save = vi.fn(async (d) => d);
+    stubRepo('ChannelConnection', { findOne: vi.fn().mockResolvedValue(null), save, create: vi.fn((d) => d) });
+    const axiosError = {
+      isAxiosError: true,
+      message: 'Request failed with status code 400',
+      response: { status: 400, data: { error: { message: 'IG account is not a business account' } } },
+    };
+    vi.doMock('axios', () => ({
+      default: {
+        post: vi.fn()
+          .mockResolvedValueOnce({}) // page subscribe succeeds
+          .mockRejectedValueOnce(axiosError), // IG subscribe fails
+        isAxiosError: (err: unknown) => !!(err as { isAxiosError?: boolean })?.isAxiosError,
+      },
+      isAxiosError: (err: unknown) => !!(err as { isAxiosError?: boolean })?.isAxiosError,
+    }));
+    vi.resetModules();
+    const { setupMetaConnections } = await import('../../channels/meta/setup.service');
+
+    const result = await setupMetaConnections(TENANT, [
+      {
+        id: 'p1', name: 'Shop Page', accessToken: 'tok',
+        instagramAccount: { id: 'ig1', username: 'shop' },
+      } as never,
+    ]);
+
+    expect(result.connections.map((c: { channel: string }) => c.channel)).toEqual(['messenger']);
+    expect(result.instagramWarnings).toEqual([
+      { pageId: 'p1', pageName: 'Shop Page', reason: 'IG account is not a business account' },
+    ]);
+  });
+
+  it('page with no linked Instagram account produces no instagramWarnings', async () => {
+    entitled.map = { messenger: true, instagram: true };
+    repoStubs.map.clear();
+    const save = vi.fn(async (d) => d);
+    stubRepo('ChannelConnection', { findOne: vi.fn().mockResolvedValue(null), save, create: vi.fn((d) => d) });
+    vi.doMock('axios', () => ({ default: { post: vi.fn().mockResolvedValue({}) } }));
+    vi.resetModules();
+    const { setupMetaConnections } = await import('../../channels/meta/setup.service');
+
+    const result = await setupMetaConnections(TENANT, [
+      { id: 'p1', name: 'Page', accessToken: 'tok' } as never,
+    ]);
+
+    expect(result.connections.map((c: { channel: string }) => c.channel)).toEqual(['messenger']);
+    expect(result.instagramWarnings).toEqual([]);
+  });
+
+  it('IG persist/upsert failure is captured as a warning while messenger still succeeds', async () => {
+    entitled.map = { messenger: true, instagram: true };
+    repoStubs.map.clear();
+    const save = vi.fn()
+      .mockImplementationOnce(async (d) => d) // messenger persist
+      .mockRejectedValueOnce(new Error('duplicate key value violates unique constraint')); // IG persist
+    stubRepo('ChannelConnection', { findOne: vi.fn().mockResolvedValue(null), save, create: vi.fn((d) => d) });
+    vi.doMock('axios', () => ({
+      default: {
+        post: vi.fn().mockResolvedValue({}),
+        isAxiosError: () => false,
+      },
+      isAxiosError: () => false,
+    }));
+    vi.resetModules();
+    const { setupMetaConnections } = await import('../../channels/meta/setup.service');
+
+    const result = await setupMetaConnections(TENANT, [
+      {
+        id: 'p1', name: 'Shop Page', accessToken: 'tok',
+        instagramAccount: { id: 'ig1', username: 'shop' },
+      } as never,
+    ]);
+
+    expect(result.connections.map((c: { channel: string }) => c.channel)).toEqual(['messenger']);
+    expect(result.instagramWarnings).toEqual([
+      { pageId: 'p1', pageName: 'Shop Page', reason: 'duplicate key value violates unique constraint' },
+    ]);
   });
 });

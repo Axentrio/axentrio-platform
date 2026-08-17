@@ -1224,7 +1224,8 @@
         "title": "Selecteer pagina's om te verbinden",
         "description": "Kies welke Facebook-pagina's je wilt verbinden voor berichten.",
         "connecting": "Verbinden…",
-        "connectSelected": "Geselecteerde verbinden"
+        "connectSelected": "Geselecteerde verbinden",
+        "instagramWarning": "Facebook-pagina verbonden, maar Instagram kon niet worden ingesteld voor {{page}}: {{reason}}"
       },
       "connected": {
         "title": "Verbonden kanalen",

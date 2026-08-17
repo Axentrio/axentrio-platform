@@ -1223,7 +1223,8 @@
         "title": "Sélectionnez les pages à connecter",
         "description": "Choisissez quelles pages Facebook connecter pour la messagerie.",
         "connecting": "Connexion…",
-        "connectSelected": "Connecter la sélection"
+        "connectSelected": "Connecter la sélection",
+        "instagramWarning": "Page Facebook connectée, mais Instagram n'a pas pu être configuré pour {{page}} : {{reason}}"
       },
       "connected": {
         "title": "Canaux connectés",

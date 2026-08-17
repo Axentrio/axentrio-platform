@@ -1231,7 +1231,8 @@
         "title": "Select Pages to Connect",
         "description": "Choose which Facebook Pages to connect for messaging.",
         "connecting": "Connecting…",
-        "connectSelected": "Connect Selected"
+        "connectSelected": "Connect Selected",
+        "instagramWarning": "Facebook Page connected, but Instagram could not be set up for {{page}}: {{reason}}"
       },
       "connected": {
         "title": "Connected Channels",

@@ -165,6 +165,22 @@ export function useDeleteBot() {
   });
 }
 
+export interface PauseAllBotsResponse {
+  pausedCount: number;
+  pausedBotIds: string[];
+}
+
+/** POST /bots/pause-all — turn AI off on every live bot of the tenant. */
+export function usePauseAllBots() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<PauseAllBotsResponse>('/bots/pause-all'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.all() });
+    },
+  });
+}
+
 // --- Per-bot AI settings + test chat (multi-bot config editing) ---
 
 export interface BotTestChatMessage {

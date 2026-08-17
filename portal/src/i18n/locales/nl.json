@@ -2789,6 +2789,15 @@
       "title": "{{feature}} is uitgeschakeld",
       "body": "Je abonnement bevat deze functie, maar deze is uitgeschakeld voor je werkruimte.",
       "cta": "Functies beheren"
+    },
+    "pauseAllBots": {
+      "button": "Alle bots pauzeren",
+      "confirmTitle": "De AI-assistent op elke bot pauzeren?",
+      "confirmBody": "Dit schakelt de AI-assistent uit op elke bot in je werkruimte. Elke bot kun je later afzonderlijk weer inschakelen in de bot-editor.",
+      "confirm": "Alle bots pauzeren",
+      "cancel": "Annuleren",
+      "success_one": "AI-assistent gepauzeerd op {{count}} bot.",
+      "success_other": "AI-assistent gepauzeerd op {{count}} bots."
     }
   },
   "setup": {

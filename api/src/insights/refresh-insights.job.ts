@@ -1,9 +1,13 @@
 /**
- * RefreshInsightsJob — pure nightly refresh with completeness watermark
- * (ADR-0006), tier-aware per ADR-0013: tenants are included by the
- * `gapInsights` Feature (never by tier name), so Free costs nothing and a
- * flag flipped by plan change / upgrade / override starts the 7-day
- * backfill automatically on the next run.
+ * RefreshInsightsJob — completeness-watermarked analysis (ADR-0006).
+ * The nightly pass includes only tenants whose analysis policy is automatic
+ * (Enterprise / `aiBusinessInsights`). Essential and Pro analyse on demand
+ * (`POST /insights/analyse`) behind the min-conversations + cooldown gates
+ * in analysis-policy.ts. Inclusion is always via the policy/flags, never a
+ * tier name, so a flag flip moves a tenant between the two models without
+ * a second source of truth (ADR-0013). Cost is two-layer: the prefilter
+ * writes a Judgment without an LLM call when a conversation cannot yield a
+ * topic; the watermark is the delta so each session is judged at most once.
  *
  * Per tenant, sequentially (no concurrent workers — eliminates the
  * canonical-topic merge race by construction):

@@ -147,11 +147,20 @@ describe('InsightsContent — gap surface', () => {
     expect(screen.getByText(/insights incomplete/i)).toBeInTheDocument();
   });
 
-  it('renders the first-run pending copy before any refresh', () => {
+  it('renders the first-run pending copy for manual tiers', () => {
+    hasFeatureRef.current = { aiBusinessInsights: false };
+    insightsRef.current = data([], { lastRefreshedAt: null, completeness: null });
+    render(<InsightsContent />);
+    expect(screen.getByText(/press analyse to update/i)).toBeInTheDocument();
+    expect(screen.getByText(/no open gaps/i)).toBeInTheDocument();
+  });
+
+  it('renders the first-run tonight copy for automatic (Enterprise) tiers', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
     insightsRef.current = data([], { lastRefreshedAt: null, completeness: null });
     render(<InsightsContent />);
     expect(screen.getByText(/first analysis runs tonight/i)).toBeInTheDocument();
-    expect(screen.getByText(/no open gaps/i)).toBeInTheDocument();
+    expect(screen.queryByText(/press analyse to update/i)).not.toBeInTheDocument();
   });
 });
 

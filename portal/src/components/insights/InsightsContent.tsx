@@ -415,6 +415,7 @@ function DigestSection() {
 export function InsightsContent() {
   const { t } = useTranslation();
   const { data, isLoading } = useInsights();
+  const automatic = useHasFeature('aiBusinessInsights');
   const evidenceEnabled = useHasFeature('gapEvidence') && (data?.meta.evidenceEnabled ?? false);
 
   if (isLoading) {
@@ -444,8 +445,10 @@ export function InsightsContent() {
                 defaultValue: 'Last analysed {{ago}}',
                 ago: timeAgo(meta.lastRefreshedAt),
               })
-            : t('insights.meta.pending', {
-                defaultValue: 'First analysis runs tonight — insights appear after your chats are reviewed',
+            : t(automatic ? 'insights.meta.pendingAutomatic' : 'insights.meta.pending', {
+                defaultValue: automatic
+                  ? 'First analysis runs tonight — insights appear after your chats are reviewed'
+                  : 'Press Analyse to update',
               })}
         </span>
         {meta?.completeness != null && meta.completeness < 0.9 && (

@@ -7,3 +7,15 @@ Three stored boolean Features carry the ladder: `gapInsights` (all paying tiers 
 The refresh-**cadence** axis ADR-0002 also listed is deliberately dropped. [ADR-0006](./0006-pure-nightly-refresh-with-completeness-watermark.md)'s watermark means each session is judged exactly once whenever the job runs — cadence changes freshness, not LLM spend — and its completeness banner would leave throttled tiers reading "Insights incomplete" most of the week: artificial staleness with UX damage and zero savings. All paying tiers refresh nightly; ADR-0006 is unchanged, except the job includes tenants by `gapInsights` (its 7-day backfill-on-enablement already covers any tenant whose flag turns true later, by plan change, upgrade, or override).
 
 Housekeeping: ADR-0002 predates the plan rename — its "pro/premium/enterprise" reads as today's `essential/pro/enterprise` (migration `1782000000000-RenamePlansEnumToEssentialPro`).
+
+---
+
+## Amendment, 2026-08-17: cadence shipped; it is not dropped
+
+The paragraph above that drops the refresh-cadence axis and says every paying tier refreshes nightly is stale. Shipped policy lives in `api/src/insights/analysis-policy.ts` and is read from the Feature flags, never a tier name:
+
+- **Essential** (`gapInsights` alone) — manual only, ≥15 new analysable conversations, at most once per 72h.
+- **Pro** (`+gapEvidence`) — manual only, ≥8 new analysable conversations, at most once per 24h.
+- **Enterprise** (`+aiBusinessInsights`) — automatic rolling; no button and no cooldown.
+
+The nightly `RefreshInsightsJob` therefore includes only tenants whose policy is `automatic`. Essential and Pro analyse on demand (`POST /insights/analyse`). Cadence *does* change spend: each analysed conversation is one LLM call unless the prefilter (the two-layer cost model) skips it, and the min + cooldown exist to protect the output and the bill respectively. The ADR-0006 watermark is unchanged as the delta mechanism — each session is still judged at most once whenever a run happens.

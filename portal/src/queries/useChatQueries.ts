@@ -338,16 +338,20 @@ export function useChatThread(chatId: string | undefined): UseChatThreadReturn {
 // Chat detail hook
 // ---------------------------------------------------------------------------
 
-/** Read the 409 command-conflict code from an error, if it is one. */
+/** Read a command-conflict code from an error, if it is one.
+ *  409s are the ownership/closed cases; 403s (`operator_not_in_tenant`,
+ *  `not_conversation_owner`) must keep the draft the same way. */
 function conflictCodeOf(err: unknown): string | undefined {
-  if (!axios.isAxiosError(err) || err.response?.status !== 409) return undefined;
+  if (!axios.isAxiosError(err) || !err.response) return undefined;
+  const status = err.response.status;
+  if (status !== 409 && status !== 403) return undefined;
   const data = err.response.data as
     | { error?: { code?: string } | string }
     | undefined;
   if (data?.error && typeof data.error === 'object' && typeof data.error.code === 'string') {
     return data.error.code;
   }
-  return 'conflict';
+  return status === 409 ? 'conflict' : undefined;
 }
 
 /**

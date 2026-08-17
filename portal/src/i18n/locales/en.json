@@ -399,7 +399,14 @@
         "description": "Show browser notifications",
         "permissionDenied": "Desktop notifications were not enabled. Please allow them in your browser settings."
       },
-      "saveFailed": "Failed to save notification preferences. Please try again."
+      "saveFailed": "Failed to save notification preferences. Please try again.",
+      "defaultTakeover": {
+        "title": "Default takeover duration",
+        "description": "Preselects the Take Over menu. You can still pick a different duration each time.",
+        "indefinite": "Until I hand back — AI stays blocked",
+        "hours_one": "{{count}} hour",
+        "hours_other": "{{count}} hours"
+      }
     },
     "appearance": {
       "title": "Theme",
@@ -2067,7 +2074,9 @@
         "placeholder": "Type a message…",
         "send": "Send message",
         "conflictTaken": "A different agent has this conversation. The message was not sent. Your text is kept below.",
-        "conflictClosed": "This conversation is closed. The message was not sent. Your text is kept below."
+        "conflictClosed": "This conversation is closed. The message was not sent. Your text is kept below.",
+        "conflictNotInTenant": "You are not a support agent in this workspace. Ask an admin to add you as a support agent. The message was not sent. Your text is kept below.",
+        "conflictNotOwner": "You are not assigned to this conversation. The message was not sent. Your text is kept below."
       },
       "sender": {
         "agent": "Agent",
@@ -2089,7 +2098,7 @@
     },
     "takeover": {
       "button": "Take Over",
-      "indefinite": "Until I return it to AI",
+      "indefinite": "Until I hand back — AI stays blocked",
       "forHours_one": "For {{count}} hour",
       "forHours_other": "For {{count}} hours",
       "changeDuration": "Change duration"
@@ -2132,6 +2141,11 @@
       "loadFailed": "Failed to load chat",
       "takeoverSuccess": "Chat taken over successfully",
       "takeoverFailed": "Failed to take over chat",
+      "takeoverNotInTenant": "You are not a support agent in this workspace. Ask an admin to add you as a support agent, then try again.",
+      "takeoverAlreadyClaimed": "This conversation was already taken over by another operator.",
+      "takeoverAlreadyClaimedBy": "This conversation was already taken over by {{name}}.",
+      "takeoverInvalidTransition": "This conversation cannot be taken over in its current state. Refresh and try again.",
+      "takeoverInvalidHours": "That takeover duration is not valid. Pick 1–24 hours or until you hand back.",
       "resumeAiSuccess": "AI replies re-enabled",
       "resumeAiFailed": "Couldn't re-enable AI (admins only)",
       "handoffAccepted": "Handoff accepted",

@@ -189,6 +189,11 @@ export class Tenant {
      * Shape and rules: onboarding/onboarding-state.ts.
      */
     onboarding?: OnboardingState;
+    /** Inbox presentation defaults. Does not change takeover semantics. */
+    inbox?: {
+      /** Preselects the Takeover menu: 1–24 hours or 'indefinite'. */
+      defaultTakeoverHours?: number | 'indefinite';
+    };
   };
 
   /**

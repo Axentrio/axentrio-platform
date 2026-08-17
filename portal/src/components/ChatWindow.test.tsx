@@ -151,6 +151,26 @@ describe('ChatWindow composer', () => {
     expect(textarea).toHaveValue('my precious draft');
   });
 
+  it('a first-send 403 operator_not_in_tenant keeps the draft and says to ask an admin', async () => {
+    mockDetail();
+    sendMessageMock.mockResolvedValue({
+      status: 'conflict',
+      code: 'operator_not_in_tenant',
+    } satisfies SendMessageResult);
+
+    const user = userEvent.setup();
+    render(<ChatWindow chat={makeChat()} />);
+
+    const textarea = screen.getByPlaceholderText('Type a message…');
+    await user.type(textarea, 'still mine');
+    await user.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(/ask an admin to add you as a support agent/i),
+    );
+    expect(textarea).toHaveValue('still mine');
+  });
+
   it('a retry that 409s surfaces the taken-notice (FIX 4 — the window acts on the result)', async () => {
     const failed: Message = {
       id: 'cid-1',

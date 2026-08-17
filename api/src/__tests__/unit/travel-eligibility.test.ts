@@ -55,7 +55,7 @@ describe('resolveTravelEligibility', () => {
       slackMin: 10,
       startFromBase: true,
       maxDetourMin: null,
-      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
+      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const,
     });
   });
 

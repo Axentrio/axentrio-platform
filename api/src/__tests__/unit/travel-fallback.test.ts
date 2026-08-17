@@ -33,7 +33,7 @@ const eligibility = {
   startFromBase: false,
   maxDetourMin: null,
   baseDepartOffsetMin: 0,
-  groupingPeriod: 'none' as const,
+  groupingPeriod: 'none' as const, routePriority: 'auto' as const,
 };
 
 // Antwerp to Ghent: far enough apart that an estimate is a real number rather than the overhead

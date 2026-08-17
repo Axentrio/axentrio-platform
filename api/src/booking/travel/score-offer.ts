@@ -19,7 +19,7 @@ import { localDayBounds, type DayRule } from './travel-day';
 import { windowsForDay } from '../booking-providers/slot-engine';
 import { resolveDayPeriods } from './half-day';
 import { scoreCandidates, type LegLookup, type RouteNode, type ScoredCandidate } from './insertion-scorer';
-import { counterfactualOrder, hasCheaperAlternative, SCORER_VERSION } from './slot-ordering';
+import { hasCheaperAlternative, orderSlotsByRoutePriority, SCORER_VERSION } from './slot-ordering';
 import { GROUPING_DEADLINE_MS, GROUPING_LEG_BUDGET, GROUPING_PAID_LEG_BUDGET } from './grouping-budget';
 import { driveLookupFor } from './routes.service';
 import { estimateDrive } from './travel-gate';
@@ -372,9 +372,10 @@ export async function scoreOfferedSlots(input: {
     return {
       scorerVersion: SCORER_VERSION,
       scores,
-      counterfactualOrder: counterfactualOrder({
+      counterfactualOrder: orderSlotsByRoutePriority({
         scored: allScored,
         requestable: input.requestable.map((s) => new Date(s.start)),
+        mode: input.eligibility.routePriority ?? 'auto',
       }),
       cheaperAlternativeExisted: hasCheaperAlternative(
         allScored,

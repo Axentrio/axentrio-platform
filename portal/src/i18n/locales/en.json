@@ -2358,7 +2358,7 @@
     },
     "meta": {
       "refreshed": "Last analysed {{ago}}",
-      "pending": "First analysis runs tonight — insights appear after your chats are reviewed",
+      "pending": "Press Analyse to update",
       "incomplete": "Insights incomplete — still analysing recent chats"
     },
     "card": {

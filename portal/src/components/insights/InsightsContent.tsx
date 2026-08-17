@@ -445,7 +445,7 @@ export function InsightsContent() {
                 ago: timeAgo(meta.lastRefreshedAt),
               })
             : t('insights.meta.pending', {
-                defaultValue: 'First analysis runs tonight — insights appear after your chats are reviewed',
+                defaultValue: 'Press Analyse to update',
               })}
         </span>
         {meta?.completeness != null && meta.completeness < 0.9 && (

@@ -150,7 +150,7 @@ describe('InsightsContent — gap surface', () => {
   it('renders the first-run pending copy before any refresh', () => {
     insightsRef.current = data([], { lastRefreshedAt: null, completeness: null });
     render(<InsightsContent />);
-    expect(screen.getByText(/first analysis runs tonight/i)).toBeInTheDocument();
+    expect(screen.getByText(/press analyse to update/i)).toBeInTheDocument();
     expect(screen.getByText(/no open gaps/i)).toBeInTheDocument();
   });
 });

@@ -9,3 +9,13 @@ A single per-Tenant cron at 02:00 UTC runs `RefreshInsightsJob`: judges all `clo
 **No hard daily cap on judgments.** A fixed per-Tenant cap creates permanent backlog for noisy Tenants and invisible freshness drift. v1 monitors token spend per Tenant via existing billing telemetry; if/when a Tenant blows costs, v1.1 adds a budget mechanism.
 
 UTC scheduling for v1 — APAC Tenants will see "yesterday's" state mid-workday, mitigated by surfacing `lastRefreshedAt` and the window boundaries in the panel. Per-Tenant local scheduling is v2.
+
+---
+
+## Amendment, 2026-08-17: the cron is automatic-tier only; cost is the prefilter plus the manual gates
+
+The opening claim that a single 02:00 UTC cron judges every Tenant, and the later claim that v1 has no judgment-volume gate at all, are stale.
+
+`RefreshInsightsJob` still runs at 02:00 UTC and still judges `closed`/`handoff` ChatSessions since `lastRefreshedAt` (the completeness watermark remains the delta mechanism: each session is judged at most once). But the nightly pass now includes only tenants whose analysis policy is `automatic` (Enterprise / `aiBusinessInsights`). Essential and Pro run the same `refreshTenantInsights` path on demand, behind the min-conversations and cooldown gates in [ADR-0013](./0013-tiered-insights-ladder.md).
+
+There is still no hard daily cap that leaves a noisy Tenant permanently backlogged. The shipped cost model is two-layer: a cheap prefilter (`api/src/insights/prefilter.ts`) writes a Judgment without an LLM call when a conversation cannot yield a topic, and the judge is paid only for the rest. Manual tiers add a second gate — enough new conversations, and enough hours since the last run — so the bill is bounded without inventing a per-day judgment ceiling.

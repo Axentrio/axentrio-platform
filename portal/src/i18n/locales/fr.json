@@ -2319,7 +2319,7 @@
     },
     "meta": {
       "refreshed": "Dernière analyse {{ago}}",
-      "pending": "La première analyse a lieu cette nuit — les insights apparaissent après l'examen de vos conversations",
+      "pending": "Appuyez sur Analyser pour mettre à jour",
       "incomplete": "Insights incomplets — analyse des conversations récentes en cours"
     },
     "card": {

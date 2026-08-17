@@ -55,8 +55,17 @@ describe('resolveTravelEligibility', () => {
       slackMin: 10,
       startFromBase: true,
       maxDetourMin: null,
-      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
+      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const,
     });
+  });
+
+  it('carries a stored Route Priority rather than inventing auto', async () => {
+    bsFindOne.mockResolvedValue({
+      travelTimeEnabled: true,
+      travelSlackMin: 10,
+      travelRoutePriority: 'nearest',
+    });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, routePriority: 'nearest' });
   });
 
   it('reads a zero detour threshold as no threshold, not as "nothing qualifies"', async () => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GROUPING_PERIODS, type GroupingPeriod } from '../contracts/travel';
+import { GROUPING_PERIODS, ROUTE_PRIORITIES, type GroupingPeriod, type RoutePriority } from '../contracts/travel';
 import { MAX_SERVICE_AREA_ENTRIES } from '../contracts/service-area';
 
 const hhmm = z.string().regex(/^([01]?\d|2[0-4]):[0-5]\d$/, 'Expected HH:MM');
@@ -296,6 +296,8 @@ export const travelSettingsSchema = z.object({
   // portal type, in the portal state, in two `as` casts and in a CHECK constraint - six copies of
   // one fact, and the artefact built to stop them drifting was the only one nothing used.
   groupingPeriod: z.enum(GROUPING_PERIODS as unknown as [GroupingPeriod, ...GroupingPeriod[]]).optional(),
+  /** Presentation-only sort of the already-scored Slot list. See `RoutePriority`. */
+  routePriority: z.enum(ROUTE_PRIORITIES as unknown as [RoutePriority, ...RoutePriority[]]).optional(),
   /**
    * The most extra driving one appointment may ADD before it stops being preferred.
    *

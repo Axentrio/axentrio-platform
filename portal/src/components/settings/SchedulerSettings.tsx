@@ -163,6 +163,7 @@ type SchedulerFormState = {
   travelStartFromBase: boolean;
   travelBaseDepart: number;
   travelGroupingPeriod: 'none' | 'half_day' | 'full_day';
+  travelRoutePriority: 'auto' | 'nearest' | 'farthest';
   travelMaxDetourMin: string;
   bookingsPaused: boolean;
   rules: BookingRules;
@@ -184,6 +185,7 @@ function createSchedulerForm(): SchedulerFormState {
     travelStartFromBase: false,
     travelBaseDepart: 0,
     travelGroupingPeriod: 'none',
+    travelRoutePriority: 'auto',
     travelMaxDetourMin: '',
     bookingsPaused: false,
     rules: {
@@ -327,6 +329,7 @@ export const SchedulerSettings: React.FC = () => {
     travelStartFromBase,
     travelBaseDepart,
     travelGroupingPeriod,
+    travelRoutePriority,
     travelMaxDetourMin,
     bookingsPaused,
     rules,
@@ -346,6 +349,7 @@ export const SchedulerSettings: React.FC = () => {
     setTravelStartFromBase,
     setTravelBaseDepart,
     setTravelGroupingPeriod,
+    setTravelRoutePriority,
     setTravelMaxDetourMin,
     setBookingsPaused,
     setRules,
@@ -365,6 +369,7 @@ export const SchedulerSettings: React.FC = () => {
       setTravelStartFromBase: makeFieldSetter(dispatch, 'travelStartFromBase'),
       setTravelBaseDepart: makeFieldSetter(dispatch, 'travelBaseDepart'),
       setTravelGroupingPeriod: makeFieldSetter(dispatch, 'travelGroupingPeriod'),
+      setTravelRoutePriority: makeFieldSetter(dispatch, 'travelRoutePriority'),
       setTravelMaxDetourMin: makeFieldSetter(dispatch, 'travelMaxDetourMin'),
       setBookingsPaused: makeFieldSetter(dispatch, 'bookingsPaused'),
       setRules: makeFieldSetter(dispatch, 'rules'),
@@ -449,6 +454,7 @@ export const SchedulerSettings: React.FC = () => {
     setTravelStartFromBase(data.travel?.startFromBase === true);
     setTravelBaseDepart(data.travel?.baseDepartOffsetMin ?? 0);
     setTravelGroupingPeriod(data.travel?.groupingPeriod ?? 'none');
+    setTravelRoutePriority(data.travel?.routePriority ?? 'auto');
     setTravelMaxDetourMin(
       data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
         ? ''
@@ -594,6 +600,7 @@ export const SchedulerSettings: React.FC = () => {
         startFromBase: travelStartFromBase,
         baseDepartOffsetMin: travelBaseDepart,
         groupingPeriod: travelGroupingPeriod,
+        routePriority: travelRoutePriority,
         // Empty means "no threshold", which the API takes as null rather than 0 - zero is a value
         // an owner can type and it means the same thing, but blank is absence, not a number.
         maxDetourMin: travelMaxDetourMin.trim() === '' ? null : Number(travelMaxDetourMin),
@@ -1255,6 +1262,28 @@ export const SchedulerSettings: React.FC = () => {
                           services send you to a customer. It starts working again if you add one.
                         </>
                       )}
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="travel-route-priority">Route priority</Label>
+                    <select
+                      id="travel-route-priority"
+                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
+                      value={travelRoutePriority}
+                      disabled={!travelEnabled || !travelsToCustomers || travelGroupingPeriod === 'none'}
+                      onChange={(e) =>
+                        setTravelRoutePriority(e.target.value as 'auto' | 'nearest' | 'farthest')
+                      }
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="nearest">Nearest first</option>
+                      <option value="farthest">Farthest first</option>
+                    </select>
+                    <p className="text-xs text-text-muted mt-1">
+                      Only the order of times already offered. Auto keeps the grouping preference;
+                      nearest and farthest sort the same already-measured detours the other way.
+                      Times grouping could not score stay where they were.
                     </p>
                   </div>
 

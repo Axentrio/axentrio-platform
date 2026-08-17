@@ -12,6 +12,7 @@
  *
  * Contract: `docs/specs/location-aware-planning.md`, "Ordering, and it must be deterministic".
  */
+import type { RoutePriority } from '../../contracts/travel';
 import type { ScoredCandidate } from './insertion-scorer';
 
 /** Bump when the ORDER this produces could change for an unchanged diary. */
@@ -53,6 +54,42 @@ export function counterfactualOrder(input: {
   return [
     ...preferred.map((s) => s.start.toISOString()),
     ...rest.map((s) => s.start.toISOString()),
+    ...[...input.requestable].sort((a, b) => a.getTime() - b.getTime()).map((d) => d.toISOString()),
+  ];
+}
+
+/**
+ * Presentation-only sort of a Slot list feasibility has already produced (ADR-0017).
+ *
+ * `auto` is the existing counterfactual order, unchanged. `nearest` / `farthest` reorder only
+ * among Slots that already have `costMinutes` — unpreferred ARE scored and participate. A true
+ * neutral (`costMinutes === null`) keeps the chronological index it already had, so a missing
+ * key cannot be pushed to the back the way `applyGrouping`'s `?? Infinity` would.
+ */
+export function orderSlotsByRoutePriority(input: {
+  scored: ScoredCandidate[];
+  requestable: Date[];
+  mode: RoutePriority;
+}): string[] {
+  if (input.mode === 'auto') return counterfactualOrder(input);
+
+  const chronological = [...input.scored].sort((a, b) => a.start.getTime() - b.start.getTime());
+  const scoredOnly = chronological.filter((s) => s.costMinutes !== null);
+  const ranked = [...scoredOnly].sort((a, b) => {
+    const byCost =
+      input.mode === 'nearest'
+        ? (a.costMinutes as number) - (b.costMinutes as number)
+        : (b.costMinutes as number) - (a.costMinutes as number);
+    return byCost !== 0 ? byCost : a.start.getTime() - b.start.getTime();
+  });
+
+  const nextRanked = ranked[Symbol.iterator]();
+  const confirmable = chronological.map((s) =>
+    s.costMinutes === null ? s.start.toISOString() : nextRanked.next().value!.start.toISOString()
+  );
+
+  return [
+    ...confirmable,
     ...[...input.requestable].sort((a, b) => a.getTime() - b.getTime()).map((d) => d.toISOString()),
   ];
 }

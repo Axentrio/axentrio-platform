@@ -282,6 +282,7 @@ async function readConfig(tenantId: string, bot: Bot) {
       startFromBase: bookingSettings?.travelStartFromBase === true,
       baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
       groupingPeriod: bookingSettings?.travelGroupingPeriod ?? 'none',
+      routePriority: bookingSettings?.travelRoutePriority ?? 'auto',
       maxDetourMin: bookingSettings?.travelMaxDetourMin ?? null,
       /**
        * Why the switch cannot be turned on, or null when it can.
@@ -570,6 +571,18 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `travel_grouping_period = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_grouping_period END`
+      );
+    }
+
+    // Same NOT NULL TEXT contract as groupingPeriod. Default `auto` is today's existing order.
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(data.travel?.routePriority ?? 'auto', data.travel?.routePriority !== undefined);
+      insertCols.push('travel_route_priority');
+      insertVals.push(valueParam);
+      updates.push(
+        `travel_route_priority = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_route_priority END`
       );
     }
 

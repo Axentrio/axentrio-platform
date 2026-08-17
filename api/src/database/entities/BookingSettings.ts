@@ -22,7 +22,7 @@ import {
   Index,
 } from 'typeorm';
 import type { ServiceAreaEntry } from '../../contracts/service-area';
-import type { GroupingPeriod } from '../../contracts/travel';
+import type { GroupingPeriod, RoutePriority } from '../../contracts/travel';
 import { Tenant } from './Tenant';
 import { Bot } from './Bot';
 
@@ -252,6 +252,15 @@ export class BookingSettings {
    */
   @Column({ type: 'text', name: 'travel_grouping_period', default: 'none' })
   travelGroupingPeriod!: GroupingPeriod;
+
+  /**
+   * Presentation-only sort of the already-scored Slot list (ADR-0017).
+   *
+   * Default `auto` is the grouping scorer's existing preference. `nearest` / `farthest` invert
+   * the same already-computed detour figures. Inert when `travelGroupingPeriod` is `none`.
+   */
+  @Column({ type: 'text', name: 'travel_route_priority', default: 'auto' })
+  travelRoutePriority!: RoutePriority;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

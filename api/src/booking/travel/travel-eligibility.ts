@@ -30,7 +30,7 @@ import { AppDataSource } from '../../database/data-source';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { getEntitlements } from '../../billing/entitlements';
 import { config } from '../../config/environment';
-import type { GroupingPeriod } from '../../contracts/travel';
+import type { GroupingPeriod, RoutePriority } from '../../contracts/travel';
 import { logger } from '../../utils/logger';
 import { itineraryKeyIsShared, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { Bot } from '../../database/entities/Bot';
@@ -83,6 +83,12 @@ export interface ActiveTravelEligibility {
    */
   /** Over what stretch grouping looks for nearby work. `none` switches it off entirely. */
   groupingPeriod: GroupingPeriod;
+  /**
+   * Presentation-only sort of the Slot list grouping already scored (ADR-0017).
+   *
+   * Inert when `groupingPeriod` is `none`. Never changes membership or feasibility class.
+   */
+  routePriority: RoutePriority;
 }
 
 /**
@@ -159,6 +165,7 @@ export async function resolveTravelEligibility(input: {
     startFromBase: settings.travelStartFromBase === true,
     baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
     groupingPeriod: settings.travelGroupingPeriod ?? 'none',
+    routePriority: settings.travelRoutePriority ?? 'auto',
     // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
     // that silently marks every slot unpreferred is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.

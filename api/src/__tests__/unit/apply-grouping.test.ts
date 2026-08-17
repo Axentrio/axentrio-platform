@@ -7,7 +7,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { applyGrouping } from '../../booking/travel/apply-grouping';
+import { orderSlotsByRoutePriority } from '../../booking/travel/slot-ordering';
+import type { ScoredCandidate } from '../../booking/travel/insertion-scorer';
 import type { OfferScoring, SlotScore } from '../../booking/travel/score-offer';
+import type { RoutePriority } from '../../contracts/travel';
 
 const iso = (hhmm: string) => `2026-09-07T${hhmm}:00.000Z`;
 const slot = (hhmm: string) => ({ start: iso(hhmm), end: iso(hhmm) });
@@ -157,5 +160,28 @@ describe('what the customer is told', () => {
       ...ON,
     });
     expect(out.applied).toBeUndefined();
+  });
+});
+
+describe('Route Priority still hands applyGrouping a permutation', () => {
+  const scored: ScoredCandidate[] = [
+    { start: new Date(iso('09:00')), costMinutes: 70, preferred: true, neutralReason: null, period: 'morning' },
+    { start: new Date(iso('12:00')), costMinutes: null, preferred: null, neutralReason: 'unanchored', period: 'morning' },
+    { start: new Date(iso('15:00')), costMinutes: 5, preferred: true, neutralReason: null, period: 'morning' },
+  ];
+  const modes: RoutePriority[] = ['auto', 'nearest', 'farthest'];
+
+  it('keeps the same Slot identities under every mode', () => {
+    const before = [slot('09:00'), slot('12:00'), slot('15:00')];
+    for (const mode of modes) {
+      const order = orderSlotsByRoutePriority({ scored, requestable: [], mode });
+      const out = applyGrouping({
+        slots: before,
+        scoring: scoring({ counterfactualOrder: order }),
+        ...ON,
+      });
+      expect([...out.slots.map((s) => s.start)].sort()).toEqual([...before.map((s) => s.start)].sort());
+      expect(out.slots).toHaveLength(before.length);
+    }
   });
 });

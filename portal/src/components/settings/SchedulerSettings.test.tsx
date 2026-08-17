@@ -98,6 +98,8 @@ const TRAVEL = {
   // Non-default for the same reason as the offset above: 'none' is what an unhydrated selector
   // reads as, so a 'none' fixture could not tell "round-tripped" from "never read".
   groupingPeriod: 'half_day' as const,
+  // Non-default so an unhydrated selector cannot pass as a round-trip.
+  routePriority: 'nearest' as const,
   // Same again - null is the unhydrated value, so a null fixture would prove nothing.
   maxDetourMin: 45,
   blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
@@ -424,6 +426,7 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
       startFromBase: true,
       baseDepartOffsetMin: 30,
       groupingPeriod: 'half_day',
+      routePriority: 'nearest',
       maxDetourMin: 45,
     });
   });

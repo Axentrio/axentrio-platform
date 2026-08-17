@@ -2959,10 +2959,10 @@
       },
       "plan": {
         "title": "Choose your plan",
-        "body": "You're on a Pro trial. Pick a plan now, or stay on the trial and decide later.",
+        "body": "Your account starts on the Free plan. Pro is recommended — choose it now, or upgrade later.",
         "choose": "Choose this plan",
-        "trialNote": "Not ready to decide? Your trial gives you everything in Pro.",
-        "keepTrial": "Continue on the trial",
+        "trialNote": "Not ready to decide? Stay on Free and upgrade whenever you want.",
+        "keepTrial": "Continue on Free",
         "recommended": "Recommended",
         "trialLength": "Includes a 14-day free trial"
       }

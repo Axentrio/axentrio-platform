@@ -312,6 +312,7 @@
     },
     "tabs": {
       "profile": "Profil",
+      "account": "Informations du compte",
       "notifications": "Notifications",
       "appearance": "Apparence",
       "widget": "Widget & marque",
@@ -320,6 +321,24 @@
       "channels": "Canaux",
       "billing": "Facturation",
       "features": "Fonctionnalités"
+    },
+    "account": {
+      "title": "Informations du compte",
+      "helper": "Identité de l'entreprise pour les factures. Distincte de votre profil personnel et de l'adresse que l'IA cite aux clients.",
+      "officialBusinessName": "Raison sociale",
+      "vatNumber": "Numéro de TVA",
+      "vatVerified": "Vérifié auprès du registre",
+      "contactPerson": "Personne de contact",
+      "invoiceEmail": "E-mail de facturation",
+      "phone": "Téléphone",
+      "street": "Rue",
+      "postalCode": "Code postal",
+      "city": "Ville",
+      "saveFailed": "Impossible d'enregistrer les informations du compte. Réessayez.",
+      "validation": {
+        "required": "Ce champ est obligatoire",
+        "email": "Saisissez une adresse e-mail valide"
+      }
     },
     "profile": {
       "title": "Informations du profil",

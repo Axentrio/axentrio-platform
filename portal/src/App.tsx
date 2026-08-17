@@ -45,6 +45,7 @@ import SettingsLayout from '@pages/settings/SettingsLayout';
 import { SetupGate } from '@pages/setup/SetupGate';
 import { useSetupStatus } from '@/queries/useOnboardingQueries';
 import ProfileSettings from '@pages/settings/ProfileSettings';
+import AccountInformationSettings from '@pages/settings/AccountInformationSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import IntegrationSettings from '@pages/settings/IntegrationSettings';
@@ -329,6 +330,7 @@ function AppRoutes() {
                         <Route index element={<Navigate to="/settings/profile" replace />} />
                         <Route path="skills" element={<Navigate to="/settings/capabilities" replace />} />
                         <Route path="profile" element={<ProfileSettings />} />
+                        <Route path="account" element={<AccountInformationSettings />} />
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />
                         <Route path="widget" element={<WidgetBrandSettings />} />

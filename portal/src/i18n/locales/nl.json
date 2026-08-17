@@ -312,6 +312,7 @@
     },
     "tabs": {
       "profile": "Profiel",
+      "account": "Accountgegevens",
       "notifications": "Meldingen",
       "appearance": "Weergave",
       "widget": "Widget & merk",
@@ -320,6 +321,24 @@
       "channels": "Kanalen",
       "billing": "Facturatie",
       "features": "Functies"
+    },
+    "account": {
+      "title": "Accountgegevens",
+      "helper": "Bedrijfsidentiteit voor facturen. Los van je persoonlijke profiel en van het adres dat de AI aan klanten noemt.",
+      "officialBusinessName": "Officiële bedrijfsnaam",
+      "vatNumber": "BTW-nummer",
+      "vatVerified": "Geverifieerd bij het register",
+      "contactPerson": "Contactpersoon",
+      "invoiceEmail": "Facturatie-e-mail",
+      "phone": "Telefoon",
+      "street": "Straat",
+      "postalCode": "Postcode",
+      "city": "Gemeente",
+      "saveFailed": "Accountgegevens konden niet worden opgeslagen. Probeer opnieuw.",
+      "validation": {
+        "required": "Dit veld is verplicht",
+        "email": "Voer een geldig e-mailadres in"
+      }
     },
     "profile": {
       "title": "Profielgegevens",

@@ -6,7 +6,7 @@
 import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap, SlidersHorizontal, CreditCard } from 'lucide-react';
+import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap, SlidersHorizontal, CreditCard, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppAuth } from '@auth/useAppAuth';
 
@@ -22,6 +22,7 @@ interface SettingsNavItem {
 const settingsNav: SettingsNavItem[] = [
   // Account
   { path: '/settings/profile', labelKey: 'profile', icon: User, group: 'Account' },
+  { path: '/settings/account', labelKey: 'account', icon: Building2, group: 'Account' },
   { path: '/settings/notifications', labelKey: 'notifications', icon: Bell, group: 'Account' },
   { path: '/settings/appearance', labelKey: 'appearance', icon: Paintbrush, group: 'Account' },
   // Bot Configuration

@@ -290,11 +290,12 @@ describe('the company step', () => {
 });
 
 describe('the plan step', () => {
-  it('finishes setup on the trial without a payment', async () => {
+  it('finishes setup on Free without a payment', async () => {
     apiGet.mockResolvedValue(statusAt('plan'));
     renderWizard();
 
-    await userEvent.click(await screen.findByRole('button', { name: /continue on the trial/i }));
+    expect(await screen.findByText(/your account starts on the free plan/i)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: /continue on free/i }));
 
     await waitFor(() =>
       expect(apiPut).toHaveBeenCalledWith('/onboarding/step', { step: 'plan', outcome: 'done' }),

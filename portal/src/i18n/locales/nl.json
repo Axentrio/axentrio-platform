@@ -2924,10 +2924,10 @@
       },
       "plan": {
         "title": "Kies je abonnement",
-        "body": "Je zit in een Pro-proefperiode. Kies nu een abonnement, of blijf op de proefperiode en beslis later.",
+        "body": "Je account start op het Free-abonnement. Pro wordt aanbevolen — kies het nu, of upgrade later.",
         "choose": "Kies dit abonnement",
-        "trialNote": "Nog niet beslist? Je proefperiode geeft je alles uit Pro.",
-        "keepTrial": "Verder met de proefperiode",
+        "trialNote": "Nog niet beslist? Blijf op Free en upgrade wanneer je wilt.",
+        "keepTrial": "Verder met Free",
         "recommended": "Aanbevolen",
         "trialLength": "Inclusief 14 dagen gratis proberen"
       }

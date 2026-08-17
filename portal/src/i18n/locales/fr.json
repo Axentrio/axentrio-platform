@@ -2923,10 +2923,10 @@
       },
       "plan": {
         "title": "Choisissez votre formule",
-        "body": "Vous êtes en essai Pro. Choisissez une formule maintenant, ou restez en essai et décidez plus tard.",
+        "body": "Votre compte commence sur la formule Free. Pro est recommandé — choisissez-la maintenant, ou passez à une offre supérieure plus tard.",
         "choose": "Choisir cette formule",
-        "trialNote": "Pas encore décidé ? Votre essai vous donne tout ce que contient Pro.",
-        "keepTrial": "Continuer avec l'essai",
+        "trialNote": "Pas encore décidé ? Restez sur Free et passez à une offre supérieure quand vous voulez.",
+        "keepTrial": "Continuer avec Free",
         "recommended": "Recommandé",
         "trialLength": "Comprend 14 jours d'essai gratuit"
       }

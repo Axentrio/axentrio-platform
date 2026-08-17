@@ -1,13 +1,14 @@
 /**
  * Step 9 — the plan.
  *
- * A new workspace starts on a Pro trial, so this screen is a choice and not a toll gate:
- * "keep the trial" is a real answer that finishes setup.
+ * A new workspace starts on Free, so this screen is a choice and not a toll gate:
+ * staying on Free is a real answer that finishes setup. Pro is recommended and can
+ * be chosen here (Checkout grants a 14-day trial) or upgraded later.
  *
  * The step is recorded as answered at the moment of choice, INCLUDING before a redirect
  * to Stripe. Marking it only on a completed payment would hand the last gate of setup to
  * a webhook: a customer who abandons checkout, or whose card takes a minute to settle,
- * would come back to a wizard they cannot leave. The trial is the safety net that makes
+ * would come back to a wizard they cannot leave. Free is the safety net that makes
  * this safe — nobody ends up inside the product without a plan.
  *
  * Prices and copy come from the same translation keys as Settings → Billing; a second
@@ -24,7 +25,7 @@ import type { StepProps } from './types';
 /** Mirrors SELF_SERVE_PLANS in Settings → Billing, in upgrade-rank order. */
 const PLANS: CheckoutablePlan[] = ['essential', 'pro', 'enterprise'];
 
-/** The plan a new workspace is already trialling, so it is the one called out. */
+/** Pro is recommended; it is the one called out. Choosing it starts Checkout (14-day trial). */
 const RECOMMENDED: CheckoutablePlan = 'pro';
 
 /**

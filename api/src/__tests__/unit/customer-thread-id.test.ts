@@ -85,6 +85,73 @@ describe('computeCustomerThreadId', () => {
     expect(computeCustomerThreadId(session, null)).toBe('s:sess-1');
     expect(computeCustomerThreadId(session)).toBe('s:sess-1');
   });
+
+  it('unbound external session with the stamped identity triple emits the same e: key as its bound sibling', () => {
+    const prior = {
+      ...base,
+      id: 'sess-prior',
+      source: 'telegram',
+      visitorId: 'tg-user-9',
+      channelConnectionId: 'conn-1',
+      metadata: { customData: { externalThreadId: 'tg-chat-9' } },
+    };
+    const boundSibling = computeCustomerThreadId(
+      { ...base, id: 'sess-new', source: 'telegram', visitorId: 'tg-user-9' },
+      {
+        channelConnectionId: 'conn-1',
+        externalUserId: 'tg-user-9',
+        externalThreadId: 'tg-chat-9',
+      },
+    );
+    expect(computeCustomerThreadId(prior, null)).toBe('e:conn-1:tg-user-9:tg-chat-9');
+    expect(computeCustomerThreadId(prior, null)).toBe(boundSibling);
+  });
+
+  it('unbound external session with an incomplete stamped triple stays on s:{sessionId}', () => {
+    const missingThread = {
+      ...base,
+      source: 'whatsapp',
+      visitorId: 'wa-user-1',
+      channelConnectionId: 'conn-1',
+      metadata: { customData: {} },
+    };
+    const missingConnection = {
+      ...base,
+      source: 'whatsapp',
+      visitorId: 'wa-user-1',
+      channelConnectionId: null,
+      metadata: { customData: { externalThreadId: 'wa-thread-1' } },
+    };
+    expect(computeCustomerThreadId(missingThread, null)).toBe('s:sess-1');
+    expect(computeCustomerThreadId(missingConnection, null)).toBe('s:sess-1');
+  });
+
+  it('unbound external session with an empty-string stamped component stays on s:{sessionId}', () => {
+    const emptyThread = {
+      ...base,
+      source: 'messenger',
+      visitorId: 'ms-user-1',
+      channelConnectionId: 'conn-1',
+      metadata: { customData: { externalThreadId: '' } },
+    };
+    const emptyVisitor = {
+      ...base,
+      source: 'messenger',
+      visitorId: '',
+      channelConnectionId: 'conn-1',
+      metadata: { customData: { externalThreadId: 'ms-thread-1' } },
+    };
+    const emptyConnection = {
+      ...base,
+      source: 'messenger',
+      visitorId: 'ms-user-1',
+      channelConnectionId: '',
+      metadata: { customData: { externalThreadId: 'ms-thread-1' } },
+    };
+    expect(computeCustomerThreadId(emptyThread, null)).toBe('s:sess-1');
+    expect(computeCustomerThreadId(emptyVisitor, null)).toBe('s:sess-1');
+    expect(computeCustomerThreadId(emptyConnection, null)).toBe('s:sess-1');
+  });
 });
 
 describe('serializeConversationSummary carries customerThreadId', () => {

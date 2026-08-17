@@ -2062,6 +2062,8 @@
       "messageCount": "{{count}} messages",
       "earlierBadge": "{{count}} earlier",
       "earlierTooltip": "This customer has earlier conversations",
+      "pageGroupBadge": "{{count}}",
+      "pageGroupTooltip": "{{count}} conversations on this page",
       "duplicatesTitle": "Possible same customer - not merged",
       "open": "Open"
     },

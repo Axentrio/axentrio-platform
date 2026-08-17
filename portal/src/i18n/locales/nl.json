@@ -2024,6 +2024,8 @@
       "messageCount": "{{count}} berichten",
       "earlierBadge": "{{count}} eerder",
       "earlierTooltip": "Deze klant heeft eerdere gesprekken",
+      "pageGroupBadge": "{{count}}",
+      "pageGroupTooltip": "{{count}} gesprekken op deze pagina",
       "duplicatesTitle": "Mogelijk dezelfde klant - niet samengevoegd",
       "open": "Openen"
     },

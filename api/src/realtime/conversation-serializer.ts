@@ -72,23 +72,59 @@ export interface CustomerThreadBinding {
  *   external  e:{channelConnectionId}:{externalUserId}:{externalThreadId}
  *             (Telegram DM vs group chat differ on externalThreadId, so they
  *              stay separate threads - same uniqueness the binding table has)
- *   fallback  s:{sessionId} when an external session has no binding row
+ *   fallback  s:{sessionId} when an external session has no binding AND no
+ *             stamped identity triple on the row
+ *
+ * External reopen note: the inbound pipeline REASSIGNS the single binding
+ * row to the new session, so prior sessions lose their binding. Those rows
+ * still carry the identity facts the pipeline stamped at create time
+ * (channelConnectionId + visitorId + metadata.customData.externalThreadId).
+ * When all three are present and non-empty the key is the SAME e: shape the
+ * bound sibling emits, so list grouping and /thread agree. An incomplete or
+ * empty component must NEVER become e: — that would match on ''/NULL and
+ * silently join unrelated sessions (same rule as resolveThreadIdentity).
  *
  * Discriminates on source === 'widget' - the same predicate the partial
  * unique index uses - so the projection and the invariant agree on which
  * sessions are widget sessions.
  */
 export function computeCustomerThreadId(
-  session: Pick<ChatSession, 'id' | 'tenantId' | 'botId' | 'visitorId' | 'source'>,
+  session: Pick<
+    ChatSession,
+    'id' | 'tenantId' | 'botId' | 'visitorId' | 'source' | 'channelConnectionId' | 'metadata'
+  >,
   binding?: CustomerThreadBinding | null,
 ): string {
   if (session.source === 'widget') {
     return `w:${session.tenantId}:${session.botId}:${session.visitorId}`;
   }
-  if (binding) {
-    return `e:${binding.channelConnectionId}:${binding.externalUserId}:${binding.externalThreadId}`;
+  const candidate = binding ?? stampedExternalBinding(session);
+  if (
+    candidate &&
+    candidate.channelConnectionId &&
+    candidate.externalUserId &&
+    candidate.externalThreadId
+  ) {
+    return `e:${candidate.channelConnectionId}:${candidate.externalUserId}:${candidate.externalThreadId}`;
   }
   return `s:${session.id}`;
+}
+
+/** Stamped-facts fallback used when an external session has no binding row.
+ *  Mirrors resolveThreadIdentity in chat.routes.ts — same triple, same empty
+ *  check, so list keys and /thread keys stay identical. */
+function stampedExternalBinding(
+  session: Pick<ChatSession, 'channelConnectionId' | 'visitorId' | 'metadata'>,
+): CustomerThreadBinding | null {
+  const metaThreadId = session.metadata?.customData?.externalThreadId;
+  if (!session.channelConnectionId || !session.visitorId || typeof metaThreadId !== 'string') {
+    return null;
+  }
+  return {
+    channelConnectionId: session.channelConnectionId,
+    externalUserId: session.visitorId,
+    externalThreadId: metaThreadId,
+  };
 }
 
 export function resolveAssignedAgentName(agent: Agent | null | undefined): string | null {
@@ -151,10 +187,9 @@ export function serializeConversationSummary(
     lastMessage?: LastMessagePreview | null;
     /**
      * Binding facts for EXTERNAL sessions (B-PR4a). Widget sessions never
-     * need it. Callers that serialize external sessions must fetch and pass
-     * the binding (conversation-events + the REST list do), or the key
-     * degrades to the s:{sessionId} fallback and the thread grouping loses
-     * that row. `null` = fetched-and-absent (an unbound external session).
+     * need it. When omitted/null, computeCustomerThreadId falls back to the
+     * stamped identity triple on the session row (channel reopen priors);
+     * only an incomplete triple degrades to s:{sessionId}.
      */
     binding?: CustomerThreadBinding | null;
   } = {},

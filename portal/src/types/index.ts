@@ -139,6 +139,8 @@ export interface Chat {
   ownershipVersion?: number;
   channel?: string;
   botId?: string;
+  /** Durable customer-thread key (B-PR4a). List grouping is display-only. */
+  customerThreadId?: string;
   // ── Timed human control (B-PR5a) ──
   /** How the human holds control; 'timed' auto-returns at humanControlUntil. */
   humanControlMode?: 'timed' | 'indefinite' | null;

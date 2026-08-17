@@ -967,6 +967,15 @@
             "closed": "Closed",
             "remove": "Remove this exception"
           }
+        },
+        "quotedAddress": {
+          "label": "Address the bot quotes",
+          "helper": "Optional. Off by default — the bot uses the account business address. Turn on only if this bot should quote a different address.",
+          "street": "Street",
+          "postalCode": "Postal code",
+          "city": "City",
+          "country": "Country",
+          "save": "Save bot address"
         }
       },
       "advanced": {
@@ -2844,7 +2853,13 @@
         "postalCodeLabel": "Postal code",
         "cityLabel": "City",
         "verifiedNote": "Confirmed by the official register.",
-        "unverifiedNote": "Not verified against the register."
+        "unverifiedNote": "Not verified against the register.",
+        "presence": {
+          "label": "How do customers reach you?",
+          "helper": "Online shops never get a physical address forced onto the bot. A physical business can give the bot its own address later.",
+          "physical": "Physical business — customers visit or we visit them",
+          "online": "Online business — no premises to quote"
+        }
       },
       "logo": {
         "title": "Add your logo",

@@ -45,12 +45,22 @@ export const updateBotSchema = z
     assistantName: z.string().min(1).max(255).optional(),
     status: z.enum(['active', 'paused']).optional(),
     businessHours: businessHoursSchema.optional(),
+    quotedAddress: z
+      .object({
+        enabled: z.boolean(),
+        street: z.string().trim().max(255).nullable().optional(),
+        postalCode: z.string().trim().max(16).nullable().optional(),
+        city: z.string().trim().max(120).nullable().optional(),
+        country: z.string().trim().max(2).nullable().optional(),
+      })
+      .optional(),
   })
   .refine(
     (v) =>
       v.name !== undefined ||
       v.assistantName !== undefined ||
       v.status !== undefined ||
-      v.businessHours !== undefined,
-    { message: 'Provide at least one of: name, assistantName, status, businessHours' },
+      v.businessHours !== undefined ||
+      v.quotedAddress !== undefined,
+    { message: 'Provide at least one of: name, assistantName, status, businessHours, quotedAddress' },
   );

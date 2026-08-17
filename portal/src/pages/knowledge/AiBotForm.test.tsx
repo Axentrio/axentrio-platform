@@ -17,6 +17,7 @@ const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = 
       schedule: { day: string; open: string; close: string; closed: boolean }[];
       dateOverrides?: Array<{ date: string; endDate?: string; closed?: boolean; windows?: Array<{ start: string; end: string }> }>;
     } | null,
+    quotedAddress: { enabled: false } as { enabled: boolean; street?: string | null; postalCode?: string | null; city?: string | null; country?: string | null },
   },
 }));
 
@@ -99,6 +100,7 @@ describe('AiBotForm', () => {
     mockBind.mockReset();
     mockUpdateBot.mockReset().mockResolvedValue(undefined);
     botDetailState.businessHours = null;
+    botDetailState.quotedAddress = { enabled: false };
     readinessState.unselectedEntitledSkills = [];
   });
 
@@ -198,6 +200,20 @@ describe('AiBotForm', () => {
       businessHours: { dateOverrides?: Array<{ closed?: boolean; date?: string }> };
     };
     expect(payload.businessHours.dateOverrides).toEqual([{ date: '2026-12-25', closed: true }]);
+  });
+
+  it('saves a per-bot quoted address only when the field is turned on', async () => {
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    const switches = await screen.findAllByRole('switch');
+    // Last switch in operational is the quoted-address enablement (default off).
+    await user.click(switches[switches.length - 1]);
+    await user.type(screen.getByPlaceholderText(/street/i), 'Grote Markt 1');
+    await user.click(screen.getByRole('button', { name: /save bot address/i }));
+    await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
+    expect(mockUpdateBot.mock.calls[0][0]).toMatchObject({
+      quotedAddress: { enabled: true, street: 'Grote Markt 1' },
+    });
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

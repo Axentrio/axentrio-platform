@@ -80,6 +80,8 @@ export interface SetupCompany {
   city?: string | null;
   /** Server-decided from the register. Sending it has no effect. */
   verified?: boolean;
+  /** #153 — online shops never activate the per-bot quoted address. */
+  presence?: 'online' | 'physical';
 }
 
 export interface SetupState {

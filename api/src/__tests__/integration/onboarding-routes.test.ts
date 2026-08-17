@@ -67,7 +67,7 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
-import { createTestTenant, createTestUser } from '../helpers/factories';
+import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import { Bot } from '../../database/entities/Bot';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { KnowledgeDocument } from '../../database/entities/KnowledgeDocument';
@@ -247,6 +247,36 @@ describe('PUT /onboarding/step', () => {
     expect(res.status).toBe(200);
     const state = await storedState(tenant.id);
     expect(state.company).toMatchObject({ name: 'Typed By Hand BV', verified: false });
+  });
+
+  it('#153: a physical presence activates the per-bot quoted-address field', async () => {
+    const tenant = await signedInTenant();
+    await createTestAnchorBot(tenant);
+    const res = await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({
+        step: 'company',
+        outcome: 'done',
+        company: { vatNumber: 'BE0400378485', name: 'Shop BV', presence: 'physical' },
+      });
+    expect(res.status).toBe(200);
+    expect((await storedState(tenant.id)).company?.presence).toBe('physical');
+    const bot = await AppDataSource.getRepository(Bot).findOneByOrFail({ tenantId: tenant.id, isDefault: true });
+    expect(bot.settings?.quotedAddress?.enabled).toBe(true);
+  });
+
+  it('#153: an online presence leaves the per-bot address off', async () => {
+    const tenant = await signedInTenant();
+    await createTestAnchorBot(tenant);
+    await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({
+        step: 'company',
+        outcome: 'done',
+        company: { vatNumber: 'BE0400378485', name: 'Webshop BV', presence: 'online' },
+      });
+    const bot = await AppDataSource.getRepository(Bot).findOneByOrFail({ tenantId: tenant.id, isDefault: true });
+    expect(bot.settings?.quotedAddress?.enabled).toBe(false);
   });
 
   it('is admin-only', async () => {

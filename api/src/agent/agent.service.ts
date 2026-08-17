@@ -23,6 +23,7 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { describeServiceArea } from '../contracts/service-area';
 import { formatVenueLine } from '../contracts/venue-address';
+import { resolveQuotedAddress } from '../account/quoted-address';
 import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
@@ -664,12 +665,25 @@ export class AgentService {
         serviceArea = describeServiceArea(
           Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
         );
-        venueLine = formatVenueLine({
-          street: bookingSettings?.venueStreet,
-          postalCode: bookingSettings?.venuePostalCode,
-          city: bookingSettings?.venueCity,
-          country: bookingSettings?.venueCountry,
-        }) ?? undefined;
+        const accountAddress = tenant.invoiceAddress ?? {
+          street: tenant.settings?.onboarding?.company?.street,
+          postalCode: tenant.settings?.onboarding?.company?.postalCode,
+          city: tenant.settings?.onboarding?.company?.city,
+          country: 'BE',
+        };
+        venueLine =
+          resolveQuotedAddress({
+            botAddressEnabled: effBotSettings.quotedAddress?.enabled === true,
+            botAddress: effBotSettings.quotedAddress ?? null,
+            accountAddress,
+          }) ??
+          formatVenueLine({
+            street: bookingSettings?.venueStreet,
+            postalCode: bookingSettings?.venuePostalCode,
+            city: bookingSettings?.venueCity,
+            country: bookingSettings?.venueCountry,
+          }) ??
+          undefined;
       } catch (error) {
         logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
       }

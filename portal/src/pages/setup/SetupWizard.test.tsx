@@ -262,6 +262,7 @@ describe('the company step', () => {
     await screen.findByText(/register isn't responding/i);
 
     await userEvent.type(screen.getByLabelText(/company name/i), 'Typed By Hand BV');
+    await userEvent.click(screen.getByLabelText(/online business/i));
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(apiPut).toHaveBeenCalled());
@@ -280,6 +281,7 @@ describe('the company step', () => {
 
     await userEvent.type(await screen.findByLabelText(/vat number/i), 'BE0999999999');
     await userEvent.type(screen.getByLabelText(/company name/i), 'Definitely Real BV');
+    await userEvent.click(screen.getByLabelText(/online business/i));
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
     await waitFor(() => expect(apiPut).toHaveBeenCalled());

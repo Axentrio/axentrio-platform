@@ -960,6 +960,15 @@
             "closed": "Gesloten",
             "remove": "Deze uitzondering verwijderen"
           }
+        },
+        "quotedAddress": {
+          "label": "Adres dat de bot noemt",
+          "helper": "Optioneel. Standaard uit — de bot gebruikt het bedrijfsadres van het account. Zet alleen aan als deze bot een ander adres moet noemen.",
+          "street": "Straat",
+          "postalCode": "Postcode",
+          "city": "Gemeente",
+          "country": "Land",
+          "save": "Botadres opslaan"
         }
       },
       "advanced": {
@@ -2806,7 +2815,13 @@
         "postalCodeLabel": "Postcode",
         "cityLabel": "Gemeente",
         "verifiedNote": "Bevestigd door het officiële register.",
-        "unverifiedNote": "Niet geverifieerd bij het register."
+        "unverifiedNote": "Niet geverifieerd bij het register.",
+        "presence": {
+          "label": "Hoe bereiken klanten je?",
+          "helper": "Online winkels krijgen nooit een fysiek adres op de bot. Een fysiek bedrijf kan later een eigen adres voor de bot instellen.",
+          "physical": "Fysiek bedrijf — klanten komen langs of wij komen langs",
+          "online": "Online bedrijf — geen vestiging om te noemen"
+        }
       },
       "logo": {
         "title": "Voeg je logo toe",

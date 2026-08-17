@@ -249,7 +249,20 @@ router.put(
       // `verified` is decided by the SERVER from the lookup, never accepted from the
       // client — otherwise "this company was confirmed by the register" means nothing.
       const check = await lookupCompanyByVat(c.vatNumber, { redis: getRedisClient() });
-      state.company = { ...c, verified: check.status === 'found' };
+      const presence = c.presence === 'physical' || c.presence === 'online' ? c.presence : undefined;
+      state.company = { ...c, presence, verified: check.status === 'found' };
+      // #153: only a physical business activates the per-bot quoted-address field.
+      // Online shops stay default-off. Fail-open if the anchor isn't there yet.
+      try {
+        const { settings } = await getAnchorBotConfig(tenantId);
+        const current = settings.quotedAddress ?? { enabled: false };
+        await replaceAnchorBotSettingsSection(tenantId, 'quotedAddress', {
+          ...current,
+          enabled: presence === 'physical',
+        });
+      } catch {
+        /* anchor missing on a brand-new tenant — field stays default-off */
+      }
     }
 
     if (outcome === 'done') {

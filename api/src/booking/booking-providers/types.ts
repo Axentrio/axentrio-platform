@@ -283,6 +283,12 @@ export interface BookingExtras {
   /** P5a — required when service.customerAddressRequired. */
   customerAddress?: string;
   /**
+   * #149 — for a `customer_choice` Service: the Booking Customer's pick.
+   * `customer` → their address is required and travel applies.
+   * `business` → no address, no travel.
+   */
+  locationChoice?: 'business' | 'customer';
+  /**
    * Google's identity for that address, when the Booking Customer PICKED it rather than typed it.
    *
    * Server-injected from the session's address binding, never a tool parameter the model fills:
@@ -325,7 +331,9 @@ export interface BookingProvider {
      * travel time is active for the Agent; ignored otherwise, so a provider that does not
      * implement travel time is unaffected by its presence.
      */
-    customerAddress?: string
+    customerAddress?: string,
+    /** #149 — for a customer_choice Service: which location they picked. */
+    locationChoice?: 'business' | 'customer',
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

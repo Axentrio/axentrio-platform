@@ -522,3 +522,15 @@ describe('travel time — asking for the address before the times', () => {
     expect(section).not.toMatch(/BEFORE you call check_availability/);
   });
 });
+
+describe('#149 — customer chooses location', () => {
+  it('flags the Service and tells the agent to ask which location they want', () => {
+    const section = buildServicesSection([
+      svc({ customerChoosesLocation: true, locationType: 'in_person' }),
+    ])!;
+    expect(section).toMatch(/customer chooses location/);
+    expect(section).toMatch(/locationChoice/);
+    expect(section).toMatch(/at the business or at their own address/);
+    expect(section).toMatch(/Only ask for \(and pass\) customerAddress when they chose their own/);
+  });
+});

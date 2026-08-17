@@ -65,19 +65,28 @@ export type BookingPlacement =
  * it cannot locate, and the request path records the same verdict without enforcing it.
  * Capturing an unplaceable job is correct; capturing it silently is not.
  */
+import { serviceNeedsCustomerAddress } from '../service-location';
+
 export async function placeBookingAddress(input: {
   tenantId: string;
   botId: string;
   itineraryKey: ItineraryKey;
-  service: Pick<ServiceType, 'customerAddressRequired'>;
+  service: Pick<ServiceType, 'customerAddressRequired' | 'customerChoosesLocation' | 'locationType'>;
   address: string | null;
   /** Set when the Booking Customer picked the address rather than typing it. */
   placeId?: string | null;
+  locationChoice?: 'business' | 'customer';
 }): Promise<BookingPlacement> {
   // Cheapest gate of all, and it is not in `resolveTravelEligibility` because it is a fact
   // about the SERVICE rather than about the Agent: an online consultation is never a travel
-  // job, however the Agent is configured.
-  if (!input.service.customerAddressRequired) return { applies: false };
+  // job, however the Agent is configured. #149: a choose-at-booking Service only travels
+  // when the customer picked their own location.
+  if (!serviceNeedsCustomerAddress(input.service, {
+    locationChoice: input.locationChoice,
+    customerAddress: input.address,
+  })) {
+    return { applies: false };
+  }
   if (!input.address?.trim()) return { applies: false };
 
   const eligibility = await resolveTravelEligibility({

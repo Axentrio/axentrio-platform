@@ -1415,6 +1415,37 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
   });
 
+  it('#149: customer_choice + locationChoice=customer without an address is ADDRESS_REQUIRED', async () => {
+    serviceTypeFind.mockResolvedValue([{
+      ...EVENT_TYPE,
+      locationType: 'in_person',
+      customerAddressRequired: false,
+      customerChoosesLocation: true,
+    }]);
+    await expect(
+      provider.requestAppointment(
+        ctx, 'idem-choice-cust', OFFERED_START, { name: 'Ada', email: 'ada@example.com' },
+        undefined, undefined, undefined, undefined,
+        { locationChoice: 'customer' },
+      ),
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
+  it('#149: customer_choice + locationChoice=business needs no address', async () => {
+    serviceTypeFind.mockResolvedValue([{
+      ...EVENT_TYPE,
+      locationType: 'in_person',
+      customerAddressRequired: false,
+      customerChoosesLocation: true,
+    }]);
+    const res = await provider.requestAppointment(
+      ctx, 'idem-choice-biz', OFFERED_START, { name: 'Ada', email: 'ada@example.com' },
+      undefined, undefined, undefined, undefined,
+      { locationChoice: 'business' },
+    );
+    expect(res.success).toBe(true);
+  });
+
   it('persists trimmed address/phone into the request row', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, customerLocationRequired: true }]);
     await provider.requestAppointment(

@@ -168,10 +168,16 @@ export class CheckAvailabilityTool implements ToolAdapter {
         description:
           "For a service whose duration is a range or AI-estimated (flagged in the SERVICES list), the chosen/estimated length in minutes, so the offered slots fit. Omit for fixed-duration services.",
       },
+      locationChoice: {
+        type: 'string',
+        enum: ['business', 'customer'],
+        description:
+          "For a service flagged 'customer chooses location': where the appointment happens. 'business' = at the premises (no address). 'customer' = at theirs (then also pass customerAddress). Required for those services; omit otherwise.",
+      },
       customerAddress: {
         type: 'string',
         description:
-          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depends on where the job is, and calling without it returns ADDRESS_REQUIRED.",
+          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depends on where the job is, and calling without it returns ADDRESS_REQUIRED. For a 'customer chooses location' service, only required when locationChoice is 'customer'.",
       },
     },
     required: ['startDate', 'endDate'],
@@ -188,6 +194,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ctx.sessionId,
         args.customerAddress as string | undefined
       );
+      const locationChoice =
+        args.locationChoice === 'business' || args.locationChoice === 'customer'
+          ? args.locationChoice
+          : undefined;
       const full = await checkAvailability(
         'agent',
         ctx.sessionId,
@@ -195,7 +205,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.endDate as string,
         args.serviceId as string | undefined,
         args.durationMin as number | undefined,
-        chosen.address
+        chosen.address,
+        locationChoice,
       );
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
@@ -328,9 +339,15 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block (e.g. {\"<question-id>\": \"answer\"}). Include every answer you collected; omit unanswered questions.",
       },
+      locationChoice: {
+        type: 'string',
+        enum: ['business', 'customer'],
+        description:
+          "For a service flagged 'customer chooses location': 'business' (premises, no address) or 'customer' (theirs — also pass customerAddress). Omit otherwise.",
+      },
       customerAddress: {
         type: 'string',
-        description: "The customer's address. Required only if the SERVICES entry flags 'needs address'.",
+        description: "The customer's address. Required only if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'.",
       },
       customerPhone: {
         type: 'string',
@@ -458,6 +475,9 @@ export class CreateBookingTool implements ToolAdapter {
         args.serviceId as string | undefined,
         args.intakeAnswers,
         {
+          locationChoice: args.locationChoice === 'business' || args.locationChoice === 'customer'
+            ? args.locationChoice
+            : undefined,
           customerAddress: booked.address,
           // The identity the customer PICKED, so the booking is placed by resolving it rather
           // than by geocoding the words again. Server-injected - it is deliberately absent from
@@ -590,9 +610,15 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block. Include every answer you collected; omit unanswered questions.",
       },
+      locationChoice: {
+        type: 'string',
+        enum: ['business', 'customer'],
+        description:
+          "For a service flagged 'customer chooses location': 'business' (premises, no address) or 'customer' (theirs — also pass customerAddress). Omit otherwise.",
+      },
       customerAddress: {
         type: 'string',
-        description: "The customer's address. Required only if the SERVICES entry flags 'needs address'.",
+        description: "The customer's address. Required only if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'.",
       },
       customerPhone: {
         type: 'string',
@@ -645,6 +671,9 @@ export class RequestAppointmentTool implements ToolAdapter {
         args.aiSummary as string | undefined,
         args.intakeAnswers,
         {
+          locationChoice: args.locationChoice === 'business' || args.locationChoice === 'customer'
+            ? args.locationChoice
+            : undefined,
           customerAddress: requested.address,
           customerPlaceId: requested.placeId,
           addressBinding: requested.binding,

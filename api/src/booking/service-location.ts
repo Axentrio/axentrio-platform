@@ -22,7 +22,12 @@
 import type { LocationType } from '../database/entities/ServiceType';
 
 /** Who travels, for one Service. */
-export type ServiceLocationMode = 'remote' | 'business_location' | 'customer_location';
+export type ServiceLocationMode =
+  | 'remote'
+  | 'business_location'
+  | 'customer_location'
+  /** Booking Customer picks business or their own address at booking time (#149). */
+  | 'customer_choice';
 
 /**
  * The two fields the answer is derived from.
@@ -34,6 +39,13 @@ export type ServiceLocationMode = 'remote' | 'business_location' | 'customer_loc
 export interface ServiceLocationFacts {
   locationType: LocationType;
   customerAddressRequired?: boolean | null;
+  /**
+   * Owner-set: this Service can happen at the premises OR at the Booking Customer's
+   * address, and the customer chooses at booking time. A fact, not a stored mode —
+   * the resolver still projects who travels. Only meaningful for a physical Service
+   * in a Both business; ignored when the Service is remote.
+   */
+  customerChoosesLocation?: boolean | null;
 }
 
 /**
@@ -57,6 +69,10 @@ export interface ServiceLocationFacts {
 export function resolveServiceLocationMode(service: ServiceLocationFacts): ServiceLocationMode {
   if (service.customerAddressRequired) return 'customer_location';
   if (service.locationType === 'in_person' || service.locationType === 'unset') {
+    // A Both-business Service the owner marked "customer can choose": the Booking
+    // Customer picks business or theirs. Must not collapse into business_location
+    // (no address asked) or customer_location (always travel).
+    if (service.customerChoosesLocation) return 'customer_choice';
     return 'business_location';
   }
   return 'remote';
@@ -65,6 +81,29 @@ export function resolveServiceLocationMode(service: ServiceLocationFacts): Servi
 /** A Service that happens somewhere physical, which is what geography can act on. */
 export function isPhysical(mode: ServiceLocationMode): boolean {
   return mode !== 'remote';
+}
+
+/**
+ * Does THIS booking need the customer's address?
+ *
+ * For a choose-at-booking Service the answer is the customer's pick, not the
+ * catalog flag: business location needs no address and no travel; their own
+ * location does. A missing/unusable choice fails safe to "no address" so we
+ * never invent a travel job.
+ */
+export function serviceNeedsCustomerAddress(
+  service: ServiceLocationFacts,
+  extras?: { locationChoice?: string | null; customerAddress?: string | null },
+): boolean {
+  const mode = resolveServiceLocationMode(service);
+  if (mode === 'customer_location') return true;
+  if (mode !== 'customer_choice') return false;
+  const choice = extras?.locationChoice;
+  if (choice === 'customer') return true;
+  if (choice === 'business') return false;
+  // Unstated choice: an address already given is a strong signal they picked theirs;
+  // otherwise fail safe to the business (no invented travel).
+  return !!extras?.customerAddress?.trim();
 }
 
 /**
@@ -92,6 +131,11 @@ export function resolveWorkLocation(services: ServiceLocationFacts[]): WorkLocat
     const mode = resolveServiceLocationMode(service);
     if (mode === 'business_location') atBusiness = true;
     if (mode === 'customer_location') atCustomer = true;
+    // A choose-at-booking Service is BOTH places until the customer picks.
+    if (mode === 'customer_choice') {
+      atBusiness = true;
+      atCustomer = true;
+    }
   }
   if (atBusiness && atCustomer) return 'both';
   if (atCustomer) return 'on_the_road';

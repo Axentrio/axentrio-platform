@@ -94,6 +94,7 @@ export interface Service {
   locationType: string;
   preparationInstructions?: string | null;
   customerAddressRequired?: boolean;
+  customerChoosesLocation?: boolean;
   customerLocationRequired?: boolean;
   fileUploadAllowed?: boolean;
   intakeQuestions?: IntakeQuestion[] | null;

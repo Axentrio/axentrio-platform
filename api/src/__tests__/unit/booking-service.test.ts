@@ -141,7 +141,8 @@ describe('Booking Service (internal dispatcher)', () => {
         undefined,
         undefined,
         // `excludeBookingId` is undefined here on purpose: this entry point is a NEW booking,
-        // and only the reschedule pickers pass one. Then the customer's address.
+        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice.
+        undefined,
         undefined,
         undefined,
       );
@@ -213,7 +214,8 @@ describe('Booking Service (internal dispatcher)', () => {
         undefined,
         undefined,
         // `excludeBookingId` is undefined here on purpose: this entry point is a NEW booking,
-        // and only the reschedule pickers pass one. Then the customer's address.
+        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice.
+        undefined,
         undefined,
         undefined,
       );

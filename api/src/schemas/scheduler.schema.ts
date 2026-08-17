@@ -200,6 +200,7 @@ export const serviceInputSchema = z.object({
   priceNote: z.string().max(255).nullable().optional(),
   customerLocationRequired: z.boolean().default(false),
   customerAddressRequired: z.boolean().default(false),
+  customerChoosesLocation: z.boolean().default(false),
   fileUploadAllowed: z.boolean().default(false),
   preparationInstructions: z.string().max(2000).nullable().optional(),
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),

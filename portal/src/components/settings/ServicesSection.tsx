@@ -75,6 +75,7 @@ interface FormState {
   isActive: boolean;
   onlineBookable: boolean;
   customerAddressRequired: boolean;
+  customerChoosesLocation: boolean;
   customerLocationRequired: boolean;
   fileUploadAllowed: boolean;
   maxBookingsPerDay: string;
@@ -106,6 +107,7 @@ const BLANK: FormState = {
   isActive: true,
   onlineBookable: true,
   customerAddressRequired: false,
+  customerChoosesLocation: false,
   customerLocationRequired: false,
   fileUploadAllowed: false,
   maxBookingsPerDay: '',
@@ -138,6 +140,7 @@ function formFromService(s: Service): FormState {
     isActive: s.isActive,
     onlineBookable: s.onlineBookable !== false,
     customerAddressRequired: !!s.customerAddressRequired,
+    customerChoosesLocation: !!s.customerChoosesLocation,
     customerLocationRequired: !!s.customerLocationRequired,
     fileUploadAllowed: !!s.fileUploadAllowed,
     maxBookingsPerDay: s.maxBookingsPerDay != null ? String(s.maxBookingsPerDay) : '',
@@ -184,6 +187,7 @@ function toInput(f: FormState): ServiceInput {
     isActive: f.isActive,
     onlineBookable: f.onlineBookable,
     customerAddressRequired: f.customerAddressRequired,
+    customerChoosesLocation: f.customerChoosesLocation,
     customerLocationRequired: f.customerLocationRequired,
     fileUploadAllowed: f.fileUploadAllowed,
     maxBookingsPerDay: num(f.maxBookingsPerDay),
@@ -468,6 +472,7 @@ export const ServicesSection: React.FC<{
         saving={saving}
         qError={qError}
         durationError={durationError}
+        workLocation={workLocation}
       />
 
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
@@ -516,7 +521,8 @@ const ServiceEditorDialog: React.FC<{
   saving: boolean;
   qError: ReturnType<typeof questionsError>;
   durationError: boolean;
-}> = ({ editing, form, set, save, close, saving, qError, durationError }) => {
+  workLocation: WorkLocation;
+}> = ({ editing, form, set, save, close, saving, qError, durationError, workLocation }) => {
   return (
       <Dialog open={!!editing} onOpenChange={(o) => !o && close()}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
@@ -710,6 +716,16 @@ const ServiceEditorDialog: React.FC<{
                 />
                 <span className="text-sm text-text-secondary">Requires customer address</span>
               </label>
+              {workLocation === 'both' && form.locationType === 'in_person' && !form.customerAddressRequired && (
+                <label htmlFor="svc-choose-loc" className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    id="svc-choose-loc"
+                    checked={form.customerChoosesLocation}
+                    onCheckedChange={(c) => set('customerChoosesLocation', c === true)}
+                  />
+                  <span className="text-sm text-text-secondary">Customer can choose: at the business or at their address</span>
+                </label>
+              )}
               <label htmlFor="svc-phone-req" className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
                   id="svc-phone-req"

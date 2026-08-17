@@ -21,11 +21,11 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 import { ServicesSection } from './ServicesSection';
 
-function renderUI() {
+function renderUI(props: { workLocation?: 'no_location' | 'at_one_location' | 'on_the_road' | 'both' } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <ServicesSection />
+      <ServicesSection {...props} />
     </QueryClientProvider>,
   );
 }
@@ -113,6 +113,29 @@ describe('ServicesSection — where does it happen?', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
     expect(apiPost.mock.calls[0][1]).toMatchObject({ locationType: 'google_meet' });
+  });
+
+  it('offers customer-can-choose only for a Both in-person service', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'both' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'in_person' } });
+    expect(await screen.findByLabelText(/customer can choose/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/customer can choose/i));
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Visit' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][1]).toMatchObject({ customerChoosesLocation: true, locationType: 'in_person' });
+  });
+
+  it('hides customer-can-choose when the catalog is not Both', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'in_person' } });
+    expect(screen.queryByLabelText(/customer can choose/i)).not.toBeInTheDocument();
   });
 
   it('explains what each choice actually does', async () => {

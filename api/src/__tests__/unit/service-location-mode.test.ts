@@ -16,6 +16,7 @@ import {
   resolveServiceLocationMode,
   resolveWorkLocation,
   isPhysical,
+  serviceNeedsCustomerAddress,
   type ServiceLocationFacts,
 } from '../../booking/service-location';
 import { resolveEventLocation } from '../../booking/booking-providers/event-location';
@@ -55,12 +56,27 @@ describe('who travels', () => {
   it('treats a null customer-address flag as false, not as unknown', () => {
     expect(resolveServiceLocationMode({ locationType: 'phone', customerAddressRequired: null })).toBe('remote');
   });
+
+  it('customerChoosesLocation is its own mode — the booking customer picks business or theirs', () => {
+    expect(
+      resolveServiceLocationMode({
+        locationType: 'in_person',
+        customerAddressRequired: false,
+        customerChoosesLocation: true,
+      }),
+    ).toBe('customer_choice');
+  });
 });
 
 describe('what kind of business this is', () => {
-  const svc = (locationType: LocationType, customerAddressRequired = false): ServiceLocationFacts => ({
+  const svc = (
+    locationType: LocationType,
+    customerAddressRequired = false,
+    customerChoosesLocation = false,
+  ): ServiceLocationFacts => ({
     locationType,
     customerAddressRequired,
+    customerChoosesLocation,
   });
 
   it('no physical service means there is no geography to plan against', () => {
@@ -93,6 +109,11 @@ describe('what kind of business this is', () => {
     expect(isPhysical('remote')).toBe(false);
     expect(isPhysical('business_location')).toBe(true);
     expect(isPhysical('customer_location')).toBe(true);
+    expect(isPhysical('customer_choice')).toBe(true);
+  });
+
+  it('a choose-at-booking Service makes the catalog Both on its own', () => {
+    expect(resolveWorkLocation([svc('in_person', false, true)])).toBe('both');
   });
 });
 
@@ -126,5 +147,29 @@ describe('the mode and the invite cannot disagree', () => {
       // ahead of all of this and is not a location claim.
       expect(invite).toBeUndefined();
     }
+  });
+});
+
+describe('does THIS booking need the customer address', () => {
+  const choose: ServiceLocationFacts = {
+    locationType: 'in_person',
+    customerAddressRequired: false,
+    customerChoosesLocation: true,
+  };
+
+  it('always, for a travel Service', () => {
+    expect(serviceNeedsCustomerAddress({ locationType: 'in_person', customerAddressRequired: true })).toBe(true);
+  });
+
+  it('never, for a premises-only Service', () => {
+    expect(serviceNeedsCustomerAddress({ locationType: 'in_person' })).toBe(false);
+  });
+
+  it('when the customer picks their own location', () => {
+    expect(serviceNeedsCustomerAddress(choose, { locationChoice: 'customer' })).toBe(true);
+  });
+
+  it('not when the customer picks the business', () => {
+    expect(serviceNeedsCustomerAddress(choose, { locationChoice: 'business' })).toBe(false);
   });
 });

@@ -954,8 +954,8 @@
         },
         "businessHours": {
           "label": "Horaires d'ouverture",
-          "helper": "En dehors de ces horaires, les visiteurs reçoivent le message hors horaires au lieu d'une réponse du bot.",
-          "alwaysOnHint": "Laissez désactivé pour une disponibilité 24/7.",
+          "helper": "Lorsqu'il est activé, l'assistant connaît vos horaires d'ouverture et peut les indiquer aux visiteurs. Il continue d'aider les visiteurs en dehors de ces horaires.",
+          "alwaysOnHint": "Laissez désactivé si vous ne voulez pas que les horaires soient mentionnés.",
           "presetsLabel": "Réglage rapide :",
           "presetWeekdays": "Sem. 9–17",
           "presetEveryday": "Tous les jours 9–17",
@@ -964,7 +964,7 @@
           "save": "Enregistrer les horaires",
           "overrides": {
             "label": "Jours fermés et horaires ponctuels",
-            "helper": "Jours fériés ou horaires différents à une date précise. Ils remplacent le planning hebdomadaire pour la réponse hors horaires.",
+            "helper": "Jours fériés ou horaires différents à une date précise. Ils remplacent le planning hebdomadaire.",
             "add": "Ajouter un jour fermé",
             "empty": "Aucune exception. Le planning hebdomadaire s'applique chaque semaine.",
             "to": "au",

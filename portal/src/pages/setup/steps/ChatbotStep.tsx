@@ -17,7 +17,7 @@
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Check, Copy, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { api, extractApiErrorMessage } from '@/services/apiClient';
 import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
+import { useBotEmbed, useBots } from '@/queries/useBotsQueries';
 import type { StepProps } from './types';
 
 const TONES = ['friendly', 'professional', 'casual', 'formal'] as const;
@@ -48,6 +49,9 @@ export function ChatbotStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const { data: settings, isLoading } = useGetAiSettings();
   const updateAi = useUpdateAiSettings();
+  const { data: botsData } = useBots();
+  const anchorBot = botsData?.bots.find((b) => b.isDefault) ?? botsData?.bots[0];
+  const { data: embed } = useBotEmbed(anchorBot?.id);
 
   const [name, setName] = React.useState('');
   const [tone, setTone] = React.useState<string>('friendly');
@@ -57,6 +61,7 @@ export function ChatbotStep({ submit }: StepProps) {
   const [closesAt, setClosesAt] = React.useState('17:00');
   const [saving, setSaving] = React.useState(false);
   const [seeded, setSeeded] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
 
   // Seed once from the server, then leave the fields alone — a refetch mid-edit must
   // not overwrite what the customer is typing.
@@ -101,6 +106,18 @@ export function ChatbotStep({ submit }: StepProps) {
       toast.error(extractApiErrorMessage(err) ?? t('setup.saveFailed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const copySnippet = async () => {
+    if (!embed?.snippet) return;
+    try {
+      await navigator.clipboard.writeText(embed.snippet);
+      setCopied(true);
+      toast.success(t('bots.embed.copied'));
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error(t('bots.errors.generic'));
     }
   };
 
@@ -197,6 +214,32 @@ export function ChatbotStep({ submit }: StepProps) {
         </div>
         <p className="text-xs text-text-muted">{t('setup.steps.chatbot.hoursHint')}</p>
       </div>
+
+      {embed?.snippet && (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <h3 className="text-sm font-medium text-text-primary">{t('setup.steps.chatbot.installTitle')}</h3>
+            <p className="text-sm text-text-secondary">{t('setup.steps.chatbot.installBody')}</p>
+          </div>
+          <pre className="overflow-x-auto rounded-md border border-edge bg-surface-3 p-3 text-xs text-text-primary">
+            <code>{embed.snippet}</code>
+          </pre>
+          <Button type="button" variant="outline" onClick={copySnippet}>
+            {copied ? (
+              <>
+                <Check className="w-4 h-4 mr-2" />
+                {t('bots.embed.copied')}
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4 mr-2" />
+                {t('bots.embed.copyButton')}
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-text-muted">{t('setup.steps.chatbot.installHint')}</p>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Button size="lg" onClick={save} disabled={busy || !complete}>

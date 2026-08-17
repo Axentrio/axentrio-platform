@@ -2023,6 +2023,8 @@
       "messageCount": "{{count}} messages",
       "earlierBadge": "{{count}} antérieures",
       "earlierTooltip": "Ce client a des conversations antérieures",
+      "pageGroupBadge": "{{count}}",
+      "pageGroupTooltip": "{{count}} conversations sur cette page",
       "duplicatesTitle": "Peut-être le même client - non fusionné",
       "open": "Ouvrir"
     },

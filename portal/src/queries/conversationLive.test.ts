@@ -25,6 +25,7 @@ import {
   findCachedChat,
   mergeDefined,
   normalizeChatStatus,
+  summaryToChatPatch,
   __resetConversationLiveState,
   type ChatListCacheEntry,
   type ChatDetailCacheEntry,
@@ -580,6 +581,49 @@ describe('applyCommandConversation', () => {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+describe('summaryToChatPatch preserves customerThreadId', () => {
+  it('copies customerThreadId onto the Chat patch so a socket-inserted row can group', () => {
+    const patch = summaryToChatPatch(
+      makeSummary({ customerThreadId: 'e:conn-1:tg-user-9:tg-chat-9' }),
+    );
+    expect(patch.customerThreadId).toBe('e:conn-1:tg-user-9:tg-chat-9');
+  });
+
+  it('omits customerThreadId when the payload does not define it', () => {
+    const patch = summaryToChatPatch(makeSummary());
+    expect(patch).not.toHaveProperty('customerThreadId');
+  });
+
+  it('admits a sibling upsert by session id — grouping never merges cache rows', () => {
+    const older = makeChat({
+      id: 'sess-prior',
+      sessionId: 'sess-prior',
+      customerThreadId: 'e:conn-1:tg-user-9:tg-chat-9',
+      lastActivityAt: '2026-08-14T08:00:00.000Z',
+    });
+    qc.setQueryData(listKey(ALL_PARAMS), { data: [older], meta: { total: 1, totalPages: 1 } });
+
+    applyConversationUpsert(
+      qc,
+      upsert(
+        makeSummary({
+          id: 'sess-new',
+          sessionId: 'sess-new',
+          customerThreadId: 'e:conn-1:tg-user-9:tg-chat-9',
+          lastMessage: 'reopened',
+          lastActivityAt: '2026-08-14T11:00:00.000Z',
+        }),
+      ),
+    );
+
+    const rows = listData(qc, ALL_PARAMS);
+    expect(rows.map((c) => c.id)).toEqual(['sess-new', 'sess-prior']);
+    expect(rows[0].customerThreadId).toBe('e:conn-1:tg-user-9:tg-chat-9');
+    expect(rows[1].customerThreadId).toBe('e:conn-1:tg-user-9:tg-chat-9');
+    expect(qc.getQueryData<ChatListCacheEntry>(listKey(ALL_PARAMS))?.meta?.total).toBe(2);
+  });
+});
 
 describe('vocabulary + merge helpers', () => {
   it('normalizes the backend status vocabulary to the portal one (and passes portal values through)', () => {

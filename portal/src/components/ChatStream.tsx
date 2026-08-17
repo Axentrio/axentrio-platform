@@ -39,6 +39,45 @@ const statusFilters: { value: ChatStatus | 'all'; labelKey: string }[] = [
   { value: 'closed', labelKey: 'inbox.stream.filters.status.closed' },
 ];
 
+function activityMs(chat: Chat): number {
+  const at = chat.lastActivityAt || chat.lastMessageAt;
+  return at ? new Date(at).getTime() : 0;
+}
+
+/** s: keys and missing keys are unresolvable identities — each row stands alone. */
+function isStandaloneThreadKey(id: string | undefined): boolean {
+  return !id || id.startsWith('s:');
+}
+
+/**
+ * Display-only collapse: one row per customerThreadId, representative =
+ * latest lastActivityAt. Cache / fetch stay session-grained.
+ */
+function collapseByCustomerThread(chats: Chat[]): Array<{ chat: Chat; siblingCount: number }> {
+  const groups = new Map<string, Chat[]>();
+  const order: Array<{ kind: 'group'; key: string } | { kind: 'single'; chat: Chat }> = [];
+
+  for (const chat of chats) {
+    if (isStandaloneThreadKey(chat.customerThreadId)) {
+      order.push({ kind: 'single', chat });
+      continue;
+    }
+    const key = chat.customerThreadId as string;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push({ kind: 'group', key });
+    }
+    groups.get(key)!.push(chat);
+  }
+
+  return order.map((entry) => {
+    if (entry.kind === 'single') return { chat: entry.chat, siblingCount: 1 };
+    const siblings = groups.get(entry.key)!;
+    const chat = siblings.reduce((best, cur) => (activityMs(cur) > activityMs(best) ? cur : best));
+    return { chat, siblingCount: siblings.length };
+  });
+}
+
 /** Last-message preview for a chat row. Pure — hoisted to module scope. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getLastMessage = (chat: any): string => {
@@ -81,8 +120,11 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
     },
   });
 
-  // Hide sessions with no messages
+  // Hide sessions with no messages. Grouping is display-only and happens
+  // AFTER the tab filter — never group-then-filter (a handoff sibling must
+  // not hide behind a newer bot session on another tab).
   const chats = allChats.filter((c: any) => c.messageCount > 0 || c.lastMessage);
+  const inboxRows = collapseByCustomerThread(chats);
 
   // B-PR4b list badge: derived from the thread endpoint's count for the
   // SELECTED row only (the same cache entry ChatWindow fetches - one request,
@@ -120,7 +162,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
             {t('inbox.stream.title')}
           </h2>
           <span className="text-sm text-text-muted">
-            {t('inbox.stream.activeCount', { count: chats.length })}
+            {t('inbox.stream.activeCount', { count: inboxRows.length })}
           </span>
         </div>
 
@@ -187,14 +229,14 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
               {t('inbox.stream.retry')}
             </button>
           </div>
-        ) : chats.length === 0 ? (
+        ) : inboxRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-muted">
             <MessageSquare className="w-8 h-8 mb-2 opacity-40" />
             <p className="text-sm">{t('inbox.stream.empty.title')}</p>
             <p className="text-xs mt-1 text-text-muted/70">{t('inbox.stream.empty.subtitle')}</p>
           </div>
         ) : (
-          chats.map((chat) => (
+          inboxRows.map(({ chat, siblingCount }) => (
             <div
               key={chat.id}
               role="button"
@@ -221,6 +263,14 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                       {chat.userName || t('inbox.chat.anonymous')}
                     </span>
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
+                    {siblingCount > 1 && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                        title={t('inbox.thread.pageGroupTooltip', { count: siblingCount })}
+                      >
+                        {t('inbox.thread.pageGroupBadge', { count: siblingCount })}
+                      </span>
+                    )}
                     {chat.id === selectedChatId && earlierCount > 0 && (
                       <span
                         className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"

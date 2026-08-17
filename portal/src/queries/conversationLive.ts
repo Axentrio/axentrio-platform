@@ -147,6 +147,7 @@ export function summaryToChatPatch(dto: ConversationSummaryPayload): Partial<Cha
   if (dto.ownershipVersion !== undefined) patch.ownershipVersion = dto.ownershipVersion;
   if (dto.channel !== undefined) patch.channel = dto.channel;
   if (dto.botId !== undefined) patch.botId = dto.botId;
+  if (dto.customerThreadId !== undefined) patch.customerThreadId = dto.customerThreadId;
   if (dto.humanControlMode !== undefined) patch.humanControlMode = dto.humanControlMode;
   if (dto.humanControlDurationHours !== undefined) {
     patch.humanControlDurationHours = dto.humanControlDurationHours;

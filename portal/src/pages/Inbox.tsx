@@ -50,6 +50,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { api } from '@services/apiClient';
+import { takeoverFailureOf, takeoverToastKey } from '@utils/takeoverErrors';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../queries/queryKeys';
 import { useNotificationSound } from '@websocket/notificationSound';
@@ -293,7 +294,12 @@ const Inbox: React.FC = () => {
       toast.success(t('inbox.toasts.takeoverSuccess'));
     } catch (error) {
       console.error('Failed to takeover chat:', error);
-      toast.error(t('inbox.toasts.takeoverFailed'));
+      const failure = takeoverFailureOf(error);
+      toast.error(
+        failure
+          ? t(takeoverToastKey(failure), { name: failure.assignedAgentId })
+          : t('inbox.toasts.takeoverFailed'),
+      );
     } finally {
       setIsTakeoverPending(false);
     }
@@ -310,7 +316,12 @@ const Inbox: React.FC = () => {
       toast.success(t('inbox.toasts.durationUpdated'));
     } catch (error) {
       console.error('Failed to change control duration:', error);
-      toast.error(t('inbox.toasts.durationUpdateFailed'));
+      const failure = takeoverFailureOf(error);
+      toast.error(
+        failure
+          ? t(takeoverToastKey(failure), { name: failure.assignedAgentId })
+          : t('inbox.toasts.durationUpdateFailed'),
+      );
     } finally {
       setIsTakeoverPending(false);
     }

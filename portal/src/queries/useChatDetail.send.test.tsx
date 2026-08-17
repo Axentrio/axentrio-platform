@@ -240,6 +240,22 @@ describe('useChatDetail.sendMessage', () => {
     await waitFor(() => expect(result.current.messages).toHaveLength(0));
   });
 
+  it('403 operator_not_in_tenant: same keep-draft conflict as a 409', async () => {
+    const { result } = await setup();
+    const err = conflictError('operator_not_in_tenant');
+    err.response!.status = 403;
+    err.response!.statusText = 'Forbidden';
+    apiPost.mockRejectedValue(err);
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.sendMessage('my draft');
+    });
+
+    expect(outcome).toMatchObject({ status: 'conflict', code: 'operator_not_in_tenant' });
+    await waitFor(() => expect(result.current.messages).toHaveLength(0));
+  });
+
   it('network failure: bubble flips to FAILED; retry re-sends the SAME clientMessageId and never double-inserts', async () => {
     const { result } = await setup();
     apiPost.mockRejectedValueOnce(new AxiosError('Network Error', 'ERR_NETWORK'));

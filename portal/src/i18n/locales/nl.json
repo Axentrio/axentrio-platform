@@ -2029,7 +2029,9 @@
         "placeholder": "Typ een bericht…",
         "send": "Bericht verzenden",
         "conflictTaken": "Een andere agent heeft dit gesprek. Het bericht is niet verzonden. Uw tekst blijft hieronder staan.",
-        "conflictClosed": "Dit gesprek is gesloten. Het bericht is niet verzonden. Uw tekst blijft hieronder staan."
+        "conflictClosed": "Dit gesprek is gesloten. Het bericht is niet verzonden. Uw tekst blijft hieronder staan.",
+        "conflictNotInTenant": "U bent geen supportagent in deze workspace. Vraag een beheerder om u als supportagent toe te voegen. Het bericht is niet verzonden. Uw tekst blijft hieronder staan.",
+        "conflictNotOwner": "U bent niet toegewezen aan dit gesprek. Het bericht is niet verzonden. Uw tekst blijft hieronder staan."
       },
       "sender": {
         "agent": "Agent",
@@ -2051,7 +2053,7 @@
     },
     "takeover": {
       "button": "Overnemen",
-      "indefinite": "Tot ik het teruggeef aan de AI",
+      "indefinite": "Tot ik het teruggeef — de AI blijft geblokkeerd",
       "forHours_one": "Voor {{count}} uur",
       "forHours_other": "Voor {{count}} uur",
       "changeDuration": "Duur wijzigen"
@@ -2094,6 +2096,11 @@
       "loadFailed": "Gesprek laden mislukt",
       "takeoverSuccess": "Gesprek succesvol overgenomen",
       "takeoverFailed": "Gesprek overnemen mislukt",
+      "takeoverNotInTenant": "U bent geen supportagent in deze workspace. Vraag een beheerder om u als supportagent toe te voegen en probeer het opnieuw.",
+      "takeoverAlreadyClaimed": "Dit gesprek is al overgenomen door een andere operator.",
+      "takeoverAlreadyClaimedBy": "Dit gesprek is al overgenomen door {{name}}.",
+      "takeoverInvalidTransition": "Dit gesprek kan in de huidige staat niet worden overgenomen. Vernieuw en probeer opnieuw.",
+      "takeoverInvalidHours": "Die overnameduur is ongeldig. Kies 1–24 uur of tot u het teruggeeft.",
       "resumeAiSuccess": "AI-antwoorden weer ingeschakeld",
       "resumeAiFailed": "Kan AI niet weer inschakelen (alleen beheerders)",
       "handoffAccepted": "Overdracht geaccepteerd",

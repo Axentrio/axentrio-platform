@@ -143,10 +143,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  const conflictNoticeFor = (code?: string) =>
-    code === 'conversation_closed'
-      ? t('inbox.window.composer.conflictClosed')
-      : t('inbox.window.composer.conflictTaken');
+  const conflictNoticeFor = (code?: string) => {
+    if (code === 'conversation_closed') return t('inbox.window.composer.conflictClosed');
+    if (code === 'operator_not_in_tenant') return t('inbox.window.composer.conflictNotInTenant');
+    if (code === 'not_conversation_owner') return t('inbox.window.composer.conflictNotOwner');
+    return t('inbox.window.composer.conflictTaken');
+  };
 
   // A retry that hits a 409 keeps the bubble (the hook holds it in the failed
   // state — the text is never lost) and surfaces the same non-destructive

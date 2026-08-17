@@ -27,6 +27,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { AxiosError, AxiosHeaders } from 'axios';
 import type { Chat } from '@app-types/index';
 
 const { apiGet, apiPost, registerHandlersMock, capturedHandlers } = vi.hoisted(() => ({
@@ -97,6 +98,7 @@ vi.mock('sonner', () => ({
 }));
 
 import Inbox from './Inbox';
+import { toast } from 'sonner';
 import { __resetConversationLiveState } from '../queries/conversationLive';
 
 // ---------------------------------------------------------------------------
@@ -204,13 +206,13 @@ describe('Inbox takeover duration menu', () => {
     expect(badge).toHaveTextContent(/resumes in (2h 0m|1h 59m)/);
   });
 
-  it('posts the modeless legacy body for "Until I return it to AI"', async () => {
+  it('posts the modeless legacy body for "Until I hand back — AI stays blocked"', async () => {
     apiPost.mockResolvedValue(claimedResponse({ mode: 'indefinite' }));
     const user = userEvent.setup();
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Until I return it to AI'));
+    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     const [url, body] = apiPost.mock.calls[0];
@@ -261,7 +263,7 @@ describe('Inbox change duration', () => {
     // re-claim would not update the policy).
     apiPost.mockResolvedValueOnce(claimedResponse({ mode: 'indefinite' }));
     await user.click(screen.getByRole('button', { name: /Change duration/ }));
-    await user.click(await screen.findByText('Until I return it to AI'));
+    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost).toHaveBeenNthCalledWith(2, '/chats/c1/takeover', {
@@ -395,5 +397,49 @@ describe('Inbox human-control badge', () => {
     expect(badge).toHaveAttribute('data-state', 'resuming');
     // The server owns the expiry: the portal must not POST anything.
     expect(apiPost).not.toHaveBeenCalled();
+  });
+});
+
+function takeoverError(status: number, code: string, details?: Record<string, unknown>): AxiosError {
+  const err = new AxiosError(code, 'ERR_BAD_REQUEST');
+  err.response = {
+    status,
+    statusText: status === 403 ? 'Forbidden' : status === 400 ? 'Bad Request' : 'Conflict',
+    headers: {},
+    config: { headers: new AxiosHeaders() } as never,
+    data: { success: false, error: { code, message: code, details } },
+  };
+  return err;
+}
+
+describe('Inbox takeover failure toasts', () => {
+  it('tells an operator with no support_agents row to ask an admin', async () => {
+    apiPost.mockRejectedValue(takeoverError(403, 'operator_not_in_tenant'));
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'handoff_requested' }));
+
+    await user.click(await screen.findByRole('button', { name: /Take Over/ }));
+    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/ask an admin to add you as a support agent/i),
+    );
+  });
+
+  it('names that another operator already took the conversation', async () => {
+    apiPost.mockRejectedValue(
+      takeoverError(409, 'conversation_already_claimed', { assignedAgentId: 'op-other' }),
+    );
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'handoff_requested' }));
+
+    await user.click(await screen.findByRole('button', { name: /Take Over/ }));
+    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/already taken over/i),
+    );
   });
 });

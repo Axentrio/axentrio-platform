@@ -55,6 +55,7 @@ import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
 import integrationsRoutes from './knowledge/integrations.routes';
 import featureTogglesRoutes from './routes/feature-toggles.routes';
+import accountInformationRoutes from './routes/account-information.routes';
 import eventWebhooksRoutes from './routes/event-webhooks.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import botsRoutes from './routes/bots.routes';
@@ -344,6 +345,7 @@ apiRouter.use('/tenants/me', aiSettingsRoutes);
 apiRouter.use('/tenants/me', widgetAppearanceRoutes);
 apiRouter.use('/tenants/me', integrationsRoutes);
 apiRouter.use('/tenants/me', featureTogglesRoutes);
+apiRouter.use('/tenants/me', accountInformationRoutes);
 // The WRITER for tenant.settings.eventWebhooks, which the emitter has always read
 // but which nothing could populate until now.
 apiRouter.use('/tenants/me/event-webhooks', eventWebhooksRoutes);

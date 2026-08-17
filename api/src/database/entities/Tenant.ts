@@ -236,6 +236,36 @@ export class Tenant {
     nextBillingDate?: Date;
   };
 
+  /**
+   * Account Information (#148) — the tenant's invoice identity.
+   * Null until first save; GET prefills from onboarding / billingInfo.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'official_business_name' })
+  officialBusinessName?: string | null;
+
+  @Column({ type: 'varchar', length: 16, nullable: true, name: 'vat_number' })
+  vatNumber?: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'contact_person' })
+  contactPerson?: string | null;
+
+  @Column({ type: 'jsonb', nullable: true, name: 'invoice_address' })
+  invoiceAddress?: {
+    street: string;
+    postalCode: string;
+    city: string;
+    country: string;
+  } | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'invoice_email' })
+  invoiceEmail?: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true, name: 'account_phone' })
+  accountPhone?: string | null;
+
+  @Column({ type: 'boolean', default: false, name: 'vat_verified' })
+  vatVerified!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

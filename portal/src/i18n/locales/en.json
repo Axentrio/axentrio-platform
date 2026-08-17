@@ -314,6 +314,7 @@
     },
     "tabs": {
       "profile": "Profile",
+      "account": "Account Information",
       "notifications": "Notifications",
       "appearance": "Appearance",
       "widget": "Widget & Brand",
@@ -322,6 +323,24 @@
       "integrations": "Integrations",
       "channels": "Channels",
       "billing": "Billing"
+    },
+    "account": {
+      "title": "Account Information",
+      "helper": "Business identity used on invoices. Separate from your personal profile and from the address the AI quotes to customers.",
+      "officialBusinessName": "Official business name",
+      "vatNumber": "VAT number",
+      "vatVerified": "Verified against the register",
+      "contactPerson": "Contact person",
+      "invoiceEmail": "Invoice email",
+      "phone": "Phone",
+      "street": "Street",
+      "postalCode": "Postal code",
+      "city": "City",
+      "saveFailed": "Could not save account information. Please try again.",
+      "validation": {
+        "required": "This field is required",
+        "email": "Enter a valid email address"
+      }
     },
     "profile": {
       "title": "Profile Information",

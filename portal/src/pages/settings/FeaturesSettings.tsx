@@ -8,9 +8,10 @@
  *
  * Plan: .scratch/plan-tenant-feature-toggles.md § 5.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import {
   MessageCircle,
   MessageSquare,
@@ -20,11 +21,22 @@ import {
   CalendarCheck,
   Gauge,
   Lock,
+  Pause,
   type LucideIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
@@ -34,6 +46,7 @@ import {
   type TenantFeatureToggles,
   type PlanFeatures,
 } from '@/queries/useEntitlementsQueries';
+import { usePauseAllBots } from '@/queries/useBotsQueries';
 
 interface FeatureMeta {
   label: string;
@@ -113,9 +126,11 @@ const FeaturesSettings: React.FC = () => {
   const { t } = useTranslation();
   const { isRole } = useAppAuth();
   const isAdmin = isRole(['admin', 'super_admin']);
+  const [pauseAllOpen, setPauseAllOpen] = useState(false);
 
   const { data, isLoading } = useEntitlements();
   const updateToggles = useUpdateFeatureToggles();
+  const pauseAllBots = usePauseAllBots();
 
   if (isLoading || !data) return <PageSkeleton variant="list" rows={4} />;
 
@@ -143,6 +158,16 @@ const FeaturesSettings: React.FC = () => {
 
   const entitledChannels = CHANNEL_KEYS.filter((k) => entitled[k]);
   const allChannelsOn = entitledChannels.length > 0 && entitledChannels.every((k) => isEnabled(toggles, effective, k));
+
+  const handlePauseAll = async () => {
+    try {
+      const result = await pauseAllBots.mutateAsync();
+      toast.success(t('features.pauseAllBots.success', { count: result.pausedCount }));
+      setPauseAllOpen(false);
+    } catch {
+      toast.error(t('common.actionFailed'));
+    }
+  };
 
   const renderRow = (key: SurfacedFeatureKey) => {
     const meta = FEATURE_META[key];
@@ -192,6 +217,33 @@ const FeaturesSettings: React.FC = () => {
         </p>
       </div>
 
+      {isAdmin && (
+        <Card variant="glass">
+          <CardContent className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+              <p className="font-medium text-text-primary">
+                {t('features.pauseAllBots.button', { defaultValue: 'Pause all bots' })}
+              </p>
+              <p className="text-sm text-text-secondary">
+                {t('features.pauseAllBots.confirmBody', {
+                  defaultValue:
+                    'This turns the AI assistant off on every bot in your workspace. Each bot can be turned back on individually in its bot editor.',
+                })}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => setPauseAllOpen(true)}
+              disabled={pauseAllBots.isPending}
+              className="shrink-0 gap-1.5"
+            >
+              <Pause className="h-4 w-4" />
+              {t('features.pauseAllBots.button', { defaultValue: 'Pause all bots' })}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {GROUPS.map((group) => (
         <Card key={group.id} variant="glass">
           <CardHeader className="flex flex-row items-center justify-between gap-3 pb-2">
@@ -225,6 +277,38 @@ const FeaturesSettings: React.FC = () => {
           {t('features.adminOnly', { defaultValue: 'Only workspace admins can change these settings.' })}
         </p>
       )}
+
+      <AlertDialog open={pauseAllOpen} onOpenChange={(open) => !pauseAllBots.isPending && setPauseAllOpen(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('features.pauseAllBots.confirmTitle', {
+                defaultValue: 'Pause the AI assistant on every bot?',
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('features.pauseAllBots.confirmBody', {
+                defaultValue:
+                  'This turns the AI assistant off on every bot in your workspace. Each bot can be turned back on individually in its bot editor.',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pauseAllBots.isPending}>
+              {t('features.pauseAllBots.cancel', { defaultValue: 'Cancel' })}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void handlePauseAll();
+              }}
+              disabled={pauseAllBots.isPending}
+            >
+              {t('features.pauseAllBots.confirm', { defaultValue: 'Pause all bots' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

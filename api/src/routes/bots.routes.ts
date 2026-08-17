@@ -253,6 +253,42 @@ router.get(
 );
 
 /**
+ * POST /bots/pause-all — turn the AI assistant off on every live bot of the
+ * tenant (`settings.ai.enabled = false`). Per-bot flag only; there is no
+ * tenant-wide pause and no resume-all (re-enable is per-bot in the editor).
+ *
+ * MUST be registered BEFORE `/:id` or Express captures `pause-all` as an id.
+ * Admin-only (`requireRole('admin')`; super_admin bypasses as elsewhere).
+ */
+router.post(
+  '/pause-all',
+  requireRole('admin'),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId!;
+
+    const pausedBotIds = await AppDataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Bot);
+      const bots = await repo.find({
+        where: { tenantId, deletedAt: IsNull() },
+      });
+
+      for (const bot of bots) {
+        const settings = (bot.settings ?? {}) as NonNullable<Bot['settings']>;
+        const ai = (settings.ai ?? {}) as NonNullable<NonNullable<Bot['settings']>['ai']>;
+        bot.settings = {
+          ...settings,
+          ai: { ...ai, enabled: false },
+        } as Bot['settings'];
+      }
+      if (bots.length) await repo.save(bots);
+      return bots.map((b) => b.id);
+    });
+
+    sendSuccess(res, { pausedCount: pausedBotIds.length, pausedBotIds });
+  })
+);
+
+/**
  * GET /bots/:id
  */
 router.get(

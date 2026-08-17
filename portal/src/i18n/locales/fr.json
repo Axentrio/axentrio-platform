@@ -2787,6 +2787,15 @@
       "title": "{{feature}} est désactivé",
       "body": "Votre offre inclut cette fonctionnalité, mais elle a été désactivée pour votre espace de travail.",
       "cta": "Gérer les fonctionnalités"
+    },
+    "pauseAllBots": {
+      "button": "Mettre tous les bots en pause",
+      "confirmTitle": "Mettre l’assistant IA en pause sur chaque bot ?",
+      "confirmBody": "Cela désactive l’assistant IA sur chaque bot de votre espace de travail. Chaque bot peut être réactivé individuellement dans son éditeur.",
+      "confirm": "Mettre tous les bots en pause",
+      "cancel": "Annuler",
+      "success_one": "Assistant IA mis en pause sur {{count}} bot.",
+      "success_other": "Assistant IA mis en pause sur {{count}} bots."
     }
   },
   "setup": {

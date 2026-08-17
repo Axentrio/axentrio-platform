@@ -2826,6 +2826,15 @@
       "title": "{{feature}} is turned off",
       "body": "Your plan includes this feature, but it has been switched off for your workspace.",
       "cta": "Manage features"
+    },
+    "pauseAllBots": {
+      "button": "Pause all bots",
+      "confirmTitle": "Pause the AI assistant on every bot?",
+      "confirmBody": "This turns the AI assistant off on every bot in your workspace. Each bot can be turned back on individually in its bot editor.",
+      "confirm": "Pause all bots",
+      "cancel": "Cancel",
+      "success_one": "Paused the AI assistant on {{count}} bot.",
+      "success_other": "Paused the AI assistant on {{count}} bots."
     }
   },
   "setup": {

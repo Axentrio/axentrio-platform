@@ -2321,6 +2321,7 @@
     "meta": {
       "refreshed": "Laatst geanalyseerd {{ago}}",
       "pending": "Druk op Analyseren om bij te werken",
+      "pendingAutomatic": "De eerste analyse draait vannacht — inzichten verschijnen nadat je gesprekken zijn beoordeeld",
       "incomplete": "Inzichten onvolledig — recente gesprekken worden nog geanalyseerd"
     },
     "card": {

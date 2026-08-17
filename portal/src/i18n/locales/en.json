@@ -2359,6 +2359,7 @@
     "meta": {
       "refreshed": "Last analysed {{ago}}",
       "pending": "Press Analyse to update",
+      "pendingAutomatic": "First analysis runs tonight — insights appear after your chats are reviewed",
       "incomplete": "Insights incomplete — still analysing recent chats"
     },
     "card": {

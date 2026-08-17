@@ -8,10 +8,9 @@ import {
 /**
  * Renders `Bot.settings.businessHours` for the `{openingHours}` placeholder.
  *
- * Until now businessHours only drove the pre-AI off-hours gate — it never reached
- * the prompt — so a bot WITHOUT the booking skill had no idea when the business was
- * open. `{openingHours}` prefers the booking AvailabilityRule when one exists (the
- * authoritative source for a booking bot) and falls back to this. Keeping ONE
+ * Operational hours are the authoritative source for spoken hours whenever they
+ * are configured/enabled. The booking AvailabilityRule is only a fallback for the
+ * placeholder, and still the sole source for slot computation. Keeping ONE
  * placeholder fed by one source per bot means the two can never contradict.
  *
  * Pure. Disabled / empty / all-closed → '' (fail-closed, never a literal {key}).
@@ -46,12 +45,37 @@ const DAY_LABEL: Record<string, string> = {
   sunday: 'Sun',
 };
 
+/** Configured in the bot form and enabled — the spoken-hours source of truth. */
+export function isBusinessHoursConfigured(bh?: BusinessHours | null): bh is BusinessHours {
+  return !!bh?.enabled && Array.isArray(bh.schedule);
+}
+
+function localDateInZone(now: Date, timezone: string): string {
+  try {
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone || 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+    const y = dateParts.find((p) => p.type === 'year')?.value;
+    const m = dateParts.find((p) => p.type === 'month')?.value;
+    const d = dateParts.find((p) => p.type === 'day')?.value;
+    return y && m && d ? `${y}-${m}-${d}` : '';
+  } catch {
+    // Invalid IANA zone — omit closures rather than crash prompt composition.
+    return '';
+  }
+}
+
 /** e.g. "Mon 09:00–17:00, Wed 10:00–14:00". Matches the booking hours formatting. */
 export function formatBusinessHoursForPlaceholder(
   bh?: BusinessHours | null,
   now: Date = new Date(),
+  /** Bot.businessTimezone — "today" for closures must be the business's local date, not UTC. */
+  timezone: string = 'UTC',
 ): string {
-  if (!bh?.enabled || !Array.isArray(bh.schedule)) return '';
+  if (!isBusinessHoursConfigured(bh)) return '';
   const weekly = bh.schedule
     .filter((d) => d && !d.closed && typeof d.open === 'string' && typeof d.close === 'string' && d.open && d.close)
     .map((d) => {
@@ -60,18 +84,10 @@ export function formatBusinessHoursForPlaceholder(
     })
     .join(', ');
 
-  // Closures are part of the answer for a bot without booking too: otherwise
-  // `{openingHours}` quotes the weekly grid on a day the owner marked closed.
-  const dateParts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now);
-  const y = dateParts.find((p) => p.type === 'year')?.value;
-  const m = dateParts.find((p) => p.type === 'month')?.value;
-  const d = dateParts.find((p) => p.type === 'day')?.value;
-  const today = y && m && d ? `${y}-${m}-${d}` : '';
+  // Closures are part of the answer: otherwise `{openingHours}` quotes the weekly
+  // grid on a day the owner marked closed. "Today" is the local calendar date in
+  // the business timezone — UTC dropped a still-current holiday after midnight Z.
+  const today = localDateInZone(now, timezone);
   const closures = (Array.isArray(bh.dateOverrides) ? bh.dateOverrides : [])
     .filter((o) => o && typeof o.date === 'string' && o.closed && today && isRelevantOn(o, today))
     .sort((a, b) => a.date.localeCompare(b.date))

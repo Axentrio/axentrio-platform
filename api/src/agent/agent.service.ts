@@ -37,7 +37,7 @@ import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, 
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { getBoundAddress } from '../booking/travel/address-binding';
-import { formatBusinessHoursForPlaceholder, isOutsideBusinessHours } from '../utils/format-business-hours';
+import { formatBusinessHoursForPlaceholder, isBusinessHoursConfigured, isOutsideBusinessHours } from '../utils/format-business-hours';
 import { isUpstreamQuotaExhausted, isUpstreamRateLimit, isUpstreamServerError, isUpstreamUnreachable, isRetryableUpstream, UpstreamUnreachableError } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
@@ -603,10 +603,17 @@ export class AgentService {
       // Rendered values for the {services} / {openingHours} placeholders. Built from
       // the SAME rows this block already loads (no extra queries).
       let bookingServices = '';
-      // Hours prefer the booking availability rule (authoritative for a booking bot)
-      // and fall back to the operational businessHours — which until now never
-      // reached the prompt at all, leaving non-booking bots blind to opening hours.
-      let openingHours = '';
+      // Spoken hours prefer the operational Bot.settings.businessHours (what the
+      // owner set in the bot form). The booking AvailabilityRule is only a fallback
+      // for the placeholder — it still solely governs which slots are bookable.
+      const operationalHoursConfigured = isBusinessHoursConfigured(effBotSettings.businessHours);
+      let openingHours = operationalHoursConfigured
+        ? formatBusinessHoursForPlaceholder(
+            effBotSettings.businessHours,
+            new Date(),
+            bot.businessTimezone,
+          )
+        : '';
       if (bookingActive) {
         try {
           // Full row: the placeholder formatter needs availabilityMode/weeklyHours,
@@ -620,7 +627,9 @@ export class AgentService {
           // (closure relevance) from rule.timezone.
           bookingTimezone = bot.businessTimezone || rule?.timezone || undefined;
           if (rule && bot.businessTimezone) rule.timezone = bot.businessTimezone;
-          openingHours = formatHoursForPlaceholder(rule);
+          // Operational hours stay authoritative even when the formatted string is
+          // empty (enabled but all-closed). Only fall back when they are not set.
+          if (!operationalHoursConfigured) openingHours = formatHoursForPlaceholder(rule);
           // ponytail: rule existence is treated as "hours set up". A rule with empty
           // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
           // case we target (no rule at all); tighten later if empty-hours configs appear.
@@ -644,11 +653,6 @@ export class AgentService {
           bookingConfigured = true;
         }
       }
-      // No booking availability rule (or no booking skill at all) → fall back to the
-      // tenant's operational business hours, which previously only drove the pre-AI
-      // off-hours gate and never reached the prompt. Exactly ONE hours source per bot,
-      // so the booking rule and businessHours can never contradict each other.
-      if (!openingHours) openingHours = formatBusinessHoursForPlaceholder(effBotSettings.businessHours);
       // Where the business travels, for {serviceArea}. Loaded for EVERY bot, not just
       // booking ones: like opening hours this is a business fact a template author may
       // want to state, and it is one indexed lookup that returns nothing for the bots

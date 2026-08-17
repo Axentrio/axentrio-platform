@@ -3,14 +3,12 @@ import { AgentService } from '../../agent/agent.service';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
 
-// `{openingHours}` must be fed by exactly ONE source per bot: the booking
-// AvailabilityRule for a bot that can book, else the tenant's operational
-// businessHours. The deciding flag, `bookingActive`, therefore has to be read
-// from the tools the bot ACTUALLY ends up with — i.e. after the template gate
-// has stripped the tools of skills the template never selected. Computing it
-// from the ungated list makes an entitled-but-not-selected booking skill quote
-// a stale availability rule and silently discard the businessHours the tenant
-// set (which is also what the pre-AI off-hours gate uses — so the two contradict).
+// `{openingHours}` must be fed by exactly ONE source per bot: operational
+// Bot.settings.businessHours when configured, else the booking AvailabilityRule.
+// The leftover-rule trap: an entitled-but-not-selected booking skill used to
+// quote a stale availability rule and silently discard the businessHours the
+// tenant set (which is also what the pre-AI off-hours gate uses). Operational
+// hours now win even for a booking bot — AvailabilityRule still governs slots.
 
 const mockProvider: LLMProvider = { chat: vi.fn() };
 vi.mock('../../llm/provider-factory', () => ({ getProvider: () => mockProvider }));
@@ -144,13 +142,15 @@ describe('AgentService — which source feeds {openingHours}', () => {
     expect((mockProvider.chat as any).mock.calls.length).toBeGreaterThan(1); // correction re-run
   });
 
-  it('a template that DOES select booking still uses the availability rule', async () => {
+  it('a booking bot with operational hours configured speaks those, not the availability rule', async () => {
     const resolver = await import('../../templates/template-resolver');
     vi.spyOn(resolver, 'resolveBoundTemplates').mockResolvedValue([
       { templateId: 'tpl-1', resolvedVersion: 1, selectedSkillIds: ['booking'], expectedModules: [], skillProse: {}, variables: [], category: null, body: 'Body.' },
     ] as any);
     await run(agent);
     expect(toolNames()).toContain('create_booking');
-    expect(liveFields().openingHours).toContain('09:00'); // the booking rule wins for a booking bot
+    const { openingHours } = liveFields();
+    expect(openingHours).toContain('03:03'); // operational hours win when both stores exist
+    expect(openingHours).not.toContain('09:00');
   });
 });

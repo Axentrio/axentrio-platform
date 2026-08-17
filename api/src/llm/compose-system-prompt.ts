@@ -194,8 +194,8 @@ interface AgentCtx {
   /** Live bookable services for {services}. Substituted ONLY when the bot can
    *  actually book — a gated/unconfigured bot must never advertise them. */
   bookingServices?: string;
-  /** The business's opening hours for {openingHours}: the booking availability rule
-   *  when one exists, else the operational businessHours. A business FACT, not a
+  /** The business's opening hours for {openingHours}: operational Bot.settings.businessHours
+   *  when configured, else the booking AvailabilityRule. A business FACT, not a
    *  capability, so every bot may state it (unlike {services}). */
   openingHours?: string;
   /** The places this business travels to, for {serviceArea}. Like {openingHours} this is
@@ -367,7 +367,7 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
     // advertise services it physically cannot book.
     services: canBook ? (ctx.bookingServices ?? '') : '',
     // Opening hours are a business FACT, not a capability — every bot may state
-    // them (booking availability when set, else the operational business hours).
+    // them (operational hours when set, else the booking availability rule).
     openingHours: ctx.openingHours ?? '',
     // Where the business works — a fact, like opening hours, not a capability.
     serviceArea: ctx.serviceArea ?? '',
@@ -464,9 +464,18 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // below.)
 
   // Knowledge base usage — hard rule (the agent never volunteered kb_search).
+  // Configured opening hours override KB: the owner set them in the bot form, so
+  // a stale KB snippet must not send hours questions to kb_search.
+  const configuredHours = (ctx.openingHours ?? '').trim();
   if (tools.some((t) => t.name === 'kb_search')) {
+    const hoursClause = configuredHours
+      ? 'services, prices, policies, location, contact details'
+      : 'services, opening hours, prices, policies, location, contact details';
+    const hoursOverride = configuredHours
+      ? ' Opening hours are already configured in this prompt — answer hours questions from those configured hours (including any closed dates listed there) and do NOT call kb_search for opening hours; configured hours override anything in the knowledge base.'
+      : '';
     sections.push(
-      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — services, opening hours, prices, policies, location, contact details, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering. NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
+      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — ${hoursClause}, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering.${hoursOverride} NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
     );
     ledger.include(K.KNOWLEDGE);
   } else {
@@ -580,6 +589,16 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
   // composed in catalog order.
   for (const section of moduleSections ?? []) {
     if (section) sections.push(section);
+  }
+
+  // Generic / non-booking bots never get booking.module's OPENING HOURS block.
+  // When the owner configured hours, state them here so the generic core (which
+  // never interpolates {openingHours}) can still answer "when are you open?".
+  // Skip if a module section already contributed the heading — one source only.
+  if (configuredHours && !sections.some((s) => s.includes('## OPENING HOURS'))) {
+    sections.push(
+      `\n## OPENING HOURS\nThe business is open at these times. State these when the customer asks about opening hours; they override anything in the knowledge base.\n${configuredHours}`,
+    );
   }
 
   // Per-template skill prose OVERRIDES (composable-templates) — a template can

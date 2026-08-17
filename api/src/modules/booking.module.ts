@@ -16,6 +16,7 @@ import {
   AvailabilityRule,
   isRelevantOn,
   overrideSpanEnd,
+  type DateOverride,
   type Weekday,
   type TimeWindow,
 } from '../database/entities/AvailabilityRule';
@@ -28,6 +29,7 @@ import {
   CancelBookingTool,
 } from '../agent/tools/booking.tool';
 import { BookingSettings } from '../database/entities/BookingSettings';
+import { Bot } from '../database/entities/Bot';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
 import { formatVenueLine } from '../contracts/venue-address';
 import { resolveTravelEligibility } from '../booking/travel/travel-eligibility';
@@ -35,6 +37,10 @@ import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { resolveItineraryKey } from '../scheduler/itinerary-key';
 import { logger } from '../utils/logger';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
+import {
+  isBusinessHoursConfigured,
+  type BusinessHours,
+} from '../utils/format-business-hours';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
 /** One-line hygiene for owner text in the prompt: collapse whitespace → drop `·`/`"` → trim. */
@@ -151,10 +157,15 @@ const MAX_OVERRIDE_LINES = 8;
  * engine was about to enforce. Past dates are dropped; the list is capped and says when it
  * has been cut, because a silent truncation reads as "that's all of them".
  */
-function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
-  const overrides = Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [];
-  const today = DateTime.fromJSDate(now).setZone(rule.timezone || 'UTC').toFormat('yyyy-MM-dd');
-  const upcoming = overrides
+function upcomingOverrideLines(
+  overrides: DateOverride[] | null | undefined,
+  timezone: string,
+  now: Date,
+): string[] {
+  const list = Array.isArray(overrides) ? overrides : [];
+  const tz = timezone || 'UTC';
+  const today = DateTime.fromJSDate(now).setZone(tz).toFormat('yyyy-MM-dd');
+  const upcoming = list
     // A RANGE stays relevant until its last day: a fortnight's closure that started
     // yesterday must still be stated, or the bot books the remaining thirteen days.
     .filter((o) => {
@@ -165,7 +176,7 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
   if (!upcoming.length) return [];
 
   const fmtDay = (iso: string): string => {
-    const d = DateTime.fromISO(iso, { zone: rule.timezone || 'UTC' });
+    const d = DateTime.fromISO(iso, { zone: tz });
     return d.isValid ? d.toFormat('cccc d LLLL') : iso;
   };
 
@@ -187,12 +198,57 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
   return lines;
 }
 
-export function buildHoursSection(rule: AvailabilityRule | null, now: Date = new Date()): string | null {
-  if (!rule) return null;
-  const overrides = upcomingOverrideLines(rule, now);
-  const exceptions = overrides.length
+const OPERATIONAL_WEEKDAY_ORDER: { key: string; label: string }[] = [
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
+  { key: 'saturday', label: 'Sat' },
+  { key: 'sunday', label: 'Sun' },
+];
+
+function exceptionBlock(overrides: string[]): string {
+  return overrides.length
     ? `\nThese specific dates OVERRIDE the hours above — they win even for a 24/7 business. Never tell a customer you are open on one of these closed dates:\n${overrides.join('\n')}`
     : '';
+}
+
+/** Spoken hours from the bot form (`Bot.settings.businessHours`). */
+export function buildOperationalHoursSection(
+  bh: BusinessHours,
+  timezone: string,
+  now: Date = new Date(),
+): string | null {
+  const overrides = upcomingOverrideLines(bh.dateOverrides, timezone, now);
+  const exceptions = exceptionBlock(overrides);
+  const lines = OPERATIONAL_WEEKDAY_ORDER.flatMap(({ key, label }) => {
+    const day = bh.schedule.find((s) => s && typeof s.day === 'string' && s.day.toLowerCase() === key);
+    if (!day || day.closed || typeof day.open !== 'string' || typeof day.close !== 'string' || !day.open || !day.close) {
+      return [];
+    }
+    return [`- ${label}: ${day.open}–${day.close}`];
+  });
+  if (!lines.length && !exceptions) return null;
+  const tz = timezone || 'UTC';
+  const weekly = lines.length
+    ? `The business is open at these times (${tz}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
+    : `No weekly opening hours are configured (${tz}).`;
+  return `\n## OPENING HOURS\n${weekly}${exceptions}`;
+}
+
+export function buildHoursSection(
+  rule: AvailabilityRule | null,
+  now: Date = new Date(),
+  /** When operational hours are configured they win for spoken hours. Slot maths still uses `rule`. */
+  operational?: { hours?: BusinessHours | null; timezone?: string } | null,
+): string | null {
+  if (operational && isBusinessHoursConfigured(operational.hours)) {
+    return buildOperationalHoursSection(operational.hours, operational.timezone || 'UTC', now);
+  }
+  if (!rule) return null;
+  const overrides = upcomingOverrideLines(rule.dateOverrides, rule.timezone || 'UTC', now);
+  const exceptions = exceptionBlock(overrides);
 
   if (rule.availabilityMode === 'always_open') {
     return `\n## OPENING HOURS\nThis business takes bookings 24/7 — there are no fixed opening hours. If a customer asks when you are open, tell them you're available around the clock.${exceptions}`;
@@ -510,7 +566,7 @@ export const bookingModule: ModuleDefinition = {
     new CancelBookingTool(),
   ],
   async buildPromptSection(ctx: ModulePromptContext): Promise<string | null> {
-    const [services, rule, bookingSettings] = await Promise.all([
+    const [services, rule, bookingSettings, bot] = await Promise.all([
       AppDataSource.getRepository(ServiceType).find({
         // `onlineBookable` too, NOT just `isActive` — this is the only consumer that used
         // to omit it. `resolveService` requires both, so an offline service was advertised
@@ -525,11 +581,16 @@ export const bookingModule: ModuleDefinition = {
       }),
       AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),
       AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: ctx.botId } }),
+      AppDataSource.getRepository(Bot).findOne({
+        where: { id: ctx.botId },
+        select: { id: true, settings: true, businessTimezone: true },
+      }),
     ]);
     // Canonical, server-owned business timezone: the bot is authoritative on
     // read, so the prompt's "today" / opening-hours facts never quote the
     // rule's denormalized (historically browser-derived) copy.
-    if (rule) rule.timezone = await getBotBusinessTimezone(ctx.botId);
+    const businessTimezone = bot?.businessTimezone || (await getBotBusinessTimezone(ctx.botId));
+    if (rule) rule.timezone = businessTimezone;
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );
@@ -584,7 +645,12 @@ export const bookingModule: ModuleDefinition = {
     // An address is worth stating even for a bot with no bookable catalog — "where are you?"
     // is not a booking question.
     if (!servicesSection) return [venueSection, areaSection].filter(Boolean).join('') || null;
-    const hoursSection = buildHoursSection(rule);
+    // Operational hours (bot form) win for spoken hours; AvailabilityRule still
+    // solely governs bookable slots. Fall back to the rule only when unset.
+    const hoursSection = buildHoursSection(rule, new Date(), {
+      hours: bot?.settings?.businessHours,
+      timezone: businessTimezone,
+    });
     return [servicesSection, hoursSection, venueSection, areaSection, customerAddressSection]
       .filter(Boolean)
       .join('');

@@ -94,10 +94,33 @@ describe('PromptBuilder', () => {
     const { prompt } = builder.build(baseTenant, baseTenant.settings as any, mockTools);
     expect(prompt).toContain('## KNOWLEDGE');
     expect(prompt).toContain('MUST call the kb_search tool BEFORE answering');
+    expect(prompt).toContain('opening hours');
 
     const noKb = mockTools.filter((t) => t.name !== 'kb_search');
     const { prompt: promptNoKb } = builder.build(baseTenant, baseTenant.settings as any, noKb);
     expect(promptNoKb).not.toContain('## KNOWLEDGE');
+  });
+
+  it('does not send opening-hours questions to kb_search when hours are already configured', () => {
+    const { prompt } = builder.build(
+      baseTenant,
+      baseTenant.settings as any,
+      mockTools,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { openingHours: 'Mon 09:00–17:00 · closed 2026-08-23' },
+    );
+    expect(prompt).toContain('## KNOWLEDGE');
+    expect(prompt).toContain('do NOT call kb_search for opening hours');
+    expect(prompt).toContain('configured hours override');
+    expect(prompt).not.toMatch(/factual about the business — services, opening hours/);
   });
 
   it('includes skill instructions when skills are configured', () => {

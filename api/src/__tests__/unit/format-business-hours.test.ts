@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isOutsideBusinessHours, type BusinessHours } from '../../utils/format-business-hours';
+import {
+  formatBusinessHoursForPlaceholder,
+  isOutsideBusinessHours,
+  type BusinessHours,
+} from '../../utils/format-business-hours';
 import { isWithinBusinessHours } from '../../booking/booking-providers/slot-engine';
 
 // Wednesday 2026-01-14, 10:00 UTC — inside a 09:00-17:00 UTC Wednesday window.
@@ -213,5 +217,26 @@ describe('isOutsideBusinessHours', () => {
       expect(operationalOpen).toBe(false);
       expect(operationalOpen).toBe(bookingOpen);
     });
+  });
+});
+
+describe('formatBusinessHoursForPlaceholder — timezone-correct closures', () => {
+  const hours = {
+    enabled: true,
+    schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+    dateOverrides: [{ date: '2026-08-22', closed: true }],
+  } as BusinessHours;
+  // 04:00 UTC on 23 Aug is still 21:00 on 22 Aug in Los Angeles. Computing "today"
+  // in UTC would drop a closure the business is still inside of.
+  const afterMidnightUtc = new Date('2026-08-23T04:00:00Z');
+
+  it('keeps a still-current local closed date when UTC has already rolled over', () => {
+    expect(formatBusinessHoursForPlaceholder(hours, afterMidnightUtc, 'America/Los_Angeles')).toContain(
+      'closed 2026-08-22',
+    );
+  });
+
+  it('drops that date once "today" in UTC has already passed it', () => {
+    expect(formatBusinessHoursForPlaceholder(hours, afterMidnightUtc, 'UTC')).not.toContain('2026-08-22');
   });
 });

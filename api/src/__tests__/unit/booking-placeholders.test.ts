@@ -118,6 +118,20 @@ describe('{services} / {openingHours} substitution in the composed prompt', () =
     } as any);
     expect(prompt).toContain('We are open Mon 09:00–17:00.');
     expect(prompt).toContain('We offer .'); // services still empty
+    expect(prompt).toContain('## OPENING HOURS');
+    expect(prompt).toContain('Mon 09:00–17:00');
+  });
+
+  it('generic core (no template body) still gets an OPENING HOURS section when hours are configured', () => {
+    const { prompt } = composeSystemPrompt({
+      ...base,
+      tools: [tool('kb_search')],
+      openingHours: 'Mon 09:00–17:00 · closed 2026-08-23',
+    } as any);
+    expect(prompt).toContain('## OPENING HOURS');
+    expect(prompt).toContain('closed 2026-08-23');
+    expect(prompt).toContain('configured hours override');
+    expect(prompt).not.toMatch(/factual about the business — services, opening hours/);
   });
 
   it('booking tools present but NOT configured → {services} still empty', () => {
@@ -199,5 +213,27 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
     expect(out).toContain('## OPENING HOURS');
     expect(out).toContain('- Mon: 09:00–17:00');
     expect(out).not.toContain('OVERRIDE');
+  });
+
+  it('operational hours win when both stores exist, including an upcoming closed date', () => {
+    const operational = {
+      enabled: true,
+      schedule: [{ day: 'monday', open: '08:00', close: '12:00', closed: false }],
+      dateOverrides: [{ date: '2026-12-23', closed: true }],
+    };
+    const out = buildHoursSection(
+      rule({ weeklyHours: { mon: [{ start: '09:00', end: '17:00' }] } }),
+      NOW,
+      { hours: operational, timezone: 'Europe/Brussels' },
+    )!;
+    expect(out).toContain('- Mon: 08:00–12:00');
+    expect(out).not.toContain('09:00');
+    expect(out).toContain('2026-12-23');
+    expect(out).toContain('CLOSED');
+  });
+
+  it('falls back to the availability rule when operational hours are not configured', () => {
+    const out = buildHoursSection(rule(), NOW, { hours: { enabled: false, schedule: [] }, timezone: 'Europe/Brussels' })!;
+    expect(out).toContain('- Mon: 09:00–17:00');
   });
 });

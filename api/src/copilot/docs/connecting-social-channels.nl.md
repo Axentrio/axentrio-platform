@@ -16,12 +16,14 @@ tags:
 
 Je bot kan DM's beantwoorden op Facebook, Instagram, WhatsApp Business en Telegram — elk bericht dat een klant naar je sociale profiel stuurt, wordt door dezelfde bot behandeld, met dezelfde kennis.
 
-Open *Social media* in de zijbalk om alle kanalen te zien.
+Open *Instellingen → Kanalen* om alle kanalen te zien.
 
-**Facebook en Instagram:** klik op **Facebook koppelen**. Geef de Meta-pagina toestemming. De bot behandelt vanaf dan de DM's van Messenger. Instagram zet je apart aan op dezelfde koppeling — zet het aan nadat Facebook gekoppeld is.
+**Facebook en Instagram:** klik op **Facebook**. Geef de Meta-pagina toestemming. De bot behandelt vanaf dan de DM's van Messenger. Er is geen aparte Instagram-koppeling. Als de gekozen pagina een gekoppeld professioneel Instagram-account (business/creator) heeft én *Instagram-DM's* aanstaat onder *Instellingen → Functies*, wordt Instagram automatisch mee gekoppeld. Zonder die koppeling aan Meta-zijde wordt alleen Facebook gekoppeld.
 
-**WhatsApp:** vereist een WhatsApp Business-account. Klik op **WhatsApp koppelen** en volg de verificatie van Meta. Het kan 24 à 48 uur duren voor Meta je afzendernaam goedkeurt.
+Koppel Instagram eerst aan Meta-zijde: het account moet Professional zijn en gekoppeld aan een Facebook-pagina waarvan je beheerder bent (Instagram-appinstellingen / pagina-instellingen → Gekoppelde accounts, of Meta Business Suite). Instagram ondersteunt alleen DM's — geen feedposts, stories of reacties — en vereist Essential of hoger. De Facebook-pagina ontkoppelen ontkoppelt ook Instagram.
 
-**Telegram:** maak een bot aan via @BotFather op Telegram en plak de bot-token in de kaart *Telegram*.
+**WhatsApp:** klik op **WhatsApp**. Een venster vraagt om het Phone Number ID en het toegangstoken van je WhatsApp Cloud API-nummer (uit Meta Business). Optioneel kun je ook het WhatsApp Business Account ID invullen.
 
-**Kanaal apart uitzetten:** elk kanaal heeft zijn eigen schakelaar. Zet een kanaal uit zonder de koppeling te verbreken — de bot houdt zijn instellingen bij, maar antwoordt niet meer op dat kanaal tot je het weer aanzet.
+**Telegram:** er is geen Telegram-knop om te verbinden op de kanalenpagina. Bestaande Telegram-koppelingen blijven in de lijst staan.
+
+**Kanaal aan- of uitzetten:** elk kanaal — Facebook Messenger, Instagram-DM's, WhatsApp en Telegram — zet je aan of uit onder *Instellingen → Functies*. Een functie uitzetten houdt de verbindingsrij, maar stopt de antwoorden. De prullenbakknop op een verbinding verwijdert die helemaal.

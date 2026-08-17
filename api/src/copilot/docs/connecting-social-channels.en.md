@@ -16,12 +16,14 @@ tags:
 
 Your bot can answer DMs on Facebook, Instagram, WhatsApp Business, and Telegram — every message a customer sends to your social profile is handled by the same bot, with the same knowledge.
 
-Open *Social Media* in the sidebar to see all channels.
+Open *Settings → Channels* to see all channels.
 
-**Facebook + Instagram:** click **Connect Facebook**. Authorize the Meta page. The bot now handles Messenger DMs. Instagram is enabled separately on the same connection — toggle it on after Facebook connects.
+**Facebook + Instagram:** click **Facebook**. Authorize the Meta Page. The bot now handles Messenger DMs. There is no standalone Instagram connect. If the selected Page has a linked Instagram professional (business/creator) account and *Instagram DMs* is on under *Settings → Features*, Instagram is connected automatically alongside Facebook. Without that Meta-side link, only Facebook connects.
 
-**WhatsApp:** requires a WhatsApp Business account. Click **Connect WhatsApp** and follow Meta's verification flow. Setup can take 24–48h for Meta to approve your sender display name.
+Link Instagram first on Meta's side: the account must be Professional and linked to a Facebook Page you admin (Instagram app settings / Page settings → Linked accounts, or Meta Business Suite). Instagram is DMs only — no feed posts, stories, or comments — and requires Essential or higher. Disconnecting the Facebook Page also disconnects the linked Instagram connection.
 
-**Telegram:** create a bot via @BotFather on Telegram, paste the bot token into the *Telegram* setup card.
+**WhatsApp:** click **WhatsApp**. A modal asks for the Phone Number ID and access token of your WhatsApp Cloud API number (from Meta Business). You can optionally add a WhatsApp Business Account ID.
 
-**Per-channel disable:** each channel has its own toggle. Disable a channel without disconnecting — the bot keeps its config but stops replying on that channel until re-enabled.
+**Telegram:** there is no Telegram connect button on the channels page. Existing Telegram connections still appear in the list.
+
+**Enable or disable a channel:** every channel — Facebook Messenger, Instagram DMs, WhatsApp, and Telegram — is turned on or off under *Settings → Features*. Turning a feature off keeps the connection row but stops replies. The trash button on a connection removes it entirely.

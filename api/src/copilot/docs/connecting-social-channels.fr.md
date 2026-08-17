@@ -16,12 +16,14 @@ tags:
 
 Votre bot peut répondre aux messages privés sur Facebook, Instagram, WhatsApp Business et Telegram — chaque message envoyé à votre profil social est traité par le même bot, avec les mêmes connaissances.
 
-Ouvrez *Réseaux sociaux* dans le menu latéral pour voir tous les canaux.
+Ouvrez *Paramètres → Canaux* pour voir tous les canaux.
 
-**Facebook et Instagram :** cliquez sur **Connecter Facebook**. Autorisez la page Meta. Le bot prend alors en charge les messages Messenger. Instagram s'active séparément sur la même connexion — activez-le une fois Facebook connecté.
+**Facebook et Instagram :** cliquez sur **Facebook**. Autorisez la page Meta. Le bot prend alors en charge les messages Messenger. Il n'existe pas de connexion Instagram séparée. Si la page sélectionnée a un compte Instagram professionnel (business/créateur) lié et que *DM Instagram* est activé sous *Paramètres → Fonctionnalités*, Instagram se connecte automatiquement en même temps que Facebook. Sans ce lien côté Meta, seul Facebook est connecté.
 
-**WhatsApp :** nécessite un compte WhatsApp Business. Cliquez sur **Connecter WhatsApp** et suivez la procédure de vérification de Meta. Comptez 24 à 48 h pour que Meta approuve votre nom d'expéditeur.
+Liez d'abord Instagram côté Meta : le compte doit être Professionnel et relié à une page Facebook dont vous êtes admin (réglages de l'app Instagram / réglages de la page → Comptes liés, ou Meta Business Suite). Instagram ne gère que les messages privés — pas de publications du fil, de stories ni de commentaires — et nécessite Essential ou plus. Déconnecter la page Facebook déconnecte aussi Instagram.
 
-**Telegram :** créez un bot via @BotFather sur Telegram, puis collez le jeton du bot dans la carte *Telegram*.
+**WhatsApp :** cliquez sur **WhatsApp**. Une fenêtre demande le Phone Number ID et le jeton d'accès de votre numéro WhatsApp Cloud API (depuis Meta Business). Vous pouvez aussi indiquer l'ID du compte WhatsApp Business.
 
-**Désactiver un canal :** chaque canal a son propre interrupteur. Désactivez-en un sans rompre la connexion — le bot conserve sa configuration mais cesse de répondre sur ce canal jusqu'à réactivation.
+**Telegram :** il n'y a pas de bouton de connexion Telegram sur la page des canaux. Les connexions Telegram existantes apparaissent toujours dans la liste.
+
+**Activer ou désactiver un canal :** chaque canal — Facebook Messenger, DM Instagram, WhatsApp et Telegram — s'active ou se désactive sous *Paramètres → Fonctionnalités*. Désactiver une fonctionnalité conserve la ligne de connexion mais arrête les réponses. Le bouton poubelle sur une connexion la supprime entièrement.

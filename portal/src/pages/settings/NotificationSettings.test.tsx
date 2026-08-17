@@ -42,6 +42,11 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('@/queries/useTenantQueries', () => ({
+  useTenantSettings: () => ({ data: { settings: { inbox: { defaultTakeoverHours: 'indefinite' } } } }),
+  useUpdateTenant: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock('@websocket/notificationSound', () => ({
   useNotificationSound: () => soundRef.current,
   setSoundMuted: vi.fn(),

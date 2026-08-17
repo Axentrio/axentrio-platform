@@ -83,8 +83,12 @@ vi.mock('../queries/useHandoffQueries', () => ({
   useRejectHandoff: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+const tenantSettingsRef = vi.hoisted(() => ({
+  current: undefined as { settings?: { inbox?: { defaultTakeoverHours?: number | 'indefinite' } } } | undefined,
+}));
+
 vi.mock('../queries/useTenantQueries', () => ({
-  useTenantSettings: () => ({ data: undefined }),
+  useTenantSettings: () => ({ data: tenantSettingsRef.current }),
 }));
 
 // The list + window internals are not under test — keep the page light.
@@ -172,6 +176,7 @@ function renderInbox(chat: Chat) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  tenantSettingsRef.current = undefined;
   __resetConversationLiveState();
   capturedHandlers.current = null;
   registerHandlersMock.mockImplementation((handlers) => {
@@ -222,6 +227,18 @@ describe('Inbox takeover duration menu', () => {
     // Indefinite control → the plain "you have control" badge.
     const badge = await screen.findByTestId('human-control-badge');
     expect(badge).toHaveAttribute('data-state', 'indefinite');
+  });
+
+  it('marks the tenant default duration in the Take Over menu', async () => {
+    tenantSettingsRef.current = { settings: { inbox: { defaultTakeoverHours: 4 } } };
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'handoff_requested' }));
+
+    await user.click(await screen.findByRole('button', { name: /Take Over/ }));
+    expect(await screen.findByRole('menuitem', { name: /For 4 hours/i })).toHaveAttribute(
+      'data-default',
+      'true',
+    );
   });
 });
 

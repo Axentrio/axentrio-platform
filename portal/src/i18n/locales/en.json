@@ -399,7 +399,14 @@
         "description": "Show browser notifications",
         "permissionDenied": "Desktop notifications were not enabled. Please allow them in your browser settings."
       },
-      "saveFailed": "Failed to save notification preferences. Please try again."
+      "saveFailed": "Failed to save notification preferences. Please try again.",
+      "defaultTakeover": {
+        "title": "Default takeover duration",
+        "description": "Preselects the Take Over menu. You can still pick a different duration each time.",
+        "indefinite": "Until I hand back — AI stays blocked",
+        "hours_one": "{{count}} hour",
+        "hours_other": "{{count}} hours"
+      }
     },
     "appearance": {
       "title": "Theme",

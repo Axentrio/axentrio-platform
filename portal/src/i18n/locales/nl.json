@@ -397,7 +397,14 @@
         "description": "Browsermeldingen weergeven",
         "permissionDenied": "Desktopmeldingen zijn niet ingeschakeld. Sta ze toe in je browserinstellingen."
       },
-      "saveFailed": "Meldingsvoorkeuren opslaan is mislukt. Probeer het opnieuw."
+      "saveFailed": "Meldingsvoorkeuren opslaan is mislukt. Probeer het opnieuw.",
+      "defaultTakeover": {
+        "title": "Standaard overnameduur",
+        "description": "Selecteert vooraf het Overnemen-menu. U kunt elke keer een andere duur kiezen.",
+        "indefinite": "Tot ik het teruggeef — de AI blijft geblokkeerd",
+        "hours_one": "{{count}} uur",
+        "hours_other": "{{count}} uur"
+      }
     },
     "appearance": {
       "title": "Thema",

@@ -33,6 +33,7 @@ import {
   AnchorBotMissingError,
 } from '../services/bot-config.service';
 import type { BotSettings } from '../database/entities/Bot';
+import { parseDefaultTakeoverHours, resolveDefaultTakeoverHours } from '../services/inbox-prefs.service';
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -73,6 +74,9 @@ router.get(
       logger.warn('Anchor bot missing during GET /tenants/me — returning empty settings', { tenantId });
     }
     const settings: Record<string, any> = { ...botSettings };
+    settings.inbox = {
+      defaultTakeoverHours: resolveDefaultTakeoverHours(tenant.settings?.inbox?.defaultTakeoverHours),
+    };
     if (settings.ai) {
       const tenantApiKey = tenant.settings?.ai?.apiKey;
       // Defensive: bot.settings.ai shouldn't carry apiKey, but strip it anyway.
@@ -222,6 +226,17 @@ router.patch(
       return { ...bh, timezone: derived } as BotSettings['businessHours'];
     };
 
+    if (settings?.inbox !== undefined) {
+      const parsed = parseDefaultTakeoverHours(settings.inbox?.defaultTakeoverHours);
+      if (parsed === null) {
+        throw new BadRequestError('defaultTakeoverHours must be an integer 1–24 or "indefinite"');
+      }
+      tenant.settings = {
+        ...(tenant.settings ?? {}),
+        inbox: { defaultTakeoverHours: parsed },
+      };
+    }
+
     if (settings) {
       const botPatch: Partial<BotSettings> = {};
       if (settings.theme !== undefined) botPatch.theme = settings.theme;
@@ -275,6 +290,9 @@ router.patch(
       if (!(err instanceof AnchorBotMissingError)) throw err;
     }
     const responseSettings: Record<string, any> = { ...responseBotSettings };
+    responseSettings.inbox = {
+      defaultTakeoverHours: resolveDefaultTakeoverHours(tenant.settings?.inbox?.defaultTakeoverHours),
+    };
     if (responseSettings.ai) {
       const tenantApiKey = tenant.settings?.ai?.apiKey;
       const { apiKey: _stale, ...aiRest } = responseSettings.ai as { apiKey?: string };

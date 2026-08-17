@@ -397,7 +397,14 @@
         "description": "Afficher les notifications du navigateur",
         "permissionDenied": "Les notifications de bureau n'ont pas été activées. Autorisez-les dans les paramètres de votre navigateur."
       },
-      "saveFailed": "Échec de l'enregistrement des préférences de notification. Veuillez réessayer."
+      "saveFailed": "Échec de l'enregistrement des préférences de notification. Veuillez réessayer.",
+      "defaultTakeover": {
+        "title": "Durée de prise en charge par défaut",
+        "description": "Présélectionne le menu Prendre en charge. Vous pouvez toujours choisir une autre durée.",
+        "indefinite": "Jusqu'à ce que je la rende — l'IA reste bloquée",
+        "hours_one": "{{count}} heure",
+        "hours_other": "{{count}} heures"
+      }
     },
     "appearance": {
       "title": "Thème",

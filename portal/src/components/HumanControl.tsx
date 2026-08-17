@@ -40,20 +40,37 @@ interface TakeoverMenuProps {
   /** The trigger button — rendered via Radix `asChild`. */
   trigger: React.ReactElement;
   onSelect: (policy: TakeoverPolicy) => void;
+  /** Tenant default — marked in the menu so the operator sees the preselection. */
+  defaultPolicy?: TakeoverPolicy;
 }
 
-export const TakeoverMenu: React.FC<TakeoverMenuProps> = ({ trigger, onSelect }) => {
+function isDefaultPick(policy: TakeoverPolicy, fallback: TakeoverPolicy | undefined): boolean {
+  if (!fallback) return policy.mode === 'indefinite';
+  if (policy.mode === 'indefinite' || fallback.mode === 'indefinite') {
+    return policy.mode === fallback.mode;
+  }
+  return policy.hours === fallback.hours;
+}
+
+export const TakeoverMenu: React.FC<TakeoverMenuProps> = ({ trigger, onSelect, defaultPolicy }) => {
   const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onSelect({ mode: 'indefinite' })}>
+        <DropdownMenuItem
+          data-default={isDefaultPick({ mode: 'indefinite' }, defaultPolicy) ? 'true' : undefined}
+          onClick={() => onSelect({ mode: 'indefinite' })}
+        >
           {t('inbox.takeover.indefinite')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {TAKEOVER_HOURS.map((hours) => (
-          <DropdownMenuItem key={hours} onClick={() => onSelect({ mode: 'timed', hours })}>
+          <DropdownMenuItem
+            key={hours}
+            data-default={isDefaultPick({ mode: 'timed', hours }, defaultPolicy) ? 'true' : undefined}
+            onClick={() => onSelect({ mode: 'timed', hours })}
+          >
             {t('inbox.takeover.forHours', { count: hours })}
           </DropdownMenuItem>
         ))}

@@ -72,6 +72,26 @@ describe('TakeoverMenu', () => {
     }
   });
 
+  it('marks the tenant default so the operator sees which pick is preselected', async () => {
+    const onSelect = vi.fn<(p: TakeoverPolicy) => void>();
+    const user = userEvent.setup();
+    render(
+      <TakeoverMenu
+        onSelect={onSelect}
+        defaultPolicy={{ mode: 'timed', hours: 4 }}
+        trigger={<button type="button">Take Over</button>}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Take Over' }));
+    const four = await screen.findByRole('menuitem', { name: /For 4 hours/i });
+    expect(four).toHaveAttribute('data-default', 'true');
+    expect(screen.getByRole('menuitem', { name: /Until I hand back/i })).not.toHaveAttribute(
+      'data-default',
+      'true',
+    );
+  });
+
   it('emits { mode:"indefinite" } for "Until I hand back — AI stays blocked"', async () => {
     const onSelect = vi.fn<(p: TakeoverPolicy) => void>();
     const user = userEvent.setup();

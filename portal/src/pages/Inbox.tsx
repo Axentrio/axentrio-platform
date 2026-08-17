@@ -151,6 +151,11 @@ const Inbox: React.FC = () => {
   const { t } = useTranslation();
   const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
+  const defaultTakeoverHours = tenant?.settings?.inbox?.defaultTakeoverHours;
+  const defaultTakeoverPolicy: TakeoverPolicy =
+    typeof defaultTakeoverHours === 'number'
+      ? { mode: 'timed', hours: defaultTakeoverHours }
+      : { mode: 'indefinite' };
 
   const getReasonLabel = (reason: HandoffRequest['reason']) => {
     const key = `inbox.handoff.reason.${reason}`;
@@ -677,6 +682,7 @@ const Inbox: React.FC = () => {
                   )}
                   {isHandoff && (
                     <TakeoverMenu
+                      defaultPolicy={defaultTakeoverPolicy}
                       onSelect={(policy) =>
                         // The initial indefinite pick keeps the modeless
                         // legacy body — only timed picks carry a policy.
@@ -697,6 +703,7 @@ const Inbox: React.FC = () => {
                   {isHumanOwned && (
                     <>
                       <TakeoverMenu
+                        defaultPolicy={defaultTakeoverPolicy}
                         onSelect={handleChangeDuration}
                         trigger={
                           <Button

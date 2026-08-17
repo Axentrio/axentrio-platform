@@ -152,5 +152,7 @@ describe('AgentService — which source feeds {openingHours}', () => {
     const { openingHours } = liveFields();
     expect(openingHours).toContain('03:03'); // operational hours win when both stores exist
     expect(openingHours).not.toContain('09:00');
+    // Empty catalog ⇒ no travel services; the flag still reaches the composer.
+    expect(liveFields()).toMatchObject({ hasTravelServices: false });
   });
 });

@@ -75,6 +75,26 @@ export function sanitizeForLine(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
 }
 
+/** Drop one `## HEADING` block (heading + body until the next `## ` or EOF). */
+function stripHeadingBlock(text: string, heading: string): string {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`(?:\\n)?${escaped}\\n[\\s\\S]*?(?=\\n## |$)`, 'g'), '');
+}
+
+/** Spoken ## OUR ADDRESS — both wording variants from the old buildVenueSection. */
+function buildOurAddressSection(line: string, hasTravelServices: boolean): string {
+  const whereToSay = hasTravelServices
+    ? `Give this address when a customer asks where you are or how to find you. Do NOT assume
+their appointment happens here: some services are carried out at the customer's own address,
+and each service says which it is. If it is one of those, the appointment is where they are.`
+    : `Give this address when a customer asks where you are, how to find you, or where an
+appointment will take place.`;
+  return `\n## OUR ADDRESS
+Customers come to us at: ${sanitizeForLine(line)}.
+${whereToSay} Do not invent directions, parking or opening arrangements
+that are not stated elsewhere.`;
+}
+
 /** Per-channel prompt overrides for messaging channels. `channelOverrides` lives on
  *  Bot.settings.ai (jsonb), which is structurally wider than the Tenant-derived
  *  AiSettings alias — hence the cast, mirroring `templateVariables`. */
@@ -202,10 +222,15 @@ interface AgentCtx {
    *  a business FACT rather than a booking capability, so every bot may state it. */
   serviceArea?: string;
   /** The venue address as one line (formatVenueLine), when the owner configured a
-   *  premises that receives customers. Gates the come-in-person invite in the
-   *  BOOKING (NOT AVAILABLE) block: a mobile-only business has no venue, so the
-   *  invite is omitted rather than sending customers to an address that isn't one. */
+   *  premises that receives customers. Authoritative spoken address (## OUR ADDRESS)
+   *  and the come-in-person invite in BOOKING (NOT AVAILABLE). A mobile-only
+   *  business has no venue, so both are omitted rather than inventing one. */
   venueLine?: string;
+  /** True when at least one bookable service is carried out at the customer's
+   *  address. Selects the travel-caveat wording of ## OUR ADDRESS and suppresses
+   *  the come-in-person invite (a mobile job has no shop to visit). Absent/false
+   *  ⇒ premises wording (back-compat). */
+  hasTravelServices?: boolean;
   /** Session channel (widget/whatsapp/messenger/instagram/telegram). On a
    *  non-widget channel the customer's contact is already known (the channel
    *  handle), so the lead-capture guidance is adapted to capture the request
@@ -464,18 +489,30 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // below.)
 
   // Knowledge base usage — hard rule (the agent never volunteered kb_search).
-  // Configured opening hours override KB: the owner set them in the bot form, so
-  // a stale KB snippet must not send hours questions to kb_search.
+  // Configured opening hours / address override KB: the owner set them in the bot
+  // form, so a stale KB snippet must not send those questions to kb_search.
   const configuredHours = (ctx.openingHours ?? '').trim();
+  const configuredAddress = (ctx.venueLine ?? '').trim();
   if (tools.some((t) => t.name === 'kb_search')) {
-    const hoursClause = configuredHours
-      ? 'services, prices, policies, location, contact details'
-      : 'services, opening hours, prices, policies, location, contact details';
-    const hoursOverride = configuredHours
-      ? ' Opening hours are already configured in this prompt — answer hours questions from those configured hours (including any closed dates listed there) and do NOT call kb_search for opening hours; configured hours override anything in the knowledge base.'
-      : '';
+    const topics = ['services'];
+    if (!configuredHours) topics.push('opening hours');
+    topics.push('prices', 'policies');
+    if (!configuredAddress) topics.push('location');
+    topics.push('contact details');
+    const overrideBits: string[] = [];
+    if (configuredHours) {
+      overrideBits.push(
+        'Opening hours are already configured in this prompt — answer hours questions from those configured hours (including any closed dates listed there) and do NOT call kb_search for opening hours; configured hours override anything in the knowledge base.',
+      );
+    }
+    if (configuredAddress) {
+      overrideBits.push(
+        'The business address is already configured in this prompt — answer location questions from that configured address and do NOT call kb_search for location; configured address overrides anything in the knowledge base.',
+      );
+    }
+    const configuredOverride = overrideBits.length ? ` ${overrideBits.join(' ')}` : '';
     sections.push(
-      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — ${hoursClause}, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering.${hoursOverride} NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
+      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — ${topics.join(', ')}, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering.${configuredOverride} NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
     );
     ledger.include(K.KNOWLEDGE);
   } else {
@@ -547,10 +584,11 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     // The one block owns the whole no-booking ladder, in order: (1) cannot book
     // here, (2) come in person if a venue exists, (3) capture contact / connect
     // team, (4) if still insisting, ask about a human then escalate.
-    // (2) is venue-gated: a mobile-only business has no premises to invite anyone
-    // to, so without a venueLine the invite is omitted entirely. Opening hours ride
-    // along only when known — the invite should name when visiting actually works.
-    const visitInvite = ctx.venueLine
+    // (2) is venue-gated AND travel-gated: a mobile-only business has no premises
+    // to invite anyone to, and a travel service must not be told "come to our shop"
+    // (the address may be a billing address). Opening hours ride along only when
+    // known — the invite should name when visiting actually works.
+    const visitInvite = ctx.venueLine && !ctx.hasTravelServices
       ? ` tell them they are welcome to visit us in person at ${ctx.venueLine}${ctx.openingHours ? ` during our opening hours: ${ctx.openingHours}` : ''},`
       : '';
     // (4) only when the escalate tool is actually loaded — otherwise the sentence
@@ -586,9 +624,13 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
   }
 
   // Module prompt contributions (e.g. booking's bookable-services catalog),
-  // composed in catalog order.
+  // composed in catalog order. venueLine is the authoritative spoken address
+  // (quoted → invoice → scheduler); drop any leftover ## OUR ADDRESS a module
+  // still emits so the two can never disagree.
   for (const section of moduleSections ?? []) {
-    if (section) sections.push(section);
+    if (!section) continue;
+    const cleaned = configuredAddress ? stripHeadingBlock(section, '## OUR ADDRESS') : section;
+    if (cleaned.trim()) sections.push(cleaned);
   }
 
   // Generic / non-booking bots never get booking.module's OPENING HOURS block.
@@ -599,6 +641,13 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
     sections.push(
       `\n## OPENING HOURS\nThe business is open at these times. State these when the customer asks about opening hours; they override anything in the knowledge base.\n${configuredHours}`,
     );
+  }
+
+  // Same pattern as hours: every bot with a resolved venueLine gets the address
+  // as a fact, including booking bots (whose NOT-AVAILABLE visit-invite is omitted
+  // once tools are loaded). Travel vs premises wording is the hasTravelServices predicate.
+  if (configuredAddress && !sections.some((s) => s.includes('## OUR ADDRESS'))) {
+    sections.push(buildOurAddressSection(configuredAddress, !!ctx.hasTravelServices));
   }
 
   // Per-template skill prose OVERRIDES (composable-templates) — a template can

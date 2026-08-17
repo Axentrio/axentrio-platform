@@ -31,7 +31,6 @@ import {
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { Bot } from '../database/entities/Bot';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
-import { formatVenueLine } from '../contracts/venue-address';
 import { resolveTravelEligibility } from '../booking/travel/travel-eligibility';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { resolveItineraryKey } from '../scheduler/itinerary-key';
@@ -331,46 +330,6 @@ export function formatHoursForPlaceholder(rule: AvailabilityRule | null, now: Da
 }
 
 /**
- * WHERE the business is, for the bot to say out loud.
- *
- * The venue was shipped as an invite-only field: it reaches the calendar event and the
- * confirmation email, and nothing else. So an owner would fill in their address, and the
- * assistant — asked "where are you based?" — answered that no location was specified. From
- * the owner's side the setting simply appeared not to work.
- *
- * Distinct from the SERVICE AREA block, and both can be present: the area is where the
- * business will TRAVEL TO, this is where customers COME TO. A business can have one, the
- * other, or both.
- */
-export function buildVenueSection(venue: {
-  street?: string | null;
-  postalCode?: string | null;
-  city?: string | null;
-  country?: string | null;
-} | null | undefined,
-/**
- * True when at least one bookable service is carried out at the CUSTOMER's address. The block
- * used to be built from the four venue columns alone, so it told the bot to give this address
- * for "where an appointment will take place" — including for travel jobs, whose invite says
- * the opposite. A business with real premises AND one mobile service hits that with no
- * misconfiguration at all; it just fills in the venue exactly as the field asks.
- */
-hasTravelServices = false): string | null {
-  const line = formatVenueLine(venue);
-  if (!line) return null;
-  const whereToSay = hasTravelServices
-    ? `Give this address when a customer asks where you are or how to find you. Do NOT assume
-their appointment happens here: some services are carried out at the customer's own address,
-and each service says which it is. If it is one of those, the appointment is where they are.`
-    : `Give this address when a customer asks where you are, how to find you, or where an
-appointment will take place.`;
-  return `\n## OUR ADDRESS
-Customers come to us at: ${sanitizeForLine(line)}.
-${whereToSay} Do not invent directions, parking or opening arrangements
-that are not stated elsewhere.`;
-}
-
-/**
  * How to get a locatable address, and what to do when one still cannot be placed.
  *
  * ONE COPY, because two different gates now throw the same code and neither owns the
@@ -594,15 +553,8 @@ export const bookingModule: ModuleDefinition = {
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );
-    const venueSection = buildVenueSection(
-      {
-        street: bookingSettings?.venueStreet,
-        postalCode: bookingSettings?.venuePostalCode,
-        city: bookingSettings?.venueCity,
-        country: bookingSettings?.venueCountry,
-      },
-      services.some((s) => s.customerAddressRequired),
-    );
+    // ## OUR ADDRESS is composed from venueLine (quoted → invoice → scheduler) so
+    // this module must not emit a competing scheduler-only copy.
     const businessCapacity = !!(
       bookingSettings?.maxBookingsPerDay ||
       bookingSettings?.maxBookedMinutesPerDay ||
@@ -642,16 +594,15 @@ export const bookingModule: ModuleDefinition = {
     });
     // No bookable catalog → the services and hours blocks stay suppressed exactly as
     // before, but a configured service area is still worth stating on its own.
-    // An address is worth stating even for a bot with no bookable catalog — "where are you?"
-    // is not a booking question.
-    if (!servicesSection) return [venueSection, areaSection].filter(Boolean).join('') || null;
+    // Address is composed from venueLine (every bot), not here.
+    if (!servicesSection) return areaSection || null;
     // Operational hours (bot form) win for spoken hours; AvailabilityRule still
     // solely governs bookable slots. Fall back to the rule only when unset.
     const hoursSection = buildHoursSection(rule, new Date(), {
       hours: bot?.settings?.businessHours,
       timezone: businessTimezone,
     });
-    return [servicesSection, hoursSection, venueSection, areaSection, customerAddressSection]
+    return [servicesSection, hoursSection, areaSection, customerAddressSection]
       .filter(Boolean)
       .join('');
   },

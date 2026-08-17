@@ -32,8 +32,9 @@ export class PromptBuilder {
     /** Live values for the {services} / {openingHours} / {serviceArea} placeholders.
      *  `services` is only substituted when the bot can actually book; the other two are
      *  business facts and always are. `venueLine` is the formatted venue address (when
-     *  a premises is configured) gating the come-in-person invite. */
-    liveFields?: { services?: string; openingHours?: string; serviceArea?: string; venueLine?: string },
+     *  a premises is configured): the spoken ## OUR ADDRESS fact and the come-in-person invite.
+     *  `hasTravelServices` selects the travel-caveat wording of that address block. */
+    liveFields?: { services?: string; openingHours?: string; serviceArea?: string; venueLine?: string; hasTravelServices?: boolean },
     /** Per-turn runtime decisions the composer must not make for itself. */
     runtime?: { proactiveAsk?: boolean; outsideBusinessHours?: boolean }
   ): { prompt: string; ledger: BlockLedger } {
@@ -56,6 +57,7 @@ export class PromptBuilder {
       openingHours: liveFields?.openingHours,
       serviceArea: liveFields?.serviceArea,
       venueLine: liveFields?.venueLine,
+      hasTravelServices: liveFields?.hasTravelServices,
       channel,
       proactiveAsk: runtime?.proactiveAsk,
       outsideBusinessHours: runtime?.outsideBusinessHours,

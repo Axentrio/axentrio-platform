@@ -15,6 +15,10 @@
 // search mandate and (b) inject ## OPENING HOURS for generic/non-booking bots.
 // Existing snapshots below do not pass openingHours, so they stay byte-identical.
 //
+// RE-LOCKED 2026-08-17 (address): configured venueLine now (a) injects ## OUR ADDRESS
+// for every bot and (b) omits location from the KB search mandate. Snapshots below
+// do not pass venueLine, so they stay byte-identical.
+//
 // RE-LOCKED 2026-08-14 (plan-booking-behaviour.md, Fix 3): the ## ESCALATION rule
 // was narrowed to "explicitly asks for a human agent" (the broad "or you cannot
 // help" preempted the BOOKING (NOT AVAILABLE) insist ladder). That one-line diff
@@ -301,6 +305,84 @@ describe('characterization: agent PromptBuilder.build', () => {
     expect(prompt).toContain('closed 2026-08-23');
     expect(prompt).toContain('do NOT call kb_search for opening hours');
     expect(prompt).toContain('configured hours override');
+  });
+
+  it('configured quotedAddress: OUR ADDRESS is stated and KB must not search location', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      venueLine: 'Passtraat 248 bus B, 9100 Sint-Niklaas',
+    });
+    expect(prompt).toContain('## OUR ADDRESS');
+    expect(prompt).toContain('Passtraat 248 bus B, 9100 Sint-Niklaas');
+    expect(prompt).toContain('do NOT call kb_search for location');
+    expect(prompt).toContain('configured address override');
+    expect(prompt).toContain('factual about the business — services, opening hours, prices, policies, contact details');
+    expect(prompt).not.toContain('factual about the business — services, opening hours, prices, policies, location, contact details');
+  });
+
+  it('no address configured: no OUR ADDRESS section, KB still searches location', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+    });
+    expect(prompt).not.toContain('## OUR ADDRESS');
+    expect(prompt).toContain('services, opening hours, prices, policies, location, contact details');
+  });
+
+  it('booking bot: quotedAddress wins over scheduler venue, exactly one OUR ADDRESS', () => {
+    const schedulerVenue = `\n## OUR ADDRESS\nCustomers come to us at: Schedulerstraat 1, 9000 Gent.\nGive this address when a customer asks where you are.`;
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking'), tool('kb_search')], bookingConfigured: true,
+      venueLine: 'Passtraat 248 bus B, 9100 Sint-Niklaas',
+      moduleSections: [schedulerVenue],
+    });
+    expect(prompt.split('\n').filter((l) => l.startsWith('## OUR ADDRESS'))).toHaveLength(1);
+    expect(prompt).toContain('Passtraat 248 bus B, 9100 Sint-Niklaas');
+    expect(prompt).not.toContain('Schedulerstraat 1');
+    expect(prompt).not.toContain('9000 Gent');
+  });
+
+  it('travel bot: OUR ADDRESS has the travel caveat, not premises appointment wording', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking'), tool('kb_search')], bookingConfigured: false,
+      venueLine: 'Passtraat 248 bus B, 9100 Sint-Niklaas',
+      hasTravelServices: true,
+    });
+    expect(prompt).toContain('## OUR ADDRESS');
+    expect(prompt).toContain('Passtraat 248 bus B, 9100 Sint-Niklaas');
+    expect(prompt).toMatch(/customer's own address/i);
+    expect(prompt).toContain('Do NOT assume');
+    expect(prompt).not.toMatch(/where an\s+appointment will take place/i);
+    expect(prompt).not.toContain('visit us in person');
+  });
+
+  it('premises bot: OUR ADDRESS keeps appointment-at-venue wording', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('create_booking')], bookingConfigured: true,
+      venueLine: 'Stationsstraat 12, 9300 Aalst',
+      hasTravelServices: false,
+    });
+    expect(prompt).toContain('## OUR ADDRESS');
+    expect(prompt).toMatch(/where an\s+appointment will take place/i);
+    expect(prompt).not.toMatch(/customer's own address/i);
+  });
+
+  it('configured hours + address: KB topic list drops both hours and location', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      openingHours: 'Mon 09:00–17:00',
+      venueLine: 'Passtraat 248 bus B, 9100 Sint-Niklaas',
+    });
+    expect(prompt).toContain('factual about the business — services, prices, policies, contact details');
+    expect(prompt).toContain('do NOT call kb_search for opening hours');
+    expect(prompt).toContain('do NOT call kb_search for location');
+    expect(prompt).not.toContain('factual about the business — services, opening hours');
+    expect(prompt).not.toContain('prices, policies, location');
   });
 
   it('booking available + venue: no NOT-AVAILABLE block, so no invite either', () => {

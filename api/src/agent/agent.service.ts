@@ -603,6 +603,9 @@ export class AgentService {
       // Rendered values for the {services} / {openingHours} placeholders. Built from
       // the SAME rows this block already loads (no extra queries).
       let bookingServices = '';
+      // Any bookable service carried out at the customer's address → travel-caveat
+      // wording on ## OUR ADDRESS (and no come-in-person invite).
+      let hasTravelServices = false;
       // Spoken hours prefer the operational Bot.settings.businessHours (what the
       // owner set in the bot form). The booking AvailabilityRule is only a fallback
       // for the placeholder — it still solely governs which slots are bookable.
@@ -645,6 +648,7 @@ export class AgentService {
           });
           bookingConfigured = isBookingConfigured(services, !!rule);
           bookingServices = formatServicesForPlaceholder(services);
+          hasTravelServices = services.some((s) => s.customerAddressRequired);
         } catch (error) {
           // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
           // must not falsely decline a CONFIGURED tenant. Worst case is the prior
@@ -751,7 +755,7 @@ export class AgentService {
       // Currently outside opening hours: the composer adds the AVAILABILITY fact so
       // the bot keeps helping and never announces "closed" as a reason to disengage.
       const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine }, { proactiveAsk, outsideBusinessHours });
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine, hasTravelServices }, { proactiveAsk, outsideBusinessHours });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.

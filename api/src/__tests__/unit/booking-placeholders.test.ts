@@ -65,6 +65,17 @@ describe('formatBusinessHoursForPlaceholder (non-booking bots)', () => {
     expect(formatBusinessHoursForPlaceholder({ ...bh, enabled: false })).toBe('');
     expect(formatBusinessHoursForPlaceholder(null)).toBe('');
   });
+
+  it('appends upcoming closed dates so a holiday is not silently omitted', () => {
+    const bh = {
+      enabled: true,
+      schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+      dateOverrides: [{ date: '2026-12-25', closed: true }],
+    } as any;
+    expect(formatBusinessHoursForPlaceholder(bh, new Date('2026-12-01T10:00:00Z'))).toBe(
+      'Mon 09:00–17:00 · closed 2026-12-25',
+    );
+  });
 });
 
 describe('{services} / {openingHours} substitution in the composed prompt', () => {

@@ -1,3 +1,10 @@
+import {
+  isRelevantOn,
+  overrideSpanEnd,
+  pickOverrideForDate,
+  type DateOverride,
+} from '../database/entities/AvailabilityRule';
+
 /**
  * Renders `Bot.settings.businessHours` for the `{openingHours}` placeholder.
  *
@@ -21,6 +28,12 @@ export interface BusinessHours {
   enabled: boolean;
   timezone?: string;
   schedule: BusinessHoursDay[];
+  /**
+   * One-off exceptions to the weekly schedule — the same Date Override shape
+   * the booking Availability Rule already stores. A closed date, or different
+   * hours on a date. Absent/empty = weekly schedule only.
+   */
+  dateOverrides?: DateOverride[];
 }
 
 const DAY_LABEL: Record<string, string> = {
@@ -34,15 +47,42 @@ const DAY_LABEL: Record<string, string> = {
 };
 
 /** e.g. "Mon 09:00–17:00, Wed 10:00–14:00". Matches the booking hours formatting. */
-export function formatBusinessHoursForPlaceholder(bh?: BusinessHours | null): string {
+export function formatBusinessHoursForPlaceholder(
+  bh?: BusinessHours | null,
+  now: Date = new Date(),
+): string {
   if (!bh?.enabled || !Array.isArray(bh.schedule)) return '';
-  return bh.schedule
+  const weekly = bh.schedule
     .filter((d) => d && !d.closed && typeof d.open === 'string' && typeof d.close === 'string' && d.open && d.close)
     .map((d) => {
       const key = typeof d.day === 'string' ? d.day.toLowerCase() : '';
       return `${DAY_LABEL[key] ?? d.day} ${d.open}–${d.close}`;
     })
     .join(', ');
+
+  // Closures are part of the answer for a bot without booking too: otherwise
+  // `{openingHours}` quotes the weekly grid on a day the owner marked closed.
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const y = dateParts.find((p) => p.type === 'year')?.value;
+  const m = dateParts.find((p) => p.type === 'month')?.value;
+  const d = dateParts.find((p) => p.type === 'day')?.value;
+  const today = y && m && d ? `${y}-${m}-${d}` : '';
+  const closures = (Array.isArray(bh.dateOverrides) ? bh.dateOverrides : [])
+    .filter((o) => o && typeof o.date === 'string' && o.closed && today && isRelevantOn(o, today))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3)
+    .map((o) => {
+      const end = overrideSpanEnd(o);
+      return end ? `${o.date} to ${end}` : o.date;
+    });
+  if (!closures.length) return weekly;
+  const closed = `closed ${closures.join(', ')}`;
+  return weekly ? `${weekly} · ${closed}` : closed;
 }
 
 /**
@@ -59,10 +99,15 @@ export function formatBusinessHoursForPlaceholder(bh?: BusinessHours | null): st
  * configurator's browser clock, which is exactly the authority this predicate
  * must not consult.
  *
+ * Date Overrides (closed days / one-off hours) replace the weekly schedule
+ * for the local calendar date they cover — same `pickOverrideForDate` the
+ * booking engine uses, so the two cannot disagree about a holiday.
+ *
  * Returns FALSE — treat as OPEN, never announce "closed" — whenever hours are
  * disabled, the schedule is empty, the timezone is missing/invalid (Intl
- * throws), or a day's open/close is malformed. Failing safe toward engaging
- * the customer is always better than a wrong "we are closed".
+ * throws), a day's open/close is malformed, or an exception is present but
+ * unusable. Failing safe toward engaging the customer is always better than
+ * a wrong "we are closed".
  */
 export function isOutsideBusinessHours(
   bh: BusinessHours | null | undefined,
@@ -84,6 +129,29 @@ export function isOutsideBusinessHours(
     const minute = parts.find((p) => p.type === 'minute')?.value;
     if (!hour || !minute) return false;
     const timeStr = `${hour}:${minute}`;
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+    const y = dateParts.find((p) => p.type === 'year')?.value;
+    const m = dateParts.find((p) => p.type === 'month')?.value;
+    const d = dateParts.find((p) => p.type === 'day')?.value;
+    const dateStr = y && m && d ? `${y}-${m}-${d}` : '';
+    // A well-formed Date Override replaces the weekly schedule for that local
+    // date. Malformed / missing exceptions are ignored (fail-safe to the weekly
+    // grid, never a wrong "closed").
+    const override = dateStr ? pickOverrideForDate(bh.dateOverrides, dateStr) : undefined;
+    if (override) {
+      if (override.closed) return true;
+      const windows = Array.isArray(override.windows) ? override.windows : [];
+      const usable = windows.filter(
+        (w) => w && typeof w.start === 'string' && typeof w.end === 'string' && w.start && w.end,
+      );
+      if (usable.length === 0) return false; // override present but hours unusable → open
+      return usable.every((w) => timeStr < w.start || timeStr >= w.end);
+    }
     const daySchedule = bh.schedule.find(
       (s) => s && typeof s.day === 'string' && s.day.toLowerCase() === dayName,
     );

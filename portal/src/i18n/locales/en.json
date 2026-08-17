@@ -938,7 +938,16 @@
           "presetEveryday": "Every day 9–5",
           "timezone": "Timezone (IANA, e.g. America/New_York)",
           "closed": "Closed",
-          "save": "Save business hours"
+          "save": "Save business hours",
+          "overrides": {
+            "label": "Closed dates & one-off hours",
+            "helper": "Holidays or different hours on a specific date. These override the weekly schedule for the off-hours reply.",
+            "add": "Add closed date",
+            "empty": "No exceptions. The weekly schedule applies every week.",
+            "to": "to",
+            "closed": "Closed",
+            "remove": "Remove this exception"
+          }
         }
       },
       "advanced": {

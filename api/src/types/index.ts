@@ -95,6 +95,12 @@ export interface ITenantSettings {
     enabled: boolean;
     timezone: string;
     schedule: IScheduleDay[];
+    dateOverrides?: Array<{
+      date: string;
+      endDate?: string;
+      closed?: boolean;
+      windows?: Array<{ start: string; end: string }>;
+    }>;
   };
 }
 

@@ -28,3 +28,38 @@ describe('businessHoursSchema — timezone', () => {
     }
   });
 });
+
+describe('businessHoursSchema — dateOverrides', () => {
+  it('accepts a closed date and one-off hours', () => {
+    const r = businessHoursSchema.safeParse({
+      enabled: true,
+      schedule,
+      dateOverrides: [
+        { date: '2026-12-25', closed: true },
+        { date: '2026-12-24', windows: [{ start: '10:00', end: '14:00' }] },
+      ],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.dateOverrides).toEqual([
+        { date: '2026-12-25', closed: true },
+        { date: '2026-12-24', windows: [{ start: '10:00', end: '14:00' }] },
+      ]);
+    }
+  });
+
+  it('rejects a backwards range', () => {
+    const r = businessHoursSchema.safeParse({
+      enabled: true,
+      schedule,
+      dateOverrides: [{ date: '2026-12-26', endDate: '2026-12-25', closed: true }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('treats a missing dateOverrides as empty (weekly schedule only)', () => {
+    const r = businessHoursSchema.safeParse({ enabled: true, schedule });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.dateOverrides).toBeUndefined();
+  });
+});

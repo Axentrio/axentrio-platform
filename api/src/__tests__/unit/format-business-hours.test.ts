@@ -110,6 +110,71 @@ describe('isOutsideBusinessHours', () => {
     });
   });
 
+  describe('Date Overrides (closed days / one-off hours)', () => {
+    it('a closed date is outside hours even when the weekly grid is open', () => {
+      expect(
+        isOutsideBusinessHours(
+          bh({
+            dateOverrides: [{ date: '2026-01-14', closed: true }],
+          }),
+          'UTC',
+          WED_10_00Z,
+        ),
+      ).toBe(true);
+    });
+
+    it('override hours replace the weekly window for that date', () => {
+      const short = bh({
+        dateOverrides: [{ date: '2026-01-14', windows: [{ start: '12:00', end: '14:00' }] }],
+      });
+      // 10:00 UTC is inside the weekly 09–17, but outside the 12–14 override.
+      expect(isOutsideBusinessHours(short, 'UTC', WED_10_00Z)).toBe(true);
+      expect(isOutsideBusinessHours(short, 'UTC', new Date('2026-01-14T13:00:00Z'))).toBe(false);
+      expect(isOutsideBusinessHours(short, 'UTC', new Date('2026-01-14T14:00:00Z'))).toBe(true);
+    });
+
+    it('a date with no override falls back to the weekly schedule', () => {
+      expect(
+        isOutsideBusinessHours(
+          bh({
+            dateOverrides: [{ date: '2026-01-15', closed: true }],
+          }),
+          'UTC',
+          WED_10_00Z,
+        ),
+      ).toBe(false);
+    });
+
+    it('a malformed or empty exception fails safe to open', () => {
+      // Closed flag absent, windows unusable → never announce closed.
+      expect(
+        isOutsideBusinessHours(
+          bh({
+            dateOverrides: [{ date: '2026-01-14', windows: [{ start: '', end: '' }] }],
+          }),
+          'UTC',
+          new Date('2026-01-14T08:00:00Z'),
+        ),
+      ).toBe(false);
+      expect(
+        isOutsideBusinessHours(
+          bh({
+            dateOverrides: [{ date: '2026-01-14' }],
+          }),
+          'UTC',
+          new Date('2026-01-14T08:00:00Z'),
+        ),
+      ).toBe(false);
+    });
+
+    it('a multi-day closed range covers every date it spans', () => {
+      const range = bh({
+        dateOverrides: [{ date: '2026-01-13', endDate: '2026-01-16', closed: true }],
+      });
+      expect(isOutsideBusinessHours(range, 'UTC', WED_10_00Z)).toBe(true);
+    });
+  });
+
   describe('operational hours agree with booking hours on the same local instant (A4)', () => {
     // The SAME Wednesday 09:00–17:00 schedule expressed both ways, both read in
     // the one canonical business timezone. If the off-hours gate and the slot
@@ -134,6 +199,18 @@ describe('isOutsideBusinessHours', () => {
     it.each(instants.map((d) => [d.toISOString(), d] as const))('%s', (_label, instant) => {
       const bookingOpen = isWithinBusinessHours(rule, instant);
       const operationalOpen = !isOutsideBusinessHours(operational, 'Europe/Brussels', instant);
+      expect(operationalOpen).toBe(bookingOpen);
+    });
+
+    it('a shared closed Date Override keeps the two predicates in lockstep', () => {
+      const closed = [{ date: '2026-01-14', closed: true }];
+      const bookingOpen = isWithinBusinessHours({ ...rule, dateOverrides: closed }, WED_10_00Z);
+      const operationalOpen = !isOutsideBusinessHours(
+        bh({ dateOverrides: closed }),
+        'Europe/Brussels',
+        WED_10_00Z,
+      );
+      expect(operationalOpen).toBe(false);
       expect(operationalOpen).toBe(bookingOpen);
     });
   });

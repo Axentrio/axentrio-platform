@@ -930,7 +930,16 @@
           "presetEveryday": "Tous les jours 9–17",
           "timezone": "Fuseau horaire (IANA, ex. America/New_York)",
           "closed": "Fermé",
-          "save": "Enregistrer les horaires"
+          "save": "Enregistrer les horaires",
+          "overrides": {
+            "label": "Jours fermés et horaires ponctuels",
+            "helper": "Jours fériés ou horaires différents à une date précise. Ils remplacent le planning hebdomadaire pour la réponse hors horaires.",
+            "add": "Ajouter un jour fermé",
+            "empty": "Aucune exception. Le planning hebdomadaire s'applique chaque semaine.",
+            "to": "au",
+            "closed": "Fermé",
+            "remove": "Supprimer cette exception"
+          }
         }
       },
       "advanced": {

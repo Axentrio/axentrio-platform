@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dateOverride } from './scheduler.schema';
 
 export const createBotSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255),
@@ -22,6 +23,9 @@ export const businessHoursSchema = z.object({
       }),
     )
     .max(7),
+  // Same Date Override shape the booking Availability Rule already stores:
+  // a named closure, or different hours, on a specific date (or inclusive range).
+  dateOverrides: z.array(dateOverride).optional(),
 });
 
 export const updateBotSchema = z

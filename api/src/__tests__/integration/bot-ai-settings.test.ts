@@ -330,5 +330,20 @@ describe('Per-bot AI settings', () => {
         .send({ businessHours: { ...validBH, schedule: [{ day: 'monday', open: '9am', close: '17:00', closed: false }] } });
       expect(res.status).toBe(422);
     });
+
+    it('persists dateOverrides and returns them on GET', async () => {
+      const dateOverrides = [
+        { date: '2026-12-25', closed: true },
+        { date: '2026-12-24', windows: [{ start: '10:00', end: '14:00' }] },
+      ];
+      const patch = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({ businessHours: { ...validBH, dateOverrides } });
+      expect(patch.status).toBe(200);
+
+      const get = await request(app).get(`/api/v1/bots/${botId}`);
+      expect(get.status).toBe(200);
+      expect(get.body.data.businessHours.dateOverrides).toEqual(dateOverrides);
+    });
   });
 });

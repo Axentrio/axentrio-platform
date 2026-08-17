@@ -349,3 +349,15 @@ export type GroupingPeriod = 'none' | 'half_day' | 'full_day';
 
 /** Every value the column accepts, for validation that cannot drift from the type. */
 export const GROUPING_PERIODS: readonly GroupingPeriod[] = ['none', 'half_day', 'full_day'] as const;
+
+/**
+ * How the already-scored Slot list is sorted for presentation (ADR-0017, 2026-08-17).
+ *
+ * Feasibility alone decides membership. These modes choose only the sort key: `auto` is the
+ * grouping scorer's existing preference; `nearest` / `farthest` invert the same already-computed
+ * detour figures. A Slot the scorer left unscored keeps its chronological position.
+ */
+export type RoutePriority = 'auto' | 'nearest' | 'farthest';
+
+/** Every value the column accepts, for validation that cannot drift from the type. */
+export const ROUTE_PRIORITIES: readonly RoutePriority[] = ['auto', 'nearest', 'farthest'] as const;

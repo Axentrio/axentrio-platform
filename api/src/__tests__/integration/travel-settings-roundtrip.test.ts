@@ -125,3 +125,30 @@ describe('grouping period', () => {
     expect((await stored())?.travelGroupingPeriod).toBe('half_day');
   });
 });
+
+describe('route priority', () => {
+  it('persists and reads back, defaulting to auto', async () => {
+    const res = await save({ routePriority: 'nearest' });
+    expect(res.status).toBe(200);
+    expect((await stored())?.travelRoutePriority).toBe('nearest');
+    expect((await read()).body.data.travel.routePriority).toBe('nearest');
+  });
+
+  it('accepts farthest as well as nearest', async () => {
+    const res = await save({ routePriority: 'farthest' });
+    expect(res.status).toBe(200);
+    expect((await stored())?.travelRoutePriority).toBe('farthest');
+    expect((await read()).body.data.travel.routePriority).toBe('farthest');
+  });
+
+  it('refuses a mode nobody has implemented', async () => {
+    const res = await save({ routePriority: 'optimize' });
+    expect(res.status).toBe(422);
+  });
+
+  it('is left alone by a save that does not mention it', async () => {
+    await save({ routePriority: 'nearest' });
+    await save({ startFromBase: true });
+    expect((await stored())?.travelRoutePriority).toBe('nearest');
+  });
+});

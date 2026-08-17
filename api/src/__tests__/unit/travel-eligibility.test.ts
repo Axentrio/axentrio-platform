@@ -59,6 +59,15 @@ describe('resolveTravelEligibility', () => {
     });
   });
 
+  it('carries a stored Route Priority rather than inventing auto', async () => {
+    bsFindOne.mockResolvedValue({
+      travelTimeEnabled: true,
+      travelSlackMin: 10,
+      travelRoutePriority: 'nearest',
+    });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, routePriority: 'nearest' });
+  });
+
   it('reads a zero detour threshold as no threshold, not as "nothing qualifies"', async () => {
     // A preference that silently marks every slot unpreferred is indistinguishable from one that
     // is switched off, and the second is overwhelmingly what an owner who typed 0 meant.

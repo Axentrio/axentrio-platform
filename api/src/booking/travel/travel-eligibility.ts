@@ -165,7 +165,7 @@ export async function resolveTravelEligibility(input: {
     startFromBase: settings.travelStartFromBase === true,
     baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
     groupingPeriod: settings.travelGroupingPeriod ?? 'none',
-    routePriority: 'auto',
+    routePriority: settings.travelRoutePriority ?? 'auto',
     // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
     // that silently marks every slot unpreferred is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.

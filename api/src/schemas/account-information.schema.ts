@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseBelgianVat } from '../integrations/company-lookup/vat-number';
+import { normalizeAccountVat } from '../integrations/company-lookup/vat-number';
 
 const requiredText = (max: number) =>
   z.string().trim().min(1).max(max);
@@ -26,12 +26,18 @@ export const accountInformationWriteSchema = z.object({
     .trim()
     .min(1)
     .transform((raw, ctx) => {
-      const parsed = parseBelgianVat(raw);
-      if (!parsed) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Belgian VAT / enterprise number' });
+      const parsed = normalizeAccountVat(raw);
+      if (!parsed.ok) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            parsed.reason === 'too_long'
+              ? 'VAT number must be at most 16 characters'
+              : 'Invalid VAT number',
+        });
         return z.NEVER;
       }
-      return parsed.vatNumber;
+      return parsed.value;
     }),
   contactPerson: requiredText(255),
   invoiceAddress: invoiceAddressSchema,

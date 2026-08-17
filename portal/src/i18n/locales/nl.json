@@ -327,6 +327,7 @@
       "helper": "Bedrijfsidentiteit voor facturen. Los van je persoonlijke profiel en van het adres dat de AI aan klanten noemt.",
       "officialBusinessName": "Officiële bedrijfsnaam",
       "vatNumber": "BTW-nummer",
+      "vatHint": "bijv. BE0123456789 of NL123456789B01",
       "vatVerified": "Geverifieerd bij het register",
       "contactPerson": "Contactpersoon",
       "invoiceEmail": "Facturatie-e-mail",

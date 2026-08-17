@@ -327,6 +327,7 @@
       "helper": "Identité de l'entreprise pour les factures. Distincte de votre profil personnel et de l'adresse que l'IA cite aux clients.",
       "officialBusinessName": "Raison sociale",
       "vatNumber": "Numéro de TVA",
+      "vatHint": "ex. BE0123456789 ou NL123456789B01",
       "vatVerified": "Vérifié auprès du registre",
       "contactPerson": "Personne de contact",
       "invoiceEmail": "E-mail de facturation",

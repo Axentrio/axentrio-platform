@@ -16,7 +16,7 @@ import {
   lookupCompanyByVat,
   parseViesAddress,
 } from '../../integrations/company-lookup/company-lookup.service';
-import { parseBelgianVat, splitLegalForm, formatEnterpriseNumber } from '../../integrations/company-lookup/vat-number';
+import { parseBelgianVat, normalizeAccountVat, splitLegalForm, formatEnterpriseNumber } from '../../integrations/company-lookup/vat-number';
 
 /** A real VIES payload, copied from the live service. */
 const COLRUYT = {
@@ -55,10 +55,30 @@ describe('parseBelgianVat — accept every way a human writes it', () => {
     expect(parseBelgianVat('12345')).toBeNull();
     expect(parseBelgianVat('9400378485')).toBeNull(); // enterprise numbers start 0 or 1
     expect(parseBelgianVat('04003784850')).toBeNull(); // eleven digits
+    expect(parseBelgianVat('NL123456789B01')).toBeNull();
   });
 
   it('formats back to the form printed on invoices', () => {
     expect(formatEnterpriseNumber('0400378485')).toBe('0400.378.485');
+  });
+});
+
+describe('normalizeAccountVat — international account VAT', () => {
+  it('keeps the Belgian canonical form for BE inputs', () => {
+    expect(normalizeAccountVat('BE 0123.456.789')).toEqual({ ok: true, value: 'BE0123456789' });
+    expect(normalizeAccountVat('0123456789')).toEqual({ ok: true, value: 'BE0123456789' });
+    expect(normalizeAccountVat('400378485')).toEqual({ ok: true, value: 'BE0400378485' });
+  });
+
+  it('accepts NL / DE / FR without rewriting them as Belgian', () => {
+    expect(normalizeAccountVat('NL123456789B01')).toEqual({ ok: true, value: 'NL123456789B01' });
+    expect(normalizeAccountVat('DE123456789')).toEqual({ ok: true, value: 'DE123456789' });
+    expect(normalizeAccountVat('FR 40 303 265 045')).toEqual({ ok: true, value: 'FR40303265045' });
+  });
+
+  it('rejects junk and over-length values rather than truncating', () => {
+    expect(normalizeAccountVat('???')).toEqual({ ok: false, reason: 'invalid' });
+    expect(normalizeAccountVat('NL123456789B01234')).toEqual({ ok: false, reason: 'too_long' });
   });
 });
 
@@ -140,6 +160,15 @@ describe('lookupCompanyByVat', () => {
     const r = await lookupCompanyByVat('hello');
     expect(r.status).toBe('invalid_format');
     expect(axiosGet).not.toHaveBeenCalled();
+  });
+
+  it('skips Belgian VIES for a non-BE VAT rather than calling the register', async () => {
+    for (const raw of ['NL123456789B01', 'DE123456789', 'GB123456789']) {
+      axiosGet.mockClear();
+      const r = await lookupCompanyByVat(raw);
+      expect(r.status).toBe('invalid_format');
+      expect(axiosGet).not.toHaveBeenCalled();
+    }
   });
 
   it('degrades to unavailable when the register is down, and never throws', async () => {

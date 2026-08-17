@@ -169,7 +169,7 @@ const AccountInformationSettings: React.FC = () => {
               onChange={(v) => set('vatNumber', v)}
               error={errors.vatNumber}
               disabled={saving}
-              hint={form.vatVerified ? t('settings.account.vatVerified') : undefined}
+              hint={form.vatVerified ? t('settings.account.vatVerified') : t('settings.account.vatHint')}
             />
             <Field
               id="contactPerson"

@@ -43,9 +43,37 @@ describe('accountInformationWriteSchema', () => {
     expect(noStreet.success).toBe(false);
   });
 
-  it('rejects a non-Belgian or malformed VAT', () => {
-    expect(accountInformationWriteSchema.safeParse({ ...valid, vatNumber: 'FR123' }).success).toBe(false);
-    expect(accountInformationWriteSchema.safeParse({ ...valid, vatNumber: 'not-a-vat' }).success).toBe(false);
+  it('accepts Belgian formats and keeps the existing canonical form', () => {
+    for (const raw of ['BE 0123.456.789', '0123456789', 'BE0123456789']) {
+      const r = accountInformationWriteSchema.safeParse({ ...valid, vatNumber: raw });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.vatNumber).toBe('BE0123456789');
+    }
+  });
+
+  it('accepts EU VATs from NL, DE and FR', () => {
+    expect(accountInformationWriteSchema.safeParse({ ...valid, vatNumber: 'NL123456789B01' }).success).toBe(true);
+    expect(accountInformationWriteSchema.safeParse({ ...valid, vatNumber: 'DE123456789' }).success).toBe(true);
+    const fr = accountInformationWriteSchema.safeParse({ ...valid, vatNumber: 'FR 40 303 265 045' });
+    expect(fr.success).toBe(true);
+    if (fr.success) expect(fr.data.vatNumber).toBe('FR40303265045');
+  });
+
+  it('rejects junk and anything longer than 16 characters after normalisation', () => {
+    const junk = accountInformationWriteSchema.safeParse({ ...valid, vatNumber: '???' });
+    expect(junk.success).toBe(false);
+    if (!junk.success) {
+      expect(junk.error.issues.some((i) => i.message === 'Invalid VAT number')).toBe(true);
+    }
+
+    const tooLong = accountInformationWriteSchema.safeParse({
+      ...valid,
+      vatNumber: 'NL123456789B01234',
+    });
+    expect(tooLong.success).toBe(false);
+    if (!tooLong.success) {
+      expect(tooLong.error.issues.some((i) => i.message === 'VAT number must be at most 16 characters')).toBe(true);
+    }
   });
 
   it('rejects a malformed invoice email', () => {

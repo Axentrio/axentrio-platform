@@ -45,6 +45,48 @@ export function parseBelgianVat(raw: string | null | undefined): ParsedVat | nul
     : null;
 }
 
+/** Two-letter country prefix + 2–12 alphanumerics, e.g. `NL123456789B01`. */
+const EU_VAT = /^[A-Z]{2}[A-Z0-9]{2,12}$/;
+/** Permissive fallback; `tenants.vat_number` is varchar(16). */
+const LOOSE_VAT = /^[A-Z0-9]{4,16}$/;
+
+export type NormalisedVat =
+  | { ok: true; value: string }
+  | { ok: false; reason: 'too_long' | 'invalid' };
+
+/**
+ * Account-information VAT. Belgian numbers keep the existing canonical form
+ * (`BE` + 10 digits). Other values are accepted when they look like an EU VAT
+ * or a short alphanumeric identifier, and rejected (never truncated) past 16
+ * characters so they fit the column.
+ */
+export function normalizeAccountVat(raw: string | null | undefined): NormalisedVat {
+  if (raw == null) return { ok: false, reason: 'invalid' };
+
+  const normalised = String(raw)
+    .trim()
+    .toUpperCase()
+    .replace(/[.\s-]/g, '');
+
+  if (!normalised) return { ok: false, reason: 'invalid' };
+  if (normalised.length > 16) return { ok: false, reason: 'too_long' };
+
+  // Bare digits or a BE prefix: keep the Belgian canonical form so existing
+  // BE tenants write the same value they always have. Do NOT run this on a
+  // foreign prefix — `parseBelgianVat('DE123456789')` would strip letters and
+  // mis-read a German number as Belgian.
+  if (/^(BE)?\d+$/.test(normalised)) {
+    const parsed = parseBelgianVat(normalised);
+    if (parsed) return { ok: true, value: parsed.vatNumber };
+  }
+
+  if (EU_VAT.test(normalised) || LOOSE_VAT.test(normalised)) {
+    return { ok: true, value: normalised };
+  }
+
+  return { ok: false, reason: 'invalid' };
+}
+
 /** `0400378485` → `0400.378.485`, the form printed on Belgian invoices. */
 export function formatEnterpriseNumber(enterpriseNumber: string): string {
   return `${enterpriseNumber.slice(0, 4)}.${enterpriseNumber.slice(4, 7)}.${enterpriseNumber.slice(7)}`;

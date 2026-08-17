@@ -78,7 +78,8 @@ router.put(
     };
 
     let vatVerified = tenant.vatNumber === body.vatNumber ? tenant.vatVerified : false;
-    if (tenant.vatNumber !== body.vatNumber) {
+    const looksBelgian = /^BE/.test(body.vatNumber) || /^\d+$/.test(body.vatNumber);
+    if (tenant.vatNumber !== body.vatNumber && looksBelgian) {
       const lookup = await lookupCompanyByVat(body.vatNumber);
       vatVerified = lookup.status === 'found';
     }

@@ -329,6 +329,7 @@
       "helper": "Business identity used on invoices. Separate from your personal profile and from the address the AI quotes to customers.",
       "officialBusinessName": "Official business name",
       "vatNumber": "VAT number",
+      "vatHint": "e.g. BE0123456789 or NL123456789B01",
       "vatVerified": "Verified against the register",
       "contactPerson": "Contact person",
       "invoiceEmail": "Invoice email",

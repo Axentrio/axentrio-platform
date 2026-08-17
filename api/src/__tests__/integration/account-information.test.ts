@@ -149,7 +149,7 @@ describe('PUT /api/v1/tenants/me/account', () => {
     await signedInTenant();
     const badVat = await request(app)
       .put('/api/v1/tenants/me/account')
-      .send({ ...PAYLOAD, vatNumber: 'FR123' });
+      .send({ ...PAYLOAD, vatNumber: '???' });
     expect(badVat.status).toBe(422);
 
     const badEmail = await request(app)
@@ -175,5 +175,17 @@ describe('PUT /api/v1/tenants/me/account', () => {
     expect(lookupCompanyByVat).toHaveBeenCalled();
     expect(res.body.data.vatVerified).toBe(true);
     expect(res.body.data.vatNumber).toBe('BE0123456749');
+  });
+
+  it('saves a non-Belgian VAT and leaves verification unset', async () => {
+    await signedInTenant();
+    lookupCompanyByVat.mockResolvedValue({ status: 'invalid_format', company: null, cached: false });
+
+    const res = await request(app)
+      .put('/api/v1/tenants/me/account')
+      .send({ ...PAYLOAD, vatNumber: 'NL123456789B01' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.vatNumber).toBe('NL123456789B01');
+    expect(res.body.data.vatVerified).toBe(false);
   });
 });

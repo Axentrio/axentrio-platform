@@ -98,6 +98,13 @@ export async function lookupCompanyByVat(
   rawVat: string,
   deps: { redis?: Redis | null } = {},
 ): Promise<LookupResult> {
+  // Foreign country prefixes must not reach parseBelgianVat: it strips letters
+  // and zero-pads, so DE/PT/GB + 9 digits would become a Belgian VIES lookup.
+  const prefix = String(rawVat).trim().toUpperCase().slice(0, 2);
+  if (/^[A-Z]{2}$/.test(prefix) && prefix !== 'BE') {
+    return { status: 'invalid_format', company: null, cached: false };
+  }
+
   const parsed = parseBelgianVat(rawVat);
   if (!parsed) return { status: 'invalid_format', company: null, cached: false };
 

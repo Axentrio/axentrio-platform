@@ -232,7 +232,11 @@ describe('widget-initiated handoff notifications', () => {
       const notifications = await notificationRepo.count({
         where: { tenantId: tenant.id, type: 'handoff_requested' },
       });
-      const emails = await emailRepo.count({ where: { tenantId: tenant.id, relatedId: handoff.id } });
+      // sendDurable inserts the ledger row as `pending` before the provider
+      // call; wait for `sent` or the assertion below races the transaction.
+      const emails = await emailRepo.count({
+        where: { tenantId: tenant.id, relatedId: handoff.id, status: 'sent' },
+      });
       return notifications === 1 && emails === 1;
     });
 

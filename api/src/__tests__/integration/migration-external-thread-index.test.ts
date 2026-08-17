@@ -3,13 +3,13 @@
  *
  * The first version of this migration indexed unquoted `channel_connection_id`,
  * which has never existed — the ChatSession column is camelCase
- * `"channelConnectionId"` (added by 177550). That SQL crash-looped every
- * production boot. These tests replay both states the fixed migration must
- * survive: a schema that already has the column (fresh / synchronize), and a
- * schema that is missing it (prod).
+ * `"channelConnectionId"` (added by 177550). The shipped SQL only creates the
+ * expression index on that quoted identifier (`CREATE INDEX IF NOT EXISTS`).
+ * It does not add the column if missing: prod already had it when this
+ * migration ran, so a column-less schema is out of contract.
  *
  * Follow-on migrations 179200 / 179210 / 179220 are also exercised once so a
- * missing-table / missing-column typo in those cannot hide behind this fix.
+ * missing-table / missing-column typo in those cannot hide behind this index.
  */
 import { describe, it, expect } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
@@ -55,17 +55,27 @@ async function columnExists(columnName: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function dropColumnAndIndex(): Promise<void> {
-  await AppDataSource.query(`DROP INDEX IF EXISTS ix_chat_sessions_external_thread`);
+async function indexDef(): Promise<string> {
+  const [idx] = await AppDataSource.query(
+    `SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND indexname = $1`,
+    [INDEX_NAME],
+  );
+  return idx.indexdef;
+}
+
+/** Restore the 177550 column + FK so later tests share the synchronized schema. */
+async function restoreChannelConnectionColumn(): Promise<void> {
+  await AppDataSource.query(
+    `ALTER TABLE "chat_sessions" ADD COLUMN IF NOT EXISTS "channelConnectionId" uuid`,
+  );
   await AppDataSource.query(
     `ALTER TABLE "chat_sessions" DROP CONSTRAINT IF EXISTS "FK_chat_session_channel_conn"`,
   );
-  await AppDataSource.query(
-    `ALTER TABLE "chat_sessions" DROP COLUMN IF EXISTS "channelConnectionId"`,
-  );
-  await AppDataSource.query(
-    `ALTER TABLE "chat_sessions" DROP COLUMN IF EXISTS channel_connection_id`,
-  );
+  await AppDataSource.query(`
+    ALTER TABLE "chat_sessions" ADD CONSTRAINT "FK_chat_session_channel_conn"
+      FOREIGN KEY ("channelConnectionId") REFERENCES "channel_connections"("id") ON DELETE SET NULL
+  `);
 }
 
 describe('AddExternalThreadIndex migration', () => {
@@ -75,38 +85,39 @@ describe('AddExternalThreadIndex migration', () => {
     expect(await indexExists()).toBe(true);
     expect(await columnExists(COLUMN_NAME)).toBe(true);
     expect(await columnExists('channel_connection_id')).toBe(false);
+
+    const def = await indexDef();
+    expect(def).toContain(`"${COLUMN_NAME}"`);
+    expect(def).not.toContain('channel_connection_id');
   });
 
-  it('up() adds the missing column then the index (prod-shaped schema)', async () => {
-    await dropColumnAndIndex();
+  it('up() hard-fails when "channelConnectionId" is missing (out of contract)', async () => {
+    await AppDataSource.query(`DROP INDEX IF EXISTS "ix_chat_sessions_external_thread"`);
+    await AppDataSource.query(
+      `ALTER TABLE "chat_sessions" DROP CONSTRAINT IF EXISTS "FK_chat_session_channel_conn"`,
+    );
+    await AppDataSource.query(
+      `ALTER TABLE "chat_sessions" DROP COLUMN IF EXISTS "channelConnectionId"`,
+    );
+    await AppDataSource.query(
+      `ALTER TABLE "chat_sessions" DROP COLUMN IF EXISTS channel_connection_id`,
+    );
     expect(await columnExists(COLUMN_NAME)).toBe(false);
     expect(await indexExists()).toBe(false);
 
-    await runUp(new AddExternalThreadIndex1791900000000(), 2);
-
-    expect(await columnExists(COLUMN_NAME)).toBe(true);
-    expect(await columnExists('channel_connection_id')).toBe(false);
-    expect(await indexExists()).toBe(true);
-
-    const [col] = await AppDataSource.query(
-      `SELECT data_type, is_nullable
-         FROM information_schema.columns
-        WHERE table_name = 'chat_sessions' AND column_name = $1`,
-      [COLUMN_NAME],
-    );
-    expect(col.data_type).toBe('uuid');
-    expect(col.is_nullable).toBe('YES');
-
-    const [idx] = await AppDataSource.query(
-      `SELECT indexdef FROM pg_indexes
-        WHERE schemaname = 'public' AND indexname = $1`,
-      [INDEX_NAME],
-    );
-    expect(idx.indexdef).toContain(`"${COLUMN_NAME}"`);
-    expect(idx.indexdef).not.toContain('channel_connection_id');
+    try {
+      await expect(runUp(new AddExternalThreadIndex1791900000000())).rejects.toThrow(
+        /column ["']channelConnectionId["'] does not exist/i,
+      );
+      expect(await columnExists(COLUMN_NAME)).toBe(false);
+      expect(await columnExists('channel_connection_id')).toBe(false);
+      expect(await indexExists()).toBe(false);
+    } finally {
+      await restoreChannelConnectionColumn();
+    }
   });
 
-  it('follow-on migrations 179200–179220 apply on the repaired schema', async () => {
+  it('follow-on migrations 179200–179220 apply on the current schema', async () => {
     await runUp(new AddCustomerChoosesLocation1792000000000(), 2);
     await runUp(new AddAccountInformation1792100000000(), 2);
 

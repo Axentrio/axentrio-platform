@@ -244,9 +244,8 @@ describe('Booking Flow — Full Agent Loop', () => {
       'Tue 10:00 AM',
       'Tue 2:00 PM',
     ]);
-    // The trailing undefined is `customerAddress` — collected only by a business that
-    // travels to its customers, and passed straight through when it is.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined, undefined);
 
     // Turn 3: User picks 10am and gives info. LLM re-verifies availability then books.
     // The precondition requires check_availability in the SAME turn before create_booking.

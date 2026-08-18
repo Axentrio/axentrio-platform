@@ -4,7 +4,7 @@
  * Nothing else maps ChannelTypes to feature keys.
  *
  * The widget is the native channel: always allowed, no feature key, never
- * gated. The four external channels each map to a per-channel Feature
+ * gated. External channels each map to a per-channel Feature
  * (Essential and above; per-tenant overrides apply via the entitlement resolver).
  * Unknown/future channel types resolve NOT entitled (fail closed) until a
  * key is added here.
@@ -20,6 +20,9 @@ const CHANNEL_FEATURES: Partial<Record<ChannelType, FeatureKey>> = {
   messenger: 'channelMessenger',
   instagram: 'channelInstagram',
   telegram: 'channelTelegram',
+  linkedin: 'channelLinkedin',
+  tiktok: 'channelTiktok',
+  x: 'channelX',
 };
 
 /**

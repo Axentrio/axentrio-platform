@@ -61,6 +61,9 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   channelMessenger: { label: 'Facebook Messenger', group: 'channels' },
   channelInstagram: { label: 'Instagram DMs', group: 'channels' },
   channelTelegram: { label: 'Telegram', group: 'channels' },
+  channelLinkedin: { label: 'LinkedIn', group: 'channels' },
+  channelTiktok: { label: 'TikTok', group: 'channels' },
+  channelX: { label: 'X', group: 'channels' },
   leadCapture: { label: 'Lead capture', group: 'leads' },
   leadEnrichment: {
     label: 'Structured lead data',

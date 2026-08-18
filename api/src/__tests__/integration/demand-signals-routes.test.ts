@@ -196,6 +196,17 @@ describe('POST /api/v1/demand-signals/notify-me — happy path', () => {
 // against the actual behavior — see report notes.
 
 describe('POST /api/v1/demand-signals/notify-me — validation', () => {
+  it('accepts the LinkedIn and X scaffold features', async () => {
+    const tenant = await createTestTenant({ tier: 'essential' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    setAuth({ tenantId: tenant.id, userId: admin.id });
+
+    for (const feature of ['linkedin', 'x']) {
+      const res = await request(app).post(ENDPOINT).send({ feature });
+      expect([200, 201]).toContain(res.status);
+    }
+  });
+
   it('rejects an unknown feature (zod allow-list) → 422', async () => {
     const tenant = await createTestTenant({ tier: 'essential' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });

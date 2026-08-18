@@ -290,9 +290,17 @@
         "3": "Unified conversation history regardless of where the chat started."
       }
     },
+    "linkedin": {
+      "title": "LinkedIn",
+      "description": "LinkedIn messaging support is coming soon."
+    },
     "tiktok": {
       "title": "TikTok",
       "description": "Direct-message support for TikTok Business is on our roadmap. Let us know you want it and we'll email you when it ships."
+    },
+    "x": {
+      "title": "X",
+      "description": "X direct-message support is coming soon."
     }
   },
   "roles": {

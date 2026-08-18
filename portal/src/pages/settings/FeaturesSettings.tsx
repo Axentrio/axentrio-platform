@@ -20,6 +20,8 @@ import {
   UserPlus,
   CalendarCheck,
   Gauge,
+  Music2,
+  AtSign,
   Lock,
   Pause,
   type LucideIcon,
@@ -72,6 +74,9 @@ const FEATURE_META: Record<SurfacedFeatureKey, FeatureMeta> = {
   channelMessenger: { label: 'Facebook Messenger', description: 'Reply to Messenger conversations.', icon: MessageSquare },
   channelInstagram: { label: 'Instagram DMs', description: 'Reply to Instagram direct messages.', icon: Camera },
   channelTelegram: { label: 'Telegram', description: 'Reply to Telegram messages.', icon: Send },
+  channelLinkedin: { label: 'LinkedIn', description: 'Reply to LinkedIn messages.', icon: MessageSquare },
+  channelTiktok: { label: 'TikTok', description: 'Reply to TikTok messages.', icon: Music2 },
+  channelX: { label: 'X', description: 'Reply to X direct messages.', icon: AtSign },
   leadCapture: { label: 'Leads', description: 'Capture and store leads from conversations.', icon: UserPlus },
   bookings: { label: 'Bookings', description: 'Let your bot schedule appointments.', icon: CalendarCheck },
   gapInsights: { label: 'Success Meter', description: 'AI insights into conversation gaps and outcomes.', icon: Gauge },
@@ -82,6 +87,9 @@ const CHANNEL_KEYS: SurfacedFeatureKey[] = [
   'channelMessenger',
   'channelInstagram',
   'channelTelegram',
+  'channelLinkedin',
+  'channelTiktok',
+  'channelX',
 ];
 
 interface FeatureGroup {

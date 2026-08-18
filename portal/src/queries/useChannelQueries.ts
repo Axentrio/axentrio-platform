@@ -10,7 +10,7 @@ interface ChannelConnection {
   tenantId: string;
   /** Bot this channel routes to; null = the tenant's default/anchor bot. */
   botId: string | null;
-  channel: 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp';
+  channel: 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp' | 'linkedin' | 'tiktok' | 'x';
   status: 'active' | 'disconnected' | 'error' | 'pending_setup';
   label: string | null;
   platformAccountId: string | null;

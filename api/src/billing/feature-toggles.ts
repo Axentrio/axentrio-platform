@@ -22,6 +22,9 @@ export const TENANT_TOGGLEABLE_FEATURES = [
   'channelMessenger',
   'channelInstagram',
   'channelTelegram',
+  'channelLinkedin',
+  'channelTiktok',
+  'channelX',
   'leadCapture',
   // DELIBERATE EXCEPTION to the "no `requires:` children" rule above.
   // `proactiveLeadCapture` has `requires: 'leadCapture'`, so it still follows its

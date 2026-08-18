@@ -59,7 +59,15 @@ export const REQUIRED_STEPS: readonly OnboardingStep[] = ['language', 'company',
  * fake key here would have been worse than the special case.
  */
 export const SKIP_DISABLES: Partial<Record<OnboardingStep, readonly string[]>> = {
-  social: ['channelWhatsapp', 'channelMessenger', 'channelInstagram', 'channelTelegram'],
+  social: [
+    'channelWhatsapp',
+    'channelMessenger',
+    'channelInstagram',
+    'channelTelegram',
+    'channelLinkedin',
+    'channelTiktok',
+    'channelX',
+  ],
   bookings: ['bookings'],
   leads: ['leadCapture'],
 };

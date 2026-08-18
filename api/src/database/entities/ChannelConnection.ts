@@ -10,7 +10,15 @@ import {
 } from 'typeorm';
 import { Tenant } from './Tenant';
 
-export type ChannelType = 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp';
+export type ChannelType =
+  | 'widget'
+  | 'telegram'
+  | 'messenger'
+  | 'instagram'
+  | 'whatsapp'
+  | 'linkedin'
+  | 'tiktok'
+  | 'x';
 
 export type ChannelConnectionStatus = 'active' | 'disconnected' | 'error' | 'pending_setup';
 

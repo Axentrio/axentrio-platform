@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { SocialChannelsContent } from './SocialChannelsContent';
+import SocialMedia from '../../pages/SocialMedia';
 
 type Connection = {
   id: string;
@@ -45,6 +46,10 @@ vi.mock('@/queries/useBotsQueries', () => ({
   useBots: () => ({ data: { bots: [], used: 0, limit: null } }),
 }));
 
+vi.mock('@/components/billing/NotifyMeButton', () => ({
+  NotifyMeButton: ({ feature }: { feature: string }) => <button>Notify me about {feature}</button>,
+}));
+
 // Channel entitlements: all on by default (Pro-like) so existing behaviors
 // are unchanged; locked-state tests can flip entries.
 const { entitledRef } = vi.hoisted(() => ({
@@ -68,6 +73,14 @@ function renderUI() {
   return render(
     <MemoryRouter>
       <SocialChannelsContent />
+    </MemoryRouter>,
+  );
+}
+
+function renderSocialMedia() {
+  return render(
+    <MemoryRouter>
+      <SocialMedia />
     </MemoryRouter>,
   );
 }
@@ -194,5 +207,28 @@ describe('SocialChannelsContent', () => {
     const checkBtn = screen.getByRole('button', { name: /check connection health/i });
     await user.click(checkBtn);
     expect(healthCheckMutate).toHaveBeenCalledWith('conn-1');
+  });
+});
+
+describe('SocialMedia upcoming channels', () => {
+  it('shows LinkedIn, TikTok, and X as coming soon when enabled', () => {
+    renderSocialMedia();
+    expect(screen.getByText('LinkedIn')).toBeInTheDocument();
+    expect(screen.getByText('TikTok')).toBeInTheDocument();
+    expect(screen.getByText('X')).toBeInTheDocument();
+    expect(screen.getAllByText('Coming soon')).toHaveLength(3);
+  });
+
+  it('shows the disabled notice instead of coming-soon state when toggled off', () => {
+    entitledRef.current = {
+      channelLinkedin: false,
+      channelTiktok: false,
+      channelX: false,
+    };
+    renderSocialMedia();
+    expect(screen.getByText('LinkedIn is turned off')).toBeInTheDocument();
+    expect(screen.getByText('TikTok is turned off')).toBeInTheDocument();
+    expect(screen.getByText('X is turned off')).toBeInTheDocument();
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
   });
 });

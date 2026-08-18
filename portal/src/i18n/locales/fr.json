@@ -288,9 +288,17 @@
         "3": "Historique de conversation unifié, peu importe où le chat a commencé."
       }
     },
+    "linkedin": {
+      "title": "LinkedIn",
+      "description": "La prise en charge des messages LinkedIn arrive bientôt."
+    },
     "tiktok": {
       "title": "TikTok",
       "description": "Les messages directs pour TikTok Business sont sur notre feuille de route. Faites-nous signe et nous vous écrirons dès que c'est prêt."
+    },
+    "x": {
+      "title": "X",
+      "description": "La prise en charge des messages directs sur X arrive bientôt."
     }
   },
   "roles": {

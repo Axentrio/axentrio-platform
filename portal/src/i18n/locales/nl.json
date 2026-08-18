@@ -288,9 +288,17 @@
         "3": "Verenigde gespreksgeschiedenis, ongeacht waar de chat is gestart."
       }
     },
+    "linkedin": {
+      "title": "LinkedIn",
+      "description": "Ondersteuning voor LinkedIn-berichten komt binnenkort beschikbaar."
+    },
     "tiktok": {
       "title": "TikTok",
       "description": "Directe berichten voor TikTok Business staan op onze roadmap. Laat het ons weten en we mailen je zodra het beschikbaar is."
+    },
+    "x": {
+      "title": "X",
+      "description": "Ondersteuning voor directe berichten op X komt binnenkort beschikbaar."
     }
   },
   "roles": {

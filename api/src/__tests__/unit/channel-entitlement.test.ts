@@ -13,6 +13,7 @@ const entCtx = vi.hoisted(() => ({
   tier: 'pro' as string,
   status: 'active' as string,
   featureOverrides: {} as Record<string, unknown>,
+  featureToggles: {} as Record<string, boolean>,
   fail: false,
 }));
 vi.mock('../../billing/entitlements', async (importOriginal) => {
@@ -24,6 +25,7 @@ vi.mock('../../billing/entitlements', async (importOriginal) => {
       return actual.entitlementsFor(entCtx.tier as never, undefined, {
         status: entCtx.status as never,
         featureOverrides: entCtx.featureOverrides as never,
+        featureToggles: entCtx.featureToggles as never,
       });
     }),
   };
@@ -36,6 +38,7 @@ import {
   requireAnyMetaChannelEntitled,
 } from '../../channels/channel-entitlement';
 import { PLANS } from '../../billing/plans';
+import { FEATURE_TAXONOMY } from '../../billing/feature-taxonomy';
 import { entitlementsFor } from '../../billing/entitlements';
 import { PlanLimitError } from '../../billing/enforce';
 
@@ -45,11 +48,20 @@ function reset(tier = 'pro', status = 'active') {
   entCtx.tier = tier;
   entCtx.status = status;
   entCtx.featureOverrides = {};
+  entCtx.featureToggles = {};
   entCtx.fail = false;
 }
 
 describe('plan catalog — channel keys (D2)', () => {
-  it.each(['channelWhatsapp', 'channelMessenger', 'channelInstagram', 'channelTelegram'] as const)(
+  it.each([
+    'channelWhatsapp',
+    'channelMessenger',
+    'channelInstagram',
+    'channelTelegram',
+    'channelLinkedin',
+    'channelTiktok',
+    'channelX',
+  ] as const)(
     '%s: false on free, true from essential up',
     (key) => {
       // Essential gained the social integrations deliberately; only `free` is widget-only.
@@ -57,6 +69,7 @@ describe('plan catalog — channel keys (D2)', () => {
       expect(PLANS.essential.features[key]).toBe(true);
       expect(PLANS.pro.features[key]).toBe(true);
       expect(PLANS.enterprise.features[key]).toBe(true);
+      expect(FEATURE_TAXONOMY[key].group).toBe('channels');
     },
   );
 
@@ -77,6 +90,9 @@ describe('channelFeatureKey — widget vs unknown are distinct (D12)', () => {
     expect(channelFeatureKey('messenger')).toBe('channelMessenger');
     expect(channelFeatureKey('instagram')).toBe('channelInstagram');
     expect(channelFeatureKey('telegram')).toBe('channelTelegram');
+    expect(channelFeatureKey('linkedin')).toBe('channelLinkedin');
+    expect(channelFeatureKey('tiktok')).toBe('channelTiktok');
+    expect(channelFeatureKey('x')).toBe('channelX');
   });
 
   it('unknown channel type → null (fail closed downstream)', () => {
@@ -102,7 +118,7 @@ describe('isChannelEntitled', () => {
 
   it('a per-tenant override revokes a channel the tier grants', async () => {
     // The override direction that still matters. Comping one ONTO a tier no longer has a target:
-    // every paid tier now grants all four, and `free` ignores overrides outright - on `free` or a
+    // every paid tier now grants every external channel, and `free` ignores overrides outright - on `free` or a
     // non-active status every boolean feature is false regardless (see entitlements.ts).
     reset('essential');
     entCtx.featureOverrides = {
@@ -110,6 +126,18 @@ describe('isChannelEntitled', () => {
     };
     expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(false);
     expect(await isChannelEntitled(TENANT, 'telegram')).toBe(true); // not implied
+  });
+
+  it('a tenant toggle disables each new channel independently', async () => {
+    reset('essential');
+    for (const [channel, key] of [
+      ['linkedin', 'channelLinkedin'],
+      ['tiktok', 'channelTiktok'],
+      ['x', 'channelX'],
+    ] as const) {
+      entCtx.featureToggles = { [key]: false };
+      expect(await isChannelEntitled(TENANT, channel)).toBe(false);
+    }
   });
 
   it('free ignores an override entirely — the tier is hard-off, not a ceiling', async () => {

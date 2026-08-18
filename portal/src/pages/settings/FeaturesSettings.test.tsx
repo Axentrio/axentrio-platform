@@ -46,6 +46,9 @@ const TOGGLEABLE = [
   'channelMessenger',
   'channelInstagram',
   'channelTelegram',
+  'channelLinkedin',
+  'channelTiktok',
+  'channelX',
   'leadCapture',
   'proactiveLeadCapture',
   'bookings',
@@ -79,9 +82,32 @@ beforeEach(() => {
 describe('FeaturesSettings', () => {
   it('renders a switch for every feature it surfaces', () => {
     renderUI();
-    // 4 channels + the "All channels" master + leads + bookings + Success Meter.
-    expect(screen.getAllByRole('switch')).toHaveLength(8);
+    // 7 channels + the "All channels" master + leads + bookings + Success Meter.
+    expect(screen.getAllByRole('switch')).toHaveLength(11);
+    expect(screen.getByText('Reply to LinkedIn messages.')).toBeInTheDocument();
+    expect(screen.getByText('Reply to TikTok messages.')).toBeInTheDocument();
+    expect(screen.getByText('Reply to X direct messages.')).toBeInTheDocument();
     expect(screen.getByText('Capture and store leads from conversations.')).toBeInTheDocument();
+  });
+
+  it('the master switch toggles all seven entitled channels', async () => {
+    const user = userEvent.setup();
+    renderUI();
+
+    await user.click(within(screen.getByText('All channels').parentElement!).getByRole('switch'));
+
+    const written = mutate.mock.calls[0][0] as BoolMap;
+    expect(
+      [
+        'channelWhatsapp',
+        'channelMessenger',
+        'channelInstagram',
+        'channelTelegram',
+        'channelLinkedin',
+        'channelTiktok',
+        'channelX',
+      ].every((key) => written[key] === false),
+    ).toBe(true);
   });
 
   it('does not offer a proactive-lead-capture switch, even to an entitled tenant', () => {

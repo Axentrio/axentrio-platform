@@ -8,7 +8,9 @@ import { z } from 'zod';
  * Plan reference: `.scratch/plan-m0-foundation-reshape.md` § PR11.
  */
 const ALLOWED_FEATURES = [
+  'linkedin',
   'tiktok',
+  'x',
   'crm_native',
   'ai_lead_intelligence',
   'ai_business_insights',

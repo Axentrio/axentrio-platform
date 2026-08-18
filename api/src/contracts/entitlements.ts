@@ -27,6 +27,9 @@ export type ToggleableFeatureKey =
   | 'channelMessenger'
   | 'channelInstagram'
   | 'channelTelegram'
+  | 'channelLinkedin'
+  | 'channelTiktok'
+  | 'channelX'
   | 'leadCapture'
   // Deliberately toggleable even though it has a `requires` parent. Proactively
   // soliciting a phone number or address from an EU consumer changes WHAT personal
@@ -81,6 +84,9 @@ export interface PlanFeatures {
   channelMessenger: boolean;
   channelInstagram: boolean;
   channelTelegram: boolean;
+  channelLinkedin: boolean;
+  channelTiktok: boolean;
+  channelX: boolean;
   /** Tiered Insights ladder (ADR-0013). */
   gapInsights: boolean;
   gapEvidence: boolean;

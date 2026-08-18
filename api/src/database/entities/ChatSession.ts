@@ -21,6 +21,7 @@ import { Bot } from './Bot';
 import { Participant } from './Participant';
 import { Message } from './Message';
 import { HandoffRequest } from './HandoffRequest';
+import type { ChannelType } from './ChannelConnection';
 
 export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff' | 'bot';
 export type SessionOwnership = 'bot_owned' | 'handoff_requested' | 'human_owned' | 'closed';
@@ -92,7 +93,7 @@ export class ChatSession {
   source!: string;
 
   @Column({ type: 'varchar', length: 20, default: 'widget' })
-  channel!: 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp';
+  channel!: ChannelType;
 
   @Column('uuid', { nullable: true })
   channelConnectionId!: string | null;

@@ -18,7 +18,7 @@ import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { notificationService } from '../services/notification.service';
-import { classifyMessage } from './classify';
+import { classifyMessage, inspectLinks, isHumanSignal } from './classify';
 import { detectBotLoop } from './loop-detector';
 import { redisLoopStore } from './loop-store';
 import { GuardrailCategory, GuardrailJournalCategory } from './types';
@@ -217,18 +217,23 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
     return { proceed: !flagged, category: flagged ? 'spam' : 'clean' };
   }
 
-  const c = classifyMessage(content, channel);
+  const linkInfo = inspectLinks(content);
+  const c = classifyMessage(content, channel, linkInfo);
   const flaggedByContent = c.category !== 'clean';
-  const suspiciousLink = c.category === 'suspicious_link' || (c.links.length > 0 && flaggedByContent);
+  const hasWeakRiskLink = linkInfo.score > 0;
+  const humanSignal = !flaggedByContent && isHumanSignal(content, linkInfo) && !hasWeakRiskLink;
+  const suspiciousLink = hasWeakRiskLink || c.category === 'suspicious_link'
+    || (c.links.length > 0 && flaggedByContent);
 
   let loopHit = false;
   let loopReasons: string[] = [];
   try {
     const r = await detectBotLoop(redisLoopStore, session.id, {
       hash: normalizedHash(content),
-      // Genuine progress = a clean, substantive message; flagged/empty or an
-      // exact repeat (handled in the reducer) counts as non-progressing.
-      meaningful: !flaggedByContent && content.trim().length > 0,
+      // Human-typical short messages reset loop streaks. Other clean, non-empty
+      // content is substantive; exact repeats are handled in the reducer.
+      meaningful: !flaggedByContent && content.trim().length > 0 && !humanSignal,
+      humanSignal,
       hasSuspiciousLink: suspiciousLink,
     });
     loopHit = r.isLoop;

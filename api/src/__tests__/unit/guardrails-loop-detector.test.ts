@@ -9,7 +9,12 @@ import {
   LoopStateStore,
 } from '../../guardrails/loop-detector';
 
-const sig = (hash: string, meaningful = true, hasSuspiciousLink = false) => ({ hash, meaningful, hasSuspiciousLink });
+const sig = (hash: string, meaningful = true, hasSuspiciousLink = false, humanSignal = false) => ({
+  hash,
+  meaningful,
+  hasSuspiciousLink,
+  humanSignal,
+});
 
 // Fold a sequence of signals starting from empty state.
 function fold(signals: ReturnType<typeof sig>[]): LoopState {
@@ -17,7 +22,7 @@ function fold(signals: ReturnType<typeof sig>[]): LoopState {
 }
 
 describe('guardrails · loop-detector reducer', () => {
-  it('counts consecutive identical messages and fires at the repeated threshold', () => {
+  it('counts repeated substantive messages and fires at the threshold', () => {
     const after2 = fold([sig('a'), sig('a')]);
     expect(after2.repeated).toBe(2);
     expect(evaluateLoopState(after2).isLoop).toBe(false);
@@ -46,11 +51,37 @@ describe('guardrails · loop-detector reducer', () => {
     expect(evaluateLoopState(s).isLoop).toBe(false);
   });
 
-  it('treats identical messages as a loop even when individually meaningful', () => {
-    // Same text three times — identical ⇒ no progress, so it IS a loop.
-    const s = fold([sig('a', true), sig('a', true), sig('a', true)]);
+  it('still fires for a repeated generic automated reply', () => {
+    const reply = 'Your request has been received, a representative will contact you shortly';
+    const s = fold([sig(reply), sig(reply), sig(reply)]);
     expect(s.repeated).toBe(3);
     expect(evaluateLoopState(s).isLoop).toBe(true);
+  });
+
+  it('human signals reset repeated and bot-like counters', () => {
+    const hello = sig('hello?', false, false, true);
+    const s = fold([hello, hello, hello, hello, hello]);
+    expect(s.repeated).toBe(0);
+    expect(s.botLike).toBe(0);
+    expect(evaluateLoopState(s).isLoop).toBe(false);
+  });
+
+  it('a human signal resets a substantive streak, which can then re-arm', () => {
+    const reply = sig('automated reply');
+    const human = sig('anyone?', false, false, true);
+    const reset = fold([reply, reply, human]);
+    expect(reset.repeated).toBe(0);
+    expect(reset.botLike).toBe(0);
+
+    const rearmed = fold([reply, reply, human, reply, reply, reply]);
+    expect(rearmed.repeated).toBe(LOOP_THRESHOLDS.repeated);
+    expect(evaluateLoopState(rearmed).isLoop).toBe(true);
+  });
+
+  it('emoji-only messages never become a loop', () => {
+    const emoji = sig('👋', false, false, true);
+    const s = fold([emoji, emoji, emoji, emoji, emoji]);
+    expect(evaluateLoopState(s).isLoop).toBe(false);
   });
 
   it('fires on cumulative suspicious-link turns (even on meaningful turns)', () => {

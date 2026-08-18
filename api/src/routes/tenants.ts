@@ -3,40 +3,67 @@
  * Tenant management and configuration
  */
 
-import crypto from 'crypto';
-import { safeOutboundRequest, assertSafeOutboundUrl } from '../security/ssrf-guard';
-import { Router, Request, Response } from 'express';
-import { IsNull } from 'typeorm';
-import { clerkClient } from '@clerk/express';
-import { AppDataSource } from '../database/data-source';
-import { Tenant } from '../database/entities/Tenant';
-import { ChatSession } from '../database/entities/ChatSession';
-import { User } from '../database/entities/User';
-import { Agent } from '../database/entities/Agent';
-import { PendingInvite } from '../database/entities/PendingInvite';
-import { requireAdmin, asyncHandler, ValidationError, NotFoundError, BadRequestError, ApiError } from '../middleware';
-import { ERROR_CODES } from '../middleware/error-codes';
-import { sendSuccess, sendCreated } from '../utils/response';
-import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization, getAllOrgMemberships, updateClerkOrganization } from '../services/clerk-sync.service';
-import { logger } from '../utils/logger';
-import { logAudit } from '../utils/audit';
-import { parsePaginationParams, applyPagination } from '../utils/pagination';
-import { invalidate } from '../utils/cache';
-import { releaseAgentSessions } from '../utils/releaseAgentSessions';
-import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
-import { emitConversationUpsertForSession } from '../realtime/conversation-events';
-import { requireFeature } from '../billing/enforce';
+import crypto from "crypto";
+import {
+  safeOutboundRequest,
+  assertSafeOutboundUrl,
+} from "../security/ssrf-guard";
+import { Router, type Request, type Response } from "express";
+import { IsNull } from "typeorm";
+import { clerkClient } from "@clerk/express";
+import { AppDataSource } from "../database/data-source";
+import { Tenant } from "../database/entities/Tenant";
+import { ChatSession } from "../database/entities/ChatSession";
+import { User } from "../database/entities/User";
+import { Agent } from "../database/entities/Agent";
+import { PendingInvite } from "../database/entities/PendingInvite";
+import {
+  requireAdmin,
+  asyncHandler,
+  ValidationError,
+  NotFoundError,
+  BadRequestError,
+  ApiError,
+} from "../middleware";
+import { ERROR_CODES } from "../middleware/error-codes";
+import { sendSuccess, sendCreated } from "../utils/response";
+import {
+  requireClerkAuth,
+  autoProvision,
+  invalidateProvisionCache,
+} from "../middleware/clerk.middleware";
+import {
+  inviteToClerkOrganization,
+  revokeAndResendClerkInvitation,
+  revokeClerkInvitation,
+  removeFromClerkOrganization,
+  addMemberToClerkOrganization,
+  getAllOrgMemberships,
+  updateClerkOrganization,
+} from "../services/clerk-sync.service";
+import { logger } from "../utils/logger";
+import { logAudit } from "../utils/audit";
+import { parsePaginationParams, applyPagination } from "../utils/pagination";
+import { invalidate } from "../utils/cache";
+import { releaseAgentSessions } from "../utils/releaseAgentSessions";
+import { emitToSession, emitToTenantAgents } from "../websocket/socket.handler";
+import { emitConversationUpsertForSession } from "../realtime/conversation-events";
+import { requireFeature } from "../billing/enforce";
 import {
   getAnchorBotConfig,
   updateAnchorBotSettings,
   AnchorBotMissingError,
-} from '../services/bot-config.service';
-import type { BotSettings } from '../database/entities/Bot';
-import { parseDefaultTakeoverHours, resolveDefaultTakeoverHours } from '../services/inbox-prefs.service';
+} from "../services/bot-config.service";
+import type { BotSettings } from "../database/entities/Bot";
+import { AvailabilityRule } from "../database/entities/AvailabilityRule";
+import { businessHoursToAvailability } from "../booking/sync-hours-from-bot";
+import {
+  parseDefaultTakeoverHours,
+  resolveDefaultTakeoverHours,
+} from "../services/inbox-prefs.service";
 
 function generateApiKey(): string {
-  return crypto.randomBytes(32).toString('hex');
+  return crypto.randomBytes(32).toString("hex");
 }
 
 const router = Router();
@@ -46,11 +73,13 @@ const router = Router();
  * GET /api/v1/tenants/me
  */
 router.get(
-  '/me',
-  requireClerkAuth, autoProvision,
+  "/me",
+  requireClerkAuth,
+  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
-    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'super_admin';
+    const isAdmin =
+      req.user?.role === "admin" || req.user?.role === "super_admin";
 
     const tenantRepository = AppDataSource.getRepository(Tenant);
     const tenant = await tenantRepository.findOne({
@@ -58,7 +87,7 @@ router.get(
     });
 
     if (!tenant) {
-      throw new NotFoundError('Tenant not found');
+      throw new NotFoundError("Tenant not found");
     }
 
     // Multi-bot Phase 4 (#16d): hydrate settings response from anchor Bot,
@@ -71,11 +100,16 @@ router.get(
     } catch (err) {
       if (!(err instanceof AnchorBotMissingError)) throw err;
       // No anchor yet (very early tenant) — fall back to empty settings.
-      logger.warn('Anchor bot missing during GET /tenants/me — returning empty settings', { tenantId });
+      logger.warn(
+        "Anchor bot missing during GET /tenants/me — returning empty settings",
+        { tenantId },
+      );
     }
     const settings: Record<string, any> = { ...botSettings };
     settings.inbox = {
-      defaultTakeoverHours: resolveDefaultTakeoverHours(tenant.settings?.inbox?.defaultTakeoverHours),
+      defaultTakeoverHours: resolveDefaultTakeoverHours(
+        tenant.settings?.inbox?.defaultTakeoverHours,
+      ),
     };
     if (settings.ai) {
       const tenantApiKey = tenant.settings?.ai?.apiKey;
@@ -85,16 +119,19 @@ router.get(
     }
     if (settings.integrations?.calcom) {
       const { apiKey, ...calcomRest } = settings.integrations.calcom;
-      settings.integrations = { ...settings.integrations, calcom: { ...calcomRest, hasApiKey: !!apiKey } };
+      settings.integrations = {
+        ...settings.integrations,
+        calcom: { ...calcomRest, hasApiKey: !!apiKey },
+      };
     }
 
     // Check if tenant has any widget sessions (for onboarding status)
     const sessionRepo = AppDataSource.getRepository(ChatSession);
     const widgetUsed = await sessionRepo
-      .createQueryBuilder('s')
-      .where('s.tenant_id = :tenantId', { tenantId })
-      .andWhere('s.source = :source', { source: 'widget' })
-      .andWhere('s.deleted_at IS NULL')
+      .createQueryBuilder("s")
+      .where("s.tenant_id = :tenantId", { tenantId })
+      .andWhere("s.source = :source", { source: "widget" })
+      .andWhere("s.deleted_at IS NULL")
       .getExists();
 
     sendSuccess(res, {
@@ -119,7 +156,7 @@ router.get(
         widgetUsed,
       },
     });
-  })
+  }),
 );
 
 /**
@@ -127,8 +164,9 @@ router.get(
  * PATCH /api/v1/tenants/me
  */
 router.patch(
-  '/me',
-  requireClerkAuth, autoProvision,
+  "/me",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -140,7 +178,7 @@ router.patch(
     });
 
     if (!tenant) {
-      throw new NotFoundError('Tenant not found');
+      throw new NotFoundError("Tenant not found");
     }
 
     // Update fields. The tenant name IS the business name shown to customers and
@@ -149,9 +187,15 @@ router.patch(
     // Clerk rejects it, fail the request rather than leave the two out of sync.
     if (name && name !== tenant.name) {
       if (tenant.clerkOrgId) {
-        const synced = await updateClerkOrganization(tenant.clerkOrgId, { name });
+        const synced = await updateClerkOrganization(tenant.clerkOrgId, {
+          name,
+        });
         if (!synced) {
-          throw new ApiError('Could not rename the organization right now. Please try again.', 502, ERROR_CODES.UPSTREAM_FAILED);
+          throw new ApiError(
+            "Could not rename the organization right now. Please try again.",
+            502,
+            ERROR_CODES.UPSTREAM_FAILED,
+          );
         }
       }
       tenant.name = name;
@@ -160,34 +204,42 @@ router.patch(
     // whole bot to an external endpoint (losing booking/chips/guardrails). It is NOT a
     // tenant self-service control — only super_admin may set it. A non-super_admin PATCH
     // carrying webhookUrl is silently ignored (the portal hides the field for them too).
-    if (webhookUrl !== undefined && req.user!.role === 'super_admin') {
+    if (webhookUrl !== undefined && req.user!.role === "super_admin") {
       // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
       // string clears the webhook (preserved).
       if (webhookUrl) {
         try {
           assertSafeOutboundUrl(webhookUrl);
         } catch {
-          throw new BadRequestError('Webhook URL must be a public https:// URL');
+          throw new BadRequestError(
+            "Webhook URL must be a public https:// URL",
+          );
         }
       }
       tenant.webhookUrl = webhookUrl;
       // Auto-generate webhook secret on first webhookUrl save
       if (webhookUrl && !tenant.webhookSecret) {
-        tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+        tenant.webhookSecret = crypto.randomBytes(32).toString("hex");
       }
     }
 
     // Reject AI settings updates via this endpoint
     if (settings?.ai !== undefined) {
-      throw new BadRequestError('AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.');
+      throw new BadRequestError(
+        "AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.",
+      );
     }
 
     if (settings?.skills !== undefined) {
-      throw new BadRequestError('Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.');
+      throw new BadRequestError(
+        "Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.",
+      );
     }
 
     if (settings?.automations !== undefined) {
-      throw new BadRequestError('Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.');
+      throw new BadRequestError(
+        "Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.",
+      );
     }
 
     // Plan-gate. Custom widget appearance (color/title/avatar) lives under
@@ -197,7 +249,11 @@ router.patch(
     // split the old muddy `customBranding` flag — `customWidgetAppearance`
     // is the closest semantic match for theme-level customization.
     if (settings?.theme !== undefined) {
-      await requireFeature(tenantId, 'customWidgetAppearance', 'plan_limit_custom_branding');
+      await requireFeature(
+        tenantId,
+        "customWidgetAppearance",
+        "plan_limit_custom_branding",
+      );
     }
 
     // Multi-bot Phase 4 (#16d): per-bot config (theme/widget/features/
@@ -212,24 +268,35 @@ router.patch(
     // move business time. Conflicts are logged for the cutover metric.
     const withDerivedTimezone = async (
       bh: Record<string, unknown>,
-    ): Promise<BotSettings['businessHours']> => {
+    ): Promise<BotSettings["businessHours"]> => {
       const { bot: anchor } = await getAnchorBotConfig(tenantId);
-      const derived = anchor.businessTimezone || 'Europe/Brussels';
-      if (typeof bh.timezone === 'string' && bh.timezone && bh.timezone !== derived) {
-        logger.warn('[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored', {
-          tenantId,
-          botId: anchor.id,
-          received: bh.timezone,
-          derived,
-        });
+      const derived = anchor.businessTimezone || "Europe/Brussels";
+      if (
+        typeof bh.timezone === "string" &&
+        bh.timezone &&
+        bh.timezone !== derived
+      ) {
+        logger.warn(
+          "[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored",
+          {
+            tenantId,
+            botId: anchor.id,
+            received: bh.timezone,
+            derived,
+          },
+        );
       }
-      return { ...bh, timezone: derived } as BotSettings['businessHours'];
+      return { ...bh, timezone: derived } as BotSettings["businessHours"];
     };
 
     if (settings?.inbox !== undefined) {
-      const parsed = parseDefaultTakeoverHours(settings.inbox?.defaultTakeoverHours);
+      const parsed = parseDefaultTakeoverHours(
+        settings.inbox?.defaultTakeoverHours,
+      );
       if (parsed === null) {
-        throw new BadRequestError('defaultTakeoverHours must be an integer 1–24 or "indefinite"');
+        throw new BadRequestError(
+          'defaultTakeoverHours must be an integer 1–24 or "indefinite"',
+        );
       }
       tenant.settings = {
         ...(tenant.settings ?? {}),
@@ -241,10 +308,14 @@ router.patch(
       const botPatch: Partial<BotSettings> = {};
       if (settings.theme !== undefined) botPatch.theme = settings.theme;
       if (settings.widget !== undefined) botPatch.widget = settings.widget;
-      if (settings.features !== undefined) botPatch.features = settings.features;
-      if (settings.integrations !== undefined) botPatch.integrations = settings.integrations;
+      if (settings.features !== undefined)
+        botPatch.features = settings.features;
+      if (settings.integrations !== undefined)
+        botPatch.integrations = settings.integrations;
       if (settings.businessHours !== undefined) {
-        botPatch.businessHours = await withDerivedTimezone(settings.businessHours);
+        botPatch.businessHours = await withDerivedTimezone(
+          settings.businessHours,
+        );
       }
       // ai/skills/automations are rejected above — not relayed here.
 
@@ -265,6 +336,31 @@ router.patch(
       });
     }
 
+    // One-way sync onto the slot engine (same as PATCH /bots/:id): onboarding
+    // writes businessHours to the anchor bot only; without this the spoken
+    // hours and the bookable slots would drift until a bot-form save.
+    if (businessHours || settings?.businessHours !== undefined) {
+      try {
+        const { bot: anchor } = await getAnchorBotConfig(tenantId);
+        const merged = anchor.settings?.businessHours;
+        if (merged && merged.enabled) {
+          const rule = await AppDataSource.getRepository(
+            AvailabilityRule,
+          ).findOne({
+            where: { botId: anchor.id },
+          });
+          if (rule) {
+            const mapped = businessHoursToAvailability(merged);
+            rule.weeklyHours = mapped.weeklyHours;
+            rule.dateOverrides = mapped.dateOverrides;
+            await AppDataSource.getRepository(AvailabilityRule).save(rule);
+          }
+        }
+      } catch (err) {
+        if (!(err instanceof AnchorBotMissingError)) throw err;
+      }
+    }
+
     await tenantRepository.save(tenant);
 
     // A first-time webhook secret may have just been auto-generated above; drop
@@ -276,7 +372,7 @@ router.patch(
     // immediately instead of mis-routing for up to the 60s TTL.
     await invalidate(`coalescer:custom-webhook:${tenantId}`);
 
-    logger.info('Tenant updated', {
+    logger.info("Tenant updated", {
       tenantId,
       updates: { name, webhookUrl: !!webhookUrl, settings: !!settings },
     });
@@ -291,16 +387,24 @@ router.patch(
     }
     const responseSettings: Record<string, any> = { ...responseBotSettings };
     responseSettings.inbox = {
-      defaultTakeoverHours: resolveDefaultTakeoverHours(tenant.settings?.inbox?.defaultTakeoverHours),
+      defaultTakeoverHours: resolveDefaultTakeoverHours(
+        tenant.settings?.inbox?.defaultTakeoverHours,
+      ),
     };
     if (responseSettings.ai) {
       const tenantApiKey = tenant.settings?.ai?.apiKey;
-      const { apiKey: _stale, ...aiRest } = responseSettings.ai as { apiKey?: string };
+      const { apiKey: _stale, ...aiRest } = responseSettings.ai as {
+        apiKey?: string;
+      };
       responseSettings.ai = { ...aiRest, hasApiKey: !!tenantApiKey };
     }
     if (responseSettings.integrations?.calcom) {
-      const { apiKey: _ck, ...calcomRest } = responseSettings.integrations.calcom;
-      responseSettings.integrations = { ...responseSettings.integrations, calcom: { ...calcomRest, hasApiKey: !!_ck } };
+      const { apiKey: _ck, ...calcomRest } =
+        responseSettings.integrations.calcom;
+      responseSettings.integrations = {
+        ...responseSettings.integrations,
+        calcom: { ...calcomRest, hasApiKey: !!_ck },
+      };
     }
 
     sendSuccess(res, {
@@ -311,7 +415,7 @@ router.patch(
       webhookSecret: tenant.webhookSecret,
       updatedAt: tenant.updatedAt,
     });
-  })
+  }),
 );
 
 /**
@@ -319,8 +423,9 @@ router.patch(
  * GET /api/v1/tenants/me/users
  */
 router.get(
-  '/me/users',
-  requireClerkAuth, autoProvision,
+  "/me/users",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -328,26 +433,38 @@ router.get(
 
     // Reconcile against Clerk so members who joined the org but never logged into
     // the portal still appear here (otherwise they're invisible until first login).
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
     if (tenant?.clerkOrgId) {
       await syncOrgMembersToDb(tenantId, tenant.clerkOrgId);
     }
 
     const userRepository = AppDataSource.getRepository(User);
 
-    const qb = userRepository.createQueryBuilder('user')
-      .select(['user.id', 'user.email', 'user.name', 'user.role', 'user.isActive', 'user.avatarUrl', 'user.lastLoginAt', 'user.createdAt'])
-      .where('user.tenantId = :tenantId', { tenantId })
-      .andWhere('user.deletedAt IS NULL');
+    const qb = userRepository
+      .createQueryBuilder("user")
+      .select([
+        "user.id",
+        "user.email",
+        "user.name",
+        "user.role",
+        "user.isActive",
+        "user.avatarUrl",
+        "user.lastLoginAt",
+        "user.createdAt",
+      ])
+      .where("user.tenantId = :tenantId", { tenantId })
+      .andWhere("user.deletedAt IS NULL");
 
     if (!params.sortBy) {
-      qb.orderBy('user.createdAt', 'DESC');
+      qb.orderBy("user.createdAt", "DESC");
     }
 
     const result = await applyPagination(qb, params);
 
     sendSuccess(res, result.data, { pagination: result.meta });
-  })
+  }),
 );
 
 /**
@@ -355,15 +472,16 @@ router.get(
  * POST /api/v1/tenants/me/users
  */
 router.post(
-  '/me/users',
-  requireClerkAuth, autoProvision,
+  "/me/users",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const { email, name, role, password } = req.body;
 
     if (!email || !name || !role) {
-      throw new ValidationError('Email, name, and role are required');
+      throw new ValidationError("Email, name, and role are required");
     }
 
     const userRepository = AppDataSource.getRepository(User);
@@ -374,7 +492,7 @@ router.post(
     });
 
     if (existingUser) {
-      throw new ValidationError('User with this email already exists');
+      throw new ValidationError("User with this email already exists");
     }
 
     // Create user
@@ -389,7 +507,7 @@ router.post(
 
     await userRepository.save(user);
 
-    logger.info('Tenant user created', {
+    logger.info("Tenant user created", {
       tenantId,
       userId: user.id,
       email: user.email,
@@ -404,7 +522,7 @@ router.post(
       isActive: user.isActive,
       createdAt: user.createdAt,
     });
-  })
+  }),
 );
 
 /**
@@ -412,8 +530,9 @@ router.post(
  * POST /api/v1/tenants/me/api-key/rotate
  */
 router.post(
-  '/me/api-key/rotate',
-  requireClerkAuth, autoProvision,
+  "/me/api-key/rotate",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -424,7 +543,7 @@ router.post(
     });
 
     if (!tenant) {
-      throw new NotFoundError('Tenant not found');
+      throw new NotFoundError("Tenant not found");
     }
 
     // Generate new API key
@@ -433,13 +552,14 @@ router.post(
 
     await tenantRepository.save(tenant);
 
-    logger.info('API key rotated', { tenantId });
+    logger.info("API key rotated", { tenantId });
 
     sendSuccess(res, {
       apiKey: newApiKey,
-      message: 'API key rotated successfully. Store this key safely as it will not be shown again.',
+      message:
+        "API key rotated successfully. Store this key safely as it will not be shown again.",
     });
-  })
+  }),
 );
 
 /**
@@ -447,8 +567,9 @@ router.post(
  * GET /api/v1/tenants/me/stats
  */
 router.get(
-  '/me/stats',
-  requireClerkAuth, autoProvision,
+  "/me/stats",
+  requireClerkAuth,
+  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
 
@@ -464,7 +585,7 @@ router.get(
       FROM chat_sessions
       WHERE tenant_id = $1
     `,
-      [tenantId]
+      [tenantId],
     );
 
     const messageStats = await AppDataSource.query(
@@ -477,7 +598,7 @@ router.get(
       FROM messages
       WHERE tenant_id = $1
     `,
-      [tenantId]
+      [tenantId],
     );
 
     const todaySessions = await AppDataSource.query(
@@ -486,7 +607,7 @@ router.get(
       FROM chat_sessions
       WHERE tenant_id = $1 AND DATE(created_at) = CURRENT_DATE
     `,
-      [tenantId]
+      [tenantId],
     );
 
     sendSuccess(res, {
@@ -506,7 +627,7 @@ router.get(
         files: parseInt(messageStats[0].file_messages, 10),
       },
     });
-  })
+  }),
 );
 
 /**
@@ -514,8 +635,9 @@ router.get(
  * POST /api/v1/tenants/me/webhook-test
  */
 router.post(
-  '/me/webhook-test',
-  requireClerkAuth, autoProvision,
+  "/me/webhook-test",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -526,13 +648,13 @@ router.post(
     });
 
     if (!tenant) {
-      throw new NotFoundError('Tenant not found');
+      throw new NotFoundError("Tenant not found");
     }
 
     if (!tenant.webhookUrl) {
       sendSuccess(res, {
         testFailed: true,
-        error: 'No webhook URL configured',
+        error: "No webhook URL configured",
       });
       return;
     }
@@ -543,7 +665,7 @@ router.post(
     } catch {
       sendSuccess(res, {
         testFailed: true,
-        error: 'Invalid webhook URL format',
+        error: "Invalid webhook URL format",
       });
       return;
     }
@@ -551,21 +673,23 @@ router.post(
     const startTime = Date.now();
     try {
       const response = await safeOutboundRequest({
-        method: 'POST',
+        method: "POST",
         url: tenant.webhookUrl,
         data: {
-          event: 'webhook.test',
+          event: "webhook.test",
           tenantId: tenant.id,
           timestamp: new Date().toISOString(),
-          payload: { type: 'test', content: 'Webhook connectivity test' },
+          payload: { type: "test", content: "Webhook connectivity test" },
         },
         timeout: 5000,
         headers: {
-          'Content-Type': 'application/json',
-          'X-Tenant-ID': tenant.id,
-          ...(tenant.webhookSecret ? {
-            'X-Webhook-Secret': tenant.webhookSecret,
-          } : {}),
+          "Content-Type": "application/json",
+          "X-Tenant-ID": tenant.id,
+          ...(tenant.webhookSecret
+            ? {
+                "X-Webhook-Secret": tenant.webhookSecret,
+              }
+            : {}),
         },
         validateStatus: () => true,
       });
@@ -588,13 +712,14 @@ router.post(
       const err = error as { code?: string; message?: string };
       sendSuccess(res, {
         testFailed: true,
-        error: err.code === 'ECONNABORTED'
-          ? 'Webhook timed out (5s limit)'
-          : err.message || 'Connection failed',
+        error:
+          err.code === "ECONNABORTED"
+            ? "Webhook timed out (5s limit)"
+            : err.message || "Connection failed",
         responseTimeMs,
       });
     }
-  })
+  }),
 );
 
 /**
@@ -602,8 +727,9 @@ router.post(
  * POST /api/v1/tenants/me/webhook-secret/regenerate
  */
 router.post(
-  '/me/webhook-secret/regenerate',
-  requireClerkAuth, autoProvision,
+  "/me/webhook-secret/regenerate",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -614,23 +740,24 @@ router.post(
     });
 
     if (!tenant) {
-      throw new NotFoundError('Tenant not found');
+      throw new NotFoundError("Tenant not found");
     }
 
-    tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+    tenant.webhookSecret = crypto.randomBytes(32).toString("hex");
     await tenantRepository.save(tenant);
 
     // Drop the cached secret (see n8n/webhook.controller verifyPerTenantSecret)
     // so inbound webhooks validate against the new secret immediately.
     await invalidate(`tenant:webhook-secret:${tenantId}`);
 
-    logger.info('Webhook secret regenerated', { tenantId });
+    logger.info("Webhook secret regenerated", { tenantId });
 
     sendSuccess(res, {
       webhookSecret: tenant.webhookSecret,
-      message: 'Webhook secret regenerated. Update your n8n workflow with the new secret.',
+      message:
+        "Webhook secret regenerated. Update your n8n workflow with the new secret.",
     });
-  })
+  }),
 );
 
 /**
@@ -643,19 +770,23 @@ async function provisionExistingOrgMember(
   tenantId: string,
   clerkOrgId: string,
   email: string,
-  role: 'admin' | 'supervisor' | 'agent'
+  role: "admin" | "supervisor" | "agent",
 ): Promise<boolean> {
   email = email.toLowerCase(); // emails can be stored mixed-case (e.g. POST /me/users); match consistently
   let memberships: any[];
   try {
     memberships = await getAllOrgMemberships(clerkOrgId);
   } catch (err: any) {
-    logger.warn('Could not check Clerk org membership', { email, error: err?.message });
+    logger.warn("Could not check Clerk org membership", {
+      email,
+      error: err?.message,
+    });
     return false;
   }
 
   const membership = memberships.find(
-    (m: any) => m.publicUserData?.identifier?.toLowerCase() === email.toLowerCase()
+    (m: any) =>
+      m.publicUserData?.identifier?.toLowerCase() === email.toLowerCase(),
   );
   if (!membership?.publicUserData?.userId) return false; // not a member — real failure
 
@@ -664,22 +795,51 @@ async function provisionExistingOrgMember(
   if (existing) return true; // already synced
 
   const clerkUserId = membership.publicUserData.userId;
-  let name = email.split('@')[0];
+  let name = email.split("@")[0];
   try {
     const clerkUser = await clerkClient.users.getUser(clerkUserId);
-    name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
-  } catch { /* use fallback name */ }
+    name =
+      [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
+      name;
+  } catch {
+    /* use fallback name */
+  }
 
-  await userRepo.createQueryBuilder().insert().into(User).values({
-    tenantId, clerkUserId, email, name, role: role as any, isActive: true,
-  }).orIgnore().execute();
+  await userRepo
+    .createQueryBuilder()
+    .insert()
+    .into(User)
+    .values({
+      tenantId,
+      clerkUserId,
+      email,
+      name,
+      role: role as any,
+      isActive: true,
+    })
+    .orIgnore()
+    .execute();
 
   const newUser = await userRepo.findOne({ where: { clerkUserId } });
   if (newUser) {
-    await AppDataSource.getRepository(Agent).createQueryBuilder().insert().into(Agent).values({
-      tenantId, userId: newUser.id, status: 'offline', maxConcurrentChats: 5, skills: [], languages: ['en'],
-    }).orIgnore().execute();
-    logger.info('Provisioned already-member user', { email, userId: newUser.id });
+    await AppDataSource.getRepository(Agent)
+      .createQueryBuilder()
+      .insert()
+      .into(Agent)
+      .values({
+        tenantId,
+        userId: newUser.id,
+        status: "offline",
+        maxConcurrentChats: 5,
+        skills: [],
+        languages: ["en"],
+      })
+      .orIgnore()
+      .execute();
+    logger.info("Provisioned already-member user", {
+      email,
+      userId: newUser.id,
+    });
   }
   return true;
 }
@@ -692,7 +852,10 @@ async function provisionExistingOrgMember(
  * — matching what autoProvision assigns on a member's first login. Fetches the
  * full membership once (paginated). Best-effort / fail-open.
  */
-async function syncOrgMembersToDb(tenantId: string, clerkOrgId: string): Promise<void> {
+async function syncOrgMembersToDb(
+  tenantId: string,
+  clerkOrgId: string,
+): Promise<void> {
   try {
     const memberships = await getAllOrgMemberships(clerkOrgId);
     if (memberships.length === 0) return;
@@ -701,11 +864,16 @@ async function syncOrgMembersToDb(tenantId: string, clerkOrgId: string): Promise
     const inviteRepo = AppDataSource.getRepository(PendingInvite);
 
     // withDeleted so a soft-deleted member is not resurrected as a new row.
-    const existing = await userRepo.find({ where: { tenantId }, withDeleted: true });
+    const existing = await userRepo.find({
+      where: { tenantId },
+      withDeleted: true,
+    });
     const existingEmails = new Set(existing.map((u) => u.email.toLowerCase()));
 
     const invites = await inviteRepo.find({ where: { tenantId } });
-    const inviteByEmail = new Map(invites.map((i) => [i.email.toLowerCase(), i]));
+    const inviteByEmail = new Map(
+      invites.map((i) => [i.email.toLowerCase(), i]),
+    );
 
     const consumedInviteIds: string[] = [];
     let provisioned = 0;
@@ -715,27 +883,62 @@ async function syncOrgMembersToDb(tenantId: string, clerkOrgId: string): Promise
       if (!email || !clerkUserId || existingEmails.has(email)) continue;
 
       const invite = inviteByEmail.get(email);
-      const role = (invite?.role as 'admin' | 'supervisor' | 'agent') ?? 'agent';
-      const name = [m.publicUserData?.firstName, m.publicUserData?.lastName].filter(Boolean).join(' ') || email.split('@')[0];
+      const role =
+        (invite?.role as "admin" | "supervisor" | "agent") ?? "agent";
+      const name =
+        [m.publicUserData?.firstName, m.publicUserData?.lastName]
+          .filter(Boolean)
+          .join(" ") || email.split("@")[0];
 
-      await userRepo.createQueryBuilder().insert().into(User).values({
-        tenantId, clerkUserId, email, name, role: role as any, isActive: true,
-      }).orIgnore().execute();
+      await userRepo
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({
+          tenantId,
+          clerkUserId,
+          email,
+          name,
+          role: role as any,
+          isActive: true,
+        })
+        .orIgnore()
+        .execute();
 
       const newUser = await userRepo.findOne({ where: { clerkUserId } });
       if (newUser) {
-        await AppDataSource.getRepository(Agent).createQueryBuilder().insert().into(Agent).values({
-          tenantId, userId: newUser.id, status: 'offline', maxConcurrentChats: 5, skills: [], languages: ['en'],
-        }).orIgnore().execute();
+        await AppDataSource.getRepository(Agent)
+          .createQueryBuilder()
+          .insert()
+          .into(Agent)
+          .values({
+            tenantId,
+            userId: newUser.id,
+            status: "offline",
+            maxConcurrentChats: 5,
+            skills: [],
+            languages: ["en"],
+          })
+          .orIgnore()
+          .execute();
         provisioned++;
       }
       if (invite) consumedInviteIds.push(invite.id);
     }
 
-    if (consumedInviteIds.length > 0) await inviteRepo.delete(consumedInviteIds);
-    if (provisioned > 0) logger.info('Synced Clerk org members to DB', { tenantId, provisioned, invitesConsumed: consumedInviteIds.length });
+    if (consumedInviteIds.length > 0)
+      await inviteRepo.delete(consumedInviteIds);
+    if (provisioned > 0)
+      logger.info("Synced Clerk org members to DB", {
+        tenantId,
+        provisioned,
+        invitesConsumed: consumedInviteIds.length,
+      });
   } catch (err: any) {
-    logger.warn('syncOrgMembersToDb failed; returning members list as-is', { tenantId, error: err?.message });
+    logger.warn("syncOrgMembersToDb failed; returning members list as-is", {
+      tenantId,
+      error: err?.message,
+    });
   }
 }
 
@@ -744,17 +947,18 @@ async function syncOrgMembersToDb(tenantId: string, clerkOrgId: string): Promise
  * POST /api/v1/tenants/me/invite
  */
 router.post(
-  '/me/invite',
-  requireClerkAuth, autoProvision,
+  "/me/invite",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const { email, role } = req.body;
     if (!email || !role) {
-      throw new ValidationError('Email and role are required');
+      throw new ValidationError("Email and role are required");
     }
 
-    if (!['admin', 'supervisor', 'agent'].includes(role)) {
-      throw new ValidationError('Invalid role');
+    if (!["admin", "supervisor", "agent"].includes(role)) {
+      throw new ValidationError("Invalid role");
     }
 
     const tenantId = req.user!.tenantId;
@@ -762,26 +966,44 @@ router.post(
     const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
 
     if (!tenant?.clerkOrgId) {
-      throw new ValidationError('No Clerk organization linked');
+      throw new ValidationError("No Clerk organization linked");
     }
 
     const invited = await inviteToClerkOrganization(
       tenant.clerkOrgId,
       email,
-      req.user!.clerkUserId
+      req.user!.clerkUserId,
     );
     if (!invited) {
       // The most common cause is the invitee already being a member of the org
       // (e.g. they accepted an earlier invite but never logged into the portal,
       // so they never got provisioned into our DB). In that case, sync them into
       // the members list instead of erroring. Only a genuine Clerk failure 502s.
-      const alreadyMember = await provisionExistingOrgMember(tenant.id, tenant.clerkOrgId, email.toLowerCase(), role);
+      const alreadyMember = await provisionExistingOrgMember(
+        tenant.id,
+        tenant.clerkOrgId,
+        email.toLowerCase(),
+        role,
+      );
       if (alreadyMember) {
-        await logAudit(req.userId!, 'invite.cleaned', 'invite', tenant.id, tenantId, { email, role, reason: 'already_member' });
-        sendSuccess(res, { message: 'User has already joined — synced to members list' });
+        await logAudit(
+          req.userId!,
+          "invite.cleaned",
+          "invite",
+          tenant.id,
+          tenantId,
+          { email, role, reason: "already_member" },
+        );
+        sendSuccess(res, {
+          message: "User has already joined — synced to members list",
+        });
         return;
       }
-      throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
+      throw new ApiError(
+        "Failed to send invite via Clerk",
+        502,
+        ERROR_CODES.CLERK_UPSTREAM_FAILED,
+      );
     }
 
     const inviteRepo = AppDataSource.getRepository(PendingInvite);
@@ -796,15 +1018,27 @@ router.post(
         invitedBy: req.userId!,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       })
-      .orUpdate(['role', 'invited_by', 'created_at', 'expires_at'], ['tenant_id', 'email'])
+      .orUpdate(
+        ["role", "invited_by", "created_at", "expires_at"],
+        ["tenant_id", "email"],
+      )
       .execute();
 
     // Fetch the saved invite to get its ID for the audit log
-    const savedInvite = await inviteRepo.findOne({ where: { tenantId: tenant.id, email: email.toLowerCase() } });
-    await logAudit(req.userId!, 'invite.sent', 'invite', savedInvite?.id ?? tenant.id, tenantId, { email, role });
+    const savedInvite = await inviteRepo.findOne({
+      where: { tenantId: tenant.id, email: email.toLowerCase() },
+    });
+    await logAudit(
+      req.userId!,
+      "invite.sent",
+      "invite",
+      savedInvite?.id ?? tenant.id,
+      tenantId,
+      { email, role },
+    );
 
-    sendSuccess(res, { message: 'Invitation sent' });
-  })
+    sendSuccess(res, { message: "Invitation sent" });
+  }),
 );
 
 /**
@@ -812,14 +1046,15 @@ router.post(
  * PATCH /api/v1/tenants/me/users/:userId
  */
 router.patch(
-  '/me/users/:userId',
-  requireClerkAuth, autoProvision,
+  "/me/users/:userId",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const { role } = req.body;
 
-    if (!role || !['admin', 'supervisor', 'agent'].includes(role)) {
-      throw new ValidationError('Invalid role');
+    if (!role || !["admin", "supervisor", "agent"].includes(role)) {
+      throw new ValidationError("Invalid role");
     }
 
     const tenantId = req.user!.tenantId;
@@ -829,7 +1064,7 @@ router.patch(
     });
 
     if (!user) {
-      throw new NotFoundError('User not found in this tenant');
+      throw new NotFoundError("User not found in this tenant");
     }
 
     user.role = role;
@@ -837,17 +1072,21 @@ router.patch(
 
     // Invalidate autoProvision cache so role change takes effect immediately
     if (user.clerkUserId) {
-      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({
+        where: { id: tenantId },
+      });
       if (tenant?.clerkOrgId) {
         invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
       }
     }
 
-    logger.info('Tenant admin changed user role', {
-      userId: user.id, newRole: role, changedBy: req.userId,
+    logger.info("Tenant admin changed user role", {
+      userId: user.id,
+      newRole: role,
+      changedBy: req.userId,
     });
     sendSuccess(res, { id: user.id, role: user.role });
-  })
+  }),
 );
 
 /**
@@ -855,8 +1094,9 @@ router.patch(
  * POST /api/v1/tenants/me/users/:userId/deactivate
  */
 router.post(
-  '/me/users/:userId/deactivate',
-  requireClerkAuth, autoProvision,
+  "/me/users/:userId/deactivate",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -864,32 +1104,43 @@ router.post(
 
     // Cannot deactivate yourself
     if (userId === req.userId) {
-      throw new BadRequestError('Cannot deactivate yourself');
+      throw new BadRequestError("Cannot deactivate yourself");
     }
 
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
+    const user = await userRepo.findOne({
+      where: { id: userId, tenantId, deletedAt: IsNull() },
+    });
 
     if (!user) {
-      throw new NotFoundError('User not found in this tenant');
+      throw new NotFoundError("User not found in this tenant");
     }
 
     if (!user.isActive) {
-      throw new BadRequestError('User is already deactivated');
+      throw new BadRequestError("User is already deactivated");
     }
 
     // Cannot deactivate the last active admin
-    if (user.role === 'admin') {
+    if (user.role === "admin") {
       const activeAdminCount = await userRepo.count({
-        where: { tenantId, role: 'admin' as const, isActive: true, deletedAt: IsNull() },
+        where: {
+          tenantId,
+          role: "admin" as const,
+          isActive: true,
+          deletedAt: IsNull(),
+        },
       });
       if (activeAdminCount <= 1) {
-        throw new BadRequestError('Cannot deactivate the last active admin');
+        throw new BadRequestError("Cannot deactivate the last active admin");
       }
     }
 
     // Deactivate in DB + cleanup sessions in one transaction
-    let releaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
+    let releaseResult = {
+      releasedSessions: 0,
+      returnedHandoffs: 0,
+      affectedSessionIds: [] as string[],
+    };
     await AppDataSource.transaction(async (manager) => {
       user.isActive = false;
       await manager.save(User, user);
@@ -897,36 +1148,45 @@ router.post(
     });
 
     // Remove from Clerk org + invalidate cache
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
     if (user.clerkUserId && tenant?.clerkOrgId) {
       await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
       invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
     }
 
-    await logAudit(req.userId!, 'user.deactivated', 'user', user.id, tenantId, {
+    await logAudit(req.userId!, "user.deactivated", "user", user.id, tenantId, {
       releasedSessions: releaseResult.releasedSessions,
       returnedHandoffs: releaseResult.returnedHandoffs,
     });
 
     // Socket events — after transaction committed
     for (const sessionId of releaseResult.affectedSessionIds) {
-      emitToSession(tenantId, sessionId, 'agent:removed', {
+      emitToSession(tenantId, sessionId, "agent:removed", {
         sessionId,
-        reason: 'agent_deactivated',
+        reason: "agent_deactivated",
       });
       // B-PR3a: normalized ownership event (the release moved every affected
       // conversation back to handoff_requested).
       await emitConversationUpsertForSession(sessionId, tenantId);
     }
-    if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
-      emitToTenantAgents(tenantId, 'handoff:queue_updated', {
-        reason: 'agent_deactivated',
+    if (
+      releaseResult.releasedSessions > 0 ||
+      releaseResult.returnedHandoffs > 0
+    ) {
+      emitToTenantAgents(tenantId, "handoff:queue_updated", {
+        reason: "agent_deactivated",
       });
     }
 
-    logger.info('Deactivated user', { userId: user.id, tenantId, deactivatedBy: req.userId });
-    sendSuccess(res, { message: 'User deactivated' });
-  })
+    logger.info("Deactivated user", {
+      userId: user.id,
+      tenantId,
+      deactivatedBy: req.userId,
+    });
+    sendSuccess(res, { message: "User deactivated" });
+  }),
 );
 
 /**
@@ -934,22 +1194,25 @@ router.post(
  * POST /api/v1/tenants/me/users/:userId/reactivate
  */
 router.post(
-  '/me/users/:userId/reactivate',
-  requireClerkAuth, autoProvision,
+  "/me/users/:userId/reactivate",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const { userId } = req.params;
 
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
+    const user = await userRepo.findOne({
+      where: { id: userId, tenantId, deletedAt: IsNull() },
+    });
 
     if (!user) {
-      throw new NotFoundError('User not found in this tenant');
+      throw new NotFoundError("User not found in this tenant");
     }
 
     if (user.isActive) {
-      throw new BadRequestError('User is already active');
+      throw new BadRequestError("User is already active");
     }
 
     user.isActive = true;
@@ -957,17 +1220,27 @@ router.post(
 
     // Re-add to Clerk org
     if (user.clerkUserId) {
-      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({
+        where: { id: tenantId },
+      });
       if (tenant?.clerkOrgId) {
-        await addMemberToClerkOrganization(tenant.clerkOrgId, user.clerkUserId, 'org:member');
+        await addMemberToClerkOrganization(
+          tenant.clerkOrgId,
+          user.clerkUserId,
+          "org:member",
+        );
       }
     }
 
-    await logAudit(req.userId!, 'user.reactivated', 'user', user.id, tenantId);
+    await logAudit(req.userId!, "user.reactivated", "user", user.id, tenantId);
 
-    logger.info('Reactivated user', { userId: user.id, tenantId, reactivatedBy: req.userId });
-    sendSuccess(res, { message: 'User reactivated' });
-  })
+    logger.info("Reactivated user", {
+      userId: user.id,
+      tenantId,
+      reactivatedBy: req.userId,
+    });
+    sendSuccess(res, { message: "User reactivated" });
+  }),
 );
 
 /**
@@ -975,14 +1248,18 @@ router.post(
  * GET /api/v1/tenants/me/pending-invites
  */
 router.get(
-  '/me/pending-invites',
-  requireClerkAuth, autoProvision,
+  "/me/pending-invites",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
 
     const inviteRepo = AppDataSource.getRepository(PendingInvite);
-    let invites = await inviteRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+    let invites = await inviteRepo.find({
+      where: { tenantId },
+      order: { createdAt: "DESC" },
+    });
 
     // Reconcile against Clerk: drop invites whose invitee already joined the org.
     // The pending row otherwise only clears when the invitee logs into the portal
@@ -991,49 +1268,66 @@ router.get(
     // fail-open if Clerk is slow/down so the page still renders.
     if (invites.length > 0) {
       try {
-        const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+        const tenant = await AppDataSource.getRepository(Tenant).findOne({
+          where: { id: tenantId },
+        });
         if (tenant?.clerkOrgId) {
           const memberships = await getAllOrgMemberships(tenant.clerkOrgId);
           const memberEmails = new Set(
             memberships
               .map((m: any) => m.publicUserData?.identifier?.toLowerCase())
-              .filter(Boolean)
+              .filter(Boolean),
           );
-          const accepted = invites.filter(inv => memberEmails.has(inv.email.toLowerCase()));
+          const accepted = invites.filter((inv) =>
+            memberEmails.has(inv.email.toLowerCase()),
+          );
           if (accepted.length > 0) {
             await inviteRepo.remove(accepted);
-            invites = invites.filter(inv => !memberEmails.has(inv.email.toLowerCase()));
-            logger.info('Cleared stale pending invites (already org members)', { tenantId, count: accepted.length });
+            invites = invites.filter(
+              (inv) => !memberEmails.has(inv.email.toLowerCase()),
+            );
+            logger.info("Cleared stale pending invites (already org members)", {
+              tenantId,
+              count: accepted.length,
+            });
           }
         }
       } catch (err) {
-        logger.warn('Pending-invite reconcile against Clerk failed; returning DB list', { tenantId, err });
+        logger.warn(
+          "Pending-invite reconcile against Clerk failed; returning DB list",
+          { tenantId, err },
+        );
       }
     }
 
     // Resolve inviter names
-    const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];
-    const inviters = inviterIds.length > 0
-      ? await AppDataSource.getRepository(User)
-          .createQueryBuilder('u')
-          .select(['u.id', 'u.name', 'u.email'])
-          .where('u.id IN (:...ids)', { ids: inviterIds })
-          .getMany()
-      : [];
-    const inviterMap = new Map(inviters.map(u => [u.id, { name: u.name, email: u.email }]));
+    const inviterIds = [
+      ...new Set(invites.map((i) => i.invitedBy).filter(Boolean)),
+    ] as string[];
+    const inviters =
+      inviterIds.length > 0
+        ? await AppDataSource.getRepository(User)
+            .createQueryBuilder("u")
+            .select(["u.id", "u.name", "u.email"])
+            .where("u.id IN (:...ids)", { ids: inviterIds })
+            .getMany()
+        : [];
+    const inviterMap = new Map(
+      inviters.map((u) => [u.id, { name: u.name, email: u.email }]),
+    );
 
-    const data = invites.map(inv => ({
+    const data = invites.map((inv) => ({
       id: inv.id,
       email: inv.email,
       role: inv.role,
-      invitedBy: inv.invitedBy ? inviterMap.get(inv.invitedBy) ?? null : null,
+      invitedBy: inv.invitedBy ? (inviterMap.get(inv.invitedBy) ?? null) : null,
       createdAt: inv.createdAt,
       expiresAt: inv.expiresAt,
       isExpired: new Date() > inv.expiresAt,
     }));
 
     sendSuccess(res, data);
-  })
+  }),
 );
 
 /**
@@ -1041,8 +1335,9 @@ router.get(
  * POST /api/v1/tenants/me/pending-invites/:id/resend
  */
 router.post(
-  '/me/pending-invites/:id/resend',
-  requireClerkAuth, autoProvision,
+  "/me/pending-invites/:id/resend",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -1053,38 +1348,69 @@ router.post(
     });
 
     if (!invite) {
-      throw new NotFoundError('Invite not found');
+      throw new NotFoundError("Invite not found");
     }
 
     // Re-send Clerk invitation
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
     if (!tenant?.clerkOrgId) {
-      throw new BadRequestError('Tenant has no Clerk organization linked');
+      throw new BadRequestError("Tenant has no Clerk organization linked");
     }
 
-    const result = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+    const result = await revokeAndResendClerkInvitation(
+      tenant.clerkOrgId,
+      invite.email,
+      req.user?.clerkUserId,
+    );
 
-    if (!result.ok && result.code === 'already_member') {
+    if (!result.ok && result.code === "already_member") {
       // Already in the Clerk org — sync them into our DB (best-effort) and drop the invite.
-      await provisionExistingOrgMember(tenantId, tenant.clerkOrgId, invite.email, invite.role as 'admin' | 'supervisor' | 'agent');
+      await provisionExistingOrgMember(
+        tenantId,
+        tenant.clerkOrgId,
+        invite.email,
+        invite.role as "admin" | "supervisor" | "agent",
+      );
 
       await inviteRepo.remove(invite);
-      await logAudit(req.userId!, 'invite.cleaned', 'invite', invite.id, tenantId, { email: invite.email, reason: 'already_member' });
-      sendSuccess(res, { message: 'User has already joined — synced to members list' });
+      await logAudit(
+        req.userId!,
+        "invite.cleaned",
+        "invite",
+        invite.id,
+        tenantId,
+        { email: invite.email, reason: "already_member" },
+      );
+      sendSuccess(res, {
+        message: "User has already joined — synced to members list",
+      });
       return;
     }
 
     if (!result.ok) {
-      throw new ApiError(result.message, 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
+      throw new ApiError(
+        result.message,
+        502,
+        ERROR_CODES.CLERK_UPSTREAM_FAILED,
+      );
     }
 
     invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await inviteRepo.save(invite);
 
-    await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
+    await logAudit(
+      req.userId!,
+      "invite.resent",
+      "invite",
+      invite.id,
+      tenantId,
+      { email: invite.email },
+    );
 
-    sendSuccess(res, { message: 'Invite resent' });
-  })
+    sendSuccess(res, { message: "Invite resent" });
+  }),
 );
 
 /**
@@ -1092,8 +1418,9 @@ router.post(
  * DELETE /api/v1/tenants/me/pending-invites/:id
  */
 router.delete(
-  '/me/pending-invites/:id',
-  requireClerkAuth, autoProvision,
+  "/me/pending-invites/:id",
+  requireClerkAuth,
+  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -1104,29 +1431,51 @@ router.delete(
     });
 
     if (!invite) {
-      throw new NotFoundError('Invite not found');
+      throw new NotFoundError("Invite not found");
     }
 
     // Revoke the Clerk-side invitation too — otherwise its email link stays live
     // and the recipient could still accept after we delete our local row. Only
     // report success once Clerk confirms there's no longer a live invitation.
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
     if (tenant?.clerkOrgId) {
-      const revoked = await revokeClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+      const revoked = await revokeClerkInvitation(
+        tenant.clerkOrgId,
+        invite.email,
+        req.user?.clerkUserId,
+      );
       if (!revoked) {
-        throw new ApiError('Failed to revoke invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
+        throw new ApiError(
+          "Failed to revoke invite via Clerk",
+          502,
+          ERROR_CODES.CLERK_UPSTREAM_FAILED,
+        );
       }
     }
 
-    await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
+    await logAudit(
+      req.userId!,
+      "invite.cancelled",
+      "invite",
+      invite.id,
+      tenantId,
+      { email: invite.email },
+    );
 
     await inviteRepo.remove(invite);
 
-    sendSuccess(res, { message: 'Invite cancelled' });
-  })
+    sendSuccess(res, { message: "Invite cancelled" });
+  }),
 );
 
-export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConversation = false, orgName?: string) {
+export function computeOnboardingStatus(
+  tenant: any,
+  kbDocCount: number,
+  hadConversation = false,
+  orgName?: string,
+) {
   const settings = tenant.settings || {};
   const ai = settings.ai || {};
   const automations = settings.automations || {};
@@ -1146,8 +1495,10 @@ export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConv
     brandVoiceConfigured: !!(
       bv?.customInstructions?.trim() ||
       bv?.businessName?.trim() ||
-      (bv?.tone && bv.tone !== 'friendly') ||
-      (bv?.name && bv.name !== 'Organization Assistant' && bv.name !== defaultBrandName)
+      (bv?.tone && bv.tone !== "friendly") ||
+      (bv?.name &&
+        bv.name !== "Organization Assistant" &&
+        bv.name !== defaultBrandName)
     ),
     knowledgeBaseHasDocs: kbDocCount > 0,
     automationsConfigured: !!(
@@ -1179,16 +1530,19 @@ export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConv
  * GET /api/v1/tenants/me/onboarding-status
  */
 router.get(
-  '/me/onboarding-status',
-  requireClerkAuth, autoProvision,
+  "/me/onboarding-status",
+  requireClerkAuth,
+  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
-    if (!tenant) throw new NotFoundError('Tenant not found');
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundError("Tenant not found");
 
     const kbResult = await AppDataSource.query(
       `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
-      [tenantId]
+      [tenantId],
     ).catch(() => [{ count: 0 }]);
 
     // Multi-bot Phase 4 (#16d): onboarding steps inspect ai/integrations/
@@ -1226,7 +1580,7 @@ router.get(
                AND (um.created_at, um.id) < (bm.created_at, bm.id)
            )
        ) AS has`,
-      [tenantId]
+      [tenantId],
     ).catch(() => [{ has: false }]);
 
     const status = computeOnboardingStatus(
@@ -1236,7 +1590,7 @@ router.get(
       tenant.name,
     );
     sendSuccess(res, status);
-  })
+  }),
 );
 
 /**
@@ -1244,18 +1598,21 @@ router.get(
  * GET /api/v1/tenants/me/available-tools
  */
 router.get(
-  '/me/available-tools',
-  requireClerkAuth, autoProvision,
+  "/me/available-tools",
+  requireClerkAuth,
+  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
-    if (!tenant) throw new NotFoundError('Tenant not found');
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundError("Tenant not found");
 
     // Multi-bot Phase 4 (#16d): tool registry resolves integrations from
     // Bot.settings now. Anchor bot drives the tenant-level tool list.
     const { settings: botSettings } = await getAnchorBotConfig(tenantId);
 
-    const { ToolRegistry } = await import('../agent/tool-registry');
+    const { ToolRegistry } = await import("../agent/tool-registry");
     const registry = new ToolRegistry();
     const tools = await registry.getToolsForTenant(tenant, botSettings);
 
@@ -1264,10 +1621,14 @@ router.get(
         name: t.name,
         description: t.description,
         hasSideEffects: t.hasSideEffects,
-        category: ['kb_search', 'capture_lead', 'escalate_to_human'].includes(t.name) ? 'always' : 'booking',
+        category: ["kb_search", "capture_lead", "escalate_to_human"].includes(
+          t.name,
+        )
+          ? "always"
+          : "booking",
       })),
     });
-  })
+  }),
 );
 
 export { router as tenantRouter };

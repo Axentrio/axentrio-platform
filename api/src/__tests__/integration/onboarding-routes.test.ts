@@ -296,7 +296,7 @@ describe('PUT /onboarding/step', () => {
     expect(bot.settings?.quotedAddress?.enabled).toBe(true);
   });
 
-  it('#153: an online presence leaves the per-bot address off', async () => {
+  it('#153: an online presence defaults the per-bot address on', async () => {
     const tenant = await signedInTenant();
     await createTestAnchorBot(tenant);
     await request(app)
@@ -306,6 +306,25 @@ describe('PUT /onboarding/step', () => {
         outcome: 'done',
         company: { vatNumber: 'BE0400378485', name: 'Webshop BV', presence: 'online' },
       });
+    const bot = await AppDataSource.getRepository(Bot).findOneByOrFail({ tenantId: tenant.id, isDefault: true });
+    expect(bot.settings?.quotedAddress?.enabled).toBe(true);
+  });
+
+  it('#153: resubmitting company details preserves an explicitly disabled address', async () => {
+    const tenant = await signedInTenant();
+    await createTestAnchorBot(tenant, {
+      settings: { quotedAddress: { enabled: false } } as Bot['settings'],
+    });
+
+    const res = await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({
+        step: 'company',
+        outcome: 'done',
+        company: { vatNumber: 'BE0400378485', name: 'Webshop BV', presence: 'online' },
+      });
+
+    expect(res.status).toBe(200);
     const bot = await AppDataSource.getRepository(Bot).findOneByOrFail({ tenantId: tenant.id, isDefault: true });
     expect(bot.settings?.quotedAddress?.enabled).toBe(false);
   });

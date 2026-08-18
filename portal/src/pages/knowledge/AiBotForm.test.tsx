@@ -4,7 +4,15 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AiBotForm from './AiBotForm';
 
-const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = vi.hoisted(() => ({
+const {
+  mockMutate,
+  mockBind,
+  mockUpdateBot,
+  readinessState,
+  botDetailState,
+  accountInformationState,
+  accountInformationQueryState,
+} = vi.hoisted(() => ({
   mockMutate: vi.fn(),
   mockBind: vi.fn(),
   mockUpdateBot: vi.fn(),
@@ -25,8 +33,19 @@ const { mockMutate, mockBind, mockUpdateBot, readinessState, botDetailState } = 
       postalCode?: string | null;
       city?: string | null;
       country?: string | null;
+    } | undefined,
+  },
+  accountInformationState: {
+    invoiceAddress: {
+      street: 'Account Street',
+      streetNumber: '10',
+      boxNumber: '3',
+      postalCode: '1000',
+      city: 'Brussels',
+      country: 'BE',
     },
   },
+  accountInformationQueryState: { isFetched: true },
 }));
 
 vi.mock('@/auth/useAppAuth', () => ({
@@ -84,16 +103,24 @@ vi.mock('@/queries/useReadinessQueries', () => ({
   useBotReadiness: () => ({ data: { botId: 'test-bot', capabilities: [], overall: {}, ...readinessState } }),
 }));
 
+vi.mock('@/queries/useTenantQueries', () => ({
+  useAccountInformation: () => ({
+    data: accountInformationState,
+    isFetched: accountInformationQueryState.isFetched,
+  }),
+}));
+
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   const user = userEvent.setup();
   // Some children use React Query hooks, so wrap in a client.
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const result = render(
+  const view = () => (
     <QueryClientProvider client={queryClient}>
       <AiBotForm botId="test-bot" onGoToKnowledgeBase={onGoToKnowledgeBase} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { user, onGoToKnowledgeBase, ...result };
+  const result = render(view());
+  return { user, onGoToKnowledgeBase, rerenderForm: () => result.rerender(view()), ...result };
 };
 
 // Business Name is an auto-saved AI-settings field (the form's auto-save path),
@@ -109,6 +136,8 @@ describe('AiBotForm', () => {
     mockUpdateBot.mockReset().mockResolvedValue(undefined);
     botDetailState.businessHours = null;
     botDetailState.quotedAddress = { enabled: false };
+    accountInformationState.invoiceAddress.country = 'BE';
+    accountInformationQueryState.isFetched = true;
     readinessState.unselectedEntitledSkills = [];
   });
 
@@ -211,15 +240,59 @@ describe('AiBotForm', () => {
     expect(payload.businessHours.dateOverrides).toEqual([{ date: '2026-12-25', closed: true }]);
   });
 
-  it('saves a per-bot quoted address only when the field is turned on', async () => {
+  it('defaults an unsaved quoted address on and prefills the account address', async () => {
+    botDetailState.quotedAddress = undefined;
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: /operational/i }));
-    const switches = await screen.findAllByRole('switch');
-    // Last switch in operational is the quoted-address enablement (default off).
-    await user.click(switches[switches.length - 1]);
-    await user.type(screen.getByPlaceholderText('Street'), 'Grote Markt');
-    await user.type(screen.getByPlaceholderText('Street number'), '1');
-    await user.type(screen.getByPlaceholderText('Box number'), '2');
+
+    expect(await screen.findByRole('switch', { name: /address the bot quotes/i })).toBeChecked();
+    expect(screen.getByPlaceholderText('Street')).toHaveValue('Account Street');
+    expect(screen.getByPlaceholderText('Street number')).toHaveValue('10');
+    expect(screen.getByPlaceholderText('Box number')).toHaveValue('3');
+    expect(screen.getByPlaceholderText('Postal code')).toHaveValue('1000');
+    expect(screen.getByPlaceholderText('City')).toHaveValue('Brussels');
+    expect(screen.getByPlaceholderText('Country code')).toHaveValue('BE');
+  });
+
+  it('keeps the quoted-address switch disabled until hydration completes', async () => {
+    accountInformationQueryState.isFetched = false;
+    const { user, rerenderForm } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+
+    const loadingSwitch = await screen.findByRole('switch', { name: /address the bot quotes/i });
+    expect(loadingSwitch).toBeDisabled();
+    await user.click(loadingSwitch);
+    expect(loadingSwitch).not.toBeChecked();
+
+    accountInformationQueryState.isFetched = true;
+    rerenderForm();
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /address the bot quotes/i })).toBeEnabled(),
+    );
+  });
+
+  it('restores a non-Belgian account country when the quoted address is turned on', async () => {
+    accountInformationState.invoiceAddress.country = 'FR';
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    await user.click(await screen.findByRole('switch', { name: /address the bot quotes/i }));
+
+    expect(screen.getByPlaceholderText('Country code')).toHaveValue('FR');
+  });
+
+  it('prefills the account address when the quoted address is turned on', async () => {
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    await user.click(await screen.findByRole('switch', { name: /address the bot quotes/i }));
+    const street = screen.getByPlaceholderText('Street');
+    const streetNumber = screen.getByPlaceholderText('Street number');
+    const boxNumber = screen.getByPlaceholderText('Box number');
+    await user.clear(street);
+    await user.type(street, 'Grote Markt');
+    await user.clear(streetNumber);
+    await user.type(streetNumber, '1');
+    await user.clear(boxNumber);
+    await user.type(boxNumber, '2');
     const country = screen.getByPlaceholderText('Country code');
     await user.clear(country);
     await user.type(country, 'belgië');
@@ -235,6 +308,19 @@ describe('AiBotForm', () => {
       },
     });
     expect(country).toHaveValue('BE');
+  });
+
+  it('saves disabled quoted-address settings as no address', async () => {
+    botDetailState.quotedAddress = { enabled: true, street: 'Saved Street' };
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    await user.click(await screen.findByRole('switch', { name: /address the bot quotes/i }));
+    await user.click(screen.getByRole('button', { name: /save bot address/i }));
+
+    await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
+    expect(mockUpdateBot.mock.calls[0][0]).toMatchObject({
+      quotedAddress: { enabled: false, street: 'Saved Street' },
+    });
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

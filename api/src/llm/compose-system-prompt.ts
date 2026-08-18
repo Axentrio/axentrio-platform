@@ -226,6 +226,9 @@ interface AgentCtx {
    *  and the come-in-person invite in BOOKING (NOT AVAILABLE). A mobile-only
    *  business has no venue, so both are omitted rather than inventing one. */
   venueLine?: string;
+  /** False when the owner explicitly disabled the address profile. Distinct from
+   *  an enabled profile with no configured address, which may still search the KB. */
+  quotedAddressEnabled?: boolean;
   /** True when at least one bookable service is carried out at the customer's
    *  address. Selects the travel-caveat wording of ## OUR ADDRESS and suppresses
    *  the come-in-person invite (a mobile job has no shop to visit). Absent/false
@@ -493,11 +496,12 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // form, so a stale KB snippet must not send those questions to kb_search.
   const configuredHours = (ctx.openingHours ?? '').trim();
   const configuredAddress = (ctx.venueLine ?? '').trim();
+  const addressDisabled = ctx.quotedAddressEnabled === false;
   if (tools.some((t) => t.name === 'kb_search')) {
     const topics = ['services'];
     if (!configuredHours) topics.push('opening hours');
     topics.push('prices', 'policies');
-    if (!configuredAddress) topics.push('location');
+    if (!configuredAddress && !addressDisabled) topics.push('location');
     topics.push('contact details');
     const overrideBits: string[] = [];
     if (configuredHours) {
@@ -508,6 +512,11 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     if (configuredAddress) {
       overrideBits.push(
         'The business address is already configured in this prompt — answer location questions from that configured address and do NOT call kb_search for location; configured address overrides anything in the knowledge base.',
+      );
+    }
+    if (addressDisabled) {
+      overrideBits.push(
+        'The business address is intentionally not part of this profile — do not provide or volunteer a business address, and do not infer or retrieve one from the knowledge base, including prefetched knowledge.',
       );
     }
     const configuredOverride = overrideBits.length ? ` ${overrideBits.join(' ')}` : '';

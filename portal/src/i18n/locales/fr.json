@@ -981,7 +981,7 @@
         },
         "quotedAddress": {
           "label": "Adresse citée par le bot",
-          "helper": "Facultatif. Désactivé par défaut — le bot utilise l'adresse du compte. Activez seulement si ce bot doit citer une autre adresse.",
+          "helper": "Activée par défaut — cite l’adresse du compte, modifiable par bot. Désactivez-la pour ne citer aucune adresse (par exemple, pour une entreprise uniquement en ligne).",
           "street": "Rue",
           "streetNumber": "Numéro",
           "boxNumber": "Boîte",

@@ -982,7 +982,7 @@
         },
         "quotedAddress": {
           "label": "Adres dat de bot noemt",
-          "helper": "Optioneel. Standaard uit — de bot gebruikt het bedrijfsadres van het account. Zet alleen aan als deze bot een ander adres moet noemen.",
+          "helper": "Standaard aan — noemt het adres van het account, per bot aanpasbaar. Zet uit om geen adres te noemen (bijvoorbeeld voor een uitsluitend online bedrijf).",
           "street": "Straat",
           "streetNumber": "Huisnummer",
           "boxNumber": "Busnummer",

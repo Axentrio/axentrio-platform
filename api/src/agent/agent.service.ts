@@ -671,19 +671,21 @@ export class AgentService {
           city: tenant.settings?.onboarding?.company?.city,
           country: 'BE',
         };
-        venueLine =
-          resolveQuotedAddress({
-            botAddressEnabled: effBotSettings.quotedAddress?.enabled === true,
-            botAddress: effBotSettings.quotedAddress ?? null,
-            accountAddress,
-          }) ??
-          formatVenueLine({
-            street: bookingSettings?.venueStreet,
-            postalCode: bookingSettings?.venuePostalCode,
-            city: bookingSettings?.venueCity,
-            country: bookingSettings?.venueCountry,
-          }) ??
-          undefined;
+        const quotedAddressEnabled = effBotSettings.quotedAddress?.enabled !== false;
+        venueLine = quotedAddressEnabled
+          ? resolveQuotedAddress({
+              botAddressEnabled: true,
+              botAddress: effBotSettings.quotedAddress ?? null,
+              accountAddress,
+            }) ??
+            formatVenueLine({
+              street: bookingSettings?.venueStreet,
+              postalCode: bookingSettings?.venuePostalCode,
+              city: bookingSettings?.venueCity,
+              country: bookingSettings?.venueCountry,
+            }) ??
+            undefined
+          : undefined;
       } catch (error) {
         logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
       }

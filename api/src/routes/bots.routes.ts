@@ -311,7 +311,7 @@ router.get(
       businessHours: bot.settings?.businessHours
         ? { ...bot.settings.businessHours, timezone: bot.businessTimezone || bot.settings.businessHours.timezone }
         : null,
-      quotedAddress: bot.settings?.quotedAddress ?? { enabled: false },
+      quotedAddress: bot.settings?.quotedAddress,
     });
   })
 );

@@ -113,6 +113,22 @@ describe('Per-bot AI settings', () => {
     configureMockAuth(auth, { userId: admin.id, tenantId, role: 'admin' });
   });
 
+  describe('GET /bots/:id', () => {
+    it('distinguishes an unsaved quoted address from one explicitly disabled', async () => {
+      const unsaved = await request(app).get(`/api/v1/bots/${botId}`);
+      expect(unsaved.status).toBe(200);
+      expect(unsaved.body.data.quotedAddress).toBeUndefined();
+
+      const update = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({ quotedAddress: { enabled: false } });
+      expect(update.status).toBe(200);
+
+      const disabled = await request(app).get(`/api/v1/bots/${botId}`);
+      expect(disabled.body.data.quotedAddress).toMatchObject({ enabled: false });
+    });
+  });
+
   describe('GET /bots/:id/ai-settings', () => {
     it('returns the bot ai shape with hasApiKey and never leaks apiKey', async () => {
       const res = await request(app).get(`/api/v1/bots/${botId}/ai-settings`);

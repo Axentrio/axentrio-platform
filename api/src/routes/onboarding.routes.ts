@@ -259,17 +259,15 @@ router.put(
         vatVerified: account.vatVerified,
         invoiceAddress: account.invoiceAddress,
       });
-      // #153: only a physical business activates the per-bot quoted-address field.
-      // Online shops stay default-off. Fail-open if the anchor isn't there yet.
+      // #153: quote the account address by default. Online-only businesses can
+      // explicitly turn this off in the Agent settings.
       try {
         const { settings } = await getAnchorBotConfig(tenantId);
-        const current = settings.quotedAddress ?? { enabled: false };
-        await replaceAnchorBotSettingsSection(tenantId, 'quotedAddress', {
-          ...current,
-          enabled: presence === 'physical',
-        });
+        if (settings.quotedAddress === undefined) {
+          await replaceAnchorBotSettingsSection(tenantId, 'quotedAddress', { enabled: true });
+        }
       } catch {
-        /* anchor missing on a brand-new tenant — field stays default-off */
+        /* anchor missing on a brand-new tenant — absent settings resolve default-on */
       }
     }
 

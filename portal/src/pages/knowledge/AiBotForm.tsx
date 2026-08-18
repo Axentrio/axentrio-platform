@@ -47,6 +47,7 @@ import { InlineError } from '@/components/ui/inline-error';
 import { SkillStateCard } from '@/components/SkillStateCard';
 import { SkillCoverageWarning } from '@/components/SkillCoverageWarning';
 import { useBotReadiness } from '@/queries/useReadinessQueries';
+import { useAccountInformation } from '@/queries/useTenantQueries';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import TagInput from './TagInput';
 
@@ -211,6 +212,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   // Business hours (operational, tenant-owned). Its own resource (bot settings),
   // saved explicitly with its own button — separate from the auto-saved AI form.
   const { data: botDetail } = useBotDetail(botId, { enabled: isAdminOrSupervisor });
+  const { data: accountInformation, isFetched: accountInformationFetched } = useAccountInformation();
   const updateBot = useUpdateBot();
 
   // Form state
@@ -243,7 +245,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [qaBoxNumber, setQaBoxNumber] = useState('');
   const [qaPostal, setQaPostal] = useState('');
   const [qaCity, setQaCity] = useState('');
-  const [qaCountry, setQaCountry] = useState('BE');
+  const [qaCountry, setQaCountry] = useState('');
   const [qaBaseline, setQaBaseline] = useState<string | null>(null);
   const qaHydratedKeyRef = useRef<string | null>(null);
   const bhHydratedKeyRef = useRef<string | null>(null);
@@ -335,16 +337,19 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
 
   useEffect(() => {
     if (!botDetail || !tenantId) return;
+    if (!accountInformationFetched) return;
     if (qaHydratedKeyRef.current === hydrationKey) return;
     qaHydratedKeyRef.current = hydrationKey;
     const qa = botDetail.quotedAddress;
-    const enabled = qa?.enabled === true;
-    const street = qa?.street ?? '';
-    const streetNumber = qa?.streetNumber ?? '';
-    const boxNumber = qa?.boxNumber ?? '';
-    const postal = qa?.postalCode ?? '';
-    const city = qa?.city ?? '';
-    const country = (qa?.country ?? 'BE').toUpperCase();
+    const account = accountInformation?.invoiceAddress;
+    const enabled = qa?.enabled ?? true;
+    const fallback = enabled ? account : undefined;
+    const street = qa?.street ?? fallback?.street ?? '';
+    const streetNumber = qa?.streetNumber ?? fallback?.streetNumber ?? '';
+    const boxNumber = qa?.boxNumber ?? fallback?.boxNumber ?? '';
+    const postal = qa?.postalCode ?? fallback?.postalCode ?? '';
+    const city = qa?.city ?? fallback?.city ?? '';
+    const country = (qa?.country ?? (enabled ? account?.country ?? 'BE' : '')).toUpperCase();
     setQaEnabled(enabled);
     setQaStreet(street);
     setQaStreetNumber(streetNumber);
@@ -353,7 +358,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setQaCity(city);
     setQaCountry(country);
     setQaBaseline(JSON.stringify({ enabled, street, streetNumber, boxNumber, postal, city, country }));
-  }, [botDetail, tenantId, hydrationKey]);
+  }, [botDetail, tenantId, hydrationKey, accountInformation, accountInformationFetched]);
 
   const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhSchedule, bhOverrides) !== bhBaseline;
 
@@ -378,6 +383,20 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     country: qaCountry,
   };
   const qaDirty = qaBaseline !== null && JSON.stringify(qaSnapshot) !== qaBaseline;
+  const qaHydrated = qaHydratedKeyRef.current === hydrationKey;
+
+  const setQuotedAddressEnabled = (checked: boolean) => {
+    if (checked) {
+      const account = accountInformation?.invoiceAddress;
+      setQaStreet((value) => value || account?.street || '');
+      setQaStreetNumber((value) => value || account?.streetNumber || '');
+      setQaBoxNumber((value) => value || account?.boxNumber || '');
+      setQaPostal((value) => value || account?.postalCode || '');
+      setQaCity((value) => value || account?.city || '');
+      setQaCountry((value) => value || account?.country?.toUpperCase() || 'BE');
+    }
+    setQaEnabled(checked);
+  };
 
   const saveQuotedAddress = async () => {
     const payload: QuotedAddress = {
@@ -1107,7 +1126,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                     <Label className="text-text-secondary">{t('ai.bot.operational.quotedAddress.label')}</Label>
                     <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
                   </div>
-                  <Switch checked={qaEnabled} onCheckedChange={setQaEnabled} disabled={readOnly} />
+                  <Switch
+                    aria-label={t('ai.bot.operational.quotedAddress.label')}
+                    checked={qaEnabled}
+                    onCheckedChange={setQuotedAddressEnabled}
+                    disabled={readOnly || !qaHydrated}
+                    aria-busy={!qaHydrated}
+                  />
                 </div>
                 {qaEnabled && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

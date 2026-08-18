@@ -16,14 +16,14 @@ const BOT = {
 };
 
 describe('resolveQuotedAddress', () => {
-  it('uses the account address when the per-bot field is off', () => {
+  it('returns null when the per-bot field is off', () => {
     expect(
       resolveQuotedAddress({
         botAddressEnabled: false,
         botAddress: BOT,
         accountAddress: ACCOUNT,
       }),
-    ).toBe('Edingensesteenweg 196, 1500 Halle, BE');
+    ).toBeNull();
   });
 
   it('uses the per-bot address when the field is on and filled', () => {

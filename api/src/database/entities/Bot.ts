@@ -50,9 +50,8 @@ export interface BotSettings {
     handoffEnabled: boolean;
   };
   /**
-   * #153 — optional address the Agent quotes. Default off: an online shop
-   * must not have a physical address forced on. When off or blank, the
-   * account invoice address (#148) is the fallback.
+   * #153 — optional address the Agent quotes. Default on; a blank address
+   * inherits the Tenant invoice address (#148). Off quotes no address.
    */
   quotedAddress?: {
     enabled: boolean;

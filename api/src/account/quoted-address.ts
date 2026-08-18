@@ -1,10 +1,9 @@
 /**
  * The address the Agent quotes in conversation (#153).
  *
- * Per-bot address is optional and DEFAULT OFF: an online shop must not have a
- * physical address forced on. When the field is off, or on but blank, fall
- * back to the account's invoice / business address from #148 so the bot
- * always has a correct address when one exists.
+ * Per-Agent address is ON by default and inherits the Tenant's invoice /
+ * business address from #148 when blank. Turning it off suppresses the
+ * quoted address entirely, for example for an online-only business.
  */
 import { formatVenueLine, type VenueAddress } from '../contracts/venue-address';
 
@@ -15,9 +14,6 @@ export interface QuotedAddressInput {
 }
 
 export function resolveQuotedAddress(input: QuotedAddressInput): string | null {
-  if (input.botAddressEnabled) {
-    const bot = formatVenueLine(input.botAddress);
-    if (bot) return bot;
-  }
-  return formatVenueLine(input.accountAddress);
+  if (!input.botAddressEnabled) return null;
+  return formatVenueLine(input.botAddress) ?? formatVenueLine(input.accountAddress);
 }

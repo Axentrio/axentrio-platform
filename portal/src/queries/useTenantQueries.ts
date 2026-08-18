@@ -6,6 +6,17 @@ import { toast } from 'sonner';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
+export interface AccountInformation {
+  invoiceAddress: {
+    street: string;
+    streetNumber?: string;
+    boxNumber?: string;
+    postalCode: string;
+    city: string;
+    country: string;
+  };
+}
+
 export const tenantOptions = {
   me: () => queryOptions({
     queryKey: queryKeys.tenants.me(),
@@ -29,6 +40,13 @@ export const tenantOptions = {
 
 export function useTenantSettings() {
   return useQuery(tenantOptions.me());
+}
+
+export function useAccountInformation() {
+  return useQuery({
+    queryKey: [...queryKeys.tenants.me(), 'account'],
+    queryFn: () => api.get<AccountInformation>('/tenants/me/account'),
+  });
 }
 
 export function useTenantMembers() {

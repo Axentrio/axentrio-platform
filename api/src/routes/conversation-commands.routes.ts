@@ -18,32 +18,54 @@
  * chat.routes): a request carrying a widget JWT is passed through to that
  * router untouched.
  */
-import { Router, Request, Response, NextFunction } from 'express';
-import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
-import { resolveTenantContext } from '../middleware/super-admin.middleware';
-import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
-import { verifyToken } from '../middleware/auth.middleware';
-import { asyncHandler, ApiError, BadRequestError } from '../middleware/error-handler';
-import { sendSuccess, sendCreated } from '../utils/response';
-import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import {
+  Router,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
+import {
+  requireClerkAuth,
+  autoProvision,
+} from "../middleware/clerk.middleware";
+import { resolveTenantContext } from "../middleware/super-admin.middleware";
+import {
+  validateTenant,
+  type TenantRequest,
+} from "../middleware/tenant.middleware";
+import { verifyToken } from "../middleware/auth.middleware";
+import {
+  asyncHandler,
+  ApiError,
+  BadRequestError,
+} from "../middleware/error-handler";
+import { sendSuccess, sendCreated } from "../utils/response";
+import { emitToSession, emitToTenantAgents } from "../websocket/socket.handler";
 import {
   emitConversationUpsertForSession,
   emitMessageCreatedForSession,
-} from '../realtime/conversation-events';
-import { deliverOperatorReply, claimFailedForRetry } from '../channels/delivery-state';
-import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
-import { conversationCommands } from '../services/conversation-command.service';
+} from "../realtime/conversation-events";
+import {
+  deliverOperatorReply,
+  claimFailedForRetry,
+} from "../channels/delivery-state";
+import { MAX_MESSAGE_CONTENT_CHARS } from "../guardrails/classify";
+import { conversationCommands } from "../services/conversation-command.service";
 
 const router = Router();
 
 /** Pass widget-token requests through to the legacy widget close route in
  *  chat.routes (same mount). Anything else is treated as an operator command. */
-function forwardWidgetTokens(req: Request, _res: Response, next: NextFunction): void {
+function forwardWidgetTokens(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
   const header = req.headers.authorization;
-  if (header?.startsWith('Bearer ')) {
+  if (header?.startsWith("Bearer ")) {
     try {
       const payload = verifyToken(header.substring(7));
-      if (payload.type === 'widget') return next('router');
+      if (payload.type === "widget") return next("router");
     } catch {
       // Not a local widget JWT (e.g. a Clerk token) — operator path.
     }
@@ -51,21 +73,28 @@ function forwardWidgetTokens(req: Request, _res: Response, next: NextFunction): 
   next();
 }
 
-const agentAuth = [requireClerkAuth, autoProvision, resolveTenantContext, validateTenant] as const;
+const agentAuth = [
+  requireClerkAuth,
+  autoProvision,
+  resolveTenantContext,
+  validateTenant,
+] as const;
 
 /** Tenant scope + super-admin impersonation flag for command service calls. */
 function commandScope(req: TenantRequest) {
   return {
     tenantId: req.tenant!.id,
-    allowForeignAgent:
-      req.user?.role === 'super_admin' && typeof req.headers['x-tenant-context'] === 'string',
+    // Role is DB-provisioned, not client-supplied. Session still must belong
+    // to req.tenant (org-switch OR X-Tenant-Context). Agent row may live on
+    // the super-admin's home tenant — user_id is globally unique.
+    allowForeignAgent: req.user?.role === "super_admin",
   };
 }
 
 function requireIdempotencyKey(body: unknown): string {
   const key = (body as { idempotencyKey?: unknown })?.idempotencyKey;
-  if (typeof key !== 'string' || !key.trim() || key.length > 128) {
-    throw new BadRequestError('idempotencyKey is required (max 128 chars)');
+  if (typeof key !== "string" || !key.trim() || key.length > 128) {
+    throw new BadRequestError("idempotencyKey is required (max 128 chars)");
   }
   return key;
 }
@@ -79,8 +108,10 @@ function requireIdempotencyKey(body: unknown): string {
 export function optionalIdempotencyKey(body: unknown): string | undefined {
   const key = (body as { idempotencyKey?: unknown })?.idempotencyKey;
   if (key === undefined || key === null) return undefined;
-  if (typeof key !== 'string' || !key.trim() || key.length > 128) {
-    throw new BadRequestError('idempotencyKey must be a non-empty string (max 128 chars)');
+  if (typeof key !== "string" || !key.trim() || key.length > 128) {
+    throw new BadRequestError(
+      "idempotencyKey must be a non-empty string (max 128 chars)",
+    );
   }
   return key;
 }
@@ -102,21 +133,30 @@ export function optionalIdempotencyKey(body: unknown): string | undefined {
  * non-idempotently.
  */
 router.post(
-  '/:sessionId/takeover',
+  "/:sessionId/takeover",
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const idempotencyKey = optionalIdempotencyKey(req.body);
-    const { mode = 'indefinite', hours } = req.body as { mode?: string; hours?: unknown };
+    const { mode = "indefinite", hours } = req.body as {
+      mode?: string;
+      hours?: unknown;
+    };
     const modeIsExplicit = (req.body as { mode?: unknown })?.mode !== undefined;
 
-    if (mode !== 'indefinite' && mode !== 'timed') {
+    if (mode !== "indefinite" && mode !== "timed") {
       throw new BadRequestError("mode must be 'indefinite' or 'timed'");
     }
-    if (mode === 'timed' && (typeof hours !== 'number' || !Number.isInteger(hours) || hours < 1 || hours > 24)) {
+    if (
+      mode === "timed" &&
+      (typeof hours !== "number" ||
+        !Number.isInteger(hours) ||
+        hours < 1 ||
+        hours > 24)
+    ) {
       throw new ApiError(
-        'A timed takeover requires an integer hours value between 1 and 24',
+        "A timed takeover requires an integer hours value between 1 and 24",
         400,
-        'invalid_takeover_hours',
+        "invalid_takeover_hours",
         { hours },
       );
     }
@@ -124,32 +164,43 @@ router.post(
     const result = await conversationCommands.claimConversation(
       req.params.sessionId,
       req.user!.id,
-      mode === 'timed' ? { mode: 'timed', hours: hours as number } : { mode: 'indefinite' },
+      mode === "timed"
+        ? { mode: "timed", hours: hours as number }
+        : { mode: "indefinite" },
       idempotencyKey,
       { ...commandScope(req), updatePolicyIfOwned: modeIsExplicit },
     );
 
-    if (result.outcome === 'claimed' && !result.replayed) {
-      emitToSession(req.tenant!.id, req.params.sessionId, 'handoff:accepted', {
+    if (result.outcome === "claimed" && !result.replayed) {
+      emitToSession(req.tenant!.id, req.params.sessionId, "handoff:accepted", {
         sessionId: req.params.sessionId,
         agent: { id: req.user!.id },
         acceptedAt: new Date().toISOString(),
       });
-      emitToTenantAgents(req.tenant!.id, 'handoff:assigned', {
+      emitToTenantAgents(req.tenant!.id, "handoff:assigned", {
         sessionId: req.params.sessionId,
         agentId: req.user!.id,
       });
       // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
-      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+      await emitConversationUpsertForSession(
+        req.params.sessionId,
+        req.tenant!.id,
+      );
     } else if (result.policyUpdated && !result.replayed) {
       // Policy changed on an already-owned conversation: no legacy handoff
       // emits (nothing was accepted or assigned), but the portal countdown
       // needs the committed upsert.
-      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+      await emitConversationUpsertForSession(
+        req.params.sessionId,
+        req.tenant!.id,
+      );
     }
 
-    sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
-  })
+    sendSuccess(res, {
+      outcome: result.outcome,
+      conversation: result.conversation,
+    });
+  }),
 );
 
 /**
@@ -157,7 +208,7 @@ router.post(
  * Key optional (B2 fix): the shipped portal posts here with an empty body (Inbox.tsx:289).
  */
 router.post(
-  '/:sessionId/release',
+  "/:sessionId/release",
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const idempotencyKey = optionalIdempotencyKey(req.body);
@@ -170,26 +221,32 @@ router.post(
       { ...commandScope(req), reason },
     );
 
-    if (result.outcome === 'released' && !result.replayed) {
-      emitToSession(req.tenant!.id, req.params.sessionId, 'handoff:returned', {
+    if (result.outcome === "released" && !result.replayed) {
+      emitToSession(req.tenant!.id, req.params.sessionId, "handoff:returned", {
         sessionId: req.params.sessionId,
         reason,
         returnedAt: new Date().toISOString(),
       });
       // B-PR3a: a release previously reached ONLY the session room — the
       // agents-room gap this PR closes.
-      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+      await emitConversationUpsertForSession(
+        req.params.sessionId,
+        req.tenant!.id,
+      );
     }
 
-    sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
-  })
+    sendSuccess(res, {
+      outcome: result.outcome,
+      conversation: result.conversation,
+    });
+  }),
 );
 
 /**
  * POST /chats/:sessionId/cancel — HANDOFF_REQUESTED -> BOT_OWNED (operator decline).
  */
 router.post(
-  '/:sessionId/cancel',
+  "/:sessionId/cancel",
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const idempotencyKey = requireIdempotencyKey(req.body);
@@ -197,23 +254,29 @@ router.post(
 
     const result = await conversationCommands.cancelHandoff(
       req.params.sessionId,
-      { kind: 'agent', agentId: req.user!.id },
+      { kind: "agent", agentId: req.user!.id },
       idempotencyKey,
       { ...commandScope(req), reason },
     );
 
-    if (result.outcome === 'cancelled' && !result.replayed) {
-      emitToTenantAgents(req.tenant!.id, 'handoff:rejected', {
+    if (result.outcome === "cancelled" && !result.replayed) {
+      emitToTenantAgents(req.tenant!.id, "handoff:rejected", {
         sessionId: req.params.sessionId,
         rejectedBy: req.user!.id,
         rejectedAt: new Date().toISOString(),
       });
       // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
-      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+      await emitConversationUpsertForSession(
+        req.params.sessionId,
+        req.tenant!.id,
+      );
     }
 
-    sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
-  })
+    sendSuccess(res, {
+      outcome: result.outcome,
+      conversation: result.conversation,
+    });
+  }),
 );
 
 /**
@@ -222,7 +285,7 @@ router.post(
  * Key optional (B2 fix): the shipped portal posts here with an empty body (Inbox.tsx:272).
  */
 router.post(
-  '/:sessionId/close',
+  "/:sessionId/close",
   forwardWidgetTokens,
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
@@ -231,24 +294,30 @@ router.post(
 
     const result = await conversationCommands.closeConversation(
       req.params.sessionId,
-      { kind: 'agent', agentId: req.user!.id },
+      { kind: "agent", agentId: req.user!.id },
       idempotencyKey,
       { ...commandScope(req), reason },
     );
 
-    if (result.outcome === 'closed' && !result.replayed) {
-      emitToSession(req.tenant!.id, req.params.sessionId, 'session:closed', {
+    if (result.outcome === "closed" && !result.replayed) {
+      emitToSession(req.tenant!.id, req.params.sessionId, "session:closed", {
         sessionId: req.params.sessionId,
         endedAt: new Date().toISOString(),
-        closedBy: 'agent',
+        closedBy: "agent",
       });
       // B-PR3a: a close previously reached ONLY the session room — the
       // agents-room gap this PR closes.
-      await emitConversationUpsertForSession(req.params.sessionId, req.tenant!.id);
+      await emitConversationUpsertForSession(
+        req.params.sessionId,
+        req.tenant!.id,
+      );
     }
 
-    sendSuccess(res, { outcome: result.outcome, conversation: result.conversation });
-  })
+    sendSuccess(res, {
+      outcome: result.outcome,
+      conversation: result.conversation,
+    });
+  }),
 );
 
 /**
@@ -258,18 +327,21 @@ router.post(
  * ownership is a 409 (the client keeps the draft).
  */
 router.post(
-  '/:sessionId/messages',
+  "/:sessionId/messages",
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
-    const { clientMessageId, content } = req.body as { clientMessageId?: string; content?: string };
-    if (typeof clientMessageId !== 'string' || !clientMessageId.trim()) {
-      throw new BadRequestError('clientMessageId is required');
+    const { clientMessageId, content } = req.body as {
+      clientMessageId?: string;
+      content?: string;
+    };
+    if (typeof clientMessageId !== "string" || !clientMessageId.trim()) {
+      throw new BadRequestError("clientMessageId is required");
     }
-    if (typeof content !== 'string' || !content.trim()) {
-      throw new BadRequestError('content is required');
+    if (typeof content !== "string" || !content.trim()) {
+      throw new BadRequestError("content is required");
     }
     if (content.length > MAX_MESSAGE_CONTENT_CHARS) {
-      throw new BadRequestError('Message too long');
+      throw new BadRequestError("Message too long");
     }
 
     const result = await conversationCommands.sendHumanMessage(
@@ -280,24 +352,30 @@ router.post(
       commandScope(req),
     );
 
-    if (result.outcome === 'sent') {
+    if (result.outcome === "sent") {
       const sessionId = req.params.sessionId;
       const messageData = {
         id: result.message.id,
         sessionId,
         chatId: sessionId,
-        type: 'text',
+        type: "text",
         content,
-        status: 'sent',
+        status: "sent",
         createdAt: result.message.createdAt,
-        sender: 'agent',
-        senderType: 'agent',
+        sender: "agent",
+        senderType: "agent",
         timestamp: new Date().toISOString(),
       };
-      emitToSession(req.tenant!.id, sessionId, 'message:receive', messageData);
-      emitToTenantAgents(req.tenant!.id, 'message:new', { sessionId, message: messageData });
+      emitToSession(req.tenant!.id, sessionId, "message:receive", messageData);
+      emitToTenantAgents(req.tenant!.id, "message:new", {
+        sessionId,
+        message: messageData,
+      });
       if (result.autoClaimed) {
-        emitToTenantAgents(req.tenant!.id, 'handoff:assigned', { sessionId, agentId: req.user!.id });
+        emitToTenantAgents(req.tenant!.id, "handoff:assigned", {
+          sessionId,
+          agentId: req.user!.id,
+        });
       }
       // B-PR3a: normalized events, post-commit. Only ids are in hand here —
       // the helper re-selects a fresh row (it also carries an auto-claim's
@@ -307,10 +385,10 @@ router.post(
       await emitMessageCreatedForSession(sessionId, req.tenant!.id, {
         id: result.message.id,
         sessionId,
-        type: 'text',
+        type: "text",
         content,
-        senderType: 'agent',
-        status: 'sent',
+        senderType: "agent",
+        status: "sent",
         createdAt: result.message.createdAt,
         // The message row stores clientMessageId in metadata (the dedupe key).
         // Putting it on the wire lets the sender's portal reconcile its
@@ -322,7 +400,10 @@ router.post(
       // including Meta's HUMAN_AGENT tag). Failure is logged, never a rollback:
       // the persisted message is the source of truth; PR 3 surfaces per-message
       // delivery state.
-      if (result.conversation && (await isExternalChannel(sessionId, req.tenant!.id))) {
+      if (
+        result.conversation &&
+        (await isExternalChannel(sessionId, req.tenant!.id))
+      ) {
         // Deliver + reconcile per-message delivery state (#128). Fire-and-forget:
         // the outcome reaches the composer over the socket, not via this response.
         void deliverOperatorReply({
@@ -334,7 +415,7 @@ router.post(
           createdAt: result.message.createdAt,
         });
       }
-    } else if (result.outcome === 'duplicate') {
+    } else if (result.outcome === "duplicate") {
       // A retry re-POSTs the same clientMessageId. Re-attempt external delivery
       // ONLY while the original is still failed — claimFailedForRetry flips
       // failed -> sending atomically — so a duplicate of a delivered reply can
@@ -361,18 +442,21 @@ router.post(
       message: result.message,
       conversation: result.conversation,
     });
-  })
+  }),
 );
 
 /** Widget sessions deliver over the socket only; everything else goes through
  *  the outbound router. Read once post-commit. */
-async function isExternalChannel(sessionId: string, tenantId: string): Promise<boolean> {
-  const { AppDataSource } = await import('../database/data-source');
+async function isExternalChannel(
+  sessionId: string,
+  tenantId: string,
+): Promise<boolean> {
+  const { AppDataSource } = await import("../database/data-source");
   const rows = (await AppDataSource.query(
     `SELECT channel FROM chat_sessions WHERE id = $1 AND tenant_id = $2`,
     [sessionId, tenantId],
   )) as Array<{ channel: string | null }>;
-  return !!rows[0]?.channel && rows[0].channel !== 'widget';
+  return !!rows[0]?.channel && rows[0].channel !== "widget";
 }
 
 export default router;

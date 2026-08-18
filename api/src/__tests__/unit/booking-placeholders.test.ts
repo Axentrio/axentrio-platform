@@ -166,6 +166,7 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
     const out = buildHoursSection(rule({ dateOverrides: [{ date: '2026-12-25', closed: true }] }), NOW)!;
     expect(out).toContain('2026-12-25');
     expect(out).toContain('CLOSED');
+    expect(out).not.toContain('Europe/Brussels');
   });
 
   it('states one-off hours as a restriction, not a closure', () => {
@@ -211,8 +212,11 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
   it('renders hours with no overrides exactly as before', () => {
     const out = buildHoursSection(rule(), NOW)!;
     expect(out).toContain('## OPENING HOURS');
+    expect(out).toContain('The business is open at these times.');
     expect(out).toContain('- Mon: 09:00–17:00');
     expect(out).not.toContain('OVERRIDE');
+    expect(out).not.toContain('Europe/Brussels');
+    expect(out).not.toMatch(/The business is open at these times \(/);
   });
 
   it('operational hours win when both stores exist, including an upcoming closed date', () => {
@@ -230,6 +234,7 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
     expect(out).not.toContain('09:00');
     expect(out).toContain('2026-12-23');
     expect(out).toContain('CLOSED');
+    expect(out).not.toContain('Europe/Brussels');
   });
 
   it('falls back to the availability rule when operational hours are not configured', () => {

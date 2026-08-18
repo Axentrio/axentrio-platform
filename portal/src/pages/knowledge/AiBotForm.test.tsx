@@ -167,7 +167,7 @@ describe('AiBotForm', () => {
     expect(payload.brandVoice).not.toHaveProperty('templateId');
   });
 
-  it('shows the server timezone read-only and omits it from business-hours writes', async () => {
+  it('hides the server timezone and omits it from business-hours writes', async () => {
     botDetailState.businessHours = {
       enabled: true,
       timezone: 'Europe/Brussels',
@@ -176,7 +176,8 @@ describe('AiBotForm', () => {
     const { user } = renderForm();
 
     await user.click(screen.getByRole('button', { name: /operational/i }));
-    expect(await screen.findByText('Europe/Brussels')).toBeInTheDocument();
+    expect(await screen.findByRole('switch', { name: 'monday open' })).toBeInTheDocument();
+    expect(screen.queryByText('Europe/Brussels')).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText('America/New_York')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('switch', { name: 'monday open' }));

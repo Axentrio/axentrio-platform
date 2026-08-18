@@ -229,10 +229,9 @@ export function buildOperationalHoursSection(
     return [`- ${label}: ${day.open}–${day.close}`];
   });
   if (!lines.length && !exceptions) return null;
-  const tz = timezone || 'UTC';
   const weekly = lines.length
-    ? `The business is open at these times (${tz}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
-    : `No weekly opening hours are configured (${tz}).`;
+    ? `The business is open at these times. State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
+    : `No weekly opening hours are configured.`;
   return `\n## OPENING HOURS\n${weekly}${exceptions}`;
 }
 
@@ -259,8 +258,8 @@ export function buildHoursSection(
   // Nothing reliable to state at all — no weekly hours AND no exceptions.
   if (!lines.length && !exceptions) return null;
   const weekly = lines.length
-    ? `The business is open at these times (${rule.timezone}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
-    : `No weekly opening hours are configured (${rule.timezone}).`;
+    ? `The business is open at these times. State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
+    : `No weekly opening hours are configured.`;
   return `\n## OPENING HOURS\n${weekly}${exceptions}`;
 }
 

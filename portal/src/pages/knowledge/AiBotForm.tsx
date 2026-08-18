@@ -100,10 +100,9 @@ function overridesForPayload(rows: OverrideRow[]): BusinessHoursDateOverride[] {
 
 const businessHoursKey = (
   enabled: boolean,
-  tz: string,
   schedule: DaySchedule[],
   overrides: OverrideRow[],
-): string => JSON.stringify({ enabled, tz, schedule, overrides });
+): string => JSON.stringify({ enabled, schedule, overrides });
 
 // Quick-set presets so the common cases don't require touching the 7-row grid.
 const PRESET_WEEKDAYS: DaySchedule[] = WEEK_DAYS.map((day) => ({ day, open: '09:00', close: '17:00', closed: day === 'saturday' || day === 'sunday' }));
@@ -235,7 +234,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [socialOverride, setSocialOverride] = useState<SocialOverride>(EMPTY_SOCIAL);
   // Business hours editor state (hydrated from the bot detail, saved separately).
   const [bhEnabled, setBhEnabled] = useState(false);
-  const [bhTimezone, setBhTimezone] = useState('UTC');
   const [bhSchedule, setBhSchedule] = useState<DaySchedule[]>(() => buildSchedule(undefined));
   const [bhOverrides, setBhOverrides] = useState<OverrideRow[]>([]);
   const [bhBaseline, setBhBaseline] = useState<string | null>(null);
@@ -330,10 +328,9 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const sched = buildSchedule(bh?.schedule);
     const overrides = overridesFromStored(bh?.dateOverrides);
     setBhEnabled(bh?.enabled ?? false);
-    setBhTimezone(bh?.timezone || 'UTC');
     setBhSchedule(sched);
     setBhOverrides(overrides);
-    setBhBaseline(businessHoursKey(bh?.enabled ?? false, bh?.timezone || 'UTC', sched, overrides));
+    setBhBaseline(businessHoursKey(bh?.enabled ?? false, sched, overrides));
   }, [botDetail, tenantId, hydrationKey]);
 
   useEffect(() => {
@@ -358,7 +355,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setQaBaseline(JSON.stringify({ enabled, street, streetNumber, boxNumber, postal, city, country }));
   }, [botDetail, tenantId, hydrationKey]);
 
-  const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides) !== bhBaseline;
+  const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhSchedule, bhOverrides) !== bhBaseline;
 
   const setDay = (day: WeekDay, patch: Partial<DaySchedule>) =>
     setBhSchedule((prev) => prev.map((d) => (d.day === day ? { ...d, ...patch } : d)));
@@ -368,7 +365,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       id: botId,
       businessHours: { enabled: bhEnabled, schedule: bhSchedule, dateOverrides: overridesForPayload(bhOverrides) },
     });
-    setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule, bhOverrides));
+    setBhBaseline(businessHoursKey(bhEnabled, bhSchedule, bhOverrides));
   };
 
   const qaSnapshot = {
@@ -963,12 +960,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                         </Button>
                       </div>
                     )}
-                    <div className="max-w-xs">
-                      <span className="mb-1 block text-xs text-text-secondary">
-                        {t('ai.bot.operational.businessHours.timezone')}
-                      </span>
-                      <span className="text-sm text-text-primary">{bhTimezone}</span>
-                    </div>
                     <div className="space-y-1.5">
                       {bhSchedule.map((d) => (
                         <div key={d.day} className="flex items-center gap-2 text-sm">

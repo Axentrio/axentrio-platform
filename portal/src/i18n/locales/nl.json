@@ -960,7 +960,6 @@
           "presetsLabel": "Snel instellen:",
           "presetWeekdays": "Werkdagen 9–17",
           "presetEveryday": "Elke dag 9–17",
-          "timezone": "Tijdzone (IANA, bijv. America/New_York)",
           "closed": "Gesloten",
           "save": "Openingstijden opslaan",
           "overrides": {

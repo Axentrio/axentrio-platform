@@ -959,7 +959,6 @@
           "presetsLabel": "Réglage rapide :",
           "presetWeekdays": "Sem. 9–17",
           "presetEveryday": "Tous les jours 9–17",
-          "timezone": "Fuseau horaire (IANA, ex. America/New_York)",
           "closed": "Fermé",
           "save": "Enregistrer les horaires",
           "overrides": {

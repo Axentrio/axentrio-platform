@@ -144,8 +144,9 @@ interface PendingAvailability {
  * Turn freshly-offered availability into tappable slot chips.
  *
  * `title` is the human-readable button label; `value` is the message sent back
- * when tapped — a natural-language, absolute date+time+tz the LLM can re-book
- * from. (Telegram's 64-byte callback_data limit doesn't constrain this: quick
+ * when tapped — a natural-language, absolute date+time the LLM can re-book
+ * from. Slot identity rides on the offer's ISO `slotStarts`, not this text.
+ * (Telegram's 64-byte callback_data limit doesn't constrain this: quick
  * replies are disabled on the Telegram adapter; the widget + Messenger/IG/
  * WhatsApp have ample payload room.)
  */
@@ -156,7 +157,7 @@ function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | u
     const dt = DateTime.fromISO(s.start).setZone(av.timezone);
     return {
       title: dt.toFormat('ccc h:mm a'),
-      value: `Book ${forService}${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')} (${av.timezone})`,
+      value: `Book ${forService}${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')}`,
     };
   });
 }

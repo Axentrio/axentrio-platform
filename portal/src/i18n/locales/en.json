@@ -967,7 +967,6 @@
           "presetsLabel": "Quick set:",
           "presetWeekdays": "Weekdays 9–5",
           "presetEveryday": "Every day 9–5",
-          "timezone": "Timezone (IANA, e.g. America/New_York)",
           "closed": "Closed",
           "save": "Save business hours",
           "overrides": {

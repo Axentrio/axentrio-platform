@@ -276,10 +276,10 @@ export function parseBookingStart(input: string, timezone: string): Date | null 
 /**
  * #6: server-format the booking time in the BUSINESS timezone, so the AI can quote
  * it verbatim instead of re-deriving a local time from the UTC instant (which drifts).
- * e.g. "Monday, 23 June 2026 at 12:00 PM (CEST)".
+ * e.g. "Monday, 23 June 2026 at 12:00 PM".
  */
 export function formatBookingDisplayTime(startUtc: Date, timezone: string): string {
-  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a (ZZZZ)");
+  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a");
 }
 
 /** P5a — which contact fields a service requires. Single mapping for the column-name

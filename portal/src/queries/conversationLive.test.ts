@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { queryKeys } from './queryKeys';
 import {
   applyConversationUpsert,
@@ -386,6 +386,16 @@ describe('applyConversationUpsert — list variants', () => {
 // message:created
 // ---------------------------------------------------------------------------
 
+/** Mount a detail observer with no data so applyMessageCreated may seed. */
+function observeDetail(client: QueryClient, sessionId: string): () => void {
+  const observer = new QueryObserver(client, {
+    queryKey: queryKeys.chats.detail(sessionId),
+    queryFn: () => Promise.resolve(undefined as unknown as ChatDetailCacheEntry),
+    enabled: false,
+  });
+  return observer.subscribe(() => {});
+}
+
 function messageEvent(overrides: Partial<MessageCreatedEvent['message']> = {}, rev = 500): MessageCreatedEvent {
   const message = {
     id: 'm-new',
@@ -509,20 +519,58 @@ describe('applyMessageCreated', () => {
     });
   });
 
-  it('a tenant-room copy arriving before the detail cache is loaded never hides the session-room copy', () => {
-    // No detail cache yet (the open thread is still fetching).
+  it('does not seed detail for an unopened / unobserved thread', () => {
+    const result = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
+    expect(result.isNew).toBe(false);
+    expect(qc.getQueryData(queryKeys.chats.detail('c1'))).toBeUndefined();
+  });
+
+  it('seeds an observed empty detail query; a later GET wipe + second event restores', () => {
+    const stop = observeDetail(qc, 'c1');
     const first = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
-    expect(first.isNew).toBe(false); // nothing was appended anywhere
+    expect(first.isNew).toBe(true);
+    expect(qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages).toEqual([
+      expect.objectContaining({ id: 'm-early', content: 'inbound hello' }),
+    ]);
 
-    // The fetch completes WITHOUT the message (it raced past the snapshot).
+    // A later GET that raced past the snapshot must not hide a second delivery.
     qc.setQueryData(queryKeys.chats.detail('c1'), { ...makeChat(), messages: [] });
-
-    // The session-room copy of the SAME event arrives — it must still append.
     const second = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
     expect(second.isNew).toBe(true);
-    const detail = qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!;
-    expect(detail.messages).toHaveLength(1);
-    expect(detail.messages![0].id).toBe('m-early');
+    expect(qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages![0].id).toBe(
+      'm-early',
+    );
+    stop();
+  });
+
+  it('seeds an unobserved detail query that is already fetching', () => {
+    void qc.fetchQuery({
+      queryKey: queryKeys.chats.detail('c1'),
+      queryFn: () => new Promise(() => {}),
+    });
+    const result = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
+    expect(result.isNew).toBe(true);
+    expect(qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages![0].id).toBe(
+      'm-early',
+    );
+  });
+
+  it('inserts a missing list row on the first message so ChatStream can show it', () => {
+    qc.setQueryData(listKey(ALL_PARAMS), { data: [], meta: { total: 0, totalPages: 1 } });
+    qc.setQueryData(listKey(BOT_PARAMS), { data: [] });
+
+    applyMessageCreated(qc, messageEvent({ id: 'm-brand', sessionId: 'c-new' }, 10));
+
+    const all = listData(qc, ALL_PARAMS);
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({
+      id: 'c-new',
+      lastMessage: 'inbound hello',
+      messageCount: 1,
+    });
+    expect(qc.getQueryData<ChatListCacheEntry>(listKey(ALL_PARAMS))?.meta?.total).toBe(1);
+    // Status unknown — do not guess a filtered tab.
+    expect(listData(qc, BOT_PARAMS)).toEqual([]);
   });
 
   it('never revision-gates the thread append, but gates the list-row patch', () => {

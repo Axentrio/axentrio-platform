@@ -61,8 +61,8 @@ const generateHandlerId = () => `handler_${Date.now()}_${Math.random().toString(
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const socketRef = useRef<Socket | null>(null);
   const handlersRef = useRef<Map<string, SocketEventHandlers>>(new Map());
-  const { getToken, isSignedIn, orgId } = useAuth();
-  const { user, isAuthenticated, notificationPreferences } = useAppAuth();
+  const { getToken, isSignedIn } = useAuth();
+  const { user, isAuthenticated, tenantId, notificationPreferences } = useAppAuth();
   const tokenRef = useRef<string | null>(null);
   const notificationPrefsRef = useRef(notificationPreferences);
   
@@ -74,12 +74,24 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     notificationPrefsRef.current = notificationPreferences;
   }, [notificationPreferences]);
 
-  // Initialize socket connection
+  // Connect after REST identity exists (/auth/me → tenantId). Clerk `orgId` is
+  // NOT required: REST already works off the same session when orgId is late/unset.
+  const canConnect = !!(isSignedIn && isAuthenticated && tenantId);
+
   const connectSocket = useCallback(async () => {
-    if (!isSignedIn || !isAuthenticated || !orgId) return;
+    if (!isSignedIn || !isAuthenticated || !tenantId) {
+      console.debug('[socket] skip connect', {
+        url: WS_CONFIG.url,
+        isSignedIn,
+        isAuthenticated,
+        tenantId,
+      });
+      return;
+    }
 
     setIsConnecting(true);
     setConnectionError(null);
+    console.debug('[socket] connecting', { url: WS_CONFIG.url, tenantId });
 
     const socket = io(WS_CONFIG.url, {
       ...WS_CONFIG.options,
@@ -138,7 +150,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
 
     socket.on(WS_EVENTS.CONNECT_ERROR, (error) => {
-      console.error('Socket connection error:', error);
+      console.error('[socket] connect_error', { url: WS_CONFIG.url, message: error.message, tenantId });
       setIsConnected(false);
       setIsConnecting(false);
       setConnectionError(error.message);
@@ -219,7 +231,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     });
 
-  }, [isSignedIn, isAuthenticated, orgId, getToken, user?.id]);
+  }, [isSignedIn, isAuthenticated, tenantId, getToken, user?.id]);
 
   // Disconnect socket
   const disconnectSocket = useCallback(() => {
@@ -235,7 +247,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Connect on mount and when auth changes
   useEffect(() => {
-    if (isAuthenticated && isSignedIn && orgId) {
+    if (canConnect) {
       connectSocket();
     } else {
       disconnectSocket();
@@ -244,7 +256,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       disconnectSocket();
     };
-  }, [isAuthenticated, isSignedIn, orgId, connectSocket, disconnectSocket]);
+  }, [canConnect, connectSocket, disconnectSocket]);
 
   // Recover promptly when the network returns or the tab is re-focused —
   // nudges Socket.IO to reconnect now instead of waiting out the backoff

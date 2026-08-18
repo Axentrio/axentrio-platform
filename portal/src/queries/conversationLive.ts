@@ -156,6 +156,24 @@ export function summaryToChatPatch(dto: ConversationSummaryPayload): Partial<Cha
   return patch;
 }
 
+/** Minimal detail entry so a live message / optimistic send can land before GET /chats/:id. */
+export function seedChatDetail(
+  id: string,
+  patch: Partial<ChatDetailCacheEntry> = {},
+): ChatDetailCacheEntry {
+  return {
+    id,
+    sessionId: id,
+    tenantId: '',
+    userId: '',
+    status: 'bot',
+    metadata: { source: 'widget' },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...patch,
+  };
+}
+
 /** Full new list row from an upsert summary (insert path). */
 function summaryToChatRow(dto: ConversationSummaryPayload): Chat {
   const patch = summaryToChatPatch(dto);
@@ -463,10 +481,26 @@ export function applyMessageCreated(
 
   const incoming = messagePayloadToMessage({ ...dto, sessionId });
 
-  // 1. Detail thread append/reconcile.
+  // 1. Detail thread append/reconcile. Seed ONLY when something is watching
+  // or already fetching this thread — a setQueryData seed is a successful
+  // fetch in TQ v5, so seeding unopened chats would skip GET /chats/:id.
   let changedThread = false;
   queryClient.setQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail(sessionId), (old) => {
-    if (!old) return old;
+    if (!old) {
+      const q = queryClient.getQueryCache().find({ queryKey: queryKeys.chats.detail(sessionId) });
+      if (!q || (q.getObserversCount() === 0 && q.state.fetchStatus !== 'fetching')) return old;
+      changedThread = true;
+      return seedChatDetail(sessionId, {
+        messages: [incoming],
+        lastMessage: incoming.content.substring(0, 80),
+        lastMessageSender: incoming.sender,
+        lastMessageAt: incoming.createdAt,
+        lastActivityAt: incoming.createdAt,
+        messageCount: 1,
+        createdAt: incoming.createdAt,
+        updatedAt: incoming.createdAt,
+      });
+    }
     const messages = old.messages ?? [];
     if (messages.some((m) => m.id === incoming.id)) return old;
 
@@ -500,13 +534,30 @@ export function applyMessageCreated(
     lastMessageAt: incoming.createdAt,
     lastActivityAt: incoming.createdAt,
   };
-  forEachListVariant(queryClient, (key, _params, entry) => {
+  // status/tenant omitted on purpose — canInsertInto then only admits unfiltered page-1.
+  const insertDto = {
+    id: sessionId,
+    sessionId,
+    lastMessage: rowPatch.lastMessage,
+    lastMessageSender: rowPatch.lastMessageSender,
+    lastMessageAt: rowPatch.lastMessageAt,
+    lastActivityAt: rowPatch.lastActivityAt,
+    messageCount: 1,
+  } as ConversationSummaryPayload;
+  forEachListVariant(queryClient, (key, params, entry) => {
     const rows = entry.data ?? [];
     const index = rows.findIndex((c) => c.id === sessionId);
-    if (index < 0) return; // the companion upsert owns the insert
-    const next = [...rows];
-    next[index] = mergeDefined(next[index], rowPatch);
-    queryClient.setQueryData(key, { ...entry, data: sortByActivityDesc(next) });
+    if (index >= 0) {
+      const next = [...rows];
+      next[index] = mergeDefined(next[index], rowPatch);
+      queryClient.setQueryData(key, { ...entry, data: sortByActivityDesc(next) });
+      return;
+    }
+    // No companion upsert yet: insert into unfiltered page-1 only (we don't
+    // know status/tenant). ChatStream hides `messageCount===0 && !lastMessage`.
+    if (!canInsertInto(params, insertDto)) return;
+    const stub = summaryToChatRow({ ...insertDto, createdAt: incoming.createdAt });
+    queryClient.setQueryData(key, withTotalDelta(entry, sortByActivityDesc([stub, ...rows]), 1));
   });
 
   return { isNew: changedThread };
@@ -677,11 +728,18 @@ export function useLiveConversationSync(options: LiveConversationSyncOptions = {
     });
 
     const onFocus = () => invalidate();
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const id = selectedChatIdRef.current;
+      if (id) queryClient.invalidateQueries({ queryKey: queryKeys.chats.detail(id) });
+    };
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       unregisterHandlers(handlerId);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [queryClient, registerHandlers, unregisterHandlers, playMessage]);
 }

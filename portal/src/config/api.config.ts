@@ -4,7 +4,24 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'http://localhost:5000';
+
+/**
+ * Vite inlines VITE_* at build time. A missing VITE_WS_URL used to become
+ * `http://localhost:5000`, which a production HTTPS page will never open.
+ * Derive the socket origin from the REST API URL instead.
+ */
+export function resolveWsUrl(wsEnv?: string, apiUrl?: string): string {
+  const explicit = wsEnv?.trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  const api = (apiUrl || 'http://localhost:5000/api/v1').trim();
+  try {
+    return new URL(api).origin;
+  } catch {
+    return api.replace(/\/api(?:\/v1)?\/?$/, '') || 'http://localhost:5000';
+  }
+}
+
+const WS_BASE_URL = resolveWsUrl(import.meta.env.VITE_WS_URL, API_BASE_URL);
 
 export const API_CONFIG = {
   baseURL: API_BASE_URL,

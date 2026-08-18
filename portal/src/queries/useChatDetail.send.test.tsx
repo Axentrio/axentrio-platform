@@ -404,4 +404,23 @@ describe('useChatDetail.sendMessage', () => {
     await waitFor(() => expect(result.current.messages).toHaveLength(1));
     expect(result.current.messages[0]).toMatchObject({ id: 'srv-4', deliveryState: 'sent' });
   });
+
+  it('seeds an empty detail cache so an optimistic send does not vanish', async () => {
+    apiGet.mockImplementation(() => new Promise(() => {}));
+    apiPost.mockResolvedValue({
+      outcome: 'sent',
+      autoClaimed: false,
+      message: { id: 'srv-empty', createdAt: '2026-08-14T12:00:00.000Z' },
+    });
+    const view = renderHook(() => useChatDetail(CHAT_ID), { wrapper: makeWrapper() });
+
+    await act(async () => {
+      await expect(view.result.current.sendMessage('still here')).resolves.toEqual({ status: 'sent' });
+    });
+
+    const detail = queryClient.getQueryData<{ messages: Array<{ content: string }> }>(
+      queryKeys.chats.detail(CHAT_ID),
+    );
+    expect(detail?.messages.some((m) => m.content === 'still here')).toBe(true);
+  });
 });

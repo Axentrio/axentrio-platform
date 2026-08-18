@@ -31,8 +31,10 @@ import {
   applyCommandConversation,
   newUuid,
   normalizeChatStatus,
+  seedChatDetail,
   type ChatDetailCacheEntry,
 } from './conversationLive';
+import { LIVE_QUERY_REFETCH_MS } from './queryConfig';
 import type {
   Chat,
   ChatStatus,
@@ -184,6 +186,8 @@ export const chatOptions = {
         const res = (await api.get<Any>('/chats/sessions', { params })) as ChatListResponse;
         return { ...res, data: (res?.data ?? []).map(normalizeChatRow) };
       },
+      refetchInterval: LIVE_QUERY_REFETCH_MS,
+      refetchIntervalInBackground: false,
     });
   },
 
@@ -435,8 +439,9 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
   const patchMessages = useCallback(
     (updater: (messages: Message[]) => Message[]) => {
       queryClient.setQueryData<ChatDetailResponse>(queryKeys.chats.detail(chatId), (old) => {
-        if (!old) return old;
-        return { ...old, messages: updater(old.messages ?? []) };
+        const messages = updater(old?.messages ?? []);
+        if (!old) return seedChatDetail(chatId, { messages });
+        return { ...old, messages };
       });
     },
     [chatId, queryClient],

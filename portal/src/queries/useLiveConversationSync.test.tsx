@@ -217,6 +217,17 @@ describe('useLiveConversationSync', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.chats.all() });
   });
 
+  it('visibilitychange to visible invalidates the open detail query', () => {
+    setup({ selectedChatId: 'c1' });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.chats.detail('c1') });
+  });
+
   it('plays the message sound ONCE for a new user message in the open thread; duplicates stay silent', () => {
     const { handlers } = setup({ selectedChatId: 'c1' });
     queryClient.setQueryData(queryKeys.chats.detail('c1'), { ...makeChat(), messages: [] });

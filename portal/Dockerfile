@@ -10,6 +10,9 @@ COPY portal/ .
 # /app). Without this, `tsc` fails in the Docker build (TS2307) even though CI's
 # full-repo checkout resolves it — which silently broke every portal deploy.
 COPY api/src/contracts /api/src/contracts
+# Vite inlines VITE_* at `npm run build`. Railway maps matching service env
+# vars to these ARGs. VITE_WS_URL is optional — api.config.ts derives it from
+# VITE_API_URL when empty (never bake localhost into a prod bundle).
 ARG VITE_API_URL
 ARG VITE_WS_URL
 ARG VITE_CLERK_PUBLISHABLE_KEY

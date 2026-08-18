@@ -113,6 +113,10 @@ describe('socket handoff:request notifications', () => {
       });
       const notificationRepo = AppDataSource.getRepository(Notification);
       const emailRepo = AppDataSource.getRepository(EmailDelivery);
+      const outboxRepo = AppDataSource.getRepository(NotificationOutbox);
+      // The outbox worker flushes rows async (pending → sent); poll until the
+      // row exists AND is sent so the assertion below isn't a race (CI flake).
+      let outbox: Array<{ status: string }> = [];
       await waitFor(async () => {
         const notifications = await notificationRepo.count({
           where: { tenantId: tenant.id, type: 'handoff_requested' },
@@ -120,12 +124,17 @@ describe('socket handoff:request notifications', () => {
         const emails = await emailRepo.count({
           where: { tenantId: tenant.id, relatedId: handoff.id, status: 'sent' },
         });
-        return notifications === 1 && emails === 1;
+        outbox = await outboxRepo.find({
+          where: { relatedId: handoff.id, kind: 'handoff' },
+        });
+        return (
+          notifications === 1 &&
+          emails === 1 &&
+          outbox.length === 1 &&
+          outbox[0].status === 'sent'
+        );
       });
 
-      const outbox = await AppDataSource.getRepository(NotificationOutbox).find({
-        where: { relatedId: handoff.id, kind: 'handoff' },
-      });
       expect(outbox).toHaveLength(1);
       expect(outbox[0].status).toBe('sent');
     } finally {

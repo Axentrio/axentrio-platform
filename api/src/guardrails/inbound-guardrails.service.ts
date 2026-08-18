@@ -2,23 +2,25 @@
 //
 // Runs BEFORE any AI reasoning (agent / RAG / custom n8n) at the agent-entry
 // chokepoints (runTurn, forwardMessageToN8n). Composes the pure classifier +
-// bot-loop detector, then in ENFORCE mode blocks + disables auto-reply + logs +
-// notifies; in SHADOW mode it only logs (no behaviour change). A blocked message
-// is marked `guardrail_flagged` so it's excluded from "unanswered/pending" and
-// history queries — i.e. it never becomes a turn or leaks into later context.
+// bot-loop detector, then in ENFORCE mode hard-blocks high-severity categories
+// or returns a neutral reply for low-severity solicitation. In SHADOW mode it
+// only logs (no behaviour change). A blocked message is marked
+// `guardrail_flagged` so it's excluded from "unanswered/pending" and history
+// queries — i.e. it never becomes a turn or leaks into later context.
 // See .scratch/plan-global-ai-guardrails.md §1/§4/§6.
 
 import { createHash } from 'crypto';
+import { In } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
-import { SpamScamLog } from '../database/entities/SpamScamLog';
+import { SpamScamLog, type GuardrailAction } from '../database/entities/SpamScamLog';
 import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { notificationService } from '../services/notification.service';
-import { classifyMessage, inspectLinks, isHumanSignal } from './classify';
+import { classifyMessage, inspectLinks, isHighSeverity, isHumanSignal } from './classify';
 import { detectBotLoop } from './loop-detector';
 import { redisLoopStore } from './loop-store';
 import { GuardrailCategory, GuardrailJournalCategory } from './types';
@@ -34,10 +36,19 @@ export interface InboundGateInput {
   channel: string;
 }
 
+export const SOLICITATION_WARN_REPLIES = {
+  en: 'Thank you for reaching out. Your message has been received and can be reviewed by the business owner.',
+  nl: 'Bedankt voor uw bericht. Uw bericht is ontvangen en kan door de bedrijfseigenaar worden bekeken.',
+  fr: 'Merci de nous avoir contactés. Votre message a bien été reçu et peut être examiné par le propriétaire de l’entreprise.',
+} as const;
+export const SOLICITATION_WARN_REPLY = SOLICITATION_WARN_REPLIES.en;
+
 /** `proceed: false` ⇒ the caller must NOT run the agent / forward the message. */
 export interface InboundGateResult {
   proceed: boolean;
   category: GuardrailCategory;
+  /** Platform-authored reply to send instead of running the agent. */
+  replyOverride?: string;
 }
 
 /** Tenant-scoped enforce flag (cached 60s). Default shadow (false). A toggle
@@ -91,6 +102,33 @@ async function readFlagged(messageId: string): Promise<boolean> {
   return m?.guardrailFlagged === true;
 }
 
+async function readGuardrailAction(messageId: string): Promise<GuardrailAction | null> {
+  const log = await AppDataSource.getRepository(SpamScamLog).findOne({
+    where: {
+      suspiciousMessageId: messageId,
+      detectedCategory: In(['spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link']),
+    },
+    select: { id: true, action: true } as never,
+    order: { createdAt: 'DESC', id: 'DESC' },
+  });
+  return log ? log.action ?? 'log_only' : null;
+}
+
+async function solicitationWarnReply(tenantId: string): Promise<string> {
+  try {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+      select: { id: true, settings: true } as never,
+    });
+    const language = tenant?.settings?.onboarding?.language;
+    return SOLICITATION_WARN_REPLIES[
+      language as keyof typeof SOLICITATION_WARN_REPLIES
+    ] ?? SOLICITATION_WARN_REPLY;
+  } catch {
+    return SOLICITATION_WARN_REPLY;
+  }
+}
+
 /** Atomic, idempotent session flip — only the FIRST flip returns true (so a burst
  *  can't double-notify). */
 async function atomicDisableAutoReply(sessionId: string, category: GuardrailCategory): Promise<boolean> {
@@ -117,6 +155,7 @@ async function writeSpamLog(args: {
   repeated: boolean;
   botLoop: boolean;
   enforced: boolean;
+  action: GuardrailAction;
   notified: boolean;
   aiAutoReplyDisabled?: boolean;
 }): Promise<void> {
@@ -136,6 +175,7 @@ async function writeSpamLog(args: {
         score: args.score,
         reasons: args.reasons,
         enforced: args.enforced,
+        action: args.action,
       }),
     );
   } catch (err) {
@@ -161,6 +201,7 @@ export async function writeRoutingDropLog(
     repeated: false,
     botLoop: false,
     enforced: true,
+    action: 'blocked',
     notified: false,
     aiAutoReplyDisabled: false,
   });
@@ -184,8 +225,8 @@ async function notifyOwner(session: ChatSession, category: GuardrailCategory, re
 /**
  * Evaluate an inbound user message. Must be called under the caller's per-session
  * lock (runTurn under the coalescer lock; the legacy path is best-effort). Returns
- * `proceed: false` only in ENFORCE mode when the message is spam/scam/bot-loop or
- * the session is already guardrail-disabled.
+ * `proceed: false` only in ENFORCE mode for high-severity categories or when the
+ * session is already guardrail-disabled. Solicitation returns a neutral reply.
  */
 export async function runInboundGate(input: InboundGateInput): Promise<InboundGateResult> {
   const { session, tenantId, message, content, channel } = input;
@@ -214,7 +255,20 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
   // double-counting loop counters.
   if (!(await claimMessage(message.id))) {
     const flagged = await readFlagged(message.id);
-    return { proceed: !flagged, category: flagged ? 'spam' : 'clean' };
+    if (flagged) return { proceed: false, category: 'spam' };
+    const action = await readGuardrailAction(message.id);
+    if (action === 'warn_reply') {
+      return {
+        proceed: true,
+        category: 'solicitation',
+        replyOverride: await solicitationWarnReply(tenantId),
+      };
+    }
+    if (action === 'blocked') return { proceed: false, category: 'spam' };
+    if (action === 'log_only') return { proceed: true, category: 'clean' };
+    // The claim committed but its outcome has not: never let a concurrent retry
+    // enter the agent while classification is still in flight.
+    return { proceed: false, category: 'clean' };
   }
 
   const linkInfo = inspectLinks(content);
@@ -244,8 +298,16 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
 
   if (!flaggedByContent && !loopHit) return { proceed: true, category: 'clean' };
 
-  const category: GuardrailCategory = flaggedByContent ? c.category : 'bot_loop';
-  const reasons = flaggedByContent ? c.reasons : loopReasons;
+  // A sustained solicitation loop is still a high-severity bot_loop.
+  const solicitationWarnOnly =
+    flaggedByContent &&
+    c.category === 'solicitation' &&
+    !loopHit &&
+    !isHighSeverity(content, linkInfo);
+  const category: GuardrailCategory = loopHit && c.category === 'solicitation'
+    ? 'bot_loop'
+    : flaggedByContent ? c.category : 'bot_loop';
+  const reasons = category === 'bot_loop' ? loopReasons : c.reasons;
   const repeated = loopReasons.some((r) => r.includes('repeated'));
 
   if (!enforce) {
@@ -254,8 +316,22 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
       session, channel, messageId: message.id, category, reasons,
       score: flaggedByContent ? c.score : null,
       suspiciousLink, repeated, botLoop: loopHit, enforced: false, notified: false,
+      action: 'log_only',
     });
     return { proceed: true, category: 'clean' };
+  }
+
+  if (solicitationWarnOnly) {
+    await writeSpamLog({
+      session, channel, messageId: message.id, category, reasons,
+      score: c.score, suspiciousLink, repeated, botLoop: false,
+      enforced: false, notified: false, aiAutoReplyDisabled: false,
+      action: 'warn_reply',
+    });
+    logger.info('[guardrails] warned on inbound solicitation', {
+      sessionId: session.id, category, reasons,
+    });
+    return { proceed: true, category, replyOverride: await solicitationWarnReply(tenantId) };
   }
 
   // Enforce: mark the message, atomically disable the session (first flip notifies).
@@ -270,6 +346,7 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
     session, channel, messageId: message.id, category, reasons,
     score: flaggedByContent ? c.score : null,
     suspiciousLink, repeated, botLoop: loopHit, enforced: true, notified: firstFlip,
+    action: 'blocked',
   });
 
   logger.info('[guardrails] blocked inbound message', {

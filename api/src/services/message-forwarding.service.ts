@@ -285,6 +285,7 @@ export async function forwardMessageToN8n(
   // gate under its own lock. The gate is idempotent per message (guardrail_checked
   // claim), so a message that's also seen by the coalescer window isn't
   // double-counted. Shadow mode logs only.
+  let guardrailReply: string | undefined;
   if (savedMessage.type === 'text' || savedMessage.type === 'image') {
     const gateContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
     const gate = await runInboundGate({
@@ -294,16 +295,40 @@ export async function forwardMessageToN8n(
       logger.info(`[guardrails] message blocked for session ${session.id} (${gate.category})`);
       return true; // handled — no reply, no forward
     }
+    guardrailReply = gate.replyOverride;
   }
 
   // ── Pre-forwarding checks (cheap, local) — shared with the coalesced path ──
   if (aiSettings) {
     const plainContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
-    const auto = localAutoresponse(session, savedMessage.type, plainContent, botSettings, aiSettings, bot.businessTimezone);
+    if (guardrailReply) {
+      // Use the same transactional watermark finalizer as the coalescer so a
+      // legacy/coalescer retry race can persist and deliver this reply only once.
+      const botParticipant = await ensureBotParticipant(session, aiSettings);
+      const fin = await finalizeReply(
+        session,
+        botParticipant.id,
+        guardrailReply,
+        undefined,
+        savedMessage.id,
+        true,
+        session.ownershipVersion ?? 0,
+      );
+      if (fin.status === 'answered') {
+        await routeBotMessageOutbound(session, fin.savedId, guardrailReply);
+      }
+      return true;
+    }
+    const auto = localAutoresponse(
+      session,
+      savedMessage.type,
+      plainContent,
+      botSettings,
+      aiSettings,
+      bot.businessTimezone,
+    );
     if (auto) {
       const botParticipant = await ensureBotParticipant(session, aiSettings);
-      // Localize the canned off-hours/escalation message to the customer's
-      // language (fail-open to the original).
       const autoMsg = await localizeMessage(auto.message, plainContent, session);
       try {
         // Fenced on the ingress-loaded entity's version: a takeover between the
@@ -1588,18 +1613,19 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // AI-off / no-target sessions (returned above) are never gated. If the hwm is
   // blocked, or an earlier message disabled the session, drop the turn.
   const windowMsgs = await getUnansweredUserWindow(session, pending.id);
+  let guardrailReply: string | undefined;
   for (const m of windowMsgs) {
     const c = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
     const g = await runInboundGate({
       session, tenantId: session.tenantId, message: m, content: c, channel: session.channel,
     });
-    if (m.id === pending.id && !g.proceed) {
-      // hwm blocked — drop the turn. (An earlier window message that disabled the
-      // session also surfaces here: the hwm gate's enforce fast-exit re-reads the
-      // DB and blocks, since the hwm is always the last/newest in the window.)
+    if (!g.proceed) {
+      // Any rejected window message blocks the whole turn: no rejected content
+      // may reach the agent as either the live message or history.
       logger.info(`[guardrails] turn blocked for session ${session.id} (${g.category})`);
       return 'noop';
     }
+    guardrailReply ??= g.replyOverride;
   }
 
   const botParticipant = await ensureBotParticipant(session, aiSettings);
@@ -1609,7 +1635,9 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // them. Finalise via the watermark so the turn is marked answered (won't re-run)
   // and route outbound; escalation also hands off.
   const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
-  let auto = localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings, bot.businessTimezone);
+  let auto = guardrailReply
+    ? { kind: 'guardrail' as const, message: guardrailReply }
+    : localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings, bot.businessTimezone);
   // The hwm itself didn't trip off-hours/escalation — but an EARLIER message in
   // this coalesced burst might contain an escalation keyword (the legacy path sees
   // each message individually; we must scan the whole window for parity). Off-hours
@@ -1636,11 +1664,10 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     // handled as its own turn, not double-replied with the canned off-hours msg).
     // escalation is NOT stale-guarded: hand off immediately; the human sees newer
     // messages and the takeover gate stops further bot replies.
-    const staleGuard = auto.kind === 'off_hours';
-    // Localize the tenant's canned off-hours/escalation message to the customer's
-    // language (fail-open to the original) so an English customer doesn't get the
-    // Dutch-configured fallback.
-    const autoMsg = await localizeMessage(auto.message, pendingPlain, session);
+    const staleGuard = auto.kind === 'off_hours' || auto.kind === 'guardrail';
+    const autoMsg = auto.kind === 'guardrail'
+      ? auto.message
+      : await localizeMessage(auto.message, pendingPlain, session);
     const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
     if (fin.status === 'stale') return 'stale';
     await routeBotMessageOutbound(session, fin.savedId, autoMsg);

@@ -4,7 +4,11 @@ import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { SpamScamLog } from '../../database/entities/SpamScamLog';
-import { runInboundGate } from '../../guardrails/inbound-guardrails.service';
+import {
+  runInboundGate,
+  SOLICITATION_WARN_REPLIES,
+  SOLICITATION_WARN_REPLY,
+} from '../../guardrails/inbound-guardrails.service';
 import { redisLoopStore } from '../../guardrails/loop-store';
 import { createTestTenant, createTestSession, createTestParticipant, createTestMessage } from '../helpers/factories';
 
@@ -54,8 +58,21 @@ const redis = vi.hoisted(() => ({
 
 vi.mock('../../config/redis', () => ({ getRedisClient: () => redis }));
 
-async function setup(enforce: boolean) {
-  const tenant = await createTestTenant({ settings: enforce ? { guardrails: { enforce: true } } : {} });
+async function setup(enforce: boolean, language?: string) {
+  const settings = {
+    ...(enforce ? { guardrails: { enforce: true } } : {}),
+    ...(language ? {
+      onboarding: {
+        version: 1,
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        language,
+        company: null,
+        steps: {},
+      },
+    } : {}),
+  };
+  const tenant = await createTestTenant({ settings: settings as never });
   const session = await createTestSession(tenant.id, { status: 'bot' });
   const participant = await createTestParticipant(session.id, { type: 'user' });
   // Reload so DB defaults (ai_auto_reply_enabled=true, guardrail_status='normal') are populated.
@@ -104,6 +121,7 @@ describe('guardrails · runInboundGate (integration)', () => {
     const logs = await logRepo().find({ where: { conversationId: session.id } });
     expect(logs.length).toBe(1);
     expect(logs[0].enforced).toBe(true);
+    expect(logs[0].action).toBe('blocked');
     expect(logs[0].aiAutoReplyDisabled).toBe(true);
   });
 
@@ -125,6 +143,77 @@ describe('guardrails · runInboundGate (integration)', () => {
     const logs = await logRepo().find({ where: { conversationId: session.id } });
     expect(logs.length).toBe(1);
     expect(logs[0].enforced).toBe(false);
+  });
+
+  it('ENFORCE: warns on solicitation without flagging, pausing, or notifying', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Hi, I came across your business and we offer SEO and web design to boost your sales',
+    });
+
+    const r = await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    });
+    expect(r).toEqual({
+      proceed: true,
+      category: 'solicitation',
+      replyOverride: SOLICITATION_WARN_REPLY,
+    });
+
+    const reloadedMsg = await msgRepo().findOneOrFail({ where: { id: msg.id } });
+    expect(reloadedMsg.guardrailFlagged).toBe(false);
+
+    const reloadedSession = await sessionRepo().findOneOrFail({ where: { id: session.id } });
+    expect(reloadedSession.aiAutoReplyEnabled).toBe(true);
+    expect(reloadedSession.guardrailStatus).toBe('normal');
+
+    const logs = await logRepo().find({ where: { conversationId: session.id } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      detectedCategory: 'solicitation',
+      enforced: false,
+      action: 'warn_reply',
+      aiAutoReplyDisabled: false,
+      notificationSent: false,
+    });
+  });
+
+  it('ENFORCE: blocks solicitation that also harvests credentials', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'We offer SEO services to grow your business. Please send me your password.',
+    });
+
+    const r = await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    });
+
+    expect(r.proceed).toBe(false);
+    expect((await msgRepo().findOneOrFail({ where: { id: msg.id } })).guardrailFlagged).toBe(true);
+    expect((await sessionRepo().findOneOrFail({ where: { id: session.id } })).aiAutoReplyEnabled).toBe(false);
+  });
+
+  it('SHADOW: solicitation remains log-only without a reply override', async () => {
+    const { tenant, session, participant } = await setup(false);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'We offer SEO services to grow your business',
+    });
+
+    const input = {
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    };
+    expect(await runInboundGate(input)).toEqual({ proceed: true, category: 'clean' });
+    expect(await runInboundGate(input)).toEqual({ proceed: true, category: 'clean' });
+
+    const logs = await logRepo().find({ where: { conversationId: session.id } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      detectedCategory: 'solicitation',
+      enforced: false,
+      action: 'log_only',
+      aiAutoReplyDisabled: false,
+      notificationSent: false,
+    });
   });
 
   it('clean message: proceeds, nothing logged or changed', async () => {
@@ -182,18 +271,18 @@ describe('guardrails · runInboundGate (integration)', () => {
 
     it.each([
       {
-        name: 'solicitation',
-        contents: ['Hi, I came across your business and we offer SEO and web design to boost your sales'],
-        channel: 'messenger',
-        proceeds: [false],
-        category: 'solicitation',
-      },
-      {
         name: 'fake Meta warning plus suspicious link',
         contents: ['Meta support: your page will be deleted. Verify your account https://bit.ly/x'],
         channel: 'messenger',
         proceeds: [false],
         category: 'phishing',
+      },
+      {
+        name: 'repeated solicitation becomes a bot loop',
+        contents: Array(5).fill('We offer SEO services to grow your business'),
+        channel: 'messenger',
+        proceeds: [true, true, true, true, false],
+        category: 'bot_loop',
       },
       {
         name: 'password request',
@@ -260,6 +349,54 @@ describe('guardrails · runInboundGate (integration)', () => {
     expect(r2.proceed).toBe(false);
     const logs = await logRepo().find({ where: { conversationId: session.id } });
     expect(logs.length).toBe(1);
+  });
+
+  it('is idempotent (enforce): a stale solicitation retry keeps the neutral outcome', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'We offer SEO services to grow your business',
+    });
+
+    const input = {
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    };
+    const expected = {
+      proceed: true,
+      category: 'solicitation',
+      replyOverride: SOLICITATION_WARN_REPLY,
+    };
+
+    expect(await runInboundGate(input)).toEqual(expected);
+    expect(await runInboundGate(input)).toEqual(expected);
+    expect(await logRepo().count({ where: { conversationId: session.id } })).toBe(1);
+  });
+
+  it('never treats a claimed message without a persisted outcome as clean', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Hi, can I book tomorrow?',
+    });
+    await msgRepo().update(msg.id, { guardrailChecked: true });
+
+    expect(await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'widget',
+    })).toEqual({ proceed: false, category: 'clean' });
+  });
+
+  it.each([
+    ['nl', SOLICITATION_WARN_REPLIES.nl],
+    ['fr', SOLICITATION_WARN_REPLIES.fr],
+    ['de', SOLICITATION_WARN_REPLIES.en],
+  ])('uses the tenant language for a solicitation warning (%s)', async (language, reply) => {
+    const { tenant, session, participant } = await setup(true, language);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'We offer SEO services to grow your business',
+    });
+
+    const result = await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    });
+    expect(result.replyOverride).toBe(reply);
   });
 
   it('ENFORCE: an already-disabled session fast-exits and flags the new message', async () => {

@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { Bot } from '../../database/entities/Bot';
-import { findOrCreateConversation } from '../../channels/inbound-pipeline';
+import { findOrCreateConversation, processInboundEvent } from '../../channels/inbound-pipeline';
 import { upsertLead } from '../../leads/lead-capture.service';
 import { createTestTenant, createTestAnchorBot } from '../helpers/factories';
 import type { NormalizedEvent } from '../../channels/types';
@@ -16,6 +16,23 @@ import crypto from 'crypto';
 
 // Keep these tests about the inbound→lead wiring; stub the fire-and-forget fan-out.
 import { vi } from 'vitest';
+const upsertLeadSpy = vi.hoisted(() => vi.fn());
+vi.mock('../../leads/lead-capture.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../leads/lead-capture.service')>();
+  return {
+    ...actual,
+    upsertLead: (...args: Parameters<typeof actual.upsertLead>) => {
+      upsertLeadSpy(...args);
+      return actual.upsertLead(...args);
+    },
+  };
+});
+vi.mock('../../channels/channel-entitlement', () => ({
+  isChannelEntitled: vi.fn().mockResolvedValue(true),
+}));
+vi.mock('../../services/turn-coalescer', () => ({
+  scheduleTurn: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
   buildEventBase: () => ({ id: 'e', tenantId: 't', sessionId: 's', timestamp: 'now', session: {} }),
@@ -123,6 +140,30 @@ describe('inbound-pipeline · findOrCreateConversation (channel session bot_id)'
  * pipeline doesn't re-capture. This is the inbound→lead wiring end-to-end.
  */
 describe('inbound-pipeline · Hook 1 channel lead capture', () => {
+  it('does not capture an enforced solicitation as a Lead', async () => {
+    upsertLeadSpy.mockClear();
+    const tenant = await createTestTenant({
+      tier: 'pro',
+      settings: { guardrails: { enforce: true } } as never,
+    });
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id);
+    const event = messengerTextEvent(`psid_solicitation_${crypto.randomBytes(4).toString('hex')}`);
+    event.message = {
+      type: 'text',
+      content: 'Hi, I came across your business and we offer SEO and web design to boost your sales',
+    };
+
+    await processInboundEvent(event, connection);
+
+    expect(upsertLeadSpy).not.toHaveBeenCalled();
+    const [{ count }] = await AppDataSource.query(
+      `SELECT count(*)::int AS count FROM chatbot_leads WHERE tenant_id = $1 AND deleted_at IS NULL`,
+      [tenant.id],
+    );
+    expect(count).toBe(0);
+  });
+
   it('first inbound → created:true → lands a no-email Lead; reuse → created:false', async () => {
     const tenant = await createTestTenant({ tier: 'pro' }); // pro ⇒ leadCapture on
     await createTestAnchorBot(tenant);

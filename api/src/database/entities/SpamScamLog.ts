@@ -10,6 +10,8 @@
 
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
+export type GuardrailAction = 'log_only' | 'warn_reply' | 'blocked';
+
 @Entity('guardrail_spam_logs')
 @Index(['tenantId', 'createdAt'])
 @Index(['conversationId'])
@@ -57,9 +59,12 @@ export class SpamScamLog {
   @Column({ type: 'jsonb', nullable: true })
   reasons?: string[] | null;
 
-  /** False = shadow-mode observation (logged but not enforced). */
+  /** Legacy enforcement flag; `action` distinguishes shadow logs from warnings. */
   @Column({ type: 'boolean', default: true, name: 'enforced' })
   enforced!: boolean;
+
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  action?: GuardrailAction | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

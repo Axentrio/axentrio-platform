@@ -61,10 +61,10 @@ export const SETUP_STEPS = [
   'logo',
   'chatbot',
   'documents',
-  'social',
   'bookings',
   'leads',
   'plan',
+  'social',
 ] as const;
 
 export type SetupStep = (typeof SETUP_STEPS)[number];

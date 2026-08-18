@@ -2380,7 +2380,7 @@
     "meta": {
       "refreshed": "Last analysed {{ago}}",
       "pending": "Press Analyse to update",
-      "pendingAutomatic": "First analysis runs tonight — insights appear after your chats are reviewed",
+      "pendingAutomatic": "Analysis runs automatically throughout the day — insights appear after your chats are reviewed",
       "incomplete": "Insights incomplete — still analysing recent chats"
     },
     "card": {
@@ -2960,15 +2960,24 @@
       },
       "social": {
         "title": "Messaging channels",
-        "body": "Reply to WhatsApp, Messenger, Instagram and Telegram from the same inbox as your website chat.",
-        "points": [
-          "One inbox for every channel",
-          "Your assistant answers there too",
-          "Take over from it whenever you want"
-        ],
-        "yes": "Yes, I want messaging channels",
-        "afterwards": "You'll connect your accounts from Channels once setup is done.",
-        "skipConsequence": "Messaging channels stay off. You can switch them on in Settings → Features."
+        "body": "Connect Messenger or WhatsApp now, or do it later. Every connected channel feeds the same inbox.",
+        "messengerBody": "Choose the Facebook Pages whose Messenger conversations your assistant should answer.",
+        "connectMessenger": "Connect Facebook Messenger",
+        "instagramBody": "Instagram connects through the Facebook flow when Meta App Review allows it.",
+        "whatsappBody": "Paste the Cloud API details from Meta Business.",
+        "phoneNumberId": "Phone Number ID",
+        "accessToken": "Permanent access token",
+        "wabaId": "Business Account ID (optional)",
+        "connectWhatsApp": "Connect WhatsApp",
+        "metaPagesTitle": "Choose Facebook Pages",
+        "metaPagesDescription": "Select the Pages to connect after authorizing Axentrio with Meta.",
+        "connectSelected": "Connect selected Pages",
+        "metaSkipped": "Not included in your plan: {{channels}}",
+        "instagramWarning": "Messenger connected, but Instagram could not be set up for {{page}}: {{reason}}",
+        "comingSoon": "Coming soon",
+        "later": "Do this later",
+        "skipConsequence": "Messaging channels stay off. You can switch them on in Settings → Features.",
+        "upgradeHint": "Messenger and WhatsApp connect on the Essential plan or higher."
       },
       "bookings": {
         "title": "Appointments",

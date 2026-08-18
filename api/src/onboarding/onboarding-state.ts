@@ -33,10 +33,10 @@ export const ONBOARDING_STEPS = [
   'logo',
   'chatbot',
   'documents',
-  'social',
   'bookings',
   'leads',
   'plan',
+  'social',
 ] as const;
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];

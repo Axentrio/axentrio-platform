@@ -2342,7 +2342,7 @@
     "meta": {
       "refreshed": "Laatst geanalyseerd {{ago}}",
       "pending": "Druk op Analyseren om bij te werken",
-      "pendingAutomatic": "De eerste analyse draait vannacht — inzichten verschijnen nadat je gesprekken zijn beoordeeld",
+      "pendingAutomatic": "De analyse draait automatisch gedurende de dag — inzichten verschijnen nadat je gesprekken zijn beoordeeld",
       "incomplete": "Inzichten onvolledig — recente gesprekken worden nog geanalyseerd"
     },
     "card": {
@@ -2922,15 +2922,24 @@
       },
       "social": {
         "title": "Berichtenkanalen",
-        "body": "Beantwoord WhatsApp, Messenger, Instagram en Telegram vanuit dezelfde inbox als je websitechat.",
-        "points": [
-          "Eén inbox voor elk kanaal",
-          "Je assistent antwoordt daar ook",
-          "Je neemt over wanneer je wilt"
-        ],
-        "yes": "Ja, ik wil berichtenkanalen",
-        "afterwards": "Je koppelt je accounts via Kanalen zodra de installatie klaar is.",
-        "skipConsequence": "Berichtenkanalen blijven uit. Je kunt ze aanzetten in Instellingen → Functies."
+        "body": "Koppel Messenger of WhatsApp nu, of doe dit later. Elk gekoppeld kanaal komt in dezelfde inbox terecht.",
+        "messengerBody": "Kies de Facebook-pagina's waarvan je assistent de Messenger-gesprekken moet beantwoorden.",
+        "connectMessenger": "Facebook Messenger koppelen",
+        "instagramBody": "Instagram wordt via dezelfde Facebook-stroom gekoppeld wanneer Meta App Review dit toestaat.",
+        "whatsappBody": "Plak de Cloud API-gegevens uit Meta Business.",
+        "phoneNumberId": "Telefoonnummer-ID",
+        "accessToken": "Permanente toegangstoken",
+        "wabaId": "Business Account-ID (optioneel)",
+        "connectWhatsApp": "WhatsApp koppelen",
+        "metaPagesTitle": "Kies Facebook-pagina's",
+        "metaPagesDescription": "Selecteer de pagina's die je wilt koppelen nadat je Axentrio bij Meta hebt gemachtigd.",
+        "connectSelected": "Geselecteerde pagina's koppelen",
+        "metaSkipped": "Niet inbegrepen in je abonnement: {{channels}}",
+        "instagramWarning": "Messenger is gekoppeld, maar Instagram kon niet worden ingesteld voor {{page}}: {{reason}}",
+        "comingSoon": "Binnenkort",
+        "later": "Dit later doen",
+        "skipConsequence": "Berichtenkanalen blijven uit. Je kunt ze aanzetten in Instellingen → Functies.",
+        "upgradeHint": "Messenger en WhatsApp koppelen is beschikbaar vanaf het Essential-plan."
       },
       "bookings": {
         "title": "Afspraken",

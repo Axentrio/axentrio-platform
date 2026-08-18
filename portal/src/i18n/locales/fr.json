@@ -2341,7 +2341,7 @@
     "meta": {
       "refreshed": "Dernière analyse {{ago}}",
       "pending": "Appuyez sur Analyser pour mettre à jour",
-      "pendingAutomatic": "La première analyse a lieu cette nuit — les insights apparaissent après l'examen de vos conversations",
+      "pendingAutomatic": "L'analyse s'exécute automatiquement tout au long de la journée — les insights apparaissent après l'examen de vos conversations",
       "incomplete": "Insights incomplets — analyse des conversations récentes en cours"
     },
     "card": {
@@ -2921,15 +2921,24 @@
       },
       "social": {
         "title": "Canaux de messagerie",
-        "body": "Répondez à WhatsApp, Messenger, Instagram et Telegram depuis la même boîte de réception que votre chat web.",
-        "points": [
-          "Une seule boîte pour tous les canaux",
-          "Votre assistant y répond aussi",
-          "Vous reprenez la main quand vous voulez"
-        ],
-        "yes": "Oui, je veux les canaux de messagerie",
-        "afterwards": "Vous connecterez vos comptes depuis Canaux une fois la configuration terminée.",
-        "skipConsequence": "Les canaux de messagerie restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités."
+        "body": "Connectez Messenger ou WhatsApp maintenant, ou faites-le plus tard. Chaque canal connecté alimente la même boîte de réception.",
+        "messengerBody": "Choisissez les Pages Facebook dont votre assistant doit traiter les conversations Messenger.",
+        "connectMessenger": "Connecter Facebook Messenger",
+        "instagramBody": "Instagram se connecte via le même parcours Facebook lorsque la validation Meta App Review le permet.",
+        "whatsappBody": "Collez les données Cloud API de Meta Business.",
+        "phoneNumberId": "ID du numéro de téléphone",
+        "accessToken": "Jeton d'accès permanent",
+        "wabaId": "ID du compte Business (facultatif)",
+        "connectWhatsApp": "Connecter WhatsApp",
+        "metaPagesTitle": "Choisissez les Pages Facebook",
+        "metaPagesDescription": "Sélectionnez les Pages à connecter après avoir autorisé Axentrio auprès de Meta.",
+        "connectSelected": "Connecter les Pages sélectionnées",
+        "metaSkipped": "Non inclus dans votre formule : {{channels}}",
+        "instagramWarning": "Messenger est connecté, mais Instagram n'a pas pu être configuré pour {{page}} : {{reason}}",
+        "comingSoon": "Bientôt disponible",
+        "later": "Faire cela plus tard",
+        "skipConsequence": "Les canaux de messagerie restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités.",
+        "upgradeHint": "La connexion de Messenger et WhatsApp est disponible à partir du plan Essential."
       },
       "bookings": {
         "title": "Rendez-vous",

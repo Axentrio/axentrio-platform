@@ -53,6 +53,20 @@ describe('SKIP_DISABLES names only toggles that exist', () => {
 });
 
 describe('nextStep — walks the wizard in order', () => {
+  it('asks for a plan before offering paid social channels', () => {
+    expect(ONBOARDING_STEPS).toEqual([
+      'language',
+      'company',
+      'logo',
+      'chatbot',
+      'documents',
+      'bookings',
+      'leads',
+      'plan',
+      'social',
+    ]);
+  });
+
   it('starts at the language question', () => {
     expect(nextStep(emptyState())).toBe('language');
   });

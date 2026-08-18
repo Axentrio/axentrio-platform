@@ -381,6 +381,9 @@ describe('PUT /onboarding/step — skipping switches the feature off', () => {
       channelMessenger: false,
       channelInstagram: false,
       channelTelegram: false,
+      channelLinkedin: false,
+      channelTiktok: false,
+      channelX: false,
     });
   });
 

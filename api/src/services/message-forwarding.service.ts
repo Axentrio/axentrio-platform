@@ -1665,9 +1665,13 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     // escalation is NOT stale-guarded: hand off immediately; the human sees newer
     // messages and the takeover gate stops further bot replies.
     const staleGuard = auto.kind === 'off_hours' || auto.kind === 'guardrail';
-    const autoMsg = auto.kind === 'guardrail'
-      ? auto.message
-      : await localizeMessage(auto.message, pendingPlain, session);
+    if (auto.kind === 'guardrail') {
+      const fin = await finalizeReply(session, botParticipant.id, auto.message, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
+      if (fin.status === 'stale') return 'stale';
+      await routeBotMessageOutbound(session, fin.savedId, auto.message);
+      return 'answered';
+    }
+    const autoMsg = await localizeMessage(auto.message, pendingPlain, session);
     const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
     if (fin.status === 'stale') return 'stale';
     await routeBotMessageOutbound(session, fin.savedId, autoMsg);

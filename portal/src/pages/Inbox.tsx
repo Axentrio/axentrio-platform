@@ -157,7 +157,8 @@ const Inbox: React.FC = () => {
       ? { mode: 'timed', hours: defaultTakeoverHours }
       : { mode: 'indefinite' };
 
-  const getReasonLabel = (reason: HandoffRequest['reason']) => {
+  const getReasonLabel = (reason?: HandoffRequest['reason']) => {
+    if (!reason) return t('inbox.handoff.reason.user_request');
     const key = `inbox.handoff.reason.${reason}`;
     const translated = t(key);
     if (translated !== key) return translated;

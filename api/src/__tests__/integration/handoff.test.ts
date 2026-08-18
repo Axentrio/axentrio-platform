@@ -96,6 +96,10 @@ describe('Handoff Flow', () => {
         status: 'handoff',
         ownership: 'handoff_requested',
       });
+      await createTestHandoffRequest(pending.id, tenantId, {
+        reason: 'bot_escalation_keyword',
+        priority: 'high',
+      });
       await createTestSession(tenantId, {
         status: 'handoff',
         ownership: 'human_owned',
@@ -110,6 +114,9 @@ describe('Handoff Flow', () => {
           id: pending.id,
           chatId: pending.id,
           status: 'pending',
+          reason: 'bot_escalation_keyword',
+          priority: 'high',
+          userName: expect.stringMatching(/^Visitor /),
         }),
       ]);
     });

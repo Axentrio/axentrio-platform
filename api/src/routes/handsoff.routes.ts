@@ -368,14 +368,31 @@ router.get(
       : [];
     const lastBySession = new Map(lastMessages.map((m) => [m.sessionId, m]));
 
+    const openHandoffs = sessionIds.length
+      ? await handoffRepository
+          .createQueryBuilder('h')
+          .where('h.sessionId IN (:...sessionIds)', { sessionIds })
+          .andWhere('h.tenantId = :tenantId', { tenantId })
+          .andWhere('h.status = :requested', { requested: 'requested' })
+          .getMany()
+      : [];
+    const handoffBySession = new Map(openHandoffs.map((h) => [h.sessionId, h]));
+
     const sessionsWithPreview = result.data.map((session) => {
       const lastMessage = lastBySession.get(session.id);
+      const hr = handoffBySession.get(session.id);
+      const visitorId = session.visitorId ?? '';
       return {
         id: session.id,
         chatId: session.id,
         // Queue status the portal Inbox badge/tab filters on (`pending`).
         // Session.status stays `handoff` in the DB (legacy + claimed chats).
         status: 'pending',
+        reason: hr?.reason ?? 'user_request',
+        priority: hr?.priority ?? 'medium',
+        waitTime: hr ? hr.getWaitTime() : 0,
+        requestedAt: hr?.requestedAt ?? session.createdAt,
+        userName: visitorId ? `Visitor ${visitorId.slice(0, 8)}` : undefined,
         metadata: session.metadata,
         createdAt: session.createdAt,
         lastMessage: lastMessage

@@ -37,12 +37,15 @@ import { aggregateCorrelations } from './correlation.service';
 import { generateDigest } from './digest.service';
 import { sendDueDigests } from './digest-send.service';
 import { aggregateGaps } from './gap-aggregation.service';
+import { claimInsightsLease, releaseAnalysisRun } from './analysis-eligibility.service';
 import { logger } from '../utils/logger';
 import { decrypt } from '../utils/encryption';
 
 const BACKFILL_DAYS = 7;
 const BACKFILL_CAP = 500;
 const WINDOW_DAYS = 7;
+export const INTRADAY_REFRESH_MINUTES = 60;
+const pendingNightlyTenants = new Map<string, Date>();
 
 interface EligibleSession {
   id: string;
@@ -111,7 +114,11 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
 }
 
 /** Refresh one tenant. Exported for tests and manual (admin) triggering. */
-export async function refreshTenantInsights(tenantId: string, now = new Date()): Promise<void> {
+export async function refreshTenantInsights(
+  tenantId: string,
+  now = new Date(),
+  options: { generateDigest?: boolean; digestAt?: Date } = {},
+): Promise<void> {
   const { features } = await getEntitlements(tenantId);
   // Fail closed here as well as in callers: manual/admin runs must not bypass
   // a tenant's disabled Success Meter feature.
@@ -284,8 +291,9 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
     // Weekly digest: generate once, on the Monday the prior week completes
     // (D6). Idempotent on (tenant, weekStart) — a same-day re-run just
     // refreshes content. Sending is a separate reconciler pass.
-    if (now.getUTCDay() === 1) {
-      await generateDigest(tenantId, now);
+    const digestAt = options.digestAt ?? now;
+    if (options.generateDigest !== false && digestAt.getUTCDay() === 1) {
+      await generateDigest(tenantId, digestAt);
     }
   }
 
@@ -313,8 +321,9 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   });
 }
 
-/** One full pass over all entitled tenants. Sequential — cost is bounded by volume, not tenants. */
-export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
+async function runAutomaticInsightsPass(now: Date, nightly: boolean): Promise<void> {
+  const hadPendingNightly = pendingNightlyTenants.size > 0;
+  const deferredNightly: Array<{ id: string; digestAt: Date }> = [];
   const tenants: Array<{ id: string }> = await AppDataSource.getRepository(Tenant)
     .createQueryBuilder('t')
     .select('t.id', 'id')
@@ -330,8 +339,25 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
       // ask for and reset the watermark their own button reads. Read from the policy,
       // never a tier name, so an override moves a tenant between the two models with
       // one source of truth (ADR-0013).
-      if (!analysisPolicyFor(entitlements.features).automatic) continue;
-      await refreshTenantInsights(id, now);
+      if (!analysisPolicyFor(entitlements.features).automatic) {
+        pendingNightlyTenants.delete(id);
+        continue;
+      }
+      if (nightly) pendingNightlyTenants.set(id, now);
+      const digestAt = pendingNightlyTenants.get(id);
+      if (!(await claimInsightsLease(id, now))) {
+        if (nightly && digestAt) deferredNightly.push({ id, digestAt });
+        continue;
+      }
+      try {
+        await refreshTenantInsights(id, now, {
+          generateDigest: digestAt !== undefined,
+          digestAt,
+        });
+        pendingNightlyTenants.delete(id);
+      } finally {
+        await releaseAnalysisRun(id);
+      }
     } catch (err) {
       logger.error('[insights-refresh] tenant pass failed', {
         tenantId: id,
@@ -340,7 +366,26 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
     }
   }
 
-  // Drain the digest outbox once per pass — retries failed sends with backoff and
+  for (const { id, digestAt } of deferredNightly) {
+    try {
+      if (!(await claimInsightsLease(id, now))) continue;
+      try {
+        await refreshTenantInsights(id, now, { generateDigest: true, digestAt });
+        pendingNightlyTenants.delete(id);
+      } finally {
+        await releaseAnalysisRun(id);
+      }
+    } catch (err) {
+      logger.error('[insights-refresh] deferred nightly tenant pass failed', {
+        tenantId: id,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+  }
+
+  if (!nightly && !hadPendingNightly) return;
+
+  // Drain the digest outbox once per nightly pass — retries failed sends with backoff and
   // delivers digests generated this run (P3 / ADR-0014 D6). Deliberately OUTSIDE the
   // automatic-tier filter above: this is delivery of already-generated digests, so a
   // tenant who analysed manually still gets theirs sent.
@@ -353,27 +398,48 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
   }
 }
 
+/** Nightly full pass, including digest generation and delivery. */
+export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
+  await runAutomaticInsightsPass(now, true);
+}
+
+/** Hourly Enterprise delta pass; the watermark keeps this incremental. */
+export async function runIntradayInsightsOnce(now = new Date()): Promise<void> {
+  await runAutomaticInsightsPass(now, false);
+}
+
 /**
- * Register the nightly schedule: a 10-minute tick that fires the pass once
- * per UTC day after 02:00 (ADR-0006). In-memory last-run marker — a restart
- * may re-run the pass, which is safe (judgments are unique per session).
+ * Register the nightly 02:00 UTC pass plus an hourly Enterprise delta pass.
+ * The shared DB lease prevents overlap across processes and manual/ops runs.
  */
 export function registerInsightsRefreshJob(): void {
   let lastRunDay: string | null = null;
+  let lastIntradayAt = Date.now();
   let running = false;
+  let nightlyDue: { day: string; at: Date } | null = null;
 
   setInterval(async () => {
     const now = new Date();
     const day = now.toISOString().slice(0, 10);
-    // Run only DURING the 02:00 UTC hour (ADR-0006) — `>= 2` would fire
-    // immediately after any daytime deploy and race manual/ops runs.
-    if (now.getUTCHours() !== 2 || lastRunDay === day || running) return;
+    if (now.getUTCHours() === 2 && lastRunDay !== day && !nightlyDue) {
+      nightlyDue = { day, at: now };
+    }
+    const nightly = nightlyDue !== null;
+    const intraday = now.getTime() - lastIntradayAt >= INTRADAY_REFRESH_MINUTES * 60_000;
+    if ((!nightly && !intraday) || running) return;
     running = true;
-    lastRunDay = day;
+    lastIntradayAt = now.getTime();
     try {
-      await runRefreshInsightsOnce(now);
+      if (nightly) {
+        const due = nightlyDue!;
+        await runRefreshInsightsOnce(due.at);
+        lastRunDay = due.day;
+        nightlyDue = null;
+      } else {
+        await runIntradayInsightsOnce(now);
+      }
     } catch (err) {
-      logger.error('[insights-refresh] nightly pass crashed', {
+      logger.error(`[insights-refresh] ${nightly ? 'nightly' : 'intraday'} pass crashed`, {
         error: err instanceof Error ? err.message : 'unknown',
       });
     } finally {
@@ -381,5 +447,5 @@ export function registerInsightsRefreshJob(): void {
     }
   }, 10 * 60 * 1000);
 
-  logger.info('[insights-refresh] nightly job registered (02:00 UTC)');
+  logger.info(`[insights-refresh] jobs registered (02:00 UTC + ${INTRADAY_REFRESH_MINUTES}m delta)`);
 }

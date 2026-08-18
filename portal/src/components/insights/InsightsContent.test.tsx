@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { insightsRef, experimentsRef, demandRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
+const { insightsRef, experimentsRef, sentimentRef, demandRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
   insightsRef: { current: null as Record<string, unknown> | null },
   experimentsRef: { current: { experiments: [] } as Record<string, unknown> },
+  sentimentRef: { current: { windowDays: 30, timeseries: [] } as Record<string, unknown> },
   demandRef: { current: undefined as Record<string, unknown> | undefined },
   digestRef: { current: { digest: null, emailEnabled: true } as Record<string, unknown> },
   hasFeatureRef: { current: {} as Record<string, boolean> },
@@ -20,6 +21,7 @@ vi.mock('../../queries/useInsightsQueries', () => ({
   useResolveGap: () => ({ mutate: resolveMutate, isPending: false }),
   useArchiveGap: () => ({ mutate: archiveMutate, isPending: false }),
   useExperiments: () => ({ data: experimentsRef.current, isLoading: false }),
+  useSentimentTrend: () => ({ data: sentimentRef.current, isLoading: false }),
   useLeadDemand: () => ({ data: demandRef.current, isLoading: false }),
   useDismissExperiment: () => ({ mutate: dismissMutate, isPending: false }),
   useDigest: () => ({ data: digestRef.current, isLoading: false }),
@@ -38,6 +40,7 @@ function gap(over: Partial<Record<string, unknown>> = {}) {
     topic: 'warranty policy',
     status: 'open',
     severity: 'red',
+    priorityScore: 42,
     occurrences: 6,
     distinctVisitors: 5,
     firstDetectedAt: '2026-06-10T00:00:00Z',
@@ -65,6 +68,7 @@ beforeEach(() => {
   hasFeatureRef.current = {};
   insightsRef.current = data([gap()]);
   experimentsRef.current = { experiments: [] };
+  sentimentRef.current = { windowDays: 30, timeseries: [] };
   digestRef.current = { digest: null, emailEnabled: true };
   resolveMutate.mockReset();
   archiveMutate.mockReset();
@@ -105,6 +109,7 @@ describe('InsightsContent — gap surface', () => {
   it('renders an open gap card with topic, stats, and lifecycle actions', () => {
     render(<InsightsContent />);
     expect(screen.getByText('warranty policy')).toBeInTheDocument();
+    expect(screen.getByText(/priority 42/i)).toBeInTheDocument();
     expect(screen.getByText(/5 customers asked without getting an answer \(6 conversations\)/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /i fixed this/i })).toBeInTheDocument();
   });
@@ -154,12 +159,31 @@ describe('InsightsContent — gap surface', () => {
     expect(screen.getByText(/no open gaps/i)).toBeInTheDocument();
   });
 
-  it('renders the first-run tonight copy for automatic (Enterprise) tiers', () => {
+  it('renders the automatic cadence copy for Enterprise tiers', () => {
     hasFeatureRef.current = { aiBusinessInsights: true };
     insightsRef.current = data([], { lastRefreshedAt: null, completeness: null });
     render(<InsightsContent />);
-    expect(screen.getByText(/first analysis runs tonight/i)).toBeInTheDocument();
+    expect(screen.getByText(/runs automatically throughout the day/i)).toBeInTheDocument();
     expect(screen.queryByText(/press analyse to update/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('InsightsContent — sentiment trends (Pro+)', () => {
+  it('hides sentiment trends without gapEvidence', () => {
+    hasFeatureRef.current = { gapEvidence: false };
+    render(<InsightsContent />);
+    expect(screen.queryByText(/customer sentiment/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the 30-day sentiment trend for Pro+', () => {
+    hasFeatureRef.current = { gapEvidence: true };
+    sentimentRef.current = {
+      windowDays: 30,
+      timeseries: [{ date: '2026-08-18', positive: 3, neutral: 1, negative: 2 }],
+    };
+    render(<InsightsContent />);
+    expect(screen.getByText(/customer sentiment/i)).toBeInTheDocument();
+    expect(screen.getByText(/last 30 days/i)).toBeInTheDocument();
   });
 });
 

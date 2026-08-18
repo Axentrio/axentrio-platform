@@ -9,7 +9,14 @@ vi.mock('../services/apiClient', () => ({
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { useInsights, useGapEvidence, useResolveGap, useDigest, useSetDigestEmail } from './useInsightsQueries';
+import {
+  useInsights,
+  useGapEvidence,
+  useResolveGap,
+  useDigest,
+  useSetDigestEmail,
+  useSentimentTrend,
+} from './useInsightsQueries';
 
 let qc: QueryClient;
 function wrapper({ children }: { children: ReactNode }) {
@@ -59,6 +66,16 @@ describe('useInsightsQueries', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(apiGet).toHaveBeenCalledWith('/insights/digest');
     expect(result.current.data?.emailEnabled).toBe(true);
+  });
+
+  it('useSentimentTrend fetches the selected Pro+ window only when enabled', async () => {
+    renderHook(() => useSentimentTrend(false, 7), { wrapper });
+    expect(apiGet).not.toHaveBeenCalled();
+
+    apiGet.mockResolvedValue({ windowDays: 7, timeseries: [] });
+    const { result } = renderHook(() => useSentimentTrend(true, 7), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiGet).toHaveBeenCalledWith('/insights/sentiment/trend?days=7');
   });
 
   it('useSetDigestEmail PUTs the preference and invalidates the digest cache', async () => {

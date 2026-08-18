@@ -7,6 +7,8 @@ const { state } = vi.hoisted(() => ({
     tenantId: 'tenant-1' as string | undefined,
     features: { gapInsights: true, gapEvidence: true, aiBusinessInsights: false },
     gapRows: [] as Array<Record<string, unknown>>,
+    experimentRows: [] as Array<Record<string, unknown>>,
+    queryRows: [] as Array<Record<string, unknown>>,
     gapEntity: null as Record<string, unknown> | null,
     savedGap: null as Record<string, unknown> | null,
   },
@@ -66,9 +68,15 @@ vi.mock('../../database/data-source', () => ({
         qb.getMany = async () => [];
         return { createQueryBuilder: () => qb };
       }
+      if (entity.name === 'InsightExperiment') {
+        const qb: any = {};
+        for (const m of ['where', 'andWhere', 'orderBy', 'addOrderBy']) qb[m] = () => qb;
+        qb.getMany = async () => state.experimentRows;
+        return { createQueryBuilder: () => qb };
+      }
       return {};
     },
-    query: async () => [],
+    query: async () => state.queryRows,
   },
 }));
 
@@ -91,6 +99,8 @@ beforeEach(() => {
   state.tenantId = 'tenant-1';
   state.features = { gapInsights: true, gapEvidence: true, aiBusinessInsights: false };
   state.gapRows = [];
+  state.experimentRows = [];
+  state.queryRows = [];
   state.gapEntity = null;
   state.savedGap = null;
 });
@@ -118,7 +128,13 @@ describe('insights routes — feature gating (ADR-0013)', () => {
     const res = await request(createApp()).get('/insights');
     expect(res.status).toBe(200);
     expect(res.body.data.gaps).toEqual([
-      expect.objectContaining({ id: 'g1', topic: 'pricing', severity: 'red', distinctVisitors: 5 }),
+      expect.objectContaining({
+        id: 'g1',
+        topic: 'pricing',
+        severity: 'red',
+        priorityScore: 21,
+        distinctVisitors: 5,
+      }),
     ]);
     expect(res.body.data.meta).toMatchObject({
       retentionDays: 90,
@@ -136,6 +152,52 @@ describe('insights routes — feature gating (ADR-0013)', () => {
     res = await request(createApp()).get('/insights');
     expect(res.body.data.meta.retentionDays).toBe(30);
     expect(res.body.data.meta.evidenceEnabled).toBe(false);
+    expect(res.body.data.gaps).toEqual([]);
+  });
+
+  it('exposes sentiment trends to Pro+ and rejects Essential', async () => {
+    state.queryRows = [{ date: new Date().toISOString().slice(0, 10), sentiment: 'positive', count: 2 }];
+    let res = await request(createApp()).get('/insights/sentiment/trend?days=7');
+    expect(res.status).toBe(200);
+    expect(res.body.data.windowDays).toBe(7);
+    expect(res.body.data.timeseries).toHaveLength(7);
+    expect(res.body.data.timeseries.at(-1).positive).toBe(2);
+
+    state.features = { gapInsights: true, gapEvidence: false, aiBusinessInsights: false };
+    res = await request(createApp()).get('/insights/sentiment/trend');
+    expect(res.status).toBe(403);
+  });
+
+  it('adds and sorts experiment priority scores', async () => {
+    state.features = { gapInsights: true, gapEvidence: true, aiBusinessInsights: true };
+    state.experimentRows = [
+      {
+        id: 'low',
+        kind: 'sentiment',
+        severity: 'orange',
+        title: 'Low',
+        payload: { sessions: 3 },
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+      },
+      {
+        id: 'high',
+        kind: 'correlation',
+        severity: 'red',
+        title: 'High',
+        payload: { a: 10, b: 10, c: 10, d: 10 },
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+      },
+    ];
+
+    const res = await request(createApp()).get('/insights/experiments');
+    expect(res.status).toBe(200);
+    expect(res.body.data.experiments.map((experiment: { id: string }) => experiment.id)).toEqual([
+      'high',
+      'low',
+    ]);
+    expect(res.body.data.experiments[0].priorityScore).toBe(120);
   });
 });
 

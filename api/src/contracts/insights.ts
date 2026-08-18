@@ -12,6 +12,8 @@ export interface GapDto {
   topic: string;
   status: GapStatus;
   severity: GapSeverity;
+  /** Pro+ computed score; null on Essential. */
+  priorityScore: number | null;
   occurrences: number;
   distinctVisitors: number;
   firstDetectedAt: string;
@@ -67,6 +69,7 @@ export interface ExperimentDto {
   id: string;
   kind: ExperimentKind;
   severity: ExperimentSeverity;
+  priorityScore: number;
   title: string;
   detail: string | null;
   /** Kind-specific display data (rates, counts, suggestion text). */
@@ -77,6 +80,18 @@ export interface ExperimentDto {
 
 export interface ExperimentsResponse {
   experiments: ExperimentDto[];
+}
+
+export interface SentimentTrendPoint {
+  date: string;
+  positive: number;
+  neutral: number;
+  negative: number;
+}
+
+export interface SentimentTrendResponse {
+  windowDays: 7 | 30;
+  timeseries: SentimentTrendPoint[];
 }
 
 /** The structured header of a weekly digest (rendered above the narrative). */

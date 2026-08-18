@@ -6,6 +6,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
   FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
@@ -24,6 +25,7 @@ import {
   useResolveGap,
   useArchiveGap,
   useExperiments,
+  useSentimentTrend,
   useLeadDemand,
   useDismissExperiment,
   useDigest,
@@ -71,6 +73,14 @@ function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boole
                 {gap.status === 'resolved_data'
                   ? t('insights.status.resolvedData', { defaultValue: 'Resolved — confirmed by chats' })
                   : t('insights.status.resolvedManual', { defaultValue: 'Resolved — marked fixed' })}
+              </Badge>
+            )}
+            {gap.priorityScore != null && (
+              <Badge variant="outline" className="text-xs text-primary-300 border-primary-400/30">
+                {t('insights.priority', {
+                  defaultValue: 'Priority {{score}}',
+                  score: gap.priorityScore,
+                })}
               </Badge>
             )}
           </div>
@@ -218,6 +228,74 @@ function ExperimentsSection() {
         </p>
       ) : (
         experiments.map((e) => <ExperimentCard key={e.id} exp={e} />)
+      )}
+    </div>
+  );
+}
+
+/** Pro+ basic sentiment distribution; Enterprise themes remain in Experiments. */
+function SentimentTrendSection() {
+  const { t } = useTranslation();
+  const enabled = useHasFeature('gapEvidence');
+  const { data, isLoading } = useSentimentTrend(enabled);
+  if (!enabled) return null;
+
+  const timeseries = data?.timeseries ?? [];
+  const hasData = timeseries.some((point) => point.positive + point.neutral + point.negative > 0);
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2">
+        <MessageCircleHeart className="h-4 w-4 text-primary-400" />
+        <h3 className="text-sm font-semibold text-text-primary">
+          {t('insights.sentiment.title', { defaultValue: 'Customer sentiment' })}
+        </h3>
+        <span className="text-xs text-zinc-500">
+          {t('insights.sentiment.window', { defaultValue: 'Last 30 days' })}
+        </span>
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-48 w-full rounded-xl" />
+      ) : !hasData ? (
+        <p className="text-xs text-zinc-500">
+          {t('insights.sentiment.empty', {
+            defaultValue: 'Sentiment trends appear after conversations are analysed.',
+          })}
+        </p>
+      ) : (
+        <Card variant="glass">
+          <CardContent className="h-52 p-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={timeseries} accessibilityLayer>
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={(date: string) => date.slice(5)}
+                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  minTickGap={20}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  width={24}
+                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1e2030',
+                    border: '1px solid #2a2d3e',
+                    borderRadius: 10,
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="positive" stackId="sentiment" fill="#34d399" />
+                <Bar dataKey="neutral" stackId="sentiment" fill="#71717a" />
+                <Bar dataKey="negative" stackId="sentiment" fill="#f87171" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
@@ -440,7 +518,7 @@ export function InsightsContent() {
               })
             : t(automatic ? 'insights.meta.pendingAutomatic' : 'insights.meta.pending', {
                 defaultValue: automatic
-                  ? 'First analysis runs tonight — insights appear after your chats are reviewed'
+                  ? 'Analysis runs automatically throughout the day — insights appear after your chats are reviewed'
                   : 'Press Analyse to update',
               })}
         </span>
@@ -496,6 +574,7 @@ export function InsightsContent() {
         </TabsContent>
       </Tabs>
 
+      <SentimentTrendSection />
       <LeadDemandSection />
       <ExperimentsSection />
     </div>

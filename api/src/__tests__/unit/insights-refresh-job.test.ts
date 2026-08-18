@@ -80,8 +80,16 @@ vi.mock('../../insights/correlation.service', () => ({
 // suite covers refresh orchestration only. Stub them so the once-runner's
 // unconditional sendDueDigests() drain doesn't touch unmocked repos.
 const sendDueDigestsMock = vi.hoisted(() => vi.fn(async () => ({ sent: 0, failed: 0 })));
+const generateDigestMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('../../insights/digest-send.service', () => ({ sendDueDigests: sendDueDigestsMock }));
-vi.mock('../../insights/digest.service', () => ({ generateDigest: vi.fn(async () => {}) }));
+vi.mock('../../insights/digest.service', () => ({ generateDigest: generateDigestMock }));
+
+const claimLeaseMock = vi.hoisted(() => vi.fn(async (_tenantId: string) => true));
+const releaseLeaseMock = vi.hoisted(() => vi.fn(async (_tenantId: string) => {}));
+vi.mock('../../insights/analysis-eligibility.service', () => ({
+  claimInsightsLease: claimLeaseMock,
+  releaseAnalysisRun: releaseLeaseMock,
+}));
 
 vi.mock('../../billing/entitlements', () => ({
   getEntitlements: async (tenantId: string) => ({
@@ -148,7 +156,12 @@ vi.mock('../../database/data-source', () => ({
   },
 }));
 
-import { refreshTenantInsights, runRefreshInsightsOnce } from '../../insights/refresh-insights.job';
+import {
+  refreshTenantInsights,
+  registerInsightsRefreshJob,
+  runIntradayInsightsOnce,
+  runRefreshInsightsOnce,
+} from '../../insights/refresh-insights.job';
 
 const NOW = new Date('2026-06-12T02:00:00Z');
 const T = 'tenant-1';
@@ -181,6 +194,11 @@ beforeEach(() => {
   aggregateMock.mockClear();
   aggregateSentimentMock.mockClear();
   aggregateCorrelationsMock.mockClear();
+  generateDigestMock.mockClear();
+  sendDueDigestsMock.mockClear();
+  claimLeaseMock.mockReset();
+  claimLeaseMock.mockResolvedValue(true);
+  releaseLeaseMock.mockReset();
   judgeMock.mockResolvedValue({
     hadQuestion: false, satisfied: null, topicPhrase: null, evidenceMessageIds: [], reasoning: null,
   });
@@ -401,6 +419,8 @@ describe('runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, n
     await runRefreshInsightsOnce(NOW);
 
     expect(aggregateMock.mock.calls.map((c) => c[0])).toEqual(['ent-1', 'ent-2']);
+    expect(claimLeaseMock.mock.calls.map((c) => c[0])).toEqual(['ent-1', 'ent-2']);
+    expect(releaseLeaseMock.mock.calls.map((c) => c[0])).toEqual(['ent-1', 'ent-2']);
   });
 
   it('still refreshes nobody when no tenant has insights at all', async () => {
@@ -408,6 +428,95 @@ describe('runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, n
     st.entitled = { 'free-1': false, 'free-2': false };
     await runRefreshInsightsOnce(NOW);
     expect(aggregateMock.mock.calls).toHaveLength(0);
+  });
+
+  it('skips an intraday tenant while a manual or scheduled run holds the lease', async () => {
+    st.tenants = [{ id: 'ent-1' }];
+    st.entitled = { 'ent-1': true };
+    st.band = { 'ent-1': 'enterprise' };
+    claimLeaseMock.mockResolvedValue(false);
+
+    await runIntradayInsightsOnce(NOW);
+
+    expect(aggregateMock).not.toHaveBeenCalled();
+    expect(releaseLeaseMock).not.toHaveBeenCalled();
+  });
+
+  it('defers Monday digest generation and sending until a held lease clears', async () => {
+    const monday = new Date('2026-06-15T02:00:00Z');
+    const tuesday = new Date('2026-06-16T00:10:00Z');
+    st.tenants = [{ id: 'ent-1' }];
+    st.entitled = { 'ent-1': true };
+    st.band = { 'ent-1': 'enterprise' };
+    claimLeaseMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await runRefreshInsightsOnce(monday);
+    expect(generateDigestMock).not.toHaveBeenCalled();
+
+    await runIntradayInsightsOnce(tuesday);
+    expect(generateDigestMock).toHaveBeenCalledWith('ent-1', monday);
+    expect(sendDueDigestsMock).toHaveBeenLastCalledWith(tuesday);
+  });
+
+  it('runs a nightly due while an hourly pass overruns 03:00 UTC', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-15T00:00:00Z'));
+    st.tenants = [{ id: 'ent-1' }];
+    st.entitled = { 'ent-1': true };
+    st.band = { 'ent-1': 'enterprise' };
+    let clearHourlyLease!: (claimed: boolean) => void;
+    claimLeaseMock
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { clearHourlyLease = resolve; }))
+      .mockResolvedValue(true);
+
+    registerInsightsRefreshJob();
+    vi.advanceTimersByTime(60 * 60_000);
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(claimLeaseMock).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(2 * 60 * 60_000);
+    expect(generateDigestMock).not.toHaveBeenCalled();
+    clearHourlyLease(true);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(generateDigestMock).toHaveBeenCalledWith('ent-1', new Date('2026-06-15T02:00:00Z'));
+    expect(sendDueDigestsMock).toHaveBeenCalledWith(new Date('2026-06-15T02:00:00Z'));
+    vi.useRealTimers();
+  });
+
+  it('lets the 02:00 nightly pass win when the hourly pass is also due', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-15T01:00:00Z'));
+    st.tenants = [{ id: 'ent-1' }];
+    st.entitled = { 'ent-1': true };
+    st.band = { 'ent-1': 'enterprise' };
+
+    registerInsightsRefreshJob();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+
+    expect(claimLeaseMock).toHaveBeenCalledTimes(1);
+    expect(aggregateMock).toHaveBeenCalledTimes(1);
+    expect(generateDigestMock).toHaveBeenCalledTimes(1);
+    expect(sendDueDigestsMock).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('runs the hourly intraday delta cadence', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-12T12:00:00Z'));
+    st.tenants = [{ id: 'ent-1' }];
+    st.entitled = { 'ent-1': true };
+    st.band = { 'ent-1': 'enterprise' };
+
+    registerInsightsRefreshJob();
+    await vi.advanceTimersByTimeAsync(59 * 60_000);
+    expect(aggregateMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(aggregateMock).toHaveBeenCalledWith('ent-1', new Date('2026-06-12T13:00:00Z'));
+    vi.useRealTimers();
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   EvidenceEntryDto,
   ExperimentsResponse,
   DigestResponse,
+  SentimentTrendResponse,
 } from '@contracts/insights';
 
 export type { GapStatus, GapSeverity };
@@ -36,6 +37,10 @@ const insightsOptions = {
   experiments: () => queryOptions({
     queryKey: queryKeys.insights.experiments(),
     queryFn: () => api.get<ExperimentsResponse>('/insights/experiments'),
+  }),
+  sentimentTrend: (days: 7 | 30) => queryOptions({
+    queryKey: queryKeys.insights.sentimentTrend(days),
+    queryFn: () => api.get<SentimentTrendResponse>(`/insights/sentiment/trend?days=${days}`),
   }),
   digest: () => queryOptions({
     queryKey: queryKeys.insights.digest(),
@@ -117,6 +122,10 @@ export function useArchiveGap(successMessage: string) {
 
 export function useExperiments(enabled = true) {
   return useQuery({ ...insightsOptions.experiments(), enabled });
+}
+
+export function useSentimentTrend(enabled = true, days: 7 | 30 = 30) {
+  return useQuery({ ...insightsOptions.sentimentTrend(days), enabled });
 }
 
 /** Lead demand — what customers actually asked for. Enterprise (aiBusinessInsights). */

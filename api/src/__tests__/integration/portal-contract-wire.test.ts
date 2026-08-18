@@ -199,6 +199,7 @@ describe('wire contract — /insights', () => {
       'id',
       'lastSeenAt',
       'occurrences',
+      'priorityScore',
       'resolvedAt',
       'severity',
       'status',
@@ -275,10 +276,27 @@ describe('wire contract — /insights/experiments', () => {
       'kind',
       'lastSeenAt',
       'payload',
+      'priorityScore',
       'severity',
       'title',
     ]);
     expect(res.body.data.experiments[0].kind).toBe('sentiment');
+  });
+});
+
+describe('wire contract — /insights/sentiment/trend', () => {
+  it('exposes the Pro sentiment trend shape', async () => {
+    await seedProTenant();
+    const res = await request(app).get('/api/v1/insights/sentiment/trend?days=7');
+    expect(res.status).toBe(200);
+    expect(keysOf(res.body.data)).toEqual(['timeseries', 'windowDays']);
+    expect(res.body.data.windowDays).toBe(7);
+    expect(keysOf(res.body.data.timeseries[0])).toEqual([
+      'date',
+      'negative',
+      'neutral',
+      'positive',
+    ]);
   });
 });
 

@@ -12,6 +12,7 @@
 import 'reflect-metadata';
 import { AppDataSource } from '../src/database/data-source';
 import { refreshTenantInsights } from '../src/insights/refresh-insights.job';
+import { claimInsightsLease, releaseAnalysisRun } from '../src/insights/analysis-eligibility.service';
 
 async function main(): Promise<void> {
   const tenantId = process.argv[2];
@@ -20,9 +21,16 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   await AppDataSource.initialize();
+  if (!(await claimInsightsLease(tenantId))) {
+    throw new Error(`analysis already running for tenant ${tenantId}`);
+  }
   console.log(`[run-insights-refresh] refreshing tenant ${tenantId}…`);
-  await refreshTenantInsights(tenantId);
-  await AppDataSource.destroy();
+  try {
+    await refreshTenantInsights(tenantId);
+  } finally {
+    await releaseAnalysisRun(tenantId);
+    await AppDataSource.destroy();
+  }
   console.log('[run-insights-refresh] done');
 }
 

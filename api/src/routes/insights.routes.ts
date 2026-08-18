@@ -29,9 +29,12 @@ import { InsightExperiment } from '../database/entities/InsightExperiment';
 import { InsightDigest } from '../database/entities/InsightDigest';
 import { Tenant } from '../database/entities/Tenant';
 import { digestEmailEnabled } from '../insights/digest.service';
+import { experimentOccurrences, priorityScore } from '../insights/priority-score';
+import { getSentimentTrend } from '../insights/sentiment-trend.service';
 import type {
   InsightsListResponse, GapDto, GapStatus, GapSeverity, EvidenceResponse,
   ExperimentsResponse, ExperimentDto, DigestResponse, DigestDto, DigestMetrics,
+  SentimentTrendResponse,
 } from '../contracts/insights';
 import { decrypt } from '../utils/encryption';
 
@@ -183,24 +186,63 @@ router.get(
       .orderBy('g.last_seen_at', 'DESC')
       .getRawMany();
 
-    const state = await AppDataSource.getRepository(InsightsRefreshState).findOne({
-      where: { tenantId },
-    });
+    const priorityEnabled = entitlements.features.gapEvidence;
+    const trendRows: Array<{ canonicalTopicId: string; currentVisitors: number; baselineVisitors: number }> =
+      priorityEnabled
+        ? await AppDataSource.query(
+            `SELECT j.canonical_topic_id AS "canonicalTopicId",
+                    COUNT(DISTINCT j.visitor_id) FILTER (
+                      WHERE j.session_started_at >= $2
+                    )::int AS "currentVisitors",
+                    COUNT(DISTINCT j.visitor_id) FILTER (
+                      WHERE j.session_started_at >= $3 AND j.session_started_at < $2
+                    )::int AS "baselineVisitors"
+               FROM chatbot_judgments j
+              WHERE j.tenant_id = $1
+                AND j.satisfied = false
+                AND j.canonical_topic_id IS NOT NULL
+                AND j.session_started_at >= $3
+              GROUP BY j.canonical_topic_id`,
+            [
+              tenantId,
+              new Date(Date.now() - 7 * 86_400_000),
+              new Date(Date.now() - 14 * 86_400_000),
+            ],
+          )
+        : [];
+    const trends = new Map(trendRows.map((row) => [row.canonicalTopicId, row]));
+    const state = await AppDataSource.getRepository(InsightsRefreshState).findOne({ where: { tenantId } });
 
     // Typed against the shared wire contract (src/contracts/insights.ts).
-    const payload: InsightsListResponse = {
-      gaps: gaps.map((g): GapDto => ({
+    const gapDtos = gaps.map((g): GapDto => {
+      const occurrences = Number(g.occurrences);
+      const distinctVisitors = Number(g.distinct_visitors);
+      const trend = trends.get(g.canonical_topic_id as string);
+      return {
         id: g.id as string,
         topic: g.topic as string,
         status: g.status as GapStatus,
         severity: g.severity as GapSeverity,
-        occurrences: g.occurrences as number,
-        distinctVisitors: g.distinct_visitors as number,
+        priorityScore: priorityEnabled
+          ? priorityScore({
+              severity: g.severity as GapSeverity,
+              occurrences,
+              currentVolume: Number(trend?.currentVisitors ?? distinctVisitors),
+              baselineVolume: Number(trend?.baselineVisitors ?? distinctVisitors),
+            })
+          : null,
+        occurrences,
+        distinctVisitors,
         firstDetectedAt: g.first_detected_at as string,
         lastSeenAt: g.last_seen_at as string,
         resolvedAt: (g.resolved_at ?? null) as string | null,
         archivedAt: (g.archived_at ?? null) as string | null,
-      })),
+      };
+    });
+    if (priorityEnabled) gapDtos.sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0));
+
+    const payload: InsightsListResponse = {
+      gaps: gapDtos,
       meta: {
         lastRefreshedAt: (state?.lastRefreshedAt ?? null) as unknown as string | null,
         completeness: state?.judgmentsCompleteness != null ? Number(state.judgmentsCompleteness) : null,
@@ -208,6 +250,20 @@ router.get(
         evidenceEnabled: entitlements.features.gapEvidence,
       },
     };
+    sendSuccess(res, payload);
+  }),
+);
+
+/** GET /insights/sentiment/trend — basic sentiment distribution for Pro+. */
+router.get(
+  '/sentiment/trend',
+  requireInsightsFeature('gapEvidence'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const windowDays: 7 | 30 = Number(req.query.days) === 7 ? 7 : 30;
+    const payload: SentimentTrendResponse = await getSentimentTrend(
+      insightsTenantId(req) as string,
+      windowDays,
+    );
     sendSuccess(res, payload);
   }),
 );
@@ -335,18 +391,28 @@ router.get(
       .addOrderBy('e.last_seen_at', 'DESC')
       .getMany();
 
-    const payload: ExperimentsResponse = {
-      experiments: rows.map((e): ExperimentDto => ({
+    const experiments = rows.map((e): ExperimentDto => {
+      const payload = e.payload ?? {};
+      const occurrences = experimentOccurrences(payload);
+      return {
         id: e.id,
         kind: e.kind,
         severity: e.severity,
+        priorityScore: priorityScore({
+          severity: e.severity,
+          occurrences,
+          currentVolume: occurrences,
+          baselineVolume: occurrences,
+        }),
         title: e.title,
         detail: e.detail ?? null,
-        payload: e.payload ?? {},
+        payload,
         firstSeenAt: e.firstSeenAt as unknown as string,
         lastSeenAt: e.lastSeenAt as unknown as string,
-      })),
-    };
+      };
+    });
+    experiments.sort((a, b) => b.priorityScore - a.priorityScore);
+    const payload: ExperimentsResponse = { experiments };
     sendSuccess(res, payload);
   }),
 );

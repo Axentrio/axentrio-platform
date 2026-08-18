@@ -88,6 +88,21 @@ export async function getAnalysisStatus(tenantId: string, now = new Date()): Pro
  */
 export const RUN_LEASE_MINUTES = 30;
 
+/** Claim the shared analysis lease without changing the manual-run cooldown. */
+export async function claimInsightsLease(tenantId: string, now = new Date()): Promise<boolean> {
+  const rows = await AppDataSource.query(
+    `INSERT INTO chatbot_insights_refresh_state (tenant_id, analysis_running_since)
+     VALUES ($1, $2)
+     ON CONFLICT (tenant_id) DO UPDATE
+        SET analysis_running_since = EXCLUDED.analysis_running_since
+      WHERE chatbot_insights_refresh_state.analysis_running_since IS NULL
+         OR chatbot_insights_refresh_state.analysis_running_since < $3
+     RETURNING tenant_id`,
+    [tenantId, now.toISOString(), new Date(now.getTime() - RUN_LEASE_MINUTES * 60_000).toISOString()],
+  );
+  return returningRows<{ tenant_id: string }>(rows).length > 0;
+}
+
 /**
  * Claim the right to run, atomically.
  *

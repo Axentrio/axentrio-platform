@@ -19,6 +19,8 @@ import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { MessageDelivery } from '../../database/entities/MessageDelivery';
+import { SpamScamLog } from '../../database/entities/SpamScamLog';
+import { Tenant } from '../../database/entities/Tenant';
 import {
   createTestTenant,
   createTestAnchorBot,
@@ -64,6 +66,7 @@ import type { AgentService } from '../../agent/agent.service';
 
 const sessionRepo = AppDataSource.getRepository(ChatSession);
 const messageRepo = AppDataSource.getRepository(Message);
+const guardrailLogRepo = AppDataSource.getRepository(SpamScamLog);
 
 const AI = {
   enabled: true,
@@ -112,6 +115,29 @@ beforeEach(() => {
 afterEach(() => {
   initializeAgentService(null as unknown as AgentService);
   vi.unstubAllEnvs();
+});
+
+describe('runTurn — routing isolation', () => {
+  it('journals a turn dropped because its tenant cannot be resolved', async () => {
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const pending = await createTestMessage(session.id, tenant.id, user.id, { content: 'hello?' });
+    vi.spyOn(AppDataSource.getRepository(Tenant), 'findOne').mockResolvedValueOnce(null);
+
+    expect(await runTurn(session, pending)).toBe('noop');
+
+    const row = await guardrailLogRepo.findOneByOrFail({ conversationId: session.id });
+    expect(row).toMatchObject({
+      tenantId: tenant.id,
+      conversationId: session.id,
+      suspiciousMessageId: pending.id,
+      detectedCategory: 'missing_tenant',
+      enforced: true,
+      aiAutoReplyDisabled: false,
+    });
+    expect(row.reasons).toEqual([`Tenant ${tenant.id} was not found`]);
+  });
 });
 
 describe('runTurn — burst coalescing', () => {

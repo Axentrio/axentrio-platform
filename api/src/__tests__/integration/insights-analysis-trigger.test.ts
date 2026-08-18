@@ -108,14 +108,13 @@ beforeEach(() => {
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
 describe('GET /insights/analysis-status', () => {
-  it('counts only the conversations the judge would actually consume', async () => {
+  it('excludes detection journals but keeps routing-isolation journals in the eligible count', async () => {
     await seedTenant('pro');
     await seedSessions(5);
     await seedSessions(4, { status: 'active' }); // never judged — still open
     await seedSessions(3, { guardrailStatus: 'spam' }); // enforce-mode exclusions
     const [shadowFlagged] = await seedSessions(1);
     const [enforceFlagged] = await seedSessions(1);
-    const [missingTenant, missingBot] = await seedSessions(2);
     const logRepo = AppDataSource.getRepository(SpamScamLog);
     await logRepo.save([
       logRepo.create({
@@ -132,6 +131,14 @@ describe('GET /insights/analysis-status', () => {
         detectedCategory: 'spam',
         enforced: true,
       }),
+    ]);
+
+    const afterDetections = await request(app).get('/api/v1/insights/analysis-status');
+    expect(afterDetections.status).toBe(200);
+    expect(afterDetections.body.data.newChats).toBe(5);
+
+    const [missingTenant, missingBot] = await seedSessions(2);
+    await logRepo.save([
       logRepo.create({
         tenantId,
         conversationId: missingTenant.id,

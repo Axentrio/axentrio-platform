@@ -372,6 +372,25 @@ describe('forwardMessageToN8n', () => {
       });
       expect(row.reasons).toEqual([`Tenant ${tenant.id} was not found`]);
     });
+
+    it('journals a message dropped because its bot is paused', async () => {
+      const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+      const { session, message } = await setup(tenant.id);
+      await AppDataSource.getRepository(Bot).update(session.botId!, { status: 'paused' });
+
+      expect(await forwardMessageToN8n(session, message)).toBe(false);
+
+      const row = await guardrailLogRepo.findOneByOrFail({ conversationId: session.id });
+      expect(row).toMatchObject({
+        tenantId: tenant.id,
+        conversationId: session.id,
+        suspiciousMessageId: message.id,
+        detectedCategory: 'missing_bot',
+        enforced: true,
+        aiAutoReplyDisabled: false,
+      });
+      expect(row.reasons).toEqual([`Bot ${session.botId} is paused`]);
+    });
   });
 
   // ── 2. n8n happy path ──────────────────────────────────────────────────

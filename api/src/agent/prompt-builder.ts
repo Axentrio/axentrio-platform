@@ -57,6 +57,7 @@ export class PromptBuilder {
       openingHours: liveFields?.openingHours,
       serviceArea: liveFields?.serviceArea,
       venueLine: liveFields?.venueLine,
+      quotedAddressEnabled: botSettings.quotedAddress?.enabled !== false,
       hasTravelServices: liveFields?.hasTravelServices,
       channel,
       proactiveAsk: runtime?.proactiveAsk,

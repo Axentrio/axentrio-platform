@@ -325,9 +325,22 @@ describe('characterization: agent PromptBuilder.build', () => {
     const { prompt } = composeSystemPrompt({
       mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
       tools: [tool('kb_search')],
+      quotedAddressEnabled: true,
     });
     expect(prompt).not.toContain('## OUR ADDRESS');
     expect(prompt).toContain('services, opening hours, prices, policies, location, contact details');
+  });
+
+  it('disabled quoted address: KB does not search or volunteer a location', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme',
+      tools: [tool('kb_search')],
+      quotedAddressEnabled: false,
+    });
+    expect(prompt).not.toContain('services, opening hours, prices, policies, location, contact details');
+    expect(prompt).toContain('business address is intentionally not part of this profile');
+    expect(prompt).toContain('do not provide or volunteer a business address');
+    expect(prompt).toContain('including prefetched knowledge');
   });
 
   it('booking bot: quotedAddress wins over scheduler venue, exactly one OUR ADDRESS', () => {

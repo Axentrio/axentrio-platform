@@ -95,10 +95,21 @@ describe('PromptBuilder', () => {
     expect(prompt).toContain('## KNOWLEDGE');
     expect(prompt).toContain('MUST call the kb_search tool BEFORE answering');
     expect(prompt).toContain('opening hours');
+    expect(prompt).toContain('services, opening hours, prices, policies, location, contact details');
 
     const noKb = mockTools.filter((t) => t.name !== 'kb_search');
     const { prompt: promptNoKb } = builder.build(baseTenant, baseTenant.settings as any, noKb);
     expect(promptNoKb).not.toContain('## KNOWLEDGE');
+  });
+
+  it('does not source a disabled address from the knowledge base', () => {
+    const settings = {
+      ...baseTenant.settings,
+      quotedAddress: { enabled: false },
+    };
+    const { prompt } = builder.build(baseTenant, settings as any, mockTools);
+    expect(prompt).not.toContain('services, opening hours, prices, policies, location, contact details');
+    expect(prompt).toContain('do not provide or volunteer a business address');
   });
 
   it('does not send opening-hours questions to kb_search when hours are already configured', () => {

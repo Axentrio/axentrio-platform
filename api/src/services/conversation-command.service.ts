@@ -194,6 +194,12 @@ interface CommandOpts {
    *  cross-tenant probe distinction). System sweeps omit it. */
   tenantId?: string;
   /**
+   * Super-admin impersonation (X-Tenant-Context): the caller's support_agents
+   * row lives in their HOME tenant (`user_id` is globally unique), so the
+   * tenant-scoped lookup would 403. Still requires a real agent row.
+   */
+  allowForeignAgent?: boolean;
+  /**
    * Run the command inside the CALLER'S transaction instead of opening one
    * (B-PR4a: the widget new-conversation close-and-open must be atomic under
    * one advisory lock). The caller owns commit/rollback; every rule above -
@@ -350,8 +356,11 @@ async function requireTenantAgent(
   manager: EntityManager,
   tenantId: string,
   agentId: string,
+  opts?: Pick<CommandOpts, 'allowForeignAgent'>,
 ): Promise<Agent> {
-  const agent = await manager.findOne(Agent, { where: { id: agentId, tenantId } });
+  const agent = opts?.allowForeignAgent
+    ? await manager.findOne(Agent, { where: { id: agentId } })
+    : await manager.findOne(Agent, { where: { id: agentId, tenantId } });
   if (!agent) throw new OperatorNotInTenantError();
   return agent;
 }
@@ -655,7 +664,7 @@ export const conversationCommands = {
     } = {},
   ): Promise<ClaimResult> {
     return withConversation(sessionId, 'claim', idempotencyKey, opts, async (manager, session) => {
-      await requireTenantAgent(manager, session.tenantId, agentId);
+      await requireTenantAgent(manager, session.tenantId, agentId, opts);
 
       if (session.ownership === 'closed') throw new ConversationClosedError();
       if (session.ownership === 'human_owned') {
@@ -733,7 +742,7 @@ export const conversationCommands = {
       throw new BadRequestError('clientMessageId is required (max 128 chars)');
     }
     return withConversation(sessionId, 'send_message', undefined, opts, async (manager, session) => {
-      const agent = await requireTenantAgent(manager, session.tenantId, agentId);
+      const agent = await requireTenantAgent(manager, session.tenantId, agentId, opts);
       if (session.ownership === 'closed') throw new ConversationClosedError();
 
       // Dedupe FIRST: a retry of an already-delivered reply must return the
@@ -854,7 +863,7 @@ export const conversationCommands = {
     opts: CommandOpts & { reason?: string } = {},
   ): Promise<ReleaseResult> {
     return withConversation(sessionId, 'release', idempotencyKey, opts, async (manager, session) => {
-      await requireTenantAgent(manager, session.tenantId, agentId);
+      await requireTenantAgent(manager, session.tenantId, agentId, opts);
 
       if (session.ownership === 'closed') throw new ConversationClosedError();
       if (session.ownership === 'bot_owned') {
@@ -929,7 +938,7 @@ export const conversationCommands = {
     opts: CommandOpts & { reason?: string } = {},
   ): Promise<CancelResult> {
     return withConversation(sessionId, 'cancel_handoff', idempotencyKey, opts, async (manager, session) => {
-      if (actor.kind === 'agent') await requireTenantAgent(manager, session.tenantId, actor.agentId);
+      if (actor.kind === 'agent') await requireTenantAgent(manager, session.tenantId, actor.agentId, opts);
 
       if (session.ownership === 'closed') throw new ConversationClosedError();
       if (session.ownership === 'bot_owned') {
@@ -987,7 +996,7 @@ export const conversationCommands = {
     opts: CommandOpts & { reason?: string } = {},
   ): Promise<CloseResult> {
     return withConversation(sessionId, 'close', idempotencyKey, opts, async (manager, session) => {
-      if (actor.kind === 'agent') await requireTenantAgent(manager, session.tenantId, actor.agentId);
+      if (actor.kind === 'agent') await requireTenantAgent(manager, session.tenantId, actor.agentId, opts);
 
       if (session.ownership === 'closed') {
         return { outcome: 'already_closed' as const, conversation: summarize(session, null) };

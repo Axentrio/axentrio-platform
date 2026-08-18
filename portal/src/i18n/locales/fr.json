@@ -2046,7 +2046,8 @@
         "conflictTaken": "Un autre agent a pris cette conversation. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous.",
         "conflictClosed": "Cette conversation est fermée. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous.",
         "conflictNotInTenant": "Vous n'êtes pas un agent de support dans cet espace. Demandez à un administrateur de vous ajouter comme agent de support. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous.",
-        "conflictNotOwner": "Vous n'êtes pas assigné à cette conversation. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous."
+        "conflictNotOwner": "Vous n'êtes pas assigné à cette conversation. Le message n'a pas été envoyé. Votre texte est conservé ci-dessous.",
+        "sendTakesOver": "Envoyer prendra en charge cette conversation à la place de l'IA"
       },
       "sender": {
         "agent": "Agent",
@@ -2060,7 +2061,7 @@
         "failed": "Non remis",
         "retry": "Réessayer"
       },
-      "transferChat": "Transférer la conversation",
+      "transferChat": "Transférer à un collègue",
       "empty": {
         "title": "Aucun message pour le moment",
         "subtitle": "Les messages s'afficheront ici dès le début de la conversation"
@@ -2068,10 +2069,12 @@
     },
     "takeover": {
       "button": "Prendre en charge",
-      "indefinite": "Jusqu'à ce que je la rende — l'IA reste bloquée",
-      "forHours_one": "Pour {{count}} heure",
-      "forHours_other": "Pour {{count}} heures",
-      "changeDuration": "Modifier la durée"
+      "indefinite": "Bloquer l'IA — jusqu'à ce que je la rende",
+      "forHours_one": "Retour à l'IA dans {{count}} heure",
+      "forHours_other": "Retour à l'IA dans {{count}} heures",
+      "changeDuration": "Modifier la durée",
+      "customHours": "Durée personnalisée (1–24)",
+      "customHoursApply": "OK"
     },
     "humanControl": {
       "indefinite": "IA en pause - vous avez le contrôle",
@@ -2102,9 +2105,9 @@
       "confirm": "Clôturer la conversation"
     },
     "transferModal": {
-      "title": "Transférer la conversation",
+      "title": "Transférer à un collègue",
       "prompt": "Sélectionnez un agent à qui transférer cette conversation :",
-      "noAgents": "Aucun agent en ligne actuellement",
+      "noAgents": "Aucun autre collègue n'est en ligne. Prenez la conversation en charge vous-même, ou réessayez plus tard.",
       "agentStats": "{{current}}/{{max}} conversations — {{status}}"
     },
     "toasts": {
@@ -2116,6 +2119,7 @@
       "takeoverAlreadyClaimedBy": "Cette conversation a déjà été reprise par {{name}}.",
       "takeoverInvalidTransition": "Cette conversation ne peut pas être reprise dans son état actuel. Actualisez et réessayez.",
       "takeoverInvalidHours": "Cette durée de prise en charge n'est pas valide. Choisissez 1–24 heures ou jusqu'à ce que vous la rendiez.",
+      "takeoverClosed": "Cette conversation est clôturée.",
       "resumeAiSuccess": "Réponses de l'IA réactivées",
       "resumeAiFailed": "Impossible de réactiver l'IA (administrateurs uniquement)",
       "handoffAccepted": "Transfert accepté",

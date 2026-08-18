@@ -36,6 +36,8 @@ export function takeoverToastKey(failure: TakeoverFailure): string {
       return 'inbox.toasts.takeoverInvalidTransition';
     case 'invalid_takeover_hours':
       return 'inbox.toasts.takeoverInvalidHours';
+    case 'conversation_closed':
+      return 'inbox.toasts.takeoverClosed';
     default:
       return 'inbox.toasts.takeoverFailed';
   }

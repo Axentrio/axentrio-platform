@@ -53,6 +53,15 @@ function forwardWidgetTokens(req: Request, _res: Response, next: NextFunction): 
 
 const agentAuth = [requireClerkAuth, autoProvision, resolveTenantContext, validateTenant] as const;
 
+/** Tenant scope + super-admin impersonation flag for command service calls. */
+function commandScope(req: TenantRequest) {
+  return {
+    tenantId: req.tenant!.id,
+    allowForeignAgent:
+      req.user?.role === 'super_admin' && typeof req.headers['x-tenant-context'] === 'string',
+  };
+}
+
 function requireIdempotencyKey(body: unknown): string {
   const key = (body as { idempotencyKey?: unknown })?.idempotencyKey;
   if (typeof key !== 'string' || !key.trim() || key.length > 128) {
@@ -117,7 +126,7 @@ router.post(
       req.user!.id,
       mode === 'timed' ? { mode: 'timed', hours: hours as number } : { mode: 'indefinite' },
       idempotencyKey,
-      { tenantId: req.tenant!.id, updatePolicyIfOwned: modeIsExplicit },
+      { ...commandScope(req), updatePolicyIfOwned: modeIsExplicit },
     );
 
     if (result.outcome === 'claimed' && !result.replayed) {
@@ -158,7 +167,7 @@ router.post(
       req.params.sessionId,
       req.user!.id,
       idempotencyKey,
-      { tenantId: req.tenant!.id, reason },
+      { ...commandScope(req), reason },
     );
 
     if (result.outcome === 'released' && !result.replayed) {
@@ -190,7 +199,7 @@ router.post(
       req.params.sessionId,
       { kind: 'agent', agentId: req.user!.id },
       idempotencyKey,
-      { tenantId: req.tenant!.id, reason },
+      { ...commandScope(req), reason },
     );
 
     if (result.outcome === 'cancelled' && !result.replayed) {
@@ -224,7 +233,7 @@ router.post(
       req.params.sessionId,
       { kind: 'agent', agentId: req.user!.id },
       idempotencyKey,
-      { tenantId: req.tenant!.id, reason },
+      { ...commandScope(req), reason },
     );
 
     if (result.outcome === 'closed' && !result.replayed) {
@@ -268,7 +277,7 @@ router.post(
       req.user!.id,
       clientMessageId,
       content,
-      { tenantId: req.tenant!.id },
+      commandScope(req),
     );
 
     if (result.outcome === 'sent') {

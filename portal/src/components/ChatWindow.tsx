@@ -3,7 +3,8 @@
  * Active chat interface with message display and input
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import type React from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Send,
@@ -66,6 +67,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [slashQuery, setSlashQuery] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
 
   const { messages, typingUsers, sendMessage, retryMessage, sendTyping } = useChatDetail(chat.id);
@@ -318,6 +320,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     );
   };
 
+  const sendingTakesOver =
+    chat.status !== 'closed' &&
+    chat.ownership !== 'human_owned' &&
+    (chat.status === 'bot' ||
+      chat.status === 'handsoff' ||
+      chat.ownership === 'bot_owned' ||
+      chat.ownership === 'handoff_requested');
+  const showTakeoverHint =
+    sendingTakesOver && (composerFocused || messageInput.trim().length > 0);
+
   return (
     <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
       {/* Header */}
@@ -347,6 +359,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               onClick={() => onTransfer(chat.id)}
               className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
               title={t('inbox.window.transferChat')}
+              aria-label={t('inbox.window.transferChat')}
             >
               <ArrowRightLeft className="w-5 h-5" />
             </Button>
@@ -470,6 +483,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </button>
           </div>
         )}
+        {showTakeoverHint && (
+          <p className="mb-2 text-xs text-text-muted" data-testid="send-takes-over-hint">
+            {t('inbox.window.composer.sendTakesOver')}
+          </p>
+        )}
         <div className="flex items-end gap-2">
           <CannedResponsePickerButton onSelect={handleCannedResponseSelect} />
 
@@ -488,6 +506,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 handleInputChange(e);
                 handleTextareaResize(e);
               }}
+              onFocus={() => setComposerFocused(true)}
+              onBlur={() => setComposerFocused(false)}
               onKeyDown={handleKeyPress}
               placeholder={t('inbox.window.composer.placeholder')}
               rows={1}

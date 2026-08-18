@@ -359,7 +359,12 @@ const Inbox: React.FC = () => {
       toast.success(t('inbox.toasts.handoffAccepted'));
     } catch (error) {
       console.error('Failed to accept handoff:', error);
-      toast.error(t('inbox.toasts.handoffAcceptFailed'));
+      const failure = takeoverFailureOf(error);
+      toast.error(
+        failure
+          ? t(takeoverToastKey(failure), { name: failure.assignedAgentId })
+          : t('inbox.toasts.handoffAcceptFailed'),
+      );
     }
   };
 
@@ -451,10 +456,11 @@ const Inbox: React.FC = () => {
   // (deriveStatusFromOwnership) — portal status 'handsoff' — so a
   // status==='human' gate would never fire for a taken-over chat.
   const isHumanOwned = selectedChat?.ownership === 'human_owned';
-  // Takeover offer: a handoff-status chat NOT already human-owned. A row with
-  // an unknown ownership (the detail GET omits the field) lands here too — a
-  // same-owner re-claim is harmless and the response corrects the pane.
-  const isHandoff = selectedChat?.status === 'handsoff' && !isHumanOwned;
+  // Take Over on any chat the AI still owns (bot or handoff), not only during
+  // handoff. Closed sessions have nothing to claim. Unknown ownership still
+  // offers the control — a same-owner re-claim is harmless.
+  const canTakeOver =
+    !!selectedChat && selectedChat.ownership !== 'human_owned' && selectedChat.status !== 'closed';
   // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
   const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
 
@@ -680,7 +686,7 @@ const Inbox: React.FC = () => {
                       {t('inbox.guardrail.resumeButton')}
                     </Button>
                   )}
-                  {isHandoff && (
+                  {canTakeOver && (
                     <TakeoverMenu
                       defaultPolicy={defaultTakeoverPolicy}
                       onSelect={(policy) =>
@@ -804,9 +810,12 @@ const Inbox: React.FC = () => {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
             </div>
           ) : agents.length === 0 ? (
-            <p className="text-center text-text-secondary py-8">
-              {t('inbox.transferModal.noAgents')}
-            </p>
+            <div className="flex flex-col items-center text-center py-8 px-4">
+              <Users className="w-8 h-8 mb-2 text-text-muted" />
+              <p className="text-sm text-text-secondary">
+                {t('inbox.transferModal.noAgents')}
+              </p>
+            </div>
           ) : (
             <div className="space-y-2">
               {agents.map((agent) => (

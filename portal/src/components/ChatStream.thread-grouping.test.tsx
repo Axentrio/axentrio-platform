@@ -129,3 +129,27 @@ describe('ChatStream customer-thread grouping (display only)', () => {
     expect(screen.queryByTitle(/conversations on this page/i)).not.toBeInTheDocument();
   });
 });
+
+describe('ChatStream takeover visibility', () => {
+  it('offers Take Over on a bot-owned chat, not only during handoff', () => {
+    mockChats([
+      makeChat({ id: 'bot-1', status: 'bot', ownership: 'bot_owned', lastMessage: 'hey' }),
+    ]);
+    render(<ChatStream tenants={[]} onChatSelect={vi.fn()} onTakeover={vi.fn()} />);
+    expect(screen.getByText('Take Over')).toBeInTheDocument();
+  });
+
+  it('hides Take Over on a closed or already human-owned chat', () => {
+    mockChats([
+      makeChat({ id: 'closed-1', status: 'closed', ownership: 'bot_owned', lastMessage: 'bye' }),
+      makeChat({
+        id: 'owned-1',
+        status: 'handsoff',
+        ownership: 'human_owned',
+        lastMessage: 'mine',
+      }),
+    ]);
+    render(<ChatStream tenants={[]} onChatSelect={vi.fn()} onTakeover={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /Take Over/ })).not.toBeInTheDocument();
+  });
+});

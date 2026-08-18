@@ -2085,7 +2085,8 @@
         "conflictTaken": "A different agent has this conversation. The message was not sent. Your text is kept below.",
         "conflictClosed": "This conversation is closed. The message was not sent. Your text is kept below.",
         "conflictNotInTenant": "You are not a support agent in this workspace. Ask an admin to add you as a support agent. The message was not sent. Your text is kept below.",
-        "conflictNotOwner": "You are not assigned to this conversation. The message was not sent. Your text is kept below."
+        "conflictNotOwner": "You are not assigned to this conversation. The message was not sent. Your text is kept below.",
+        "sendTakesOver": "Sending will take over this conversation from the AI"
       },
       "sender": {
         "agent": "Agent",
@@ -2099,7 +2100,7 @@
         "failed": "Not delivered",
         "retry": "Retry"
       },
-      "transferChat": "Transfer chat",
+      "transferChat": "Transfer to teammate",
       "empty": {
         "title": "No messages yet",
         "subtitle": "Messages will appear here once the conversation starts"
@@ -2107,10 +2108,12 @@
     },
     "takeover": {
       "button": "Take Over",
-      "indefinite": "Until I hand back — AI stays blocked",
-      "forHours_one": "For {{count}} hour",
-      "forHours_other": "For {{count}} hours",
-      "changeDuration": "Change duration"
+      "indefinite": "Block AI — until I release",
+      "forHours_one": "Return to AI in {{count}} hour",
+      "forHours_other": "Return to AI in {{count}} hours",
+      "changeDuration": "Change duration",
+      "customHours": "Custom hours (1–24)",
+      "customHoursApply": "Set"
     },
     "humanControl": {
       "indefinite": "AI paused - you have control",
@@ -2141,9 +2144,9 @@
       "confirm": "Close chat"
     },
     "transferModal": {
-      "title": "Transfer chat",
+      "title": "Transfer to teammate",
       "prompt": "Select an agent to transfer this conversation to:",
-      "noAgents": "No agents currently online",
+      "noAgents": "No other teammates are online. Take over this conversation yourself, or try again later.",
       "agentStats": "{{current}}/{{max}} chats — {{status}}"
     },
     "toasts": {
@@ -2155,6 +2158,7 @@
       "takeoverAlreadyClaimedBy": "This conversation was already taken over by {{name}}.",
       "takeoverInvalidTransition": "This conversation cannot be taken over in its current state. Refresh and try again.",
       "takeoverInvalidHours": "That takeover duration is not valid. Pick 1–24 hours or until you hand back.",
+      "takeoverClosed": "This conversation is closed.",
       "resumeAiSuccess": "AI replies re-enabled",
       "resumeAiFailed": "Couldn't re-enable AI (admins only)",
       "handoffAccepted": "Handoff accepted",

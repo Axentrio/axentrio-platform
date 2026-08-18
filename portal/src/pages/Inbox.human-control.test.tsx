@@ -30,7 +30,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { AxiosError, AxiosHeaders } from 'axios';
 import type { Chat } from '@app-types/index';
 
-const { apiGet, apiPost, registerHandlersMock, capturedHandlers } = vi.hoisted(() => ({
+const { apiGet, apiPost, registerHandlersMock, capturedHandlers, handoffState } = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   registerHandlersMock: vi.fn(),
@@ -41,6 +41,24 @@ const { apiGet, apiPost, registerHandlersMock, capturedHandlers } = vi.hoisted((
       onConnect?: () => void;
       onDisconnect?: () => void;
     },
+  },
+  handoffState: {
+    handoffs: [] as Array<{
+      id: string;
+      chatId: string;
+      tenantId: string;
+      userId: string;
+      userName: string;
+      priority: 'medium';
+      reason: 'user_request';
+      status: 'pending';
+      requestedAt: string;
+      waitTime: number;
+      messageCount: number;
+    }>,
+    pendingCount: 0,
+    acceptMutate: vi.fn(),
+    rejectMutate: vi.fn(),
   },
 }));
 
@@ -78,9 +96,12 @@ vi.mock('@websocket/notificationSound', () => ({
 }));
 
 vi.mock('../queries/useHandoffQueries', () => ({
-  useHandoffsQuery: () => ({ handoffs: [], pendingCount: 0 }),
-  useAcceptHandoff: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useRejectHandoff: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useHandoffsQuery: () => ({
+    handoffs: handoffState.handoffs,
+    pendingCount: handoffState.pendingCount,
+  }),
+  useAcceptHandoff: () => ({ mutateAsync: handoffState.acceptMutate, isPending: false }),
+  useRejectHandoff: () => ({ mutateAsync: handoffState.rejectMutate, isPending: false }),
 }));
 
 const tenantSettingsRef = vi.hoisted(() => ({
@@ -178,6 +199,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   tenantSettingsRef.current = undefined;
   __resetConversationLiveState();
+  handoffState.handoffs = [];
+  handoffState.pendingCount = 0;
+  handoffState.acceptMutate.mockReset();
+  handoffState.rejectMutate.mockReset();
   capturedHandlers.current = null;
   registerHandlersMock.mockImplementation((handlers) => {
     capturedHandlers.current = handlers;
@@ -197,7 +222,7 @@ describe('Inbox takeover duration menu', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('For 2 hours'));
+    await user.click(await screen.findByText('Return to AI in 2 hours'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     expect(apiPost).toHaveBeenCalledWith('/chats/c1/takeover', {
@@ -211,13 +236,13 @@ describe('Inbox takeover duration menu', () => {
     expect(badge).toHaveTextContent(/resumes in (2h 0m|1h 59m)/);
   });
 
-  it('posts the modeless legacy body for "Until I hand back — AI stays blocked"', async () => {
+  it('posts the modeless legacy body for "Block AI — until I release"', async () => {
     apiPost.mockResolvedValue(claimedResponse({ mode: 'indefinite' }));
     const user = userEvent.setup();
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+    await user.click(await screen.findByText('Block AI — until I release'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     const [url, body] = apiPost.mock.calls[0];
@@ -235,7 +260,7 @@ describe('Inbox takeover duration menu', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    expect(await screen.findByRole('menuitem', { name: /For 4 hours/i })).toHaveAttribute(
+    expect(await screen.findByRole('menuitem', { name: /Return to AI in 4 hours/i })).toHaveAttribute(
       'data-default',
       'true',
     );
@@ -261,7 +286,7 @@ describe('Inbox change duration', () => {
     const newUntil = new Date(Date.now() + 8 * 3_600_000).toISOString();
     apiPost.mockResolvedValueOnce(claimedResponse({ mode: 'timed', hours: 8, until: newUntil }));
     await user.click(await screen.findByRole('button', { name: /Change duration/ }));
-    await user.click(await screen.findByText('For 8 hours'));
+    await user.click(await screen.findByText('Return to AI in 8 hours'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     expect(apiPost).toHaveBeenNthCalledWith(1, '/chats/c1/takeover', {
@@ -280,7 +305,7 @@ describe('Inbox change duration', () => {
     // re-claim would not update the policy).
     apiPost.mockResolvedValueOnce(claimedResponse({ mode: 'indefinite' }));
     await user.click(screen.getByRole('button', { name: /Change duration/ }));
-    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+    await user.click(await screen.findByText('Block AI — until I release'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost).toHaveBeenNthCalledWith(2, '/chats/c1/takeover', {
@@ -314,7 +339,7 @@ describe('Inbox change duration', () => {
 
     const trigger = await screen.findByRole('button', { name: /Change duration/ });
     await user.click(trigger);
-    await user.click(await screen.findByText('For 8 hours'));
+    await user.click(await screen.findByText('Return to AI in 8 hours'));
 
     // In flight: the trigger is disabled — a rapid second change cannot race
     // the first (same ownershipVersion, so the caches could not order them).
@@ -436,7 +461,7 @@ describe('Inbox takeover failure toasts', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+    await user.click(await screen.findByText('Block AI — until I release'));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.error).toHaveBeenCalledWith(
@@ -452,11 +477,70 @@ describe('Inbox takeover failure toasts', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+    await user.click(await screen.findByText('Block AI — until I release'));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringMatching(/already taken over/i),
     );
+  });
+
+  it('gives conversation_closed its own toast', async () => {
+    apiPost.mockRejectedValue(takeoverError(409, 'conversation_closed'));
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot' }));
+
+    await user.click(await screen.findByRole('button', { name: /Take Over/ }));
+    await user.click(await screen.findByText('Block AI — until I release'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.error).toHaveBeenCalledWith('This conversation is closed.');
+  });
+
+  it('maps Accept handoff errors through the same takeoverFailureOf codes', async () => {
+    handoffState.pendingCount = 1;
+    handoffState.handoffs = [{
+      id: 'h1',
+      chatId: 'c1',
+      tenantId: 't1',
+      userId: 'v1',
+      userName: 'Visitor',
+      priority: 'medium',
+      reason: 'user_request',
+      status: 'pending',
+      requestedAt: '2026-08-15T09:00:00.000Z',
+      waitTime: 12,
+      messageCount: 2,
+    }];
+    handoffState.acceptMutate.mockRejectedValue(takeoverError(409, 'conversation_closed'));
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/inbox?filter=handsoff']}>
+          <Inbox />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /Accept/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.error).toHaveBeenCalledWith('This conversation is closed.');
+  });
+});
+
+describe('Inbox takeover visibility', () => {
+  it('offers Take Over on a bot-owned chat, not only during handoff', async () => {
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot' }));
+    expect(await screen.findByRole('button', { name: /Take Over/ })).toBeInTheDocument();
+  });
+
+  it('hides Take Over on a closed chat', async () => {
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'closed' }));
+    await screen.findByTestId('chat-window');
+    expect(screen.queryByRole('button', { name: /Take Over/ })).not.toBeInTheDocument();
   });
 });

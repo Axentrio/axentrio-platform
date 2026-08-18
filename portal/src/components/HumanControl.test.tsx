@@ -54,7 +54,7 @@ describe('TakeoverMenu', () => {
     render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    await user.click(await screen.findByText('For 4 hours'));
+    await user.click(await screen.findByText('Return to AI in 4 hours'));
 
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({ mode: 'timed', hours: 4 });
   });
@@ -65,10 +65,10 @@ describe('TakeoverMenu', () => {
     render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    expect(await screen.findByText('Until I hand back — AI stays blocked')).toBeInTheDocument();
-    expect(screen.getByText('For 1 hour')).toBeInTheDocument();
+    expect(await screen.findByText('Block AI — until I release')).toBeInTheDocument();
+    expect(screen.getByText('Return to AI in 1 hour')).toBeInTheDocument();
     for (const hours of [2, 4, 8, 12, 24]) {
-      expect(screen.getByText(`For ${hours} hours`)).toBeInTheDocument();
+      expect(screen.getByText(`Return to AI in ${hours} hours`)).toBeInTheDocument();
     }
   });
 
@@ -84,23 +84,36 @@ describe('TakeoverMenu', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    const four = await screen.findByRole('menuitem', { name: /For 4 hours/i });
+    const four = await screen.findByRole('menuitem', { name: /Return to AI in 4 hours/i });
     expect(four).toHaveAttribute('data-default', 'true');
-    expect(screen.getByRole('menuitem', { name: /Until I hand back/i })).not.toHaveAttribute(
+    expect(screen.getByRole('menuitem', { name: /Block AI/i })).not.toHaveAttribute(
       'data-default',
       'true',
     );
   });
 
-  it('emits { mode:"indefinite" } for "Until I hand back — AI stays blocked"', async () => {
+  it('emits { mode:"indefinite" } for "Block AI — until I release"', async () => {
     const onSelect = vi.fn<(p: TakeoverPolicy) => void>();
     const user = userEvent.setup();
     render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    await user.click(await screen.findByText('Until I hand back — AI stays blocked'));
+    await user.click(await screen.findByText('Block AI — until I release'));
 
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({ mode: 'indefinite' });
+  });
+
+  it('emits a custom integer hours pick (1–24)', async () => {
+    const onSelect = vi.fn<(p: TakeoverPolicy) => void>();
+    const user = userEvent.setup();
+    render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
+
+    await user.click(screen.getByRole('button', { name: 'Take Over' }));
+    const input = await screen.findByLabelText('Custom hours (1–24)');
+    await user.type(input, '3');
+    await user.click(screen.getByRole('button', { name: 'Set' }));
+
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith({ mode: 'timed', hours: 3 });
   });
 });
 

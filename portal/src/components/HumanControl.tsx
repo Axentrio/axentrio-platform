@@ -54,8 +54,19 @@ function isDefaultPick(policy: TakeoverPolicy, fallback: TakeoverPolicy | undefi
 
 export const TakeoverMenu: React.FC<TakeoverMenuProps> = ({ trigger, onSelect, defaultPolicy }) => {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [customHours, setCustomHours] = useState('');
+
+  const applyCustomHours = () => {
+    const hours = Number(customHours);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 24) return;
+    onSelect({ mode: 'timed', hours });
+    setOpen(false);
+    setCustomHours('');
+  };
+
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
@@ -74,6 +85,34 @@ export const TakeoverMenu: React.FC<TakeoverMenuProps> = ({ trigger, onSelect, d
             {t('inbox.takeover.forHours', { count: hours })}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={(e) => e.preventDefault()}
+          className="focus:bg-transparent"
+        >
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              applyCustomHours();
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              max={24}
+              step={1}
+              value={customHours}
+              onChange={(e) => setCustomHours(e.target.value)}
+              placeholder={t('inbox.takeover.customHours')}
+              aria-label={t('inbox.takeover.customHours')}
+              className="w-24 rounded-md border border-edge bg-surface-3 px-2 py-1 text-xs text-text-primary"
+            />
+            <button type="submit" className="text-xs font-medium text-primary-400">
+              {t('inbox.takeover.customHoursApply')}
+            </button>
+          </form>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

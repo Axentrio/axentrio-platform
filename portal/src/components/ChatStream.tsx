@@ -320,10 +320,10 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                   </div>
                 </div>
 
-                {/* Takeover button for handoff chats. A human-owned chat also
-                    carries status 'handsoff' (deriveStatusFromOwnership), so
-                    ownership must exclude it — it is already taken (B-PR5b). */}
-                {chat.status === 'handsoff' && chat.ownership !== 'human_owned' && (
+                {/* Take Over on any chat the AI still owns, not only handoff.
+                    A human-owned chat also carries status 'handsoff'
+                    (deriveStatusFromOwnership), so ownership must exclude it. */}
+                {chat.ownership !== 'human_owned' && chat.status !== 'closed' && (
                   <Button
                     size="sm"
                     type="button"

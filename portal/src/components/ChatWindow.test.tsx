@@ -203,4 +203,18 @@ describe('ChatWindow composer', () => {
     // The failed bubble is still rendered (the hook keeps it).
     expect(screen.getByText('undelivered text')).toBeInTheDocument();
   });
+
+  it('hints that sending will take over a bot-owned conversation', async () => {
+    mockDetail();
+    const user = userEvent.setup();
+    render(
+      <ChatWindow chat={{ ...makeChat(), status: 'bot', ownership: 'bot_owned' }} />,
+    );
+
+    expect(screen.queryByTestId('send-takes-over-hint')).not.toBeInTheDocument();
+    await user.click(screen.getByPlaceholderText('Type a message…'));
+    expect(screen.getByTestId('send-takes-over-hint')).toHaveTextContent(
+      'Sending will take over this conversation from the AI',
+    );
+  });
 });

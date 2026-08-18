@@ -61,7 +61,13 @@ export async function validateTenant(
   next: NextFunction
 ): Promise<void> {
   try {
-    const tenantId = extractTenantId(req);
+    // Super-admin impersonation: resolveTenantContext already rewrote
+    // req.tenantId from X-Tenant-Context. Prefer that over the JWT home
+    // tenant / X-Tenant-ID so commands run in the viewed workspace.
+    const tenantId =
+      req.user?.role === 'super_admin' && req.tenantId
+        ? req.tenantId
+        : extractTenantId(req);
 
     if (!tenantId) {
       return next(new BadRequestError('Bad Request: Tenant ID required'));
@@ -82,8 +88,9 @@ export async function validateTenant(
       return next(new NotFoundError('Not Found: Tenant not found or inactive'));
     }
 
-    // For authenticated requests, verify user belongs to tenant
-    if (req.user && req.user.tenantId !== tenantId) {
+    // Super-admins may operate another tenant via X-Tenant-Context.
+    // Everyone else must belong to the resolved tenant.
+    if (req.user && req.user.tenantId !== tenantId && req.user.role !== 'super_admin') {
       return next(new ForbiddenError('Forbidden: User does not belong to tenant'));
     }
 

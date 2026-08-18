@@ -13,6 +13,7 @@ import type { ClassifyResult, GuardrailCategory } from "./types";
 
 /** A message scores as flagged only at/above this combined family score. */
 export const FLAG_THRESHOLD = 0.6;
+const SOLICITATION_FLAG_THRESHOLD = 0.45;
 
 /** Hard cap on inbound message length, enforced at EVERY AI-scheduling ingress
  *  (chat route, widget HTTP, socket) so the scan window always covers the whole
@@ -49,6 +50,9 @@ const CREDENTIAL_PATH_RE =
   /\/(login|signin|sign-in|verify|verification|secure|account|recover(y)?|reset|unlock|confirm|appeal|billing|wallet|connect)\b/i;
 
 const URL_RE = /\b((?:https?:\/\/|www\.)[^\s<>"')]+)/gi;
+const BARE_LINK_RE =
+  /\b((?:[a-z0-9-]+(?:\.[a-z0-9-]+)+|\d{1,3}(?:\.\d{1,3}){3})(?:\/[^\s<>"')]+)?)/giu;
+const IP_LITERAL_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
 interface Signal {
   re: RegExp;
@@ -64,7 +68,7 @@ interface Signal {
 // code" / "IBAN" / "bank details" — an IBAN is a payment detail, not a secret.
 const CREDENTIAL_SIGNALS: Signal[] = [
   {
-    re: /\b(send|share|give|provide|tell|forward|enter|submit|confirm)\b[^.!?\n]{0,40}\b(password|passcode|otp|one[-\s]?time\s?(pass)?code|2fa|two[-\s]?factor|auth(entication)?\s?code|verification\s?code|pin\s?(code|number)?|cvv|cvc|card\s?(number|details)|login\s?(credentials|details|password)|credentials)\b/i,
+    re: /\b(send|share|give|provide|tell|forward|enter|submit|confirm)\b[^.!?\n]{0,40}\b(password|passcode|otp|one[-\s]?time\s?(pass)?code|2fa|two[-\s]?factor|auth(entication)?\s?code|verification\s?code|login\s?code|access\s?code|sign[-\s]?in\s?code|pin\s?(code|number)?|cvv|cvc|card\s?(number|details)|login\s?(credentials|details|password)|credentials)\b/i,
     weight: 0.7,
     reason: "solicits a secret/credential",
   },
@@ -78,7 +82,7 @@ const CREDENTIAL_SIGNALS: Signal[] = [
 // Fake platform-security / account-threat phishing.
 const PHISHING_SIGNALS: Signal[] = [
   {
-    re: /\b(your\s+(page|account|profile)\s+(will\s+be|has\s+been)\s+(deleted|suspended|disabled|removed|restricted|terminated))\b/i,
+    re: /\b(your\s+(?:[a-z]+\s+){0,3}(?:page|account|profile|business)\s+(?:will\s+be|has\s+been)\s+(?:deleted|suspended|disabled|removed|restricted|terminated))\b/i,
     weight: 0.55,
     reason: "fake account-deletion threat",
   },
@@ -93,7 +97,7 @@ const PHISHING_SIGNALS: Signal[] = [
     reason: "fake security alert",
   },
   {
-    re: /\b(verify|confirm|validate)\s+(your\s+)?(identity|account|page|business|profile)\b/i,
+    re: /\b(verify|confirm|validate)\s+(?:your\s+(?:[a-z]+\s+){0,3})?(?:identity|account|page|business|profile)\b/i,
     weight: 0.4,
     reason: "account-verification lure",
   },
@@ -117,12 +121,13 @@ const SCAM_SIGNALS: Signal[] = [
     reason: "crypto/forex pitch",
   },
   {
-    re: /\b(guaranteed?|risk[-\s]?free)\s+(returns?|profit|income|roi)\b/i,
+    // Multiplier-return phrases are scored by the next signal, not twice.
+    re: /\b(guaranteed?|risk[-\s]?free)\s+(?!(?:\w+\s+){0,2}(?:double|triple|10x|100x)\s+returns?\b)(?:\w+\s+){0,2}(returns?|profit|income|roi)\b/i,
     weight: 0.5,
     reason: "guaranteed-returns promise",
   },
   {
-    re: /\b(double|triple|10x|100x)\s+(your\s+)?(money|investment|capital)\b/i,
+    re: /\b(double|triple|10x|100x)\s+(your\s+)?(money|investment|capital|returns?)\b/i,
     weight: 0.5,
     reason: "unrealistic returns",
   },
@@ -255,12 +260,6 @@ const HUMAN_PHRASES = new Set([
 const CUSTOMER_DETAIL_RE =
   /^(?:\+?[\d\s().-]{7,}|\d{1,6}\s+[A-Za-zÀ-ÿ'’-]+(?:\s+[A-Za-zÀ-ÿ'’-]+){0,3}\b(?:avenue|ave|boulevard|blvd|lane|ln|road|rd|street|st)\.?|.{0,60}\b(?:appointment|book(?:ing)?|reserve|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.{0,40}(?:\d|am\b|pm\b))$/iu;
 
-// Bare risky hosts / IP literals WITHOUT a scheme or www prefix — URL_RE only
-// matches `http(s)://` / `www.`, so `bit.ly/x` or `5.188.2.1/login` would
-// otherwise dodge inspectLinks and be treated as human (review round 2).
-const BARE_RISKY_HOST_RE =
-  /\b(?:bit\.ly|tinyurl\.com|goo\.gl|t\.co|ow\.ly|is\.gd|buff\.ly|rebrand\.ly|cutt\.ly|shorturl\.at|rb\.gy|tiny\.cc|t\.ly|bl\.ink|lnkd\.in|shor\.by|short\.io)\b|\b\d{1,3}(\.\d{1,3}){3}\b/iu;
-
 const STREET_ADDRESS_RE =
   /^(?:\d{1,5}\s+[A-Za-zÀ-ÿ'’-]+(?:\s+[A-Za-zÀ-ÿ'’-]+){0,3}|[A-Za-zÀ-ÿ'’-]+(?:\s+[A-Za-zÀ-ÿ'’-]+){0,3}\s+\d{1,5})(?:[,\s]+\d{4,5})?$/u;
 
@@ -291,8 +290,6 @@ export function isHumanSignal(
   if (classifyMessage(t, "widget", inspectedLinks).category !== "clean")
     return false;
   if (inspectedLinks.score > 0) return false;
-  // Bare shortener / IP-literal host without scheme or www (see BARE_RISKY_HOST_RE).
-  if (BARE_RISKY_HOST_RE.test(t)) return false;
 
   const normalized = t
     .toLowerCase()
@@ -314,9 +311,24 @@ export interface LinkInspection {
 
 /** Extract URLs (as strings only) and surface suspicious-link signals. */
 export function inspectLinks(text: string): LinkInspection {
-  const links = [
-    ...(text ?? "").slice(0, MAX_CLASSIFY_CHARS).matchAll(URL_RE),
-  ].map((m) => m[1]);
+  const source = (text ?? "").slice(0, MAX_CLASSIFY_CHARS);
+  const links = [...source.matchAll(URL_RE)].map((m) => m[1]);
+  for (const match of source.matchAll(BARE_LINK_RE)) {
+    const raw = match[1];
+    const index = match.index;
+    if (raw.toLowerCase().startsWith("www.") || source[index - 1] === "/")
+      continue;
+    const host = raw.split("/", 1)[0].toLowerCase();
+    const path = raw.slice(host.length);
+    if (
+      SHORTENER_HOSTS.has(host) ||
+      IP_LITERAL_RE.test(host) ||
+      host.includes("xn--") ||
+      CREDENTIAL_PATH_RE.test(path)
+    ) {
+      links.push(raw);
+    }
+  }
   let score = 0;
   const reasons: string[] = [];
   for (const raw of links) {
@@ -340,7 +352,7 @@ export function inspectLinks(text: string): LinkInspection {
       score += 0.5;
       reasons.push(`shortened link (${host})`);
     }
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    if (IP_LITERAL_RE.test(host)) {
       score += 0.5;
       reasons.push("ip-literal link host");
     }
@@ -357,9 +369,26 @@ export function inspectLinks(text: string): LinkInspection {
   return { links, score: Math.min(score, 1), reasons };
 }
 
+/** True when any hard-block family has at least one signal, even if another
+ * family wins classification or the signal is below the flag threshold. */
+export function isHighSeverity(
+  text: string,
+  inspectedLinks?: LinkInspection,
+): boolean {
+  const t = (text ?? "").slice(0, MAX_CLASSIFY_CHARS).trim();
+  if (!t) return false;
+  const linkInfo = inspectedLinks ?? inspectLinks(t);
+  return (
+    linkInfo.score > 0 ||
+    [CREDENTIAL_SIGNALS, PHISHING_SIGNALS, SCAM_SIGNALS, SPAM_SIGNALS].some(
+      (signals) => scoreSignals(t, signals).score > 0,
+    )
+  );
+}
+
 /**
  * Classify a single inbound message. Pure: same input → same output, no I/O.
- * Returns the highest-severity family at/above FLAG_THRESHOLD, else `clean`.
+ * Returns the highest-scoring family at/above its threshold, else `clean`.
  * `channel` is accepted for future channel-aware weighting; today it only
  * nudges cold-outreach sensitivity on social DMs.
  */
@@ -437,12 +466,20 @@ export function classifyMessage(
   // flip a tie. Candidates are severity-ordered, and strict `>` keeps the more
   // dangerous category on an equal score (codex review).
   const bp = (n: number) => Math.round(n * 100);
-  let best = candidates[0];
-  for (const c of candidates) {
+  const flaggedCandidates = candidates.filter(({ category, score }) =>
+    bp(score) >=
+    bp(
+      category === "solicitation"
+        ? SOLICITATION_FLAG_THRESHOLD
+        : FLAG_THRESHOLD,
+    ),
+  );
+  let best = flaggedCandidates[0];
+  for (const c of flaggedCandidates) {
     if (bp(c.score) > bp(best.score)) best = c;
   }
 
-  if (bp(best.score) >= bp(FLAG_THRESHOLD)) {
+  if (best) {
     return {
       category: best.category,
       score: Math.min(best.score, 1),
@@ -483,7 +520,7 @@ export function detectUnsafeLinkHosts(text: string): string[] {
       continue; // an unparseable URL-ish token alone is too weak to block a reply
     }
     if (SHORTENER_HOSTS.has(host)) reasons.push(`shortened link (${host})`);
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host))
+    if (IP_LITERAL_RE.test(host))
       reasons.push("ip-literal link host");
     if (host.includes("xn--")) reasons.push("punycode link host");
   }

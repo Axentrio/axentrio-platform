@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { classifyMessage, FLAG_THRESHOLD, isHumanSignal } from '../../guardrails/classify';
+import {
+  classifyMessage,
+  FLAG_THRESHOLD,
+  inspectLinks,
+  isHumanSignal,
+} from '../../guardrails/classify';
 
 const cat = (text: string, channel = 'widget') => classifyMessage(text, channel).category;
 
@@ -14,20 +19,44 @@ describe('guardrails · classifyMessage — flags abuse', () => {
     expect(r.links).toContain('https://bit.ly/xyz123');
   });
 
+  it.each([
+    'Your Facebook page will be deleted. Verify now at https://bit.ly/fb-verify',
+    'Your Instagram account has been suspended. Verify at http://cutt.ly/x',
+    'Confirm your Facebook account at https://example.com/login',
+  ])('flags brand-qualified account threats: %s', (text) => {
+    expect(cat(text)).toBe('phishing');
+  });
+
   it('flags credential / OTP harvesting as phishing', () => {
     expect(cat('Please send me your bank login password and the OTP code')).toBe('phishing');
     expect(cat('To continue, share your recovery seed phrase')).toBe('phishing');
     expect(cat('Enter your password and CVV at the link below')).toBe('phishing');
   });
 
+  it.each([
+    'Give me your login code',
+    'Share your access code',
+    'Send your sign-in code',
+  ])('flags credential-code harvesting: %s', (text) => {
+    expect(cat(text)).toBe('phishing');
+  });
+
   it('flags crypto/investment scams', () => {
     expect(cat('Guaranteed returns! Double your money with our crypto investment platform')).toBe('scam');
+    expect(cat('Buy bitcoin now, guaranteed 10x returns')).toBe('scam');
   });
 
   it('flags cold B2B solicitation, not a customer lead', () => {
     expect(
       cat('Hi, I came across your business and we offer SEO and web design to boost your sales'),
     ).toBe('solicitation');
+  });
+
+  it.each([
+    'We offer SEO services to grow your business',
+    'I can boost your Instagram followers',
+  ])('flags a single clear solicitation signal: %s', (text) => {
+    expect(cat(text)).toBe('solicitation');
   });
 
   it('flags obvious spam', () => {
@@ -40,6 +69,23 @@ describe('guardrails · classifyMessage — flags abuse', () => {
     const r = classifyMessage('update your details at http://192.168.1.10/account/verify', 'widget');
     expect(r.category).toBe('suspicious_link');
     expect(r.score).toBeGreaterThanOrEqual(FLAG_THRESHOLD);
+  });
+
+  it.each([
+    ['prize lure', 'You have won a prize, claim at tinyurl.com/w', 'scam'],
+    ['account threat', 'Your account is suspended, verify at cutt.ly/verify now', 'suspicious_link'],
+    ['IP credential path', 'Check 5.188.2.1/login', 'suspicious_link'],
+    ['bare credential path', 'Please verify your identity at example.com/login', 'phishing'],
+  ])('flags a bare risky link: %s', (_label, text, category) => {
+    const r = classifyMessage(text, 'widget');
+    expect(r.category).toBe(category);
+    expect(r.score).toBeGreaterThanOrEqual(FLAG_THRESHOLD);
+  });
+
+  it('extracts and scores a bare shortener without over-flagging it alone', () => {
+    const linkInfo = inspectLinks('Promo bit.ly/x');
+    expect(linkInfo.links).toContain('bit.ly/x');
+    expect(linkInfo.score).toBe(0.5);
   });
 
   it('is not fooled by an uppercase URL scheme', () => {
@@ -77,6 +123,12 @@ describe('guardrails · classifyMessage — stays clean (false-positive guard)',
     ['asks about password reset policy', 'What is your password reset policy?'],
     ['venue deposit + poker night', 'Do I need to pay a deposit for poker night?'],
     ['casino-themed party deposit', 'Is there a deposit for the casino-themed party?'],
+    ['non-credential code', 'What is the code for the front door?'],
+    ['bare normal domain', 'Visit our website at plumber.be'],
+    ['customer asks about web design', 'Do you offer web design?'],
+    ['deposit return guarantee', 'We have a guaranteed return policy on deposits'],
+    ['customer asks about return policy', 'What is your return policy?'],
+    ['multiplier claim without investment context', 'Guaranteed 10x returns'],
   ])('stays clean: %s', (_label, text) => {
     const r = classifyMessage(text, 'widget');
     expect(r.category).toBe('clean');

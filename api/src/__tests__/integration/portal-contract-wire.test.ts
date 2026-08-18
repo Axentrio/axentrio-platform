@@ -177,6 +177,7 @@ describe('wire contract — /insights', () => {
       severity: 'red',
       occurrences: 5,
       distinctVisitors: 5,
+      recommendation: 'Publish clear pricing in the knowledge base.',
       firstDetectedAt: new Date(),
       lastSeenAt: new Date(),
     });
@@ -200,6 +201,7 @@ describe('wire contract — /insights', () => {
       'lastSeenAt',
       'occurrences',
       'priorityScore',
+      'recommendation',
       'resolvedAt',
       'severity',
       'status',
@@ -208,6 +210,7 @@ describe('wire contract — /insights', () => {
     // Pro: evidence is included in the flag set (ADR-0013 ladder).
     expect(data.meta.evidenceEnabled).toBe(true);
     expect(data.meta.retentionDays).toBe(90);
+    expect(data.gaps[0].recommendation).toBe('Publish clear pricing in the knowledge base.');
   });
 });
 
@@ -301,12 +304,36 @@ describe('wire contract — /insights/sentiment/trend', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/insights/digest  ↔  contracts/insights.ts (P3, Enterprise)
+// GET /api/v1/insights/digest  ↔  contracts/insights.ts (Pro+)
 // ---------------------------------------------------------------------------
 
 describe('wire contract — /insights/digest', () => {
-  it('403s a Pro tenant (aiBusinessInsights-gated)', async () => {
-    await seedProTenant();
+  it('serves a weekly improvement snapshot to Pro', async () => {
+    const tenant = await seedProTenant();
+    await AppDataSource.getRepository(InsightDigest).save({
+      tenantId: tenant.id,
+      weekStart: '2026-06-08',
+      summaryMd: 'A grounded Pro weekly summary.',
+      metrics: {
+        conversations: { current: 10, previous: 5 },
+        bookings: { current: 3, previous: 1 },
+        leads: { current: 2, previous: 0 },
+        gapsOpened: 4,
+        gapsWon: 2,
+      },
+      sendState: 'pending',
+    });
+
+    const res = await request(app).get('/api/v1/insights/digest');
+    expect(res.status).toBe(200);
+    expect(res.body.data.digest.summaryMd).toBe('A grounded Pro weekly summary.');
+  });
+
+  it('keeps the snapshot unavailable to Essential', async () => {
+    const tenant = await createTestTenant({ tier: 'essential' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    setAuth({ tenantId: tenant.id, userId: admin.id });
+
     const res = await request(app).get('/api/v1/insights/digest');
     expect(res.status).toBe(403);
   });

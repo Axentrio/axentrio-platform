@@ -122,6 +122,7 @@ describe('insights routes — feature gating (ADR-0013)', () => {
     state.gapRows = [{
       id: 'g1', topic: 'pricing', status: 'open', severity: 'red',
       occurrences: 7, distinct_visitors: 5,
+      recommendation: 'Publish clear pricing in the knowledge base.',
       first_detected_at: '2026-06-08', last_seen_at: '2026-06-10',
       resolved_at: null, archived_at: null,
     }];
@@ -133,6 +134,7 @@ describe('insights routes — feature gating (ADR-0013)', () => {
         topic: 'pricing',
         severity: 'red',
         priorityScore: 21,
+        recommendation: 'Publish clear pricing in the knowledge base.',
         distinctVisitors: 5,
       }),
     ]);
@@ -141,6 +143,24 @@ describe('insights routes — feature gating (ADR-0013)', () => {
       evidenceEnabled: true,
       completeness: 1,
     });
+  });
+
+  it('hides optimization suggestions from Essential and from closed Gaps', async () => {
+    state.gapRows = [{
+      id: 'g1', topic: 'pricing', status: 'resolved_data', severity: 'green',
+      occurrences: 2, distinct_visitors: 2,
+      recommendation: 'Stale suggestion',
+      first_detected_at: '2026-06-08', last_seen_at: '2026-06-10',
+      resolved_at: '2026-06-11', archived_at: null,
+    }];
+
+    let res = await request(createApp()).get('/insights');
+    expect(res.body.data.gaps[0].recommendation).toBeNull();
+
+    state.features = { gapInsights: true, gapEvidence: false, aiBusinessInsights: false };
+    state.gapRows[0].status = 'open';
+    res = await request(createApp()).get('/insights');
+    expect(res.body.data.gaps[0].recommendation).toBeNull();
   });
 
   it('retention 365d with aiBusinessInsights, 30d with neither', async () => {

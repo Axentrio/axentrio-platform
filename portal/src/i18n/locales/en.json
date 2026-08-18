@@ -730,7 +730,7 @@
             "sessions": "Unlimited sessions",
             "llmCalls": "Platform LLM included",
             "channels": "All channels (unified inbox)",
-            "insights": "AI Insights with evidence + 90-day history",
+            "insights": "AI Insights with evidence, suggestions + weekly snapshots",
             "branding": "Hide Powered by Axentrio",
             "support": "Bookings, calendar, platform assistant"
           }
@@ -742,7 +742,7 @@
           "blurb": "Three chatbots, 1-year insights history, priority support.",
           "features": {
             "unlimited": "3 chatbots, 1-year insights history",
-            "integrations": "AI Business Insights: digest, correlations, sentiment (coming soon)",
+            "integrations": "AI Business Insights: correlations, sentiment + priority alerts",
             "sla": "Priority support + dedicated success"
           }
         }

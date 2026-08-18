@@ -14,6 +14,8 @@ export interface GapDto {
   severity: GapSeverity;
   /** Pro+ computed score; null on Essential. */
   priorityScore: number | null;
+  /** Pro+ optimization suggestion for an open Gap; null otherwise. */
+  recommendation: string | null;
   occurrences: number;
   distinctVisitors: number;
   firstDetectedAt: string;

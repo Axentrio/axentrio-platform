@@ -1,5 +1,5 @@
 /**
- * Weekly digest generation (P3 / ADR-0014, D6) — Enterprise-only.
+ * Weekly improvement snapshot generation — Pro+ (`gapEvidence`).
  *
  * Once a week (Monday nightly) we summarize the COMPLETE week that just ended:
  * a structured header (outcomes vs the prior week + gap movements) and a short
@@ -10,14 +10,15 @@
  * wants the email) or `skipped` (opted out), so the surface always has a digest
  * to show in-app regardless of email preference.
  */
-import { AppDataSource } from '../database/data-source';
-import { Tenant } from '../database/entities/Tenant';
-import { InsightDigest } from '../database/entities/InsightDigest';
-import { InsightExperiment } from '../database/entities/InsightExperiment';
-import { getProvider } from '../llm/provider-factory';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { logger } from '../utils/logger';
-import type { DigestMetrics } from '../contracts/insights';
+import { AppDataSource } from "../database/data-source";
+import { Tenant } from "../database/entities/Tenant";
+import { InsightDigest } from "../database/entities/InsightDigest";
+import { InsightExperiment } from "../database/entities/InsightExperiment";
+import { getEntitlements } from "../billing/entitlements";
+import { getProvider } from "../llm/provider-factory";
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from "../llm/defaults";
+import { logger } from "../utils/logger";
+import type { DigestMetrics } from "../contracts/insights";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -27,15 +28,19 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
  * Jun 15 summarizes [Jun 8, Jun 15). Returned as a YYYY-MM-DD date string.
  */
 export function weekStartFor(now: Date): string {
-  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const midnight = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   const daysSinceMonday = (midnight.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
-  const thisMonday = new Date(midnight.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+  const thisMonday = new Date(
+    midnight.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000,
+  );
   const summarizedMonday = new Date(thisMonday.getTime() - WEEK_MS);
   return summarizedMonday.toISOString().slice(0, 10);
 }
 
 /** Default-ON: only an explicit `false` opts the tenant out of the email. */
-export function digestEmailEnabled(tenant: Pick<Tenant, 'settings'>): boolean {
+export function digestEmailEnabled(tenant: Pick<Tenant, "settings">): boolean {
   return tenant.settings?.insights?.digestEmail !== false;
 }
 
@@ -44,7 +49,10 @@ async function countSince(sql: string, params: unknown[]): Promise<number> {
   return Number(row?.count ?? 0);
 }
 
-async function computeMetrics(tenantId: string, weekStart: Date): Promise<DigestMetrics> {
+async function computeMetrics(
+  tenantId: string,
+  weekStart: Date,
+): Promise<DigestMetrics> {
   const weekEnd = new Date(weekStart.getTime() + WEEK_MS);
   const prevStart = new Date(weekStart.getTime() - WEEK_MS);
 
@@ -58,10 +66,14 @@ async function computeMetrics(tenantId: string, weekStart: Date): Promise<Digest
                      AND created_at >= $2 AND created_at < $3`;
 
   const [
-    conversations, convPrev,
-    bookings, bookPrev,
-    leads, leadPrev,
-    gapsOpened, gapsWon,
+    conversations,
+    convPrev,
+    bookings,
+    bookPrev,
+    leads,
+    leadPrev,
+    gapsOpened,
+    gapsWon,
   ] = await Promise.all([
     countSince(convoSql, [tenantId, weekStart, weekEnd]),
     countSince(convoSql, [tenantId, prevStart, weekStart]),
@@ -94,8 +106,8 @@ async function computeMetrics(tenantId: string, weekStart: Date): Promise<Digest
 function deltaPhrase(label: string, current: number, previous: number): string {
   if (previous === 0) return `${current} ${label}`;
   const pct = Math.round(((current - previous) / previous) * 100);
-  const dir = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-  return `${current} ${label} (${dir === 'flat' ? 'flat' : `${dir} ${Math.abs(pct)}%`} vs prior week)`;
+  const dir = pct > 0 ? "up" : pct < 0 ? "down" : "flat";
+  return `${current} ${label} (${dir === "flat" ? "flat" : `${dir} ${Math.abs(pct)}%`} vs prior week)`;
 }
 
 /**
@@ -103,102 +115,122 @@ function deltaPhrase(label: string, current: number, previous: number): string {
  * it is never asked to infer causation (ADR-0014 D4). Falls back to a plain
  * deterministic summary if the model call fails, so generation never throws.
  */
-async function narrate(metrics: DigestMetrics, topExperiment: string | null): Promise<string> {
+async function narrate(
+  metrics: DigestMetrics,
+  topExperiment: string | null,
+): Promise<string> {
   const facts = [
-    deltaPhrase('conversations', metrics.conversations.current, metrics.conversations.previous),
-    deltaPhrase('bookings', metrics.bookings.current, metrics.bookings.previous),
-    deltaPhrase('leads', metrics.leads.current, metrics.leads.previous),
+    deltaPhrase(
+      "conversations",
+      metrics.conversations.current,
+      metrics.conversations.previous,
+    ),
+    deltaPhrase(
+      "bookings",
+      metrics.bookings.current,
+      metrics.bookings.previous,
+    ),
+    deltaPhrase("leads", metrics.leads.current, metrics.leads.previous),
     `${metrics.gapsOpened} new unanswered topics, ${metrics.gapsWon} resolved`,
     topExperiment ? `notable pattern: ${topExperiment}` : null,
-  ].filter(Boolean).join('; ');
+  ]
+    .filter(Boolean)
+    .join("; ");
 
-  const deterministic =
-    `This week: ${facts}. These are observed figures, not predictions.`;
+  const deterministic = `This week: ${facts}. These are observed figures, not predictions.`;
 
   try {
     const provider = getProvider(DEFAULT_PROVIDER);
     const response = await provider.chat(
       [
         {
-          role: 'system',
+          role: "system",
           content:
-            'You write a 2–3 sentence weekly business summary for a small-business owner from the figures provided. ' +
-            'Warm, plain English. Use ONLY the figures given — never invent numbers, never claim one thing caused another. ' +
-            'No greeting, no sign-off, no markdown headers.',
+            "You write a 2–3 sentence weekly business summary for a small-business owner from the figures provided. " +
+            "Warm, plain English. Use ONLY the figures given — never invent numbers, never claim one thing caused another. " +
+            "No greeting, no sign-off, no markdown headers.",
         },
-        { role: 'user', content: facts },
+        { role: "user", content: facts },
       ],
-      { model: DEFAULT_MODEL, maxTokens: 200, temperature: 0.3, jsonMode: false },
+      {
+        model: DEFAULT_MODEL,
+        maxTokens: 200,
+        temperature: 0.3,
+        jsonMode: false,
+      },
     );
     const text = response.content?.trim();
     return text && text.length > 0 ? text : deterministic;
   } catch (err) {
-    logger.warn('[insights-digest] narrative LLM failed, using deterministic summary', {
-      error: err instanceof Error ? err.message : 'unknown',
-    });
+    logger.warn(
+      "[insights-digest] narrative LLM failed, using deterministic summary",
+      {
+        error: err instanceof Error ? err.message : "unknown",
+      },
+    );
     return deterministic;
   }
 }
 
 /**
- * Generate (or refresh) the digest for the week ending at `now`'s most recent
- * Monday. Idempotent: re-running overwrites the SAME (tenant, weekStart) row's
- * content but never resets a row that has already been sent.
+ * Generate the digest for the week ending at `now`'s most recent Monday.
+ * Idempotent: an existing (tenant, weekStart) row means this work is complete.
+ * When `force` is set, an existing row is regenerated (used after a downgrade
+ * so an Enterprise experiment narrative never survives for a Pro tenant).
  */
-export async function generateDigest(tenantId: string, now: Date): Promise<void> {
+export async function generateDigest(
+  tenantId: string,
+  now: Date,
+  options: { force?: boolean } = {},
+): Promise<void> {
   const weekStartStr = weekStartFor(now);
   const weekStart = new Date(`${weekStartStr}T00:00:00.000Z`);
+  const repo = AppDataSource.getRepository(InsightDigest);
+  const existing = await repo.findOne({
+    where: { tenantId, weekStart: weekStartStr },
+  });
+  if (existing && !options.force) return;
 
   const metrics = await computeMetrics(tenantId, weekStart);
 
-  // Severity is a varchar ('red'|'orange'|'green'), so ORDER BY severity ASC sorts
-  // ALPHABETICALLY — green, orange, red — i.e. least-severe first. The digest was
-  // therefore headlining the LEAST severe experiment as its top finding.
-  //
-  // Ranked in TS rather than SQL: the active set is small, and it keeps this on the
-  // plain repository API the callers' tests mock.
-  const actives = await AppDataSource.getRepository(InsightExperiment).find({
-    where: { tenantId, state: 'active' },
-    order: { lastSeenAt: 'DESC' },
-  });
+  const { features } = await getEntitlements(tenantId);
+  // Correlation and sentiment experiments are Enterprise-only. Old rows survive a
+  // downgrade, so the current feature gate must also apply when composing the digest.
+  const actives = features.aiBusinessInsights
+    ? await AppDataSource.getRepository(InsightExperiment).find({
+        where: { tenantId, state: "active" },
+        order: { lastSeenAt: "DESC" },
+      })
+    : [];
   const SEVERITY_RANK: Record<string, number> = { red: 0, orange: 1, green: 2 };
   const topExp =
     [...actives].sort(
-      (a, b) => (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3),
+      (a, b) =>
+        (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3),
     )[0] ?? null;
   const summaryMd = await narrate(metrics, topExp?.title ?? null);
 
   const tenant = await AppDataSource.getRepository(Tenant).findOne({
     where: { id: tenantId },
-    select: ['id', 'settings'],
+    select: ["id", "settings"],
   });
   const wantsEmail = tenant ? digestEmailEnabled(tenant) : true;
 
-  const repo = AppDataSource.getRepository(InsightDigest);
-  const existing = await repo.findOne({ where: { tenantId, weekStart: weekStartStr } });
+  await repo.save(
+    repo.create({
+      tenantId,
+      weekStart: weekStartStr,
+      summaryMd,
+      metrics: metrics as unknown as Record<string, unknown>,
+      sendState: wantsEmail ? "pending" : "skipped",
+      sendNextAttemptAt: wantsEmail ? now : null,
+      sendAttempts: 0,
+    }),
+  );
 
-  if (existing) {
-    // Refresh content; never disturb a digest already in flight or sent.
-    existing.summaryMd = summaryMd;
-    existing.metrics = metrics as unknown as Record<string, unknown>;
-    if (existing.sendState === 'pending' || existing.sendState === 'skipped') {
-      existing.sendState = wantsEmail ? 'pending' : 'skipped';
-      existing.sendNextAttemptAt = wantsEmail ? now : null;
-    }
-    await repo.save(existing);
-  } else {
-    await repo.save(
-      repo.create({
-        tenantId,
-        weekStart: weekStartStr,
-        summaryMd,
-        metrics: metrics as unknown as Record<string, unknown>,
-        sendState: wantsEmail ? 'pending' : 'skipped',
-        sendNextAttemptAt: wantsEmail ? now : null,
-        sendAttempts: 0,
-      }),
-    );
-  }
-
-  logger.info('[insights-digest] generated', { tenantId, weekStart: weekStartStr, wantsEmail });
+  logger.info("[insights-digest] generated", {
+    tenantId,
+    weekStart: weekStartStr,
+    wantsEmail,
+  });
 }

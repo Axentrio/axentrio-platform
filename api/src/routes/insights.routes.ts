@@ -231,6 +231,10 @@ router.get(
               baselineVolume: Number(trend?.baselineVisitors ?? distinctVisitors),
             })
           : null,
+        recommendation:
+          priorityEnabled && g.status === 'open'
+            ? (g.recommendation as string | null) ?? null
+            : null,
         occurrences,
         distinctVisitors,
         firstDetectedAt: g.first_detected_at as string,
@@ -340,6 +344,7 @@ async function transitionGap(
   }
   gap.status = to;
   gap.severity = to === 'resolved_manual' ? 'green' : gap.severity;
+  gap.recommendation = null;
   if (to === 'resolved_manual') gap.resolvedAt = new Date();
   else gap.archivedAt = new Date();
   return repo.save(gap);
@@ -440,7 +445,7 @@ router.post(
 );
 
 /* ------------------------------------------------------------------ */
-/*  P3 — weekly digest (latest) + email preference. Enterprise-gated.  */
+/*  Weekly improvement snapshot (latest) + email preference. Pro+-gated. */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -522,7 +527,7 @@ router.get(
 
 router.get(
   '/digest',
-  requireInsightsFeature('aiBusinessInsights'),
+  requireInsightsFeature('gapEvidence'),
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = insightsTenantId(req) as string;
 
@@ -558,7 +563,7 @@ router.get(
  */
 router.put(
   '/digest/email',
-  requireInsightsFeature('aiBusinessInsights'),
+  requireInsightsFeature('gapEvidence'),
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = insightsTenantId(req) as string;
     const enabled = (req.body as { enabled?: unknown })?.enabled;

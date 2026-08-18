@@ -10,6 +10,7 @@ import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } fro
 import {
   Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
   FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
+  Lightbulb,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -44,7 +45,15 @@ const SEVERITY_DOT: Record<string, string> = {
   green: 'bg-emerald-400',
 };
 
-function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boolean }) {
+function GapCard({
+  gap,
+  evidenceEnabled,
+  recommendationsEnabled,
+}: {
+  gap: GapRow;
+  evidenceEnabled: boolean;
+  recommendationsEnabled: boolean;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const { data: evidenceRes, isLoading: loadingEvidence } = useGapEvidence(
@@ -116,6 +125,13 @@ function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boole
             ago: timeAgo(gap.lastSeenAt),
           })}
         </p>
+
+        {recommendationsEnabled && gap.status === 'open' && gap.recommendation && (
+          <p className="flex items-start gap-2 text-sm text-zinc-300">
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            {gap.recommendation}
+          </p>
+        )}
 
         {/* Evidence drill-down — Pro+; locked affordance sells the upgrade (Deviation 11/14). */}
         {evidenceEnabled ? (
@@ -411,10 +427,10 @@ function DigestMetric({ label, current, previous }: { label: string; current: nu
   );
 }
 
-/** Enterprise-only weekly digest hero (P3 / ADR-0014 D6/D8). */
+/** Pro+ weekly improvement snapshot. */
 function DigestSection() {
   const { t } = useTranslation();
-  const enabled = useHasFeature('aiBusinessInsights');
+  const enabled = useHasFeature('gapEvidence');
   const { data, isLoading } = useDigest(enabled);
   const setEmail = useSetDigestEmail(t('insights.digest.emailToast', { defaultValue: 'Preference saved' }));
   if (!enabled) return null;
@@ -487,7 +503,8 @@ export function InsightsContent() {
   const { t } = useTranslation();
   const { data, isLoading } = useInsights();
   const automatic = useHasFeature('aiBusinessInsights');
-  const evidenceEnabled = useHasFeature('gapEvidence') && (data?.meta.evidenceEnabled ?? false);
+  const gapEvidenceEnabled = useHasFeature('gapEvidence');
+  const evidenceEnabled = gapEvidenceEnabled && (data?.meta.evidenceEnabled ?? false);
 
   if (isLoading) {
     return (
@@ -504,7 +521,7 @@ export function InsightsContent() {
 
   return (
     <div className="space-y-4">
-      {/* Enterprise weekly digest hero (P3) — renders nothing for other tiers. */}
+      {/* Pro+ weekly improvement snapshot — renders nothing for Essential. */}
       <DigestSection />
 
       {/* Freshness + completeness banners (ADR-0006/0007) */}
@@ -554,7 +571,14 @@ export function InsightsContent() {
               </p>
             </div>
           ) : (
-            open.map((g) => <GapCard key={g.id} gap={g} evidenceEnabled={evidenceEnabled} />)
+            open.map((g) => (
+              <GapCard
+                key={g.id}
+                gap={g}
+                evidenceEnabled={evidenceEnabled}
+                recommendationsEnabled={gapEvidenceEnabled}
+              />
+            ))
           )}
         </TabsContent>
 
@@ -569,7 +593,14 @@ export function InsightsContent() {
               </p>
             </div>
           ) : (
-            wins.map((g) => <GapCard key={g.id} gap={g} evidenceEnabled={evidenceEnabled} />)
+            wins.map((g) => (
+              <GapCard
+                key={g.id}
+                gap={g}
+                evidenceEnabled={evidenceEnabled}
+                recommendationsEnabled={gapEvidenceEnabled}
+              />
+            ))
           )}
         </TabsContent>
       </Tabs>

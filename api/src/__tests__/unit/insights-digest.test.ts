@@ -9,6 +9,8 @@ const { state } = vi.hoisted(() => ({
     existing: null as Record<string, unknown> | null,
     saved: [] as Array<Record<string, unknown>>,
     narrative: 'A warm grounded summary.',
+    enterprise: true,
+    prompts: [] as string[],
   },
 }));
 
@@ -41,7 +43,15 @@ vi.mock('../../database/data-source', () => ({
 
 vi.mock('../../llm/provider-factory', () => ({
   getProvider: () => ({
-    chat: async () => ({ content: state.narrative, usage: { promptTokens: 1, completionTokens: 1 } }),
+    chat: async (messages: Array<{ content: string }>) => {
+      state.prompts.push(messages[1].content);
+      return { content: state.narrative, usage: { promptTokens: 1, completionTokens: 1 } };
+    },
+  }),
+}));
+vi.mock('../../billing/entitlements', () => ({
+  getEntitlements: async () => ({
+    features: { aiBusinessInsights: state.enterprise },
   }),
 }));
 vi.mock('../../llm/defaults', () => ({ DEFAULT_PROVIDER: 'openai', DEFAULT_MODEL: 'gpt' }));
@@ -56,6 +66,8 @@ beforeEach(() => {
   state.tenant = { id: 't1', settings: {} };
   state.existing = null;
   state.saved = [];
+  state.enterprise = true;
+  state.prompts = [];
 });
 
 describe('insights · digest weekStart (P3 D6)', () => {
@@ -105,18 +117,33 @@ describe('insights · generateDigest (P3 D6)', () => {
     expect(state.saved[0].sendNextAttemptAt).toBeNull();
   });
 
-  it('refreshes an existing pending row in place (idempotent on tenant+week)', async () => {
-    state.existing = { id: 'd1', tenantId: 't1', weekStart: '2026-06-08', sendState: 'pending', summaryMd: 'old' };
+  it('generates once across separate runs in the same week', async () => {
     await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+    state.existing = state.saved[0];
+
+    await generateDigest('t1', new Date('2026-06-17T12:00:00Z'));
+
     expect(state.saved).toHaveLength(1);
-    expect(state.saved[0].id).toBe('d1'); // same row, not a new insert
-    expect(state.saved[0].summaryMd).toBe('A warm grounded summary.');
+    expect(state.prompts).toHaveLength(1);
   });
 
   it('never disturbs a row already sent', async () => {
     state.existing = { id: 'd1', tenantId: 't1', weekStart: '2026-06-08', sendState: 'sent', summaryMd: 'old' };
     await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
-    expect(state.saved[0].sendState).toBe('sent'); // content refreshed, state untouched
+    expect(state.saved).toHaveLength(0);
+  });
+
+  it('excludes Enterprise experiments after a downgrade to Pro', async () => {
+    state.enterprise = false;
+    state.topExp = {
+      kind: 'correlation',
+      severity: 'red',
+      title: 'Enterprise-only correlation',
+    };
+
+    await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+
+    expect(state.prompts[0]).not.toContain('Enterprise-only correlation');
   });
 });
 

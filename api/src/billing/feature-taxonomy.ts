@@ -87,9 +87,13 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   // Tiered Insights ladder (ADR-0013 / Deviation 36). Tier→flag mapping
   // lives in plans.ts — never branch on tier names in insights code.
   gapInsights: { label: 'AI Insights (Gaps)', group: 'insights' },
-  gapEvidence: { label: 'Gap evidence drill-down', group: 'insights', requires: 'gapInsights' },
+  gapEvidence: {
+    label: 'Gap evidence, recommendations & weekly snapshots',
+    group: 'insights',
+    requires: 'gapInsights',
+  },
   aiBusinessInsights: {
-    label: 'AI Business Insights (digest, correlation, sentiment, export)',
+    label: 'AI Business Insights (correlation, sentiment, alerts, export)',
     group: 'insights',
     requires: 'gapInsights',
   },

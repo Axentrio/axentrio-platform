@@ -50,6 +50,13 @@ export class Gap {
   @Column({ type: 'int', name: 'distinct_visitors', default: 0 })
   distinctVisitors!: number;
 
+  /** Pro+ one-sentence action generated from recent Judgment evidence. */
+  @Column({ type: 'text', nullable: true })
+  recommendation?: string | null;
+
+  @Column({ type: 'timestamptz', name: 'recommendation_updated_at', nullable: true })
+  recommendationUpdatedAt?: Date | null;
+
   @Column({ type: 'timestamptz', name: 'first_detected_at' })
   firstDetectedAt!: Date;
 

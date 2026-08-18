@@ -21,31 +21,40 @@
  * an LLM failure freezes it at the failed session so the next run retries,
  * while later sessions are still attempted for throughput.
  */
-import { AppDataSource } from '../database/data-source';
-import { Tenant } from '../database/entities/Tenant';
-import { ChatSession } from '../database/entities/ChatSession';
-import { Judgment } from '../database/entities/Judgment';
-import { InsightsRefreshState } from '../database/entities/InsightsRefreshState';
-import { getEntitlements } from '../billing/entitlements';
-import { analysisPolicyFor } from './analysis-policy';
-import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service';
-import { prefilterTranscript, emptyPrefilterTally } from './prefilter';
-import { canonicalizeTopic } from './topics.service';
-import { canonicalizeSentimentTheme } from './sentiment-themes.service';
-import { aggregateSentiment } from './sentiment-aggregation.service';
-import { aggregateCorrelations } from './correlation.service';
-import { generateDigest } from './digest.service';
-import { sendDueDigests } from './digest-send.service';
-import { aggregateGaps } from './gap-aggregation.service';
-import { claimInsightsLease, releaseAnalysisRun } from './analysis-eligibility.service';
-import { logger } from '../utils/logger';
-import { decrypt } from '../utils/encryption';
+import { AppDataSource } from "../database/data-source";
+import { Tenant } from "../database/entities/Tenant";
+import { ChatSession } from "../database/entities/ChatSession";
+import { Judgment } from "../database/entities/Judgment";
+import { InsightsRefreshState } from "../database/entities/InsightsRefreshState";
+import { InsightDigest } from "../database/entities/InsightDigest";
+import { getEntitlements } from "../billing/entitlements";
+import { analysisPolicyFor } from "./analysis-policy";
+import {
+  judgeTranscript,
+  TranscriptMessage,
+  UsageTally,
+} from "./judge.service";
+import { prefilterTranscript, emptyPrefilterTally } from "./prefilter";
+import { canonicalizeTopic } from "./topics.service";
+import { canonicalizeSentimentTheme } from "./sentiment-themes.service";
+import { aggregateSentiment } from "./sentiment-aggregation.service";
+import { aggregateCorrelations } from "./correlation.service";
+import { generateDigest, weekStartFor } from "./digest.service";
+import { sendDueDigests } from "./digest-send.service";
+import { aggregateGaps } from "./gap-aggregation.service";
+import { generateGapRecommendations } from "./gap-recommendation.service";
+import { notifyHighPriorityGaps } from "./high-priority-notification.service";
+import {
+  claimInsightsLease,
+  releaseAnalysisRun,
+} from "./analysis-eligibility.service";
+import { logger } from "../utils/logger";
+import { decrypt } from "../utils/encryption";
 
 const BACKFILL_DAYS = 7;
 const BACKFILL_CAP = 500;
 const WINDOW_DAYS = 7;
 export const INTRADAY_REFRESH_MINUTES = 60;
-const pendingNightlyTenants = new Map<string, Date>();
 
 interface EligibleSession {
   id: string;
@@ -61,13 +70,16 @@ async function loadEligibleSessions(
   cap: number,
 ): Promise<EligibleSession[]> {
   const rows = await AppDataSource.getRepository(ChatSession)
-    .createQueryBuilder('s')
-    .select('s.id', 'id')
-    .addSelect('s.visitor_id', 'visitorId')
-    .addSelect('s.status', 'status')
-    .addSelect('s.started_at', 'startedAt')
-    .addSelect('COALESCE(s.ended_at, s.last_activity_at, s.started_at)', 'effectiveEndedAt')
-    .where('s.tenant_id = :tenantId', { tenantId })
+    .createQueryBuilder("s")
+    .select("s.id", "id")
+    .addSelect("s.visitor_id", "visitorId")
+    .addSelect("s.status", "status")
+    .addSelect("s.started_at", "startedAt")
+    .addSelect(
+      "COALESCE(s.ended_at, s.last_activity_at, s.started_at)",
+      "effectiveEndedAt",
+    )
+    .where("s.tenant_id = :tenantId", { tenantId })
     .andWhere("s.status IN ('closed', 'handoff')")
     // Guardrails: exclude spam/scam/bot-loop conversations from insights (AC20).
     .andWhere("s.guardrail_status = 'normal'")
@@ -78,8 +90,11 @@ async function loadEligibleSessions(
           AND gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')
       )`,
     )
-    .andWhere('COALESCE(s.ended_at, s.last_activity_at, s.started_at) > :since', { since })
-    .orderBy('COALESCE(s.ended_at, s.last_activity_at, s.started_at)', 'ASC')
+    .andWhere(
+      "COALESCE(s.ended_at, s.last_activity_at, s.started_at) > :since",
+      { since },
+    )
+    .orderBy("COALESCE(s.ended_at, s.last_activity_at, s.started_at)", "ASC")
     .limit(cap)
     .getRawMany();
   return rows.map((r) => ({
@@ -90,7 +105,13 @@ async function loadEligibleSessions(
 }
 
 async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
-  const rows: Array<{ id: string; content: string; contentEncrypted: boolean; sender: string }> =
+  const rows: Array<{
+    id: string;
+    content: string;
+    contentEncrypted: boolean;
+    sender: string;
+  }> =
+    // pi-lens-ignore: ast-grep:no-sql-in-code
     await AppDataSource.query(
       `SELECT m.id, m.content, m.content_encrypted AS "contentEncrypted", p.type AS sender
        FROM messages m
@@ -108,7 +129,9 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
     return {
       id: r.id,
       content,
-      sender: (['user', 'agent', 'bot', 'system'].includes(r.sender) ? r.sender : 'system') as TranscriptMessage['sender'],
+      sender: (["user", "agent", "bot", "system"].includes(r.sender)
+        ? r.sender
+        : "system") as TranscriptMessage["sender"],
     };
   });
 }
@@ -135,7 +158,9 @@ export async function refreshTenantInsights(
     state = stateRepo.create({ tenantId, lastRefreshedAt: null });
   }
 
-  const since = state.lastRefreshedAt ?? new Date(now.getTime() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
+  const since =
+    state.lastRefreshedAt ??
+    new Date(now.getTime() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
   const sessions = await loadEligibleSessions(tenantId, since, BACKFILL_CAP);
 
   let watermark: Date | null = null;
@@ -147,7 +172,9 @@ export async function refreshTenantInsights(
 
   for (const session of sessions) {
     // Unique(session_id) makes re-judging a no-op risk; skip cheaply instead.
-    const already = await judgmentRepo.findOne({ where: { sessionId: session.id } });
+    const already = await judgmentRepo.findOne({
+      where: { sessionId: session.id },
+    });
     if (already) {
       if (!watermarkFrozen) watermark = session.effectiveEndedAt;
       continue;
@@ -162,7 +189,7 @@ export async function refreshTenantInsights(
       // "Insights incomplete" for conversations that were correctly found empty.
       const gate = prefilterTranscript({
         messages: transcript,
-        isHandoff: session.status === 'handoff',
+        isHandoff: session.status === "handoff",
       });
       if (!gate.judge) {
         layer1.skipped += 1;
@@ -187,17 +214,27 @@ export async function refreshTenantInsights(
       }
       layer1.judged += 1;
 
-      const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally, {
-        withSentiment,
-        withSentimentThemes,
-      });
+      const verdict = await judgeTranscript(
+        transcript,
+        session.status === "handoff",
+        tally,
+        {
+          withSentiment,
+          withSentimentThemes,
+        },
+      );
 
       let canonicalTopicId: string | null = null;
       let rejectedTopic: string | null = null;
       let rejectReason: string | null = null;
 
       if (verdict.hadQuestion && verdict.topicPhrase) {
-        const canon = await canonicalizeTopic(tenantId, verdict.topicPhrase, verdict.evidenceMessageIds, tally);
+        const canon = await canonicalizeTopic(
+          tenantId,
+          verdict.topicPhrase,
+          verdict.evidenceMessageIds,
+          tally,
+        );
         if (canon.ok) {
           canonicalTopicId = canon.canonicalTopicId;
         } else {
@@ -211,7 +248,11 @@ export async function refreshTenantInsights(
       // stores no theme on this judgment.
       let sentimentThemeId: string | null = null;
       if (withSentimentThemes && verdict.sentiment && verdict.sentimentTheme) {
-        const theme = await canonicalizeSentimentTheme(tenantId, verdict.sentimentTheme, verdict.sentiment);
+        const theme = await canonicalizeSentimentTheme(
+          tenantId,
+          verdict.sentimentTheme,
+          verdict.sentiment,
+        );
         if (theme.ok) sentimentThemeId = theme.themeId;
       }
 
@@ -236,17 +277,17 @@ export async function refreshTenantInsights(
       judged += 1;
       if (!watermarkFrozen) watermark = session.effectiveEndedAt;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'unknown';
+      const message = err instanceof Error ? err.message : "unknown";
       // A concurrent run (manual ops script vs the nightly pass) may have
       // judged this session between our pre-check and insert — that's a
       // skip, not a failure: the judgment exists, the watermark can advance.
-      if (message.includes('uq_judgments_session')) {
+      if (message.includes("uq_judgments_session")) {
         if (!watermarkFrozen) watermark = session.effectiveEndedAt;
         continue;
       }
       failed += 1;
       watermarkFrozen = true; // failed session retries next run
-      logger.warn('[insights-refresh] judge failed for session', {
+      logger.warn("[insights-refresh] judge failed for session", {
         tenantId,
         sessionId: session.id,
         error: message,
@@ -255,7 +296,10 @@ export async function refreshTenantInsights(
   }
 
   // Completeness over the rolling 7-day window (ADR-0006).
-  const windowStart = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const windowStart = new Date(
+    now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
+  // pi-lens-ignore: ast-grep:no-sql-in-code
   const [{ eligible }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS eligible FROM chat_sessions s
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
@@ -268,6 +312,7 @@ export async function refreshTenantInsights(
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );
+  // pi-lens-ignore: ast-grep:no-sql-in-code
   const [{ judgedInWindow }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS "judgedInWindow" FROM chat_sessions s
      JOIN chatbot_judgments j ON j.session_id = s.id
@@ -284,25 +329,32 @@ export async function refreshTenantInsights(
   const completeness = eligible > 0 ? judgedInWindow / eligible : 1;
 
   await aggregateGaps(tenantId, now);
+  if (features.gapEvidence) {
+    await generateGapRecommendations(tenantId, tally, now);
+  }
   // Enterprise-only experiment aggregation (P3). Gated by the flag, not tier.
   if (withSentimentThemes) {
+    await notifyHighPriorityGaps(tenantId, now);
     await aggregateSentiment(tenantId, now);
     await aggregateCorrelations(tenantId, now);
-    // Weekly digest: generate once, on the Monday the prior week completes
-    // (D6). Idempotent on (tenant, weekStart) — a same-day re-run just
-    // refreshes content. Sending is a separate reconciler pass.
-    const digestAt = options.digestAt ?? now;
-    if (options.generateDigest !== false && digestAt.getUTCDay() === 1) {
-      await generateDigest(tenantId, digestAt);
-    }
+  }
+  // Pro+ weekly improvement snapshot. Idempotent on (tenant, weekStart);
+  // sending remains a separate reconciler pass. Digest work is OWNED by the
+  // pass loop (derived from the missing weekly row), so this is explicit
+  // opt-in only — a manual on-demand analysis never generates a digest, and
+  // a deferred Monday retry landing on Tuesday still runs (no day gate).
+  const digestAt = options.digestAt ?? now;
+  if (features.gapEvidence && options.generateDigest === true) {
+    await generateDigest(tenantId, digestAt);
   }
 
   state.lastRefreshedAt = watermarkFrozen ? watermark : now;
   state.judgmentsCompleteness = completeness.toFixed(4);
-  state.lastRunError = failed > 0 ? `${failed} session(s) failed judging` : null;
+  state.lastRunError =
+    failed > 0 ? `${failed} session(s) failed judging` : null;
   await stateRepo.save(state);
 
-  logger.info('[insights-refresh] tenant refreshed', {
+  logger.info("[insights-refresh] tenant refreshed", {
     tenantId,
     judged,
     failed,
@@ -315,38 +367,73 @@ export async function refreshTenantInsights(
       ...layer1,
       savedShare:
         layer1.judged + layer1.skipped > 0
-          ? Number((layer1.skipped / (layer1.judged + layer1.skipped)).toFixed(3))
+          ? Number(
+              (layer1.skipped / (layer1.judged + layer1.skipped)).toFixed(3),
+            )
           : 0,
     },
   });
 }
 
-async function runAutomaticInsightsPass(now: Date, nightly: boolean): Promise<void> {
-  const hadPendingNightly = pendingNightlyTenants.size > 0;
-  const deferredNightly: Array<{ id: string; digestAt: Date }> = [];
-  const tenants: Array<{ id: string }> = await AppDataSource.getRepository(Tenant)
-    .createQueryBuilder('t')
-    .select('t.id', 'id')
+async function runAutomaticInsightsPass(
+  now: Date,
+  nightly: boolean,
+): Promise<void> {
+  const deferredNightly: Array<{
+    id: string;
+    digestAt: Date;
+    automatic: boolean;
+  }> = [];
+  const tenants: Array<{ id: string }> = await AppDataSource.getRepository(
+    Tenant,
+  )
+    .createQueryBuilder("t")
+    .select("t.id", "id")
     .where("t.status = 'active'")
     .getRawMany();
+
+  // Digest work is DERIVED from the missing weekly digest row, not from
+  // process-local state: a restart after a failed Monday generation still
+  // retries on the next pass (review round 3, finding 2).
+  const weeklyDigestMissing = async (tenantId: string): Promise<boolean> => {
+    const weekStartStr = weekStartFor(now);
+    return !(await AppDataSource.getRepository(InsightDigest).findOne({
+      where: { tenantId, weekStart: weekStartStr },
+    }));
+  };
 
   for (const { id } of tenants) {
     try {
       const entitlements = await getEntitlements(id);
+      const automatic = analysisPolicyFor(entitlements.features).automatic;
+      const digestDue =
+        entitlements.features.gapEvidence && (await weeklyDigestMissing(id));
+      const digestAt = digestDue ? now : undefined;
       // Only tiers whose analysis is AUTOMATIC. Essential and Pro analyse on demand
       // (`POST /insights/analyse`) behind a minimum-conversations gate and a cooldown,
       // so including them here would spend their LLM budget on a schedule they did not
       // ask for and reset the watermark their own button reads. Read from the policy,
       // never a tier name, so an override moves a tenant between the two models with
       // one source of truth (ADR-0013).
-      if (!analysisPolicyFor(entitlements.features).automatic) {
-        pendingNightlyTenants.delete(id);
+      if (!automatic) {
+        if (!digestAt) {
+          continue;
+        }
+        if (!(await claimInsightsLease(id, now))) {
+          if (nightly) deferredNightly.push({ id, digestAt, automatic: false });
+          continue;
+        }
+        try {
+          // Pro analysis stays manual; the leased snapshot reads existing aggregates only.
+          await generateDigest(id, digestAt);
+        } finally {
+          await releaseAnalysisRun(id);
+        }
         continue;
       }
-      if (nightly) pendingNightlyTenants.set(id, now);
-      const digestAt = pendingNightlyTenants.get(id);
       if (!(await claimInsightsLease(id, now))) {
-        if (nightly && digestAt) deferredNightly.push({ id, digestAt });
+        if (nightly && digestAt)
+          deferredNightly.push({ id, digestAt, automatic: true });
         continue;
       }
       try {
@@ -354,36 +441,41 @@ async function runAutomaticInsightsPass(now: Date, nightly: boolean): Promise<vo
           generateDigest: digestAt !== undefined,
           digestAt,
         });
-        pendingNightlyTenants.delete(id);
       } finally {
         await releaseAnalysisRun(id);
       }
     } catch (err) {
-      logger.error('[insights-refresh] tenant pass failed', {
+      logger.error("[insights-refresh] tenant pass failed", {
         tenantId: id,
-        error: err instanceof Error ? err.message : 'unknown',
+        error: err instanceof Error ? err.message : "unknown",
       });
     }
   }
 
-  for (const { id, digestAt } of deferredNightly) {
+  for (const { id, digestAt, automatic } of deferredNightly) {
     try {
       if (!(await claimInsightsLease(id, now))) continue;
       try {
-        await refreshTenantInsights(id, now, { generateDigest: true, digestAt });
-        pendingNightlyTenants.delete(id);
+        if (automatic) {
+          await refreshTenantInsights(id, now, {
+            generateDigest: true,
+            digestAt,
+          });
+        } else {
+          await generateDigest(id, digestAt);
+        }
       } finally {
         await releaseAnalysisRun(id);
       }
     } catch (err) {
-      logger.error('[insights-refresh] deferred nightly tenant pass failed', {
+      logger.error("[insights-refresh] deferred nightly tenant pass failed", {
         tenantId: id,
-        error: err instanceof Error ? err.message : 'unknown',
+        error: err instanceof Error ? err.message : "unknown",
       });
     }
   }
 
-  if (!nightly && !hadPendingNightly) return;
+  if (!nightly) return;
 
   // Drain the digest outbox once per nightly pass — retries failed sends with backoff and
   // delivers digests generated this run (P3 / ADR-0014 D6). Deliberately OUTSIDE the
@@ -392,8 +484,8 @@ async function runAutomaticInsightsPass(now: Date, nightly: boolean): Promise<vo
   try {
     await sendDueDigests(now);
   } catch (err) {
-    logger.error('[insights-refresh] digest reconciler failed', {
-      error: err instanceof Error ? err.message : 'unknown',
+    logger.error("[insights-refresh] digest reconciler failed", {
+      error: err instanceof Error ? err.message : "unknown",
     });
   }
 }
@@ -418,34 +510,43 @@ export function registerInsightsRefreshJob(): void {
   let running = false;
   let nightlyDue: { day: string; at: Date } | null = null;
 
-  setInterval(async () => {
-    const now = new Date();
-    const day = now.toISOString().slice(0, 10);
-    if (now.getUTCHours() === 2 && lastRunDay !== day && !nightlyDue) {
-      nightlyDue = { day, at: now };
-    }
-    const nightly = nightlyDue !== null;
-    const intraday = now.getTime() - lastIntradayAt >= INTRADAY_REFRESH_MINUTES * 60_000;
-    if ((!nightly && !intraday) || running) return;
-    running = true;
-    lastIntradayAt = now.getTime();
-    try {
-      if (nightly) {
-        const due = nightlyDue!;
-        await runRefreshInsightsOnce(due.at);
-        lastRunDay = due.day;
-        nightlyDue = null;
-      } else {
-        await runIntradayInsightsOnce(now);
+  setInterval(
+    async () => {
+      const now = new Date();
+      const day = now.toISOString().slice(0, 10);
+      if (now.getUTCHours() === 2 && lastRunDay !== day && !nightlyDue) {
+        nightlyDue = { day, at: now };
       }
-    } catch (err) {
-      logger.error(`[insights-refresh] ${nightly ? 'nightly' : 'intraday'} pass crashed`, {
-        error: err instanceof Error ? err.message : 'unknown',
-      });
-    } finally {
-      running = false;
-    }
-  }, 10 * 60 * 1000);
+      const nightly = nightlyDue !== null;
+      const intraday =
+        now.getTime() - lastIntradayAt >= INTRADAY_REFRESH_MINUTES * 60_000;
+      if ((!nightly && !intraday) || running) return;
+      running = true;
+      lastIntradayAt = now.getTime();
+      try {
+        if (nightly) {
+          const due = nightlyDue!;
+          await runRefreshInsightsOnce(due.at);
+          lastRunDay = due.day;
+          nightlyDue = null;
+        } else {
+          await runIntradayInsightsOnce(now);
+        }
+      } catch (err) {
+        logger.error(
+          `[insights-refresh] ${nightly ? "nightly" : "intraday"} pass crashed`,
+          {
+            error: err instanceof Error ? err.message : "unknown",
+          },
+        );
+      } finally {
+        running = false;
+      }
+    },
+    10 * 60 * 1000,
+  );
 
-  logger.info(`[insights-refresh] jobs registered (02:00 UTC + ${INTRADAY_REFRESH_MINUTES}m delta)`);
+  logger.info(
+    `[insights-refresh] jobs registered (02:00 UTC + ${INTRADAY_REFRESH_MINUTES}m delta)`,
+  );
 }

@@ -723,7 +723,7 @@
             "sessions": "Onbeperkte sessies",
             "llmCalls": "Platform-LLM inbegrepen",
             "channels": "Alle kanalen (unified inbox)",
-            "insights": "AI-inzichten met bewijs + 90 dagen geschiedenis",
+            "insights": "AI-inzichten met bewijs, suggesties + wekelijkse snapshots",
             "branding": "Verberg \"Powered by Axentrio\"",
             "support": "Boekingen, agenda, platform-assistent"
           }
@@ -735,7 +735,7 @@
           "blurb": "Drie chatbots, 1 jaar inzichtgeschiedenis, prioriteitsondersteuning.",
           "features": {
             "unlimited": "3 chatbots, 1 jaar inzichtgeschiedenis",
-            "integrations": "AI Business Insights: digest, correlaties, sentiment (binnenkort)",
+            "integrations": "AI Business Insights: correlaties, sentiment + prioriteitsmeldingen",
             "sla": "Prioriteitsondersteuning + toegewijde success"
           }
         }

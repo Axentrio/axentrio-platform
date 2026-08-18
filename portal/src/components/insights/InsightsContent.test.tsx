@@ -41,6 +41,7 @@ function gap(over: Partial<Record<string, unknown>> = {}) {
     status: 'open',
     severity: 'red',
     priorityScore: 42,
+    recommendation: null,
     occurrences: 6,
     distinctVisitors: 5,
     firstDetectedAt: '2026-06-10T00:00:00Z',
@@ -144,6 +145,18 @@ describe('InsightsContent — gap surface', () => {
     expect(screen.getByText(/upgrade to see the conversations/i)).toBeInTheDocument();
   });
 
+  it('shows optimization suggestions for open Pro+ Gaps only', () => {
+    const suggestion = 'Publish clear warranty terms in the knowledge base.';
+    hasFeatureRef.current = { gapEvidence: true };
+    insightsRef.current = data([gap({ recommendation: suggestion })]);
+    const { rerender } = render(<InsightsContent />);
+    expect(screen.getByText(suggestion)).toBeInTheDocument();
+
+    hasFeatureRef.current = { gapEvidence: false };
+    rerender(<InsightsContent />);
+    expect(screen.queryByText(suggestion)).not.toBeInTheDocument();
+  });
+
   it('renders freshness and the completeness warning under 0.9', () => {
     insightsRef.current = data([gap()], { completeness: 0.7 });
     render(<InsightsContent />);
@@ -212,23 +225,23 @@ describe('InsightsContent — experiments (Enterprise, P3)', () => {
   });
 });
 
-describe('InsightsContent — weekly digest (Enterprise, P3)', () => {
-  it('hides the digest hero without aiBusinessInsights', () => {
-    hasFeatureRef.current = { aiBusinessInsights: false };
+describe('InsightsContent — weekly improvement snapshot (Pro+)', () => {
+  it('hides the snapshot without gapEvidence (Essential)', () => {
+    hasFeatureRef.current = { gapEvidence: false };
     render(<InsightsContent />);
     expect(screen.queryByText(/your weekly summary/i)).not.toBeInTheDocument();
   });
 
-  it('shows the pending copy before the first Monday for Enterprise', () => {
-    hasFeatureRef.current = { aiBusinessInsights: true };
+  it('shows the pending copy before the first Monday for Pro', () => {
+    hasFeatureRef.current = { gapEvidence: true, aiBusinessInsights: false };
     digestRef.current = { digest: null, emailEnabled: true };
     render(<InsightsContent />);
     expect(screen.getByText(/your weekly summary/i)).toBeInTheDocument();
     expect(screen.getByText(/first weekly summary will appear/i)).toBeInTheDocument();
   });
 
-  it('renders the narrative and metric deltas when a digest exists', () => {
-    hasFeatureRef.current = { aiBusinessInsights: true };
+  it('renders the narrative and metric deltas for Enterprise unchanged', () => {
+    hasFeatureRef.current = { gapEvidence: true, aiBusinessInsights: true };
     digestRef.current = { digest: digest(), emailEnabled: true };
     render(<InsightsContent />);
     expect(screen.getByText(/bookings ticked up/i)).toBeInTheDocument();
@@ -239,7 +252,7 @@ describe('InsightsContent — weekly digest (Enterprise, P3)', () => {
 
   it('toggles the weekly email preference', async () => {
     const user = userEvent.setup();
-    hasFeatureRef.current = { aiBusinessInsights: true };
+    hasFeatureRef.current = { gapEvidence: true };
     digestRef.current = { digest: digest(), emailEnabled: true };
     render(<InsightsContent />);
     await user.click(screen.getByRole('switch'));

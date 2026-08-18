@@ -17,6 +17,7 @@
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,6 +27,8 @@ import { toast } from 'sonner';
 import { api, extractApiErrorMessage } from '@/services/apiClient';
 import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
 import { useBotEmbed, useBots } from '@/queries/useBotsQueries';
+import type { SetupStatus } from '@/queries/useOnboardingQueries';
+import { queryKeys } from '@/queries/queryKeys';
 import type { StepProps } from './types';
 
 const TONES = ['friendly', 'professional', 'casual', 'formal'] as const;
@@ -45,8 +48,9 @@ const DEFAULT_OPEN_DAYS: string[] = ['monday', 'tuesday', 'wednesday', 'thursday
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function ChatbotStep({ submit }: StepProps) {
+export function ChatbotStep({ status, submit }: StepProps & { status: SetupStatus }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { data: settings, isLoading } = useGetAiSettings();
   const updateAi = useUpdateAiSettings();
   const { data: botsData } = useBots();
@@ -54,6 +58,7 @@ export function ChatbotStep({ submit }: StepProps) {
   const { data: embed } = useBotEmbed(anchorBot?.id);
 
   const [name, setName] = React.useState('');
+  const [businessName, setBusinessName] = React.useState(status.state.company?.name ?? '');
   const [tone, setTone] = React.useState<string>('friendly');
   const [supportEmail, setSupportEmail] = React.useState('');
   const [openDays, setOpenDays] = React.useState<string[]>(DEFAULT_OPEN_DAYS);
@@ -68,10 +73,11 @@ export function ChatbotStep({ submit }: StepProps) {
   React.useEffect(() => {
     if (seeded || isLoading || !settings) return;
     setName(settings.brandVoice?.name ?? '');
+    setBusinessName(settings.brandVoice?.businessName ?? status.state.company?.name ?? '');
     setTone(settings.brandVoice?.tone ?? 'friendly');
     setSupportEmail(settings.supportEmail ?? '');
     setSeeded(true);
-  }, [seeded, isLoading, settings]);
+  }, [seeded, isLoading, settings, status.state.company?.name]);
 
   const toggleDay = (day: string) =>
     setOpenDays((days) =>
@@ -84,7 +90,11 @@ export function ChatbotStep({ submit }: StepProps) {
       await updateAi.mutateAsync({
         enabled: true,
         supportEmail: supportEmail.trim(),
-        brandVoice: { name: name.trim(), tone },
+        brandVoice: {
+          name: name.trim(),
+          ...(businessName.trim() && { businessName: businessName.trim() }),
+          tone,
+        },
       });
       // The same top-level key AI & Content writes, so the two screens edit one value.
       await api.patch('/tenants/me', {
@@ -98,6 +108,7 @@ export function ChatbotStep({ submit }: StepProps) {
           })),
         },
       });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
       submit.mutate({ step: 'chatbot' });
     } catch (err) {
       // Without this the customer clicks Continue, the spinner stops, and nothing
@@ -139,6 +150,16 @@ export function ChatbotStep({ submit }: StepProps) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={t('setup.steps.chatbot.namePlaceholder')}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="setup-business-name">{t('setup.steps.chatbot.businessNameLabel')}</Label>
+        <Input
+          id="setup-business-name"
+          value={businessName}
+          onChange={(e) => setBusinessName(e.target.value)}
+          placeholder={t('setup.steps.chatbot.businessNamePlaceholder')}
         />
       </div>
 

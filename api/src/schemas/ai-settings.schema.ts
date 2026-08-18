@@ -8,6 +8,7 @@ export const updateAiSettingsSchema = z.object({
   supportEmail: z.string().email().max(200).optional().nullable().or(z.literal('')),
   brandVoice: z.object({
     name: z.string().min(1).max(100),
+    businessName: z.string().max(100).optional(),
     tone: z.string().min(1).max(50),
     /** RETIRED. Accepted so an already-loaded portal tab can still save,
      *  then dropped — never persisted, never composed. The template is the

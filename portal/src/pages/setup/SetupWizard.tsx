@@ -109,7 +109,7 @@ export default function SetupWizard() {
       case 'plan':
         return <PlanStep submit={submitStep} />;
       case 'chatbot':
-        return <ChatbotStep submit={submitStep} />;
+        return <ChatbotStep status={status} submit={submitStep} />;
       case 'bookings':
         return <BookingsStep submit={submitStep} />;
       case 'social':

@@ -6,7 +6,7 @@
  * blocks Continue.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const { apiGet, apiPatch } = vi.hoisted(() => ({
@@ -20,6 +20,7 @@ vi.mock('@/services/apiClient', async (importOriginal) => ({
 }));
 
 import { ChatbotStep } from './ChatbotStep';
+import type { SetupStatus } from '@/queries/useOnboardingQueries';
 import type { StepProps } from './types';
 
 const SNIPPET = '<script src="https://api.axentrio.test/widget.js" data-key="bk_anchor"></script>';
@@ -36,11 +37,14 @@ const ANCHOR_BOT = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
-function mockApis({ embedError = false } = {}) {
+function mockApis({
+  embedError = false,
+  businessName,
+}: { embedError?: boolean; businessName?: string } = {}) {
   apiGet.mockImplementation((url: string) => {
     if (url.startsWith('/tenants/me/ai-settings')) {
       return Promise.resolve({
-        brandVoice: { name: 'Sofie', tone: 'friendly' },
+        brandVoice: { name: 'Sofie', businessName, tone: 'friendly' },
         supportEmail: 'info@acme.be',
       });
     }
@@ -64,11 +68,24 @@ function renderStep() {
     mutate: vi.fn(),
     isPending: false,
   } as unknown as StepProps['submit'];
-  return render(
+  const status: SetupStatus = {
+    state: {
+      version: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      completedAt: null,
+      language: 'en',
+      company: { vatNumber: 'BE0123456789', name: 'Acme BV' },
+      steps: { company: 'done' },
+    },
+    nextStep: 'chatbot',
+    complete: false,
+  };
+  const view = render(
     <QueryClientProvider client={client}>
-      <ChatbotStep submit={submit} />
+      <ChatbotStep status={status} submit={submit} />
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 beforeEach(() => {
@@ -77,6 +94,69 @@ beforeEach(() => {
 });
 
 describe('ChatbotStep — widget install', () => {
+  it('seeds the company name and submits it in brand voice', async () => {
+    mockApis();
+    const { client } = renderStep();
+    const invalidateQueries = vi.spyOn(client, 'invalidateQueries');
+
+    const companyName = await screen.findByRole('textbox', { name: /company name/i });
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: /assistant name/i })).toHaveValue('Sofie'),
+    );
+    expect(companyName).toHaveValue('Acme BV');
+    fireEvent.change(companyName, { target: { value: '  Acme Services  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() =>
+      expect(apiPatch).toHaveBeenCalledWith('/tenants/me/ai-settings', {
+        enabled: true,
+        supportEmail: 'info@acme.be',
+        brandVoice: { name: 'Sofie', businessName: 'Acme Services', tone: 'friendly' },
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        invalidateQueries.mock.calls.filter(([filters]) =>
+          filters?.queryKey?.every((key, index) => key === ['tenants', 'me'][index]),
+        ),
+      ).toHaveLength(2),
+    );
+  });
+
+  it('keeps a saved trading name when the step is revisited', async () => {
+    mockApis({ businessName: 'Acme Repairs' });
+    renderStep();
+
+    const companyName = await screen.findByRole('textbox', { name: /company name/i });
+    await waitFor(() => expect(companyName).toHaveValue('Acme Repairs'));
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() =>
+      expect(apiPatch).toHaveBeenCalledWith('/tenants/me/ai-settings', {
+        enabled: true,
+        supportEmail: 'info@acme.be',
+        brandVoice: { name: 'Sofie', businessName: 'Acme Repairs', tone: 'friendly' },
+      }),
+    );
+  });
+
+  it('omits a blank trading name so it inherits the tenant name', async () => {
+    mockApis();
+    renderStep();
+
+    const companyName = await screen.findByRole('textbox', { name: /company name/i });
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: /assistant name/i })).toHaveValue('Sofie'),
+    );
+    fireEvent.change(companyName, {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/tenants/me/ai-settings', expect.anything()));
+    expect(apiPatch.mock.calls[0][1].brandVoice).not.toHaveProperty('businessName');
+  });
+
   it('shows the install title and copy button when the embed snippet is ready', async () => {
     mockApis();
     renderStep();

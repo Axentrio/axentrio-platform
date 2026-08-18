@@ -36,6 +36,8 @@ import {
   type Weekday,
   type ServiceAreaEntry,
 } from '@/queries/useSchedulerQueries';
+import { useTenantSettings } from '@/queries/useTenantQueries';
+import type { BusinessHours, WeekDay } from '@/queries/useBotsQueries';
 import type { StepProps } from './types';
 
 /**
@@ -53,6 +55,28 @@ const WEEK_DAYS: { api: Weekday; i18n: string }[] = [
   { api: 'sun', i18n: 'sunday' },
 ];
 const DEFAULT_OPEN_DAYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const DEFAULT_OPENS_AT = '09:00';
+const DEFAULT_CLOSES_AT = '17:00';
+const WEEKDAY_BY_NAME: Record<WeekDay, Weekday> = {
+  monday: 'mon',
+  tuesday: 'tue',
+  wednesday: 'wed',
+  thursday: 'thu',
+  friday: 'fri',
+  saturday: 'sat',
+  sunday: 'sun',
+};
+
+export function bookingHoursSeed(businessHours?: BusinessHours | null) {
+  const open = businessHours?.enabled
+    ? businessHours.schedule.filter((day) => !day.closed)
+    : [];
+  return {
+    openDays: open.length ? open.map((day) => WEEKDAY_BY_NAME[day.day]) : DEFAULT_OPEN_DAYS,
+    opensAt: open[0]?.open ?? DEFAULT_OPENS_AT,
+    closesAt: open[0]?.close ?? DEFAULT_CLOSES_AT,
+  };
+}
 
 /** Slot intervals people actually book in. Minutes. */
 const SLOT_CHOICES = [15, 30, 60] as const;
@@ -85,12 +109,17 @@ export function BookingsStep({ submit }: StepProps) {
   // the GOOGLE status and there was no second option to click.
   const { data: outlook, isLoading: outlookLoading } = useOutlookCalendarStatus();
   const connectOutlook = useConnectOutlookCalendar();
-  const { data: scheduler } = useSchedulerConfig();
+  const { data: scheduler, isLoading: schedulerLoading } = useSchedulerConfig();
+  const {
+    data: tenant,
+    isLoading: tenantLoading,
+    isFetching: tenantFetching,
+  } = useTenantSettings();
   const updateScheduler = useUpdateSchedulerConfig();
 
   const [openDays, setOpenDays] = React.useState<Weekday[]>(DEFAULT_OPEN_DAYS);
-  const [opensAt, setOpensAt] = React.useState('09:00');
-  const [closesAt, setClosesAt] = React.useState('17:00');
+  const [opensAt, setOpensAt] = React.useState(DEFAULT_OPENS_AT);
+  const [closesAt, setClosesAt] = React.useState(DEFAULT_CLOSES_AT);
   const [slotMinutes, setSlotMinutes] = React.useState<number>(30);
   const [serviceArea, setServiceArea] = React.useState<ServiceAreaEntry[]>([]);
   const [seeded, setSeeded] = React.useState(false);
@@ -99,20 +128,27 @@ export function BookingsStep({ submit }: StepProps) {
     // The area is seeded OUTSIDE the availability guard below, mirroring SchedulerSettings:
     // a bot can have a service area before it has any hours.
     if (!seeded && Array.isArray(scheduler?.serviceArea)) setServiceArea(scheduler.serviceArea);
-    if (seeded || !scheduler?.availability) return;
-    const weekly = scheduler.availability.weeklyHours ?? {};
-    const days = WEEK_DAYS.filter((d) => (weekly[d.api]?.length ?? 0) > 0).map((d) => d.api);
-    if (days.length) {
-      setOpenDays(days);
-      const first = weekly[days[0]]?.[0];
-      if (first?.start) setOpensAt(first.start);
-      if (first?.end) setClosesAt(first.end);
-    }
-    if (scheduler.availability.slotGranularityMin) {
-      setSlotMinutes(scheduler.availability.slotGranularityMin);
+    if (seeded || schedulerLoading || tenantLoading || tenantFetching) return;
+    if (scheduler?.availability) {
+      const weekly = scheduler.availability.weeklyHours ?? {};
+      const days = WEEK_DAYS.filter((d) => (weekly[d.api]?.length ?? 0) > 0).map((d) => d.api);
+      if (days.length) {
+        setOpenDays(days);
+        const first = weekly[days[0]]?.[0];
+        if (first?.start) setOpensAt(first.start);
+        if (first?.end) setClosesAt(first.end);
+      }
+      if (scheduler.availability.slotGranularityMin) {
+        setSlotMinutes(scheduler.availability.slotGranularityMin);
+      }
+    } else {
+      const hours = bookingHoursSeed(tenant?.settings?.businessHours);
+      setOpenDays(hours.openDays);
+      setOpensAt(hours.opensAt);
+      setClosesAt(hours.closesAt);
     }
     setSeeded(true);
-  }, [seeded, scheduler]);
+  }, [seeded, scheduler, schedulerLoading, tenant, tenantLoading, tenantFetching]);
 
   const toggleDay = (day: Weekday) =>
     setOpenDays((days) => (days.includes(day) ? days.filter((d) => d !== day) : [...days, day]));

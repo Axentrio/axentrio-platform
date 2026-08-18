@@ -2872,6 +2872,8 @@
         "body": "C'est le nom que voient les clients quand il répond. Vous pourrez le changer, ainsi que tout le reste, plus tard.",
         "nameLabel": "Nom de l'assistant",
         "namePlaceholder": "p. ex. Sofie",
+        "businessNameLabel": "Nom de l'entreprise (facultatif)",
+        "businessNamePlaceholder": "p. ex. Acme Services",
         "toneLabel": "Quel ton doit-il avoir ?",
         "skipConsequence": "Votre assistant IA reste désactivé. Vous pourrez l'activer plus tard dans Paramètres.",
         "supportEmailLabel": "Où envoyer ceux qu'il ne peut pas aider ?",

@@ -2873,6 +2873,8 @@
         "body": "Dit is de naam die klanten zien bij een antwoord. Je kunt die en al de rest later aanpassen.",
         "nameLabel": "Naam assistent",
         "namePlaceholder": "bv. Sofie",
+        "businessNameLabel": "Bedrijfsnaam (optioneel)",
+        "businessNamePlaceholder": "bv. Acme Services",
         "toneLabel": "Hoe moet hij klinken?",
         "skipConsequence": "Je AI-assistent blijft uit. Je kunt hem later aanzetten in Instellingen.",
         "supportEmailLabel": "Waarheen stuurt hij wie hij niet kan helpen?",

@@ -2911,6 +2911,8 @@
         "body": "This is the name customers see when it replies. You can change it and everything else about it later.",
         "nameLabel": "Assistant name",
         "namePlaceholder": "e.g. Sofie",
+        "businessNameLabel": "Company name (optional)",
+        "businessNamePlaceholder": "e.g. Acme Services",
         "toneLabel": "How should it sound?",
         "skipConsequence": "Your AI assistant stays off. You can turn it on later in Settings.",
         "supportEmailLabel": "Where should it send people it can't help?",

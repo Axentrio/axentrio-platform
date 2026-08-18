@@ -214,6 +214,37 @@ describe('PUT /onboarding/step', () => {
     expect(res.status).toBe(400);
   });
 
+  it('persists company identity and registered address on the tenant', async () => {
+    const tenant = await signedInTenant();
+    const res = await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({
+        step: 'company',
+        outcome: 'done',
+        company: {
+          vatNumber: 'BE0400378485',
+          name: 'Colruyt Group',
+          legalForm: 'NV',
+          street: 'Edingensesteenweg 196',
+          postalCode: '1500',
+          city: 'Halle',
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(await reload(tenant.id)).toMatchObject({
+      officialBusinessName: 'Colruyt Group',
+      vatNumber: 'BE0400378485',
+      vatVerified: true,
+      invoiceAddress: {
+        street: 'Edingensesteenweg 196',
+        postalCode: '1500',
+        city: 'Halle',
+        country: 'BE',
+      },
+    });
+  });
+
   it('decides `verified` from the register, never from the client', async () => {
     // Otherwise "this company was confirmed by the register" means nothing: anyone
     // could post verified:true with an invented number.
@@ -303,6 +334,31 @@ describe('PUT /onboarding/step', () => {
     const settings = (await reload(tenant.id)).settings as Record<string, unknown>;
     expect(settings.theme).toEqual({ primary: '#123456' });
     expect(settings.onboarding).toBeDefined();
+  });
+});
+
+describe('PATCH /tenants/me/ai-settings', () => {
+  it('persists the onboarding trading name on the anchor bot', async () => {
+    const tenant = await signedInTenant();
+    const anchor = await createTestAnchorBot(tenant);
+
+    const res = await request(app)
+      .patch('/api/v1/tenants/me/ai-settings')
+      .send({
+        brandVoice: {
+          name: 'Sofie',
+          businessName: 'Acme Services',
+          tone: 'friendly',
+        },
+      });
+
+    expect(res.status).toBe(200);
+    const bot = await AppDataSource.getRepository(Bot).findOneByOrFail({ id: anchor.id });
+    expect(bot.settings.ai?.brandVoice).toMatchObject({
+      name: 'Sofie',
+      businessName: 'Acme Services',
+      tone: 'friendly',
+    });
   });
 });
 

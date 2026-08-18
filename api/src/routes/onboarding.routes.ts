@@ -27,6 +27,7 @@ import { KnowledgeDocument } from '../database/entities/KnowledgeDocument';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { logAudit } from '../utils/audit';
+import { prefillAccountInformation } from '../account/account-information';
 import {
   emptyState,
   isComplete,
@@ -251,6 +252,13 @@ router.put(
       const check = await lookupCompanyByVat(c.vatNumber, { redis: getRedisClient() });
       const presence = c.presence === 'physical' || c.presence === 'online' ? c.presence : undefined;
       state.company = { ...c, presence, verified: check.status === 'found' };
+      const account = prefillAccountInformation({ company: state.company });
+      await AppDataSource.getRepository(Tenant).update(tenantId, {
+        officialBusinessName: account.officialBusinessName,
+        vatNumber: account.vatNumber,
+        vatVerified: account.vatVerified,
+        invoiceAddress: account.invoiceAddress,
+      });
       // #153: only a physical business activates the per-bot quoted-address field.
       // Online shops stay default-off. Fail-open if the anchor isn't there yet.
       try {

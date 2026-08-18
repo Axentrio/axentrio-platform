@@ -31,8 +31,8 @@ import { getEntitlements } from "../billing/entitlements";
 import { analysisPolicyFor } from "./analysis-policy";
 import {
   judgeTranscript,
-  TranscriptMessage,
-  UsageTally,
+  type TranscriptMessage,
+  type UsageTally,
 } from "./judge.service";
 import { prefilterTranscript, emptyPrefilterTally } from "./prefilter";
 import { canonicalizeTopic } from "./topics.service";
@@ -111,7 +111,7 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
     contentEncrypted: boolean;
     sender: string;
   }> =
-    // pi-lens-ignore: ast-grep:no-sql-in-code
+    // pi-lens-ignore: no-sql-in-code
     await AppDataSource.query(
       `SELECT m.id, m.content, m.content_encrypted AS "contentEncrypted", p.type AS sender
        FROM messages m
@@ -299,7 +299,7 @@ export async function refreshTenantInsights(
   const windowStart = new Date(
     now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
   );
-  // pi-lens-ignore: ast-grep:no-sql-in-code
+  // pi-lens-ignore: no-sql-in-code
   const [{ eligible }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS eligible FROM chat_sessions s
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
@@ -312,7 +312,7 @@ export async function refreshTenantInsights(
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );
-  // pi-lens-ignore: ast-grep:no-sql-in-code
+  // pi-lens-ignore: no-sql-in-code
   const [{ judgedInWindow }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS "judgedInWindow" FROM chat_sessions s
      JOIN chatbot_judgments j ON j.session_id = s.id

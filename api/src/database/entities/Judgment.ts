@@ -68,9 +68,8 @@ export class Judgment {
   reasoning?: string | null;
 
   /**
-   * Sentiment (P3 / ADR-0014, D5) — populated only when the tenant has
-   * `aiBusinessInsights` (Enterprise). Forward-only: sessions judged before
-   * the flag flipped stay null (cold-start accepted).
+   * Basic per-session sentiment for tenants with `gapInsights`. Forward-only:
+   * sessions judged before the flag flipped stay null (cold-start accepted).
    */
   @Column({ type: 'varchar', length: 8, nullable: true })
   sentiment?: 'positive' | 'negative' | 'neutral' | null;

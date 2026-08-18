@@ -62,10 +62,6 @@ export class Gap {
   @Column({ type: 'timestamptz', name: 'archived_at', nullable: true })
   archivedAt?: Date | null;
 
-  /** Regenerated each refresh (ADR-0003: not part of identity; ADR-0010: localised). */
-  @Column({ type: 'text', nullable: true })
-  recommendation?: string | null;
-
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

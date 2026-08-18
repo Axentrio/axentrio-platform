@@ -113,7 +113,7 @@ describe('insights routes — feature gating (ADR-0013)', () => {
       id: 'g1', topic: 'pricing', status: 'open', severity: 'red',
       occurrences: 7, distinct_visitors: 5,
       first_detected_at: '2026-06-08', last_seen_at: '2026-06-10',
-      resolved_at: null, archived_at: null, recommendation: null,
+      resolved_at: null, archived_at: null,
     }];
     const res = await request(createApp()).get('/insights');
     expect(res.status).toBe(200);

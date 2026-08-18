@@ -105,13 +105,16 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
 
 /** Refresh one tenant. Exported for tests and manual (admin) triggering. */
 export async function refreshTenantInsights(tenantId: string, now = new Date()): Promise<void> {
+  const { features } = await getEntitlements(tenantId);
+  // Fail closed here as well as in callers: manual/admin runs must not bypass
+  // a tenant's disabled Success Meter feature.
+  if (!features.gapInsights) return;
+
   const stateRepo = AppDataSource.getRepository(InsightsRefreshState);
   const judgmentRepo = AppDataSource.getRepository(Judgment);
 
-  // Resolve the Enterprise flag ONCE per tenant (P3 / ADR-0014, D5). When off,
-  // judging stays byte-identical to the pre-P3 contract — sentiment is
-  // entitled-only and additive.
-  const withSentiment = (await getEntitlements(tenantId)).features.aiBusinessInsights;
+  const withSentiment = features.gapInsights;
+  const withSentimentThemes = features.aiBusinessInsights;
 
   let state = await stateRepo.findOne({ where: { tenantId } });
   if (!state) {
@@ -172,6 +175,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
 
       const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally, {
         withSentiment,
+        withSentimentThemes,
       });
 
       let canonicalTopicId: string | null = null;
@@ -192,7 +196,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
       // Sentiment theme (Enterprise-only, D5). Forward-only; a reject just
       // stores no theme on this judgment.
       let sentimentThemeId: string | null = null;
-      if (withSentiment && verdict.sentiment && verdict.sentimentTheme) {
+      if (withSentimentThemes && verdict.sentiment && verdict.sentimentTheme) {
         const theme = await canonicalizeSentimentTheme(tenantId, verdict.sentimentTheme, verdict.sentiment);
         if (theme.ok) sentimentThemeId = theme.themeId;
       }
@@ -257,7 +261,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
 
   await aggregateGaps(tenantId, now);
   // Enterprise-only experiment aggregation (P3). Gated by the flag, not tier.
-  if (withSentiment) {
+  if (withSentimentThemes) {
     await aggregateSentiment(tenantId, now);
     await aggregateCorrelations(tenantId, now);
     // Weekly digest: generate once, on the Monday the prior week completes

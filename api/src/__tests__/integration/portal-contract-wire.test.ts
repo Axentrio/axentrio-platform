@@ -196,7 +196,6 @@ describe('wire contract — /insights', () => {
       'id',
       'lastSeenAt',
       'occurrences',
-      'recommendation',
       'resolvedAt',
       'severity',
       'status',

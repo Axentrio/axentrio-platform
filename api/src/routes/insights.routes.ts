@@ -200,7 +200,6 @@ router.get(
         lastSeenAt: g.last_seen_at as string,
         resolvedAt: (g.resolved_at ?? null) as string | null,
         archivedAt: (g.archived_at ?? null) as string | null,
-        recommendation: (g.recommendation ?? null) as string | null,
       })),
       meta: {
         lastRefreshedAt: (state?.lastRefreshedAt ?? null) as unknown as string | null,

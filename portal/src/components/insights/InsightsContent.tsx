@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Lightbulb, Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
+  Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
   FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -106,13 +106,6 @@ function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boole
             ago: timeAgo(gap.lastSeenAt),
           })}
         </p>
-
-        {gap.recommendation && (
-          <p className="text-sm text-zinc-300 bg-white/5 rounded-lg px-3 py-2">
-            <Lightbulb className="inline h-3.5 w-3.5 mr-1.5 text-amber-300" />
-            {gap.recommendation}
-          </p>
-        )}
 
         {/* Evidence drill-down — Pro+; locked affordance sells the upgrade (Deviation 11/14). */}
         {evidenceEnabled ? (

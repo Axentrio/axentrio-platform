@@ -59,6 +59,21 @@ vi.mock('../../insights/gap-aggregation.service', () => ({
   aggregateGaps: aggregateMock,
 }));
 
+const sentimentThemeMock = vi.hoisted(() => vi.fn());
+vi.mock('../../insights/sentiment-themes.service', () => ({
+  canonicalizeSentimentTheme: sentimentThemeMock,
+}));
+
+const aggregateSentimentMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../insights/sentiment-aggregation.service', () => ({
+  aggregateSentiment: aggregateSentimentMock,
+}));
+
+const aggregateCorrelationsMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../insights/correlation.service', () => ({
+  aggregateCorrelations: aggregateCorrelationsMock,
+}));
+
 // Digest generation + outbox are Enterprise-only and have their own tests; this
 // suite covers refresh orchestration only. Stub them so the once-runner's
 // unconditional sendDueDigests() drain doesn't touch unmocked repos.
@@ -148,13 +163,90 @@ beforeEach(() => {
   st.eligibleCount = 0;
   st.judgedInWindowCount = 0;
   st.tenants = [];
-  st.entitled = {};
+  st.entitled = { [T]: true };
+  st.band = {};
   st.refreshedTenants = [];
   judgeMock.mockReset();
   canonMock.mockReset();
+  sentimentThemeMock.mockReset();
   aggregateMock.mockClear();
+  aggregateSentimentMock.mockClear();
+  aggregateCorrelationsMock.mockClear();
   judgeMock.mockResolvedValue({
     hadQuestion: false, satisfied: null, topicPhrase: null, evidenceMessageIds: [], reasoning: null,
+  });
+});
+
+describe('refreshTenantInsights — feature guard', () => {
+  it('does nothing when gapInsights is disabled', async () => {
+    st.entitled[T] = false;
+    st.eligibleSessions = [session('s1', '2026-06-11T10:00:00Z')];
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(st.capturedLimit).toBe(0);
+    expect(judgeMock).not.toHaveBeenCalled();
+    expect(aggregateMock).not.toHaveBeenCalled();
+    expect(st.savedState).toBeNull();
+  });
+});
+
+describe('refreshTenantInsights — sentiment tiers', () => {
+  it('records basic sentiment for Essential without creating or aggregating themes', async () => {
+    st.band[T] = 'essential';
+    st.eligibleSessions = [session('s1', '2026-06-11T10:00:00Z')];
+    st.transcripts = {
+      s1: [{ id: 'm1', content: 'your answer was not helpful', contentEncrypted: false, sender: 'user' }],
+    };
+    judgeMock.mockResolvedValue({
+      hadQuestion: true,
+      satisfied: false,
+      topicPhrase: null,
+      evidenceMessageIds: ['m1'],
+      reasoning: 'The customer was unhappy.',
+      sentiment: 'negative',
+      sentimentTheme: 'unclear answers',
+    });
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).toHaveBeenCalledWith(expect.any(Array), false, expect.any(Object), {
+      withSentiment: true,
+      withSentimentThemes: false,
+    });
+    expect(st.savedJudgments[0]).toMatchObject({
+      sentiment: 'negative',
+      sentimentThemeId: null,
+    });
+    expect(sentimentThemeMock).not.toHaveBeenCalled();
+    expect(aggregateSentimentMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps sentiment theme canonicalisation and aggregation for Enterprise', async () => {
+    st.band[T] = 'enterprise';
+    st.eligibleSessions = [session('s1', '2026-06-11T10:00:00Z')];
+    st.transcripts = {
+      s1: [{ id: 'm1', content: 'your answer was not helpful', contentEncrypted: false, sender: 'user' }],
+    };
+    judgeMock.mockResolvedValue({
+      hadQuestion: true,
+      satisfied: false,
+      topicPhrase: null,
+      evidenceMessageIds: ['m1'],
+      reasoning: 'The customer was unhappy.',
+      sentiment: 'negative',
+      sentimentTheme: 'unclear answers',
+    });
+    sentimentThemeMock.mockResolvedValue({ ok: true, themeId: 'theme-1' });
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(sentimentThemeMock).toHaveBeenCalledWith(T, 'unclear answers', 'negative');
+    expect(st.savedJudgments[0]).toMatchObject({
+      sentiment: 'negative',
+      sentimentThemeId: 'theme-1',
+    });
+    expect(aggregateSentimentMock).toHaveBeenCalledWith(T, NOW);
   });
 });
 

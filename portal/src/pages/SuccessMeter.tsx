@@ -2,8 +2,8 @@
  * Success Meter Page — the user-facing surface (CONTEXT.md sidebar-label
  * carve-out), per ADR-0013 D7: one surface, two tabs — Outcomes (the
  * analytics dashboard) and AI Insights (the Gaps surface per ADR-0007).
- * The Insights tab is gated by `gapInsights`; unentitled tenants see the
- * Deviation-11 locked preview.
+ * The whole surface is gated by `gapInsights`; Outcomes remain a separate
+ * analytics capability, but this route is hidden when Success Meter is off.
  */
 import { useTranslation } from 'react-i18next';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +19,36 @@ export default function SuccessMeter() {
   const { t } = useTranslation();
   const isEntitledInsights = useIsEntitled('gapInsights');
   const hasInsights = useHasFeature('gapInsights'); // effective (entitled ∧ tenant toggle)
+
+  if (!isEntitledInsights) {
+    return (
+      <LockedPreview
+        feature="gapInsights"
+        title={t('insights.locked.title', { defaultValue: 'AI Insights' })}
+        oneLiner={t('insights.locked.oneLiner', {
+          defaultValue: 'See what customers ask that your assistant can’t answer yet.',
+        })}
+        bullets={[
+          t('insights.locked.bullet1', {
+            defaultValue: 'Topics customers keep asking about, ranked by how many asked',
+          }),
+          t('insights.locked.bullet2', {
+            defaultValue: 'Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically',
+          }),
+          t('insights.locked.bullet3', {
+            defaultValue: 'Refreshed nightly from your real conversations',
+          }),
+        ]}
+      />
+    );
+  }
+  if (!hasInsights) {
+    return (
+      <FeatureDisabledNotice
+        featureLabel={t('features.keys.gapInsights.label', { defaultValue: 'Success Meter' })}
+      />
+    );
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -47,33 +77,7 @@ export default function SuccessMeter() {
         </TabsContent>
 
         <TabsContent value="insights" className="p-6">
-          {hasInsights ? (
-            <InsightsContent />
-          ) : isEntitledInsights ? (
-            // Entitled but toggled off — opt-out notice, never an upsell.
-            <FeatureDisabledNotice
-              featureLabel={t('features.keys.gapInsights.label', { defaultValue: 'Success Meter' })}
-            />
-          ) : (
-            <LockedPreview
-              feature="gapInsights"
-              title={t('insights.locked.title', { defaultValue: 'AI Insights' })}
-              oneLiner={t('insights.locked.oneLiner', {
-                defaultValue: 'See what customers ask that your assistant can’t answer yet.',
-              })}
-              bullets={[
-                t('insights.locked.bullet1', {
-                  defaultValue: 'Topics customers keep asking about, ranked by how many asked',
-                }),
-                t('insights.locked.bullet2', {
-                  defaultValue: 'Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically',
-                }),
-                t('insights.locked.bullet3', {
-                  defaultValue: 'Refreshed nightly from your real conversations',
-                }),
-              ]}
-            />
-          )}
+          <InsightsContent />
         </TabsContent>
       </Tabs>
     </div>

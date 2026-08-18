@@ -32,8 +32,8 @@ export interface JudgeVerdict {
   evidenceMessageIds: string[];
   reasoning: string | null;
   /**
-   * Sentiment (P3 / ADR-0014, D5) — only populated when judged with
-   * `withSentiment` (Enterprise tenants). null/undefined otherwise.
+   * Basic sentiment — populated when judged with `withSentiment`.
+   * null/undefined otherwise.
    */
   sentiment: 'positive' | 'negative' | 'neutral' | null;
   /** Short English praise/complaint theme phrase, or null. */
@@ -52,11 +52,17 @@ Rules:
 - reasoning: one or two sentences, plain language, citing what the customer asked and how the assistant responded.`;
 
 /**
- * Enterprise-only extension (D5). Appended to the base prompt + JSON shape ONLY
- * when `withSentiment` is set — non-Enterprise judging stays byte-identical to
- * SYSTEM_PROMPT above, so sentiment is purely additive and entitled-only.
+ * Basic sentiment extension. Themes are intentionally absent so Essential and
+ * Pro judgments cannot feed the Enterprise-only theme registry.
  */
-const SENTIMENT_PROMPT = `${SYSTEM_PROMPT.replace(
+const BASIC_SENTIMENT_PROMPT = `${SYSTEM_PROMPT.replace(
+  '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string}',
+  '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string, "sentiment": "positive"|"negative"|"neutral"}',
+)}
+- sentiment: the customer's overall sentiment in this chat — "positive", "negative", or "neutral".`;
+
+/** Enterprise extension: basic sentiment plus a canonicalisable theme phrase. */
+const SENTIMENT_THEME_PROMPT = `${SYSTEM_PROMPT.replace(
   '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string}',
   '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string, "sentiment": "positive"|"negative"|"neutral", "sentimentTheme": string|null}',
 )}
@@ -89,16 +95,21 @@ export async function judgeTranscript(
   messages: TranscriptMessage[],
   isHandoff: boolean,
   tally?: UsageTally,
-  opts?: { withSentiment?: boolean },
+  opts?: { withSentiment?: boolean; withSentimentThemes?: boolean },
 ): Promise<JudgeVerdict> {
   // Deliberately NOT passing tenantId to getProvider: the nightly judge is
   // platform-side batch work and must not consume the tenant's dailyLlmCalls
   // quota (which protects their live bot). Cost is tracked via the tally
   // (ADR-0006: "monitor token spend via billing telemetry").
   const provider = getProvider(DEFAULT_PROVIDER);
+  const systemPrompt = opts?.withSentimentThemes
+    ? SENTIMENT_THEME_PROMPT
+    : opts?.withSentiment
+      ? BASIC_SENTIMENT_PROMPT
+      : SYSTEM_PROMPT;
   const response = await provider.chat(
     [
-      { role: 'system', content: opts?.withSentiment ? SENTIMENT_PROMPT : SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: renderTranscript(messages) },
     ],
     { model: DEFAULT_MODEL, maxTokens: 500, temperature: 0, jsonMode: true },
@@ -132,11 +143,14 @@ export async function judgeTranscript(
   if (isHandoff && hadQuestion) satisfied = false;
 
   const sentiment =
-    opts?.withSentiment && ['positive', 'negative', 'neutral'].includes(parsed.sentiment as string)
+    (opts?.withSentiment || opts?.withSentimentThemes) &&
+    ['positive', 'negative', 'neutral'].includes(parsed.sentiment as string)
       ? (parsed.sentiment as 'positive' | 'negative' | 'neutral')
       : null;
   const sentimentTheme =
-    opts?.withSentiment && typeof parsed.sentimentTheme === 'string' && parsed.sentimentTheme.trim()
+    opts?.withSentimentThemes &&
+    typeof parsed.sentimentTheme === 'string' &&
+    parsed.sentimentTheme.trim()
       ? parsed.sentimentTheme
       : null;
 

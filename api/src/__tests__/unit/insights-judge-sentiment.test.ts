@@ -26,7 +26,7 @@ function reply(obj: Record<string, unknown>) {
 
 beforeEach(() => chatMock.mockReset());
 
-describe('judge · sentiment extension (P3 D5)', () => {
+describe('judge · sentiment tiers', () => {
   it('without withSentiment: prompt is the base contract and no sentiment is parsed', async () => {
     reply({ hadQuestion: true, satisfied: false, topic: 'warranty', evidenceMessageIds: ['m1'], reasoning: 'asked, not answered', sentiment: 'negative', sentimentTheme: 'slow' });
     const v = await judgeTranscript(TX, false);
@@ -38,9 +38,23 @@ describe('judge · sentiment extension (P3 D5)', () => {
     expect(v.topicPhrase).toBe('warranty');
   });
 
-  it('with withSentiment: prompt asks for sentiment and it is parsed', async () => {
+  it('with basic sentiment: parses sentiment but never requests or accepts a theme', async () => {
     reply({ hadQuestion: true, satisfied: false, topic: 'warranty', evidenceMessageIds: ['m1'], reasoning: 'x', sentiment: 'negative', sentimentTheme: 'unclear answers' });
     const v = await judgeTranscript(TX, false, undefined, { withSentiment: true });
+
+    const systemPrompt = chatMock.mock.calls[0][0][0].content;
+    expect(systemPrompt).toMatch(/"sentiment"/);
+    expect(systemPrompt).not.toMatch(/sentimentTheme/);
+    expect(v.sentiment).toBe('negative');
+    expect(v.sentimentTheme).toBeNull();
+  });
+
+  it('with sentiment themes: parses both fields for Enterprise', async () => {
+    reply({ hadQuestion: true, satisfied: false, topic: 'warranty', evidenceMessageIds: ['m1'], reasoning: 'x', sentiment: 'negative', sentimentTheme: 'unclear answers' });
+    const v = await judgeTranscript(TX, false, undefined, {
+      withSentiment: true,
+      withSentimentThemes: true,
+    });
 
     const systemPrompt = chatMock.mock.calls[0][0][0].content;
     expect(systemPrompt).toMatch(/sentimentTheme/);

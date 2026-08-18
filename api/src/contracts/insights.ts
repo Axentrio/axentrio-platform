@@ -18,7 +18,6 @@ export interface GapDto {
   lastSeenAt: string;
   resolvedAt: string | null;
   archivedAt: string | null;
-  recommendation: string | null;
 }
 
 export interface InsightsMeta {

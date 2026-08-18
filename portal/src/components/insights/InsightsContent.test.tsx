@@ -44,7 +44,6 @@ function gap(over: Partial<Record<string, unknown>> = {}) {
     lastSeenAt: '2026-06-11T00:00:00Z',
     resolvedAt: null,
     archivedAt: null,
-    recommendation: null,
     ...over,
   };
 }

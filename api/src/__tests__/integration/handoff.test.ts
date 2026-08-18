@@ -90,6 +90,31 @@ describe('Handoff Flow', () => {
     });
   });
 
+  describe('GET /api/v1/handoffs/pending', () => {
+    it('returns unclaimed handoff sessions with queue status pending', async () => {
+      const pending = await createTestSession(tenantId, {
+        status: 'handoff',
+        ownership: 'handoff_requested',
+      });
+      await createTestSession(tenantId, {
+        status: 'handoff',
+        ownership: 'human_owned',
+      });
+      await createTestSession(tenantId, { status: 'bot', ownership: 'bot_owned' });
+
+      const res = await request(app).get('/api/v1/handoffs/pending');
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.pendingRequests).toEqual([
+        expect.objectContaining({
+          id: pending.id,
+          chatId: pending.id,
+          status: 'pending',
+        }),
+      ]);
+    });
+  });
+
   describe('GET /api/v1/handoffs/queue', () => {
     it('should return only requested handoffs in the queue', async () => {
       const session1 = await createTestSession(tenantId, { status: 'handoff' });

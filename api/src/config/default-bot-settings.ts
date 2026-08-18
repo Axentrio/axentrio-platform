@@ -8,8 +8,29 @@
  * Keeping these here prevents the create-path defaults and the GET-fill defaults
  * from drifting apart.
  */
-import { BotSettings } from '../database/entities/Bot';
+import type { BotSettings } from '../database/entities/Bot';
 import { DEFAULT_SKILLS } from './default-skills';
+
+/** Default keyword short-circuit. Must cover every greeting-chip handoff phrase. */
+export const DEFAULT_ESCALATION_KEYWORDS = [
+  'speak to someone',
+  'human agent',
+  'talk to a person',
+  'talk to someone',
+] as const;
+
+/** Stored list unioned with defaults so old bots still match greeting-chip phrases. */
+export function effectiveEscalationKeywords(stored?: readonly string[] | null): string[] {
+  return [...new Set([...DEFAULT_ESCALATION_KEYWORDS, ...(stored ?? [])])];
+}
+
+/** First-message chips on a new widget session. Last item is the handoff chip. */
+export const WIDGET_GREETING_QUICK_REPLIES = [
+  'Book appointment',
+  'Our services',
+  'Pricing',
+  'Talk to someone',
+] as const;
 
 /** Default behavioural `ai` block for a bot. `name` seeds the brand-voice name. */
 export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
@@ -20,7 +41,7 @@ export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
     brandVoice: { name: `${name} Assistant`, tone: 'friendly', templateId: null },
     guardrails: {
       topicsToAvoid: [],
-      escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
+      escalationKeywords: [...DEFAULT_ESCALATION_KEYWORDS],
       confidenceThreshold: 0.7,
       maxResponseLength: 500,
       greetingMessage: 'Welcome! How can I help you today?',

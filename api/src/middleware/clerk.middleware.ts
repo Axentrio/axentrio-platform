@@ -16,6 +16,7 @@ import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
+import { DEFAULT_ESCALATION_KEYWORDS } from '../config/default-bot-settings';
 import { logger } from '../utils/logger';
 import type { RequestUser, UserRole } from '../types';
 import {
@@ -158,7 +159,7 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
                   },
                   guardrails: {
                     topicsToAvoid: [],
-                    escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
+                    escalationKeywords: [...DEFAULT_ESCALATION_KEYWORDS],
                     confidenceThreshold: 0.7,
                     maxResponseLength: 500,
                     greetingMessage: 'Welcome! How can I help you today?',

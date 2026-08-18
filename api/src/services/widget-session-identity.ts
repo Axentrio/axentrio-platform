@@ -21,7 +21,7 @@ import { Bot } from '../database/entities/Bot';
 import { enforceCountLimit } from '../billing/enforce';
 import { effectiveBotConfig, withEffectiveConfig } from '../templates/template-resolver';
 import { substituteVariables } from '../llm/prompt-builder';
-import { defaultBotAi } from '../config/default-bot-settings';
+import { defaultBotAi, WIDGET_GREETING_QUICK_REPLIES } from '../config/default-bot-settings';
 import { encrypt } from '../utils/encryption';
 import { emitConversationUpsert } from '../realtime/conversation-events';
 import { ValidationError } from '../middleware/error-handler';
@@ -241,7 +241,7 @@ export async function ensureWidgetGreeting(
           status: 'sent' as Message['status'],
           sentAt: new Date(),
           metadata: {
-            quickReplies: ['Book appointment', 'Our services', 'Pricing', 'Talk to someone'],
+            quickReplies: [...WIDGET_GREETING_QUICK_REPLIES],
           },
         }),
       );

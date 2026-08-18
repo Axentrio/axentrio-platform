@@ -372,7 +372,10 @@ router.get(
       const lastMessage = lastBySession.get(session.id);
       return {
         id: session.id,
-        status: session.status,
+        chatId: session.id,
+        // Queue status the portal Inbox badge/tab filters on (`pending`).
+        // Session.status stays `handoff` in the DB (legacy + claimed chats).
+        status: 'pending',
         metadata: session.metadata,
         createdAt: session.createdAt,
         lastMessage: lastMessage

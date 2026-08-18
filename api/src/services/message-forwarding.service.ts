@@ -47,6 +47,7 @@ import { localizeMessage } from '../llm/localize';
 import { isOutsideBusinessHours } from '../utils/format-business-hours';
 import { renderChannelAddressControls } from '../channels/address-controls';
 import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
+import { effectiveEscalationKeywords } from '../config/default-bot-settings';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -450,7 +451,7 @@ function localAutoresponse(
     };
   }
 
-  const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
+  const escalationKeywords = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords);
   const lowerContent = plainContent.toLowerCase();
   const matched = escalationKeywords.find((kw: string) => lowerContent.includes(kw.toLowerCase()));
   if (matched) {
@@ -1596,7 +1597,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // each message individually; we must scan the whole window for parity). Off-hours
   // is time-based so it's already covered by the hwm check above.
   if (!auto) {
-    const kwCount = aiSettings.guardrails?.escalationKeywords?.length ?? 0;
+    const kwCount = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords).length;
     // windowMsgs is the small guardrails window (newest 11). If it's at the cap
     // AND escalation keywords are configured, scan the FULL unanswered text
     // backlog up to the hwm so a keyword in an older burst message isn't missed

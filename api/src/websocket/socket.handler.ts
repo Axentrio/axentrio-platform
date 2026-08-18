@@ -736,6 +736,7 @@ async function handleHandoffRequest(
     const commandResult = await conversationCommands.requestHandoff(sessionId, 'user_request', 'socket', undefined, {
       tenantId,
       note: reason || 'User requested',
+      notify: true,
     });
 
     // Display-only free-text reason (not ownership state). DB-side deep merge —
@@ -762,6 +763,21 @@ async function handleHandoffRequest(
     if (commandResult.outcome === 'requested') {
       const { emitConversationUpsertForSession } = await import('../realtime/conversation-events');
       await emitConversationUpsertForSession(sessionId, tenantId);
+      const { deliverHandoffNotification } = await import('../notifications/notification-outbox.worker');
+      void deliverHandoffNotification({
+        tenantId: tenantId!,
+        handoffId: commandResult.handoffId!,
+        sessionId,
+        reason: 'user_request',
+        requestedAt: new Date(),
+      }).catch((error) => {
+        logger.warn('Handoff notification backstop failed', {
+          tenantId,
+          sessionId,
+          handoffId: commandResult.handoffId!,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
 
     // Confirm to requester

@@ -48,6 +48,8 @@ import { Bot } from '../../database/entities/Bot';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { BotKnowledgeBase } from '../../database/entities/BotKnowledgeBase';
 import { app } from '../../server';
+import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
+import { computeSlots } from '../../booking/booking-providers/slot-engine';
 import { createTestTenant, createTestAnchorBot, createTestUser } from '../helpers/factories';
 
 const fullAiBody = (over: Record<string, unknown> = {}) => ({
@@ -344,6 +346,167 @@ describe('Per-bot AI settings', () => {
       const get = await request(app).get(`/api/v1/bots/${botId}`);
       expect(get.status).toBe(200);
       expect(get.body.data.businessHours.dateOverrides).toEqual(dateOverrides);
+    });
+
+    it('syncs a closed dateOverride onto an existing AvailabilityRule so that day has no slots', async () => {
+      // 2026-08-20 is a Thursday. Seed the rule as Mon–Fri 09–17 so the day is
+      // bookable until the bot-form holiday lands.
+      const ruleRepo = AppDataSource.getRepository(AvailabilityRule);
+      await ruleRepo.save(
+        ruleRepo.create({
+          tenantId,
+          botId,
+          timezone: 'UTC',
+          availabilityMode: 'business_hours',
+          weeklyHours: {
+            mon: [{ start: '09:00', end: '17:00' }],
+            tue: [{ start: '09:00', end: '17:00' }],
+            wed: [{ start: '09:00', end: '17:00' }],
+            thu: [{ start: '09:00', end: '17:00' }],
+            fri: [{ start: '09:00', end: '17:00' }],
+          },
+          dateOverrides: [],
+          slotGranularityMin: 15,
+        }),
+      );
+
+      const dateOverrides = [{ date: '2026-08-20', closed: true }];
+      const patch = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({
+          businessHours: {
+            enabled: true,
+            schedule: [
+              { day: 'monday', open: '09:00', close: '17:00', closed: false },
+              { day: 'tuesday', open: '09:00', close: '17:00', closed: false },
+              { day: 'wednesday', open: '09:00', close: '17:00', closed: false },
+              { day: 'thursday', open: '09:00', close: '17:00', closed: false },
+              { day: 'friday', open: '09:00', close: '17:00', closed: false },
+              { day: 'saturday', open: '00:00', close: '00:00', closed: true },
+              { day: 'sunday', open: '00:00', close: '00:00', closed: true },
+            ],
+            dateOverrides,
+          },
+        });
+      expect(patch.status).toBe(200);
+
+      const rule = await ruleRepo.findOneOrFail({ where: { botId } });
+      expect(rule.dateOverrides).toEqual(dateOverrides);
+      expect(rule.weeklyHours.thu).toEqual([{ start: '09:00', end: '17:00' }]);
+      // Other rule fields must survive the hours write.
+      expect(rule.availabilityMode).toBe('business_hours');
+      expect(rule.slotGranularityMin).toBe(15);
+
+      const slotInput = {
+        eventType: {
+          durationMin: 30,
+          bufferBeforeMin: 0,
+          bufferAfterMin: 0,
+          minNoticeMin: 0,
+          maxHorizonDays: 60,
+        },
+        now: new Date('2026-08-01T00:00:00Z'),
+        busy: [],
+      };
+      expect(
+        computeSlots({
+          ...slotInput,
+          rule,
+          rangeStart: '2026-08-20T00:00:00Z',
+          rangeEnd: '2026-08-21T00:00:00Z',
+        }),
+      ).toEqual([]);
+      expect(
+        computeSlots({
+          ...slotInput,
+          rule,
+          rangeStart: '2026-08-21T00:00:00Z',
+          rangeEnd: '2026-08-22T00:00:00Z',
+        }).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it('maps a closed weekday onto weeklyHours (no Thursday window)', async () => {
+      const ruleRepo = AppDataSource.getRepository(AvailabilityRule);
+      await ruleRepo.save(
+        ruleRepo.create({
+          tenantId,
+          botId,
+          timezone: 'UTC',
+          weeklyHours: { thu: [{ start: '09:00', end: '17:00' }], fri: [{ start: '09:00', end: '17:00' }] },
+          dateOverrides: [],
+        }),
+      );
+
+      const patch = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({
+          businessHours: {
+            enabled: true,
+            schedule: [
+              { day: 'thursday', open: '09:00', close: '17:00', closed: true },
+              { day: 'friday', open: '09:00', close: '17:00', closed: false },
+            ],
+          },
+        });
+      expect(patch.status).toBe(200);
+
+      const rule = await ruleRepo.findOneOrFail({ where: { botId } });
+      expect(rule.weeklyHours).toEqual({ fri: [{ start: '09:00', end: '17:00' }] });
+      expect(rule.weeklyHours).not.toHaveProperty('thu');
+    });
+
+    it('does not rewrite the AvailabilityRule when spoken hours are disabled', async () => {
+      const existingHours = {
+        thu: [{ start: '09:00', end: '17:00' }],
+        fri: [{ start: '10:00', end: '16:00' }],
+      };
+      const existingOverrides = [{ date: '2026-12-25', closed: true }];
+      const ruleRepo = AppDataSource.getRepository(AvailabilityRule);
+      await ruleRepo.save(
+        ruleRepo.create({
+          tenantId,
+          botId,
+          timezone: 'UTC',
+          weeklyHours: existingHours,
+          dateOverrides: existingOverrides,
+          slotGranularityMin: 15,
+        }),
+      );
+
+      const patch = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({
+          businessHours: {
+            enabled: false,
+            schedule: [{ day: 'monday', open: '08:00', close: '12:00', closed: false }],
+            dateOverrides: [{ date: '2026-08-20', closed: true }],
+          },
+        });
+      expect(patch.status).toBe(200);
+
+      const rule = await ruleRepo.findOneOrFail({ where: { botId } });
+      expect(rule.weeklyHours).toEqual(existingHours);
+      expect(rule.dateOverrides).toEqual(existingOverrides);
+      expect(rule.slotGranularityMin).toBe(15);
+    });
+
+    it('does not create an AvailabilityRule when the bot has none', async () => {
+      const ruleRepo = AppDataSource.getRepository(AvailabilityRule);
+      await expect(ruleRepo.findOne({ where: { botId } })).resolves.toBeNull();
+
+      const patch = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({
+          businessHours: {
+            enabled: true,
+            schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+            dateOverrides: [{ date: '2026-08-20', closed: true }],
+          },
+        });
+      expect(patch.status).toBe(200);
+      await expect(ruleRepo.findOne({ where: { botId } })).resolves.toBeNull();
+      await expect(ruleRepo.count({ where: { botId } })).resolves.toBe(0);
     });
   });
 });

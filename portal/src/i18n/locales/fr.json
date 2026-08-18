@@ -954,7 +954,7 @@
         },
         "businessHours": {
           "label": "Horaires d'ouverture",
-          "helper": "Lorsqu'il est activé, l'assistant connaît vos horaires d'ouverture et peut les indiquer aux visiteurs. Il continue d'aider les visiteurs en dehors de ces horaires.",
+          "helper": "Lorsqu'il est activé, l'assistant connaît vos horaires d'ouverture et peut les indiquer aux visiteurs. Ces horaires régissent aussi les créneaux réservables. Il continue d'aider les visiteurs en dehors de ces horaires.",
           "alwaysOnHint": "Laissez désactivé si vous ne voulez pas que les horaires soient mentionnés.",
           "presetsLabel": "Réglage rapide :",
           "presetWeekdays": "Sem. 9–17",

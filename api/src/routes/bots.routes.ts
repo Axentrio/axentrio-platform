@@ -42,6 +42,8 @@ import { getEntitlements } from '../billing/entitlements';
 import { getAnchorBotConfig, getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 import { getCapabilities, type ReadinessBotCtx, type ReadinessResult } from '../readiness';
 import { computeUnselectedEntitledSkills } from '../modules/skill-coverage';
+import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { businessHoursToAvailability } from '../booking/sync-hours-from-bot';
 
 const router = Router();
 const botRepository = AppDataSource.getRepository(Bot);
@@ -405,6 +407,16 @@ router.patch(
           ...(bot.settings ?? {}),
           businessHours: { ...businessHours, timezone: derivedTimezone },
         };
+        // One-way sync onto the slot engine — only when spoken hours are ON.
+        // Disabled spoken hours mean "don't mention hours / always-on", not
+        // "wipe the scheduler". A bot with no AvailabilityRule is left alone.
+        const rule = await manager.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } });
+        if (rule && businessHours.enabled) {
+          const mapped = businessHoursToAvailability(businessHours);
+          rule.weeklyHours = mapped.weeklyHours;
+          rule.dateOverrides = mapped.dateOverrides;
+          await manager.getRepository(AvailabilityRule).save(rule);
+        }
       }
       if (quotedAddress !== undefined) {
         bot.settings = {

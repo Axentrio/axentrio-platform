@@ -756,8 +756,9 @@ export const SchedulerSettings: React.FC = () => {
                 <div className="space-y-3 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Availability</h3>
                   <p className="text-xs text-text-muted">
-                    These hours tell the assistant when you're open and which times it can auto-confirm. They never stop
-                    it from helping customers or capturing an out-of-hours request for you to confirm.
+                    These hours gate bookable slots. They are managed from your AI bot's business hours; changes here may
+                    be overwritten the next time those hours are saved. They never stop the assistant from helping
+                    customers or capturing an out-of-hours request.
                   </p>
                   {/* Always-open vs business-hours mode */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

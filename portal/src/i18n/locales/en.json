@@ -962,7 +962,7 @@
         },
         "businessHours": {
           "label": "Business hours",
-          "helper": "When on, the assistant knows your opening hours and can share them with visitors. It keeps helping visitors outside these hours.",
+          "helper": "When on, the assistant knows your opening hours and can share them with visitors. These hours also govern bookable slots. It keeps helping visitors outside these hours.",
           "alwaysOnHint": "Leave off if you don't want hours mentioned.",
           "presetsLabel": "Quick set:",
           "presetWeekdays": "Weekdays 9–5",

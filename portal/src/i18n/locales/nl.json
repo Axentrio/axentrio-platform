@@ -955,7 +955,7 @@
         },
         "businessHours": {
           "label": "Openingstijden",
-          "helper": "Als dit aan staat, kent de assistent je openingstijden en kan die met bezoekers delen. Buiten deze uren blijft de assistent helpen.",
+          "helper": "Als dit aan staat, kent de assistent je openingstijden en kan die met bezoekers delen. Deze uren bepalen ook de boekbare tijdsloten. Buiten deze uren blijft de assistent helpen.",
           "alwaysOnHint": "Laat uit als je niet wilt dat de openingstijden worden genoemd.",
           "presetsLabel": "Snel instellen:",
           "presetWeekdays": "Werkdagen 9–17",

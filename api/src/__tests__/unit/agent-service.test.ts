@@ -520,7 +520,10 @@ describe('AgentService', () => {
     );
 
     expect(result.type).toBe('response');
-    if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeUndefined();
+      expect(result.validationContext?.bookingRecorded).toBe(true);
+    }
   });
 
   it('drops slot chips once a request is captured in the same run', async () => {

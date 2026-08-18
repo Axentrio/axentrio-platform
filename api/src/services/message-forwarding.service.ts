@@ -41,7 +41,7 @@ import {
   BotNotFoundConfigError,
 } from './bot-config.service';
 import { conversationCommands } from './conversation-command.service';
-import { runInboundGate } from '../guardrails/inbound-guardrails.service';
+import { runInboundGate, writeRoutingDropLog } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
 import { isOutsideBusinessHours } from '../utils/format-business-hours';
@@ -230,6 +230,12 @@ export async function forwardMessageToN8n(
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
   if (!tenant) {
     logger.warn(`Tenant not found for session ${session.id}`);
+    await writeRoutingDropLog(
+      session,
+      savedMessage.id,
+      'missing_tenant',
+      `Tenant ${session.tenantId} was not found`,
+    );
     return false;
   }
 
@@ -249,6 +255,7 @@ export async function forwardMessageToN8n(
         `Session ${session.id} points at a paused/deleted bot — should have been caught upstream`,
         { error: err.message, tenantId: session.tenantId, botId: session.botId },
       );
+      await writeRoutingDropLog(session, savedMessage.id, 'missing_bot', err.message);
       return false;
     }
     throw err;
@@ -780,6 +787,7 @@ async function platformAgentPath(
           const guard = await applyOutputGuardrails({
             tenantId: tenant.id, session, channel: session.channel,
             content: result.content, fallbackMessage, generationPath: 'legacy',
+            validationContext: result.validationContext,
           });
           if (guard.blocked) {
             await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
@@ -840,6 +848,7 @@ async function platformAgentPath(
           const guard = await applyOutputGuardrails({
             tenantId: tenant.id, session, channel: session.channel,
             content: result.message, fallbackMessage, generationPath: 'legacy',
+            validationContext: result.validationContext,
           });
           if (guard.blocked) {
             await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
@@ -1540,7 +1549,15 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   if (session.aiAutoReplyEnabled === false) return 'noop';
 
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
-  if (!tenant) return 'noop';
+  if (!tenant) {
+    await writeRoutingDropLog(
+      session,
+      pending.id,
+      'missing_tenant',
+      `Tenant ${session.tenantId} was not found`,
+    );
+    return 'noop';
+  }
 
   let botSettings: BotSettings;
   let bot: Bot;
@@ -1551,6 +1568,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       logger.warn(`[coalescer] session ${session.id} points at a paused/deleted bot — skipping`, {
         error: (err as Error).message,
       });
+      await writeRoutingDropLog(session, pending.id, 'missing_bot', (err as Error).message);
       return 'noop';
     }
     throw err;
@@ -1710,6 +1728,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     const guard = await applyOutputGuardrails({
       tenantId: session.tenantId, session, channel: session.channel,
       content, fallbackMessage, generationPath: 'coalescer',
+      validationContext: result.validationContext,
     });
     if (guard.blocked) {
       content = guard.content;

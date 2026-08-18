@@ -68,6 +68,13 @@ async function loadEligibleSessions(
     .andWhere("s.status IN ('closed', 'handoff')")
     // Guardrails: exclude spam/scam/bot-loop conversations from insights (AC20).
     .andWhere("s.guardrail_status = 'normal'")
+    .andWhere(
+      `NOT EXISTS (
+        SELECT 1 FROM guardrail_spam_logs gsl
+        WHERE gsl.conversation_id = s.id
+          AND gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')
+      )`,
+    )
     .andWhere('COALESCE(s.ended_at, s.last_activity_at, s.started_at) > :since', { since })
     .orderBy('COALESCE(s.ended_at, s.last_activity_at, s.started_at)', 'ASC')
     .limit(cap)
@@ -246,6 +253,11 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
     `SELECT COUNT(*)::int AS eligible FROM chat_sessions s
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
        AND s.guardrail_status = 'normal'
+       AND NOT EXISTS (
+         SELECT 1 FROM guardrail_spam_logs gsl
+         WHERE gsl.conversation_id = s.id
+           AND gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')
+       )
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );
@@ -254,6 +266,11 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
      JOIN chatbot_judgments j ON j.session_id = s.id
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
        AND s.guardrail_status = 'normal'
+       AND NOT EXISTS (
+         SELECT 1 FROM guardrail_spam_logs gsl
+         WHERE gsl.conversation_id = s.id
+           AND gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')
+       )
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );

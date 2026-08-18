@@ -55,6 +55,7 @@ import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { InsightsRefreshState } from '../../database/entities/InsightsRefreshState';
+import { SpamScamLog } from '../../database/entities/SpamScamLog';
 import { createTestTenant, createTestUser, createTestBillingAccount, createTestAnchorBot } from '../helpers/factories';
 import type { Tenant } from '../../database/entities/Tenant';
 
@@ -78,8 +79,9 @@ async function seedTenant(tier: 'essential' | 'pro' | 'enterprise') {
  */
 async function seedSessions(n: number, over: Partial<ChatSession> = {}) {
   const repo = AppDataSource.getRepository(ChatSession);
+  const sessions: ChatSession[] = [];
   for (let i = 0; i < n; i++) {
-    await repo.save(
+    sessions.push(await repo.save(
       repo.create({
         tenantId,
         botId,
@@ -91,8 +93,9 @@ async function seedSessions(n: number, over: Partial<ChatSession> = {}) {
         endedAt: new Date(),
         ...over,
       }),
-    );
+    ));
   }
+  return sessions;
 }
 
 beforeEach(() => {
@@ -109,11 +112,45 @@ describe('GET /insights/analysis-status', () => {
     await seedTenant('pro');
     await seedSessions(5);
     await seedSessions(4, { status: 'active' }); // never judged — still open
-    await seedSessions(3, { guardrailStatus: 'spam' }); // excluded from insights
+    await seedSessions(3, { guardrailStatus: 'spam' }); // enforce-mode exclusions
+    const [shadowFlagged] = await seedSessions(1);
+    const [enforceFlagged] = await seedSessions(1);
+    const [missingTenant, missingBot] = await seedSessions(2);
+    const logRepo = AppDataSource.getRepository(SpamScamLog);
+    await logRepo.save([
+      logRepo.create({
+        tenantId,
+        conversationId: shadowFlagged.id,
+        sourceChannel: 'widget',
+        detectedCategory: 'spam',
+        enforced: false,
+      }),
+      logRepo.create({
+        tenantId,
+        conversationId: enforceFlagged.id,
+        sourceChannel: 'widget',
+        detectedCategory: 'spam',
+        enforced: true,
+      }),
+      logRepo.create({
+        tenantId,
+        conversationId: missingTenant.id,
+        sourceChannel: 'widget',
+        detectedCategory: 'missing_tenant',
+        enforced: true,
+      }),
+      logRepo.create({
+        tenantId,
+        conversationId: missingBot.id,
+        sourceChannel: 'widget',
+        detectedCategory: 'missing_bot',
+        enforced: true,
+      }),
+    ]);
 
     const res = await request(app).get('/api/v1/insights/analysis-status');
     expect(res.status).toBe(200);
-    expect(res.body.data.newChats).toBe(5);
+    expect(res.body.data.newChats).toBe(7);
     expect(res.body.data.minNewChats).toBe(8);
     expect(res.body.data.reason).toBe('not_enough_chats');
   });

@@ -21,7 +21,7 @@ import { notificationService } from '../services/notification.service';
 import { classifyMessage } from './classify';
 import { detectBotLoop } from './loop-detector';
 import { redisLoopStore } from './loop-store';
-import { GuardrailCategory } from './types';
+import { GuardrailCategory, GuardrailJournalCategory } from './types';
 
 export interface InboundGateInput {
   session: ChatSession;
@@ -109,8 +109,8 @@ async function atomicDisableAutoReply(sessionId: string, category: GuardrailCate
 async function writeSpamLog(args: {
   session: ChatSession;
   channel: string;
-  messageId: string;
-  category: GuardrailCategory;
+  messageId: string | null;
+  category: GuardrailJournalCategory;
   reasons: string[];
   score: number | null;
   suspiciousLink: boolean;
@@ -118,6 +118,7 @@ async function writeSpamLog(args: {
   botLoop: boolean;
   enforced: boolean;
   notified: boolean;
+  aiAutoReplyDisabled?: boolean;
 }): Promise<void> {
   try {
     await AppDataSource.getRepository(SpamScamLog).save(
@@ -130,7 +131,7 @@ async function writeSpamLog(args: {
         suspiciousLinksDetected: args.suspiciousLink,
         repeatedMessageDetected: args.repeated,
         botLoopDetected: args.botLoop,
-        aiAutoReplyDisabled: args.enforced,
+        aiAutoReplyDisabled: args.aiAutoReplyDisabled ?? args.enforced,
         notificationSent: args.notified,
         score: args.score,
         reasons: args.reasons,
@@ -140,6 +141,29 @@ async function writeSpamLog(args: {
   } catch (err) {
     logger.warn('[guardrails] failed to write spam/scam log', { sessionId: args.session.id, err });
   }
+}
+
+/** Journal a routing-isolation drop. `enforced=true` records the block action. */
+export async function writeRoutingDropLog(
+  session: ChatSession,
+  messageId: string | null,
+  category: 'missing_tenant' | 'missing_bot',
+  reason: string,
+): Promise<void> {
+  await writeSpamLog({
+    session,
+    channel: session.channel,
+    messageId,
+    category,
+    reasons: [reason],
+    score: null,
+    suspiciousLink: false,
+    repeated: false,
+    botLoop: false,
+    enforced: true,
+    notified: false,
+    aiAutoReplyDisabled: false,
+  });
 }
 
 async function notifyOwner(session: ChatSession, category: GuardrailCategory, reasons: string[]): Promise<void> {

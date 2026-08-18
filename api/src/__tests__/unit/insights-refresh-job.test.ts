@@ -13,6 +13,8 @@ const st = vi.hoisted(() => ({
   eligibleSessions: [] as Array<Record<string, unknown>>,
   capturedLimit: 0,
   capturedSinceParams: [] as Array<Record<string, unknown>>,
+  capturedWhere: [] as string[],
+  capturedQueries: [] as string[],
   // Judgment repo
   existingJudgments: new Set<string>(),
   savedJudgments: [] as Array<Record<string, unknown>>,
@@ -97,7 +99,11 @@ vi.mock('../../database/data-source', () => ({
       if (entity.name === 'ChatSession') {
         const qb: any = {};
         for (const m of ['select', 'addSelect', 'orderBy']) qb[m] = () => qb;
-        qb.where = (_s: string, p?: Record<string, unknown>) => { if (p) st.capturedSinceParams.push(p); return qb; };
+        qb.where = (sql: string, p?: Record<string, unknown>) => {
+          st.capturedWhere.push(sql);
+          if (p) st.capturedSinceParams.push(p);
+          return qb;
+        };
         qb.andWhere = qb.where;
         qb.limit = (n: number) => { st.capturedLimit = n; return qb; };
         qb.getRawMany = async () => st.eligibleSessions;
@@ -132,6 +138,7 @@ vi.mock('../../database/data-source', () => ({
       throw new Error(`unexpected repo ${entity.name}`);
     },
     query: async (sql: string, params: unknown[]) => {
+      st.capturedQueries.push(sql);
       if (sql.includes('FROM messages')) return st.transcripts[params[0] as string] ?? [];
       if (sql.includes('judgedInWindow') || sql.includes('JOIN chatbot_judgments')) {
         return [{ judgedInWindow: st.judgedInWindowCount }];
@@ -154,6 +161,8 @@ beforeEach(() => {
   st.eligibleSessions = [];
   st.capturedLimit = 0;
   st.capturedSinceParams = [];
+  st.capturedWhere = [];
+  st.capturedQueries = [];
   st.existingJudgments = new Set();
   st.savedJudgments = [];
   st.saveErrorQueue = [];
@@ -332,6 +341,25 @@ describe('refreshTenantInsights — backfill + skip + completeness', () => {
     await refreshTenantInsights(T, NOW);
     expect(st.savedState!.judgmentsCompleteness).toBe('0.9000');
     expect(aggregateMock).toHaveBeenCalledWith(T, NOW);
+  });
+
+  it('excludes detection journals in any mode but not missing-identity journals', async () => {
+    await refreshTenantInsights(T, NOW);
+
+    const selection = st.capturedWhere.find((sql) => sql.includes('guardrail_spam_logs'));
+    expect(selection).toBeDefined();
+    const completenessQueries = st.capturedQueries.filter((sql) =>
+      sql.includes('FROM chat_sessions s'),
+    );
+    expect(completenessQueries).toHaveLength(2);
+    for (const sql of [selection!, ...completenessQueries]) {
+      expect(sql).toContain(
+        "gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')",
+      );
+      expect(sql).not.toContain('missing_tenant');
+      expect(sql).not.toContain('missing_bot');
+      expect(sql).not.toContain('gsl.enforced');
+    }
   });
 });
 

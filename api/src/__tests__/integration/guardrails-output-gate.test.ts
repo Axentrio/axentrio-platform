@@ -62,4 +62,44 @@ describe('guardrails · applyOutputGuardrails (integration)', () => {
     const logs = await logRepo().find({ where: { conversationId: session.id } });
     expect(logs.length).toBe(0);
   });
+
+  it('ENFORCE: blocks a fake booking confirmation when no booking was recorded', async () => {
+    const { tenant, session } = await setup(true);
+    const r = await applyOutputGuardrails({
+      tenantId: tenant.id, session, channel: 'widget',
+      content: "I've confirmed your booking.", fallbackMessage: FALLBACK,
+      generationPath: 'coalescer',
+      validationContext: { bookingRecorded: false, priceContextLoaded: false },
+    });
+
+    expect(r).toEqual({ blocked: true, content: FALLBACK });
+    const row = await logRepo().findOneByOrFail({ conversationId: session.id });
+    expect(row.families).toContain('fake_booking_confirmation');
+  });
+
+  it('allows a booking confirmation after a booking was recorded', async () => {
+    const { tenant, session } = await setup(true);
+    const content = "I've confirmed your booking.";
+    const r = await applyOutputGuardrails({
+      tenantId: tenant.id, session, channel: 'widget',
+      content, fallbackMessage: FALLBACK, generationPath: 'coalescer',
+      validationContext: { bookingRecorded: true, priceContextLoaded: false },
+    });
+
+    expect(r).toEqual({ blocked: false, content });
+  });
+
+  it('ENFORCE: blocks a price assertion when no price context was loaded', async () => {
+    const { tenant, session } = await setup(true);
+    const r = await applyOutputGuardrails({
+      tenantId: tenant.id, session, channel: 'widget',
+      content: 'That service costs €30.', fallbackMessage: FALLBACK,
+      generationPath: 'coalescer',
+      validationContext: { bookingRecorded: false, priceContextLoaded: false },
+    });
+
+    expect(r).toEqual({ blocked: true, content: FALLBACK });
+    const row = await logRepo().findOneByOrFail({ conversationId: session.id });
+    expect(row.families).toContain('invented_price');
+  });
 });

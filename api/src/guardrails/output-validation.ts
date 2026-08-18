@@ -8,17 +8,18 @@
 // PRIMARY defense and this is only a secondary net. We therefore match ONLY
 // signals that are essentially never legitimate in a customer-facing reply, and
 // reuse the hardened inbound link/credential primitives so the two directions
-// cannot drift. Checks the plan names but does NOT attempt (not reliably
-// detectable from output text alone): invented price, fake confirmation, fake
-// feature-unlock, inferred-tier — those need backend/state cross-checks.
+// cannot drift. Invented prices and fake booking confirmations are checked only
+// when the caller supplies the turn state needed to prove them.
 
-import { detectUnsafeLinkHosts } from './classify';
+import { detectUnsafeLinkHosts } from "./classify";
 
 export type OutputViolationFamily =
-  | 'leaked_internals'
-  | 'plan_leakage'
-  | 'credential_solicitation'
-  | 'unsafe_link';
+  | "leaked_internals"
+  | "plan_leakage"
+  | "credential_solicitation"
+  | "unsafe_link"
+  | "fake_booking_confirmation"
+  | "invented_price";
 
 export interface OutputViolation {
   family: OutputViolationFamily;
@@ -30,32 +31,101 @@ export interface OutputValidationResult {
   violations: OutputViolation[];
 }
 
+export interface OutputValidationContext {
+  /** True only when a booking mutation succeeded during this Agent run. */
+  bookingRecorded: boolean;
+  /** True when price-bearing catalog or KnowledgeBase content reached this run. */
+  priceContextLoaded: boolean;
+}
+
+/** High-precision numeric currency assertion; bare words such as "price" do not count. */
+export function containsCurrencyAmount(text: string): boolean {
+  return /(?:€|£|\$)\s?\d{1,7}(?:[.,]\d{1,2})?\b|\b(?:EUR|USD|GBP)\s?\d{1,7}(?:[.,]\d{1,2})?\b|\b\d{1,7}(?:[.,]\d{1,2})?\s?(?:(?:EUR|USD|GBP)\b|(?:€|£|\$)(?!\w))/i.test(
+    text,
+  );
+}
+
+/** High-precision detector for a reply claiming a booking mutation completed now. */
+export function claimsBookingDone(text: string): boolean {
+  const t = text.toLowerCase();
+  return [
+    // Completed booking mutation only — bare `scheduled` (reminder/follow-up) is
+    // an everyday reply, not a booking claim (review FP round 2).
+    /\bi(?:'ve| have) (?:successfully )?booked\b/,
+    // `confirmed your booking/appointment` — but NOT when it merely states
+    // availability ("your appointment is available tomorrow").
+    /\bi(?:'ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
+    // Only a *booking* submission counts — a lead/handoff `request` is not a
+    // booking mutation.
+    /\byour booking has been (?:submitted|booked|confirmed)\b/,
+    // Dutch: `geboekt/gereserveerd` may stand alone ("ik heb geboekt" is a
+    // completed claim), but `gepland/ingepland/bevestigd` need the booking noun
+    // — otherwise "ik heb gepland om je te bellen" / "ik heb bevestigd dat we
+    // open zijn" false-positive (review FP round 2).
+    /\bik heb (?:je|uw|het|de|een)?\s?(?:afspraak|reservering|boeking)?\s?(?:geboekt|gereserveerd)\b/,
+    /\bik heb (?:je|uw|het|de|een)?\s?(?:afspraak|reservering|boeking)\s?(?:gepland|ingepland|bevestigd)\b/,
+  ].some((re) => re.test(t));
+}
+
 // Internal markers that have NO legitimate place in a reply to a customer.
 // The fence markers + section headers mirror compose-system-prompt.ts exactly,
 // so a leak of the assembled system prompt is caught verbatim; the tool/id/
 // secret patterns are infrastructure details a reply must never expose.
 const INTERNAL_MARKERS: Array<{ re: RegExp; reason: string }> = [
   // Prompt fences (unique to our composer — impossible in an organic reply).
-  { re: /<<<\s*(?:KNOWLEDGE|EXTRA_INFO)\b|\b(?:KNOWLEDGE|EXTRA_INFO)\s*>>>/i, reason: 'prompt fence marker' },
+  {
+    re: /<<<\s*(?:KNOWLEDGE|EXTRA_INFO)\b|\b(?:KNOWLEDGE|EXTRA_INFO)\s*>>>/i,
+    reason: "prompt fence marker",
+  },
   // Distinctive composed section headers (mirror compose-system-prompt.ts).
-  { re: /##\s*PLATFORM RULES \(non-negotiable\)/i, reason: 'platform-rules header' },
-  { re: /##\s*KNOWLEDGE BASE \(reference data/i, reason: 'knowledge-base section header' },
-  { re: /##\s*ADDITIONAL CONTEXT \(reference only/i, reason: 'additional-context header' },
-  { re: /##\s*GUARDRAILS\b/i, reason: 'guardrails header' },
-  { re: /##\s*FORMATTING RULES \(CRITICAL/i, reason: 'formatting-rules header' },
-  { re: /\bLANGUAGE \(read first\):/i, reason: 'language-directive header' },
+  {
+    re: /##\s*PLATFORM RULES \(non-negotiable\)/i,
+    reason: "platform-rules header",
+  },
+  {
+    re: /##\s*KNOWLEDGE BASE \(reference data/i,
+    reason: "knowledge-base section header",
+  },
+  {
+    re: /##\s*ADDITIONAL CONTEXT \(reference only/i,
+    reason: "additional-context header",
+  },
+  { re: /##\s*GUARDRAILS\b/i, reason: "guardrails header" },
+  {
+    re: /##\s*FORMATTING RULES \(CRITICAL/i,
+    reason: "formatting-rules header",
+  },
+  { re: /\bLANGUAGE \(read first\):/i, reason: "language-directive header" },
   // Internal tool names (all built-in agent tools — a reply must never name them).
-  { re: /\b(?:kb_search|capture_lead|escalate_to_human|check_availability|create_booking|request_appointment|list_bookings|reschedule_booking|cancel_booking)\b/, reason: 'internal tool name' },
+  {
+    re: /\b(?:kb_search|capture_lead|escalate_to_human|check_availability|create_booking|request_appointment|list_bookings|reschedule_booking|cancel_booking)\b/,
+    reason: "internal tool name",
+  },
   // Internal id field names (snake_case ids that only exist server-side).
-  { re: /\b(?:tenant_id|session_id|bot_id|conversation_id)\b/, reason: 'internal id field' },
+  {
+    re: /\b(?:tenant_id|session_id|bot_id|conversation_id)\b/,
+    reason: "internal id field",
+  },
   // Secret / API-key shapes (high-precision — these strings are always secrets).
   // OpenAI keys include sk-proj-/sk-svcacct-/sk-admin- prefixes (codex).
-  { re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9]{16,}\b/, reason: 'openai-style secret key' },
-  { re: /\bsk_(?:live|test|prod)_[A-Za-z0-9]{8,}\b/i, reason: 'stripe-style secret key' },
-  { re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/, reason: 'jwt token' },
-  { re: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/, reason: 'bearer token' },
+  {
+    re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9]{16,}\b/,
+    reason: "openai-style secret key",
+  },
+  {
+    re: /\bsk_(?:live|test|prod)_[A-Za-z0-9]{8,}\b/i,
+    reason: "stripe-style secret key",
+  },
+  {
+    re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
+    reason: "jwt token",
+  },
+  { re: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/, reason: "bearer token" },
   // Internal automation infrastructure.
-  { re: /\bwebhookUrl\b|\bn8n\.(?:io|com|cloud)\b/i, reason: 'internal webhook/automation reference' },
+  {
+    re: /\bwebhookUrl\b|\bn8n\.(?:io|com|cloud)\b/i,
+    reason: "internal webhook/automation reference",
+  },
 ];
 
 // Subscription-plan leakage (R12/AC5) — end customers must never be shown plan
@@ -75,13 +145,31 @@ const INTERNAL_MARKERS: Array<{ re: RegExp; reason: string }> = [
 // CAPABILITY-GATING context (a "feature", an availability denial, or a
 // "to use/access/enable/unlock") nearby — the actual R12/AC5 leak shape. Legit
 // upsells ("includes…", "covers…") and non-plan uses can't satisfy that combo.
-const PLAN = 'Essential|Pro|Enterprise';
+const PLAN = "Essential|Pro|Enterprise";
 const PLAN_NAME = `(?:${PLAN})\\s+(?:plan|tier|subscription)`;
 const PLAN_LEAKAGE: Array<{ re: RegExp; reason: string }> = [
-  { re: new RegExp(`\\bfeature\\b[^.!?\\n]{0,40}\\b${PLAN_NAME}\\b`, 'i'), reason: 'gates a feature behind a plan' },
-  { re: new RegExp(`\\b${PLAN_NAME}\\b[^.!?\\n]{0,40}\\bfeature\\b`, 'i'), reason: 'gates a feature behind a plan' },
-  { re: new RegExp(`\\b(?:not (?:available|included|supported)|only (?:available|included|on)|available only on|require[sd]?|need(?:s|ed)?)\\b[^.!?\\n]{0,30}\\b${PLAN_NAME}\\b`, 'i'), reason: 'gates a feature behind a plan' },
-  { re: new RegExp(`\\b${PLAN_NAME}\\b[^.!?\\n]{0,30}\\bto (?:use|access|enable|unlock)\\b`, 'i'), reason: 'gates a feature behind a plan' },
+  {
+    re: new RegExp(`\\bfeature\\b[^.!?\\n]{0,40}\\b${PLAN_NAME}\\b`, "i"),
+    reason: "gates a feature behind a plan",
+  },
+  {
+    re: new RegExp(`\\b${PLAN_NAME}\\b[^.!?\\n]{0,40}\\bfeature\\b`, "i"),
+    reason: "gates a feature behind a plan",
+  },
+  {
+    re: new RegExp(
+      `\\b(?:not (?:available|included|supported)|only (?:available|included|on)|available only on|require[sd]?|need(?:s|ed)?)\\b[^.!?\\n]{0,30}\\b${PLAN_NAME}\\b`,
+      "i",
+    ),
+    reason: "gates a feature behind a plan",
+  },
+  {
+    re: new RegExp(
+      `\\b${PLAN_NAME}\\b[^.!?\\n]{0,30}\\bto (?:use|access|enable|unlock)\\b`,
+      "i",
+    ),
+    reason: "gates a feature behind a plan",
+  },
 ];
 
 // Output credential solicitation — fully self-contained (does NOT reuse the
@@ -92,13 +180,26 @@ const PLAN_LEAKAGE: Array<{ re: RegExp; reason: string }> = [
 // credentials" is a secret), and "password" excludes policy/help phrasings
 // ("password reset/policy"). Contact details (name/email/phone) are never here.
 const SECRET_NOUN =
-  'password(?!\\s+(?:reset|policy|requirement|protection|manager))|passcode|otp|one[-\\s]?time\\s?(?:pass)?code|2fa|two[-\\s]?factor|auth(?:entication)?\\s?code|verification\\s?code|pin(?:\\s?code|\\s?number)?|cvv|cvc|card\\s?(?:number|details)|login\\s?credentials|(?:recovery|backup|seed)\\s?(?:code|phrase|key|words?)';
-const CRED_VERB = 'send|share|give|provide|tell|forward|enter|submit|confirm|type|input|key\\s?in|paste';
+  "password(?!\\s+(?:reset|policy|requirement|protection|manager))|passcode|otp|one[-\\s]?time\\s?(?:pass)?code|2fa|two[-\\s]?factor|auth(?:entication)?\\s?code|verification\\s?code|pin(?:\\s?code|\\s?number)?|cvv|cvc|card\\s?(?:number|details)|login\\s?credentials|(?:recovery|backup|seed)\\s?(?:code|phrase|key|words?)";
+const CRED_VERB =
+  "send|share|give|provide|tell|forward|enter|submit|confirm|type|input|key\\s?in|paste";
 const OUTPUT_CREDENTIAL: Array<{ re: RegExp; reason: string }> = [
   // imperative "<verb> … <secret>" (inbound verbs + output-only type/input/paste)
-  { re: new RegExp(`\\b(?:${CRED_VERB})\\b[^.!?\\n]{0,40}\\b(?:${SECRET_NOUN})\\b`, 'i'), reason: 'solicits a secret/credential' },
+  {
+    re: new RegExp(
+      `\\b(?:${CRED_VERB})\\b[^.!?\\n]{0,40}\\b(?:${SECRET_NOUN})\\b`,
+      "i",
+    ),
+    reason: "solicits a secret/credential",
+  },
   // interrogative "what (is|'s|are) your … <secret>"
-  { re: new RegExp(`\\bwhat(?:'s| is| are)?\\b[^.!?\\n]{0,15}\\byour\\b[^.!?\\n]{0,15}\\b(?:${SECRET_NOUN})\\b`, 'i'), reason: 'solicits a secret/credential' },
+  {
+    re: new RegExp(
+      `\\bwhat(?:'s| is| are)?\\b[^.!?\\n]{0,15}\\byour\\b[^.!?\\n]{0,15}\\b(?:${SECRET_NOUN})\\b`,
+      "i",
+    ),
+    reason: "solicits a secret/credential",
+  },
 ];
 
 /**
@@ -106,26 +207,49 @@ const OUTPUT_CREDENTIAL: Array<{ re: RegExp; reason: string }> = [
  * violation found; `ok` is true only when there are none. Empty/whitespace text
  * is always ok (nothing to send anyway).
  */
-export function validateOutput(text: string): OutputValidationResult {
+export function validateOutput(
+  text: string,
+  context?: OutputValidationContext,
+): OutputValidationResult {
   // Scan the ENTIRE reply — unlike inbound (which is hard-capped at ingress so its
   // scan window always covers the whole message), an outbound reply has no such
   // cap, so truncating here would let a leak in the tail slip past unscanned
   // (codex). All checks are linear (bounded negated classes), so full-scan is O(n).
-  const t = text ?? '';
+  const t = text ?? "";
   const violations: OutputViolation[] = [];
   if (!t.trim()) return { ok: true, violations };
 
   for (const m of INTERNAL_MARKERS) {
-    if (m.re.test(t)) violations.push({ family: 'leaked_internals', evidence: m.reason });
+    if (m.re.test(t))
+      violations.push({ family: "leaked_internals", evidence: m.reason });
   }
   for (const p of PLAN_LEAKAGE) {
-    if (p.re.test(t)) violations.push({ family: 'plan_leakage', evidence: p.reason });
+    if (p.re.test(t))
+      violations.push({ family: "plan_leakage", evidence: p.reason });
   }
   for (const c of OUTPUT_CREDENTIAL) {
-    if (c.re.test(t)) violations.push({ family: 'credential_solicitation', evidence: c.reason });
+    if (c.re.test(t))
+      violations.push({
+        family: "credential_solicitation",
+        evidence: c.reason,
+      });
   }
   for (const r of detectUnsafeLinkHosts(t)) {
-    violations.push({ family: 'unsafe_link', evidence: r });
+    violations.push({ family: "unsafe_link", evidence: r });
+  }
+  if (context?.bookingRecorded === false && claimsBookingDone(t)) {
+    violations.push({
+      family: "fake_booking_confirmation",
+      evidence:
+        "reply claims a booking mutation but none was recorded this run",
+    });
+  }
+  if (context?.priceContextLoaded === false && containsCurrencyAmount(t)) {
+    violations.push({
+      family: "invented_price",
+      evidence:
+        "reply asserts a price but no price-bearing context was loaded this run",
+    });
   }
 
   // De-dupe identical (family, evidence) pairs so repeated markers in one reply

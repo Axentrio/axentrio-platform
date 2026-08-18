@@ -3,12 +3,13 @@
  * `analysis-policy.ts`.
  *
  * The new-conversation count uses the SAME predicate the refresh job uses to select
- * sessions (`loadEligibleSessions`): closed or handed off, guardrail-clean, ended after
- * the watermark. Counting anything else would let the button unlock on conversations the
- * judge will then skip, and the tenant would burn their 72-hour cooldown on a run that
- * analysed nothing. If that predicate ever changes, this must change with it — the
- * duplication is deliberate (a shared query builder would drag the job's cap and
- * ordering into a counter that wants neither) but it is a coupling worth knowing about.
+ * sessions (`loadEligibleSessions`): closed or handed off, guardrail-clean with no
+ * inbound guardrail journal rows, ended after the watermark. Counting anything else
+ * would let the button unlock on conversations the judge will then skip, and the tenant
+ * would burn their 72-hour cooldown on a run that analysed nothing. If that predicate
+ * ever changes, this must change with it — the duplication is deliberate (a shared query
+ * builder would drag the job's cap and ordering into a counter that wants neither) but
+ * it is a coupling worth knowing about.
  */
 import { AppDataSource } from '../database/data-source';
 import { returningRows } from '../utils/raw-sql';
@@ -41,6 +42,11 @@ export async function countNewAnalysableChats(tenantId: string, since: Date | nu
       WHERE s.tenant_id = $1
         AND s.status IN ('closed', 'handoff')
         AND s.guardrail_status = 'normal'
+        AND NOT EXISTS (
+          SELECT 1 FROM guardrail_spam_logs gsl
+          WHERE gsl.conversation_id = s.id
+            AND gsl.detected_category IN ('spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link')
+        )
         AND ($2::timestamptz IS NULL
              OR COALESCE(s.ended_at, s.last_activity_at, s.started_at) > $2::timestamptz)`,
     [tenantId, since ? since.toISOString() : null],

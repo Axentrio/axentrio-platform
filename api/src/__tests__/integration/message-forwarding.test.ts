@@ -17,6 +17,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { Tenant } from '../../database/entities/Tenant';
+import { SpamScamLog } from '../../database/entities/SpamScamLog';
 import { decrypt } from '../../utils/encryption';
 import {
   createTestTenant as baseCreateTestTenant,
@@ -112,6 +113,7 @@ import { config } from '../../config/environment';
 const sessionRepo = AppDataSource.getRepository(ChatSession);
 const messageRepo = AppDataSource.getRepository(Message);
 const handoffRepo = AppDataSource.getRepository(HandoffRequest);
+const guardrailLogRepo = AppDataSource.getRepository(SpamScamLog);
 
 // ── Shared AI settings builder ───────────────────────────────────────────────
 
@@ -350,6 +352,25 @@ describe('forwardMessageToN8n', () => {
 
       expect(mockGenerateResponse).not.toHaveBeenCalled();
       expect(mockSendToWebhook).not.toHaveBeenCalled();
+    });
+
+    it('journals a message dropped because its tenant cannot be resolved', async () => {
+      const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+      const { session, message } = await setup(tenant.id);
+      vi.spyOn(AppDataSource.getRepository(Tenant), 'findOne').mockResolvedValueOnce(null);
+
+      expect(await forwardMessageToN8n(session, message)).toBe(false);
+
+      const row = await guardrailLogRepo.findOneByOrFail({ conversationId: session.id });
+      expect(row).toMatchObject({
+        tenantId: tenant.id,
+        conversationId: session.id,
+        suspiciousMessageId: message.id,
+        detectedCategory: 'missing_tenant',
+        enforced: true,
+        aiAutoReplyDisabled: false,
+      });
+      expect(row.reasons).toEqual([`Tenant ${tenant.id} was not found`]);
     });
   });
 

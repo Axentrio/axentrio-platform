@@ -65,7 +65,25 @@ const tool = (name: string): ToolAdapter => ({
 
 const mockGetToolsForTenant = vi.fn();
 const mockToolRegistry = { getToolsForTenant: mockGetToolsForTenant, getBuiltinToolNames: vi.fn() };
-const mockPromptBuilder = { build: vi.fn().mockReturnValue({ prompt: 'You are TestBot.', ledger: undefined }) };
+const mockPromptBuilder = {
+  build: vi.fn((
+    _tenant: unknown,
+    settings: { ai?: { extraInfo?: string } },
+    _tools: unknown,
+    kbContext?: string,
+    moduleSections?: string[],
+    _customerName?: string,
+    templateBody?: string,
+  ) => ({
+    prompt: [
+      settings.ai?.extraInfo,
+      templateBody,
+      ...(moduleSections ?? []),
+      kbContext,
+    ].filter(Boolean).join('\n'),
+    ledger: undefined,
+  })),
+};
 const mockMetering = { record: vi.fn(), isOverBudget: vi.fn().mockResolvedValue(false) };
 const mockTraceLogger = { save: vi.fn() };
 
@@ -102,6 +120,48 @@ describe('AgentService — knowledge pre-fetch on the opening turn', () => {
     expect(mockSearchKnowledge).toHaveBeenCalledTimes(1);
     expect(kbContextArg()).toContain('Valyro helpt bedrijven om voorspelbaar te groeien.');
     expect(kbContextArg()).toContain('Valyro website');
+  });
+
+  it('marks price context when retrieved knowledge contains a currency amount', async () => {
+    mockSearchKnowledge.mockResolvedValue({
+      chunks: [{ id: 'c1', title: 'Prices', content: 'A consultation costs €30.', similarity: 0.9, metadata: {} }],
+      totalChunks: 1,
+    });
+
+    const result = await run(agent);
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.validationContext).toEqual({
+        bookingRecorded: false,
+        priceContextLoaded: true,
+      });
+    }
+  });
+
+  it('marks price context from the assembled system prompt', async () => {
+    mockPromptBuilder.build.mockReturnValueOnce({
+      prompt: 'The template and additional context say a consultation costs €40.',
+      ledger: undefined,
+    });
+
+    const result = await run(agent);
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.validationContext?.priceContextLoaded).toBe(true);
+    }
+  });
+
+  it('marks price context from conversation history', async () => {
+    const result = await run(agent, [
+      { role: 'user', content: 'Earlier you said the consultation costs €35.' },
+    ]);
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.validationContext?.priceContextLoaded).toBe(true);
+    }
   });
 
   it('scopes retrieval to the bot\'s attached knowledge bases', async () => {

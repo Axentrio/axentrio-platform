@@ -11,7 +11,7 @@ import { getProvider } from '../llm/provider-factory';
 import { buildPromptTrace } from '../llm/block-ledger';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { ChatMessage, ContentPart, ToolDefinition, type LLMProvider, type LLMOptions, type LLMResponse } from '../llm/llm.types';
+import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvider, type LLMOptions, type LLMResponse } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { getEntitlements } from '../billing/entitlements';
 import type { FeatureKey } from '../billing/types';
@@ -41,6 +41,11 @@ import { formatBusinessHoursForPlaceholder, isBusinessHoursConfigured, isOutside
 import { isUpstreamQuotaExhausted, isUpstreamRateLimit, isUpstreamServerError, isUpstreamUnreachable, isRetryableUpstream, UpstreamUnreachableError } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
+import {
+  claimsBookingDone,
+  containsCurrencyAmount,
+  type OutputValidationContext,
+} from '../guardrails/output-validation';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -80,8 +85,9 @@ export type AgentResult =
        * and only the agent knows the canonical instants behind the natural-language chips.
        */
       offer?: OfferMeasurement;
+      validationContext?: OutputValidationContext;
     }
-  | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string; handoffRequested?: boolean }
+  | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string; handoffRequested?: boolean; validationContext?: OutputValidationContext }
   | { type: 'max_iterations'; fallbackMessage: string; handoffRequested?: boolean }
   | { type: 'budget_exceeded'; fallbackMessage: string; handoffRequested?: boolean }
   | {
@@ -120,6 +126,20 @@ function buildUserContent(message: string, images?: AgentImageInput[]): string |
 }
 
 const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'];
+
+/** Broader than the hard output gate: future intent is useful for correcting the
+ * model inside the Agent loop, but is not proof enough to replace a reply. */
+function claimsBookingForAgentNudge(text: string): boolean {
+  const t = text.toLowerCase();
+  return claimsBookingDone(t) || [
+    /\bi'?ve (successfully )?(booked|scheduled|requested|submitted|placed|created)\b/,
+    /\bi'?ll (go ahead and (book|request|submit|schedule)|proceed( with (the|your|this))?)\b/,
+    /\bsuccessfully (requested|booked|scheduled|submitted|created)\b/,
+    /\byour (booking|request) (has been|is) (submitted|created|placed|received|sent|booked)\b/,
+    /\bik heb (je|uw|het|de|een)?\s?(afspraak|reservering|boeking)?\s?(ge(boekt|reserveerd|pland)|ingepland|aangevraagd|vastgelegd)\b/,
+    /\b(je|uw|de) (afspraak|reservering|boeking) (is|staat) (ge(boekt|reserveerd|pland)|ingepland|bevestigd|vastgelegd|aangevraagd)\b/,
+  ].some((re) => re.test(t));
+}
 
 interface PendingAvailability {
   slots: Array<{ start: string; end: string }>;
@@ -160,35 +180,6 @@ function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | u
       value: `Book ${forService}${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')}`,
     };
   });
-}
-
-/**
- * Best-effort detector for a final reply that CLAIMS a booking/request was made
- * (or is being made right now). Used ONLY as a hazard signal — what authorizes a
- * confirmation is whether a booking mutation actually succeeded this run (see the
- * egress guard). Patterns are narrow to avoid firing on "you requested X" or a
- * conditional "I'll book it once you confirm". Best-effort per language: English +
- * Dutch (the platform's primary non-English audience) patterns below; the prompt
- * rule is the backstop for languages not covered. NOTE: a fully language-agnostic
- * claim detector needs an LLM classifier — tracked as a follow-up.
- */
-function claimsBookingDone(text: string): boolean {
-  const t = text.toLowerCase();
-  // Narrow, "the bot just did / is about to do it" phrasings. We deliberately
-  // avoid ambiguous wording like "your appointment is confirmed" that could refer
-  // to an EXISTING booking — the bookingRecorded flag already prevents firing on a
-  // legitimate fresh confirmation, so the patterns only need to catch the
-  // hallucinated "I did this" claims.
-  return [
-    // English
-    /\bi'?ve (successfully )?(booked|scheduled|requested|submitted|placed|created)\b/,
-    /\bi'?ll (go ahead and (book|request|submit|schedule)|proceed( with (the|your|this))?)\b/,
-    /\bsuccessfully (requested|booked|scheduled|submitted|created)\b/,
-    /\byour (booking|request) (has been|is) (submitted|created|placed|received|sent|booked)\b/,
-    // Dutch (best-effort — mirrors the English "I did it" / "your booking is done" shapes)
-    /\bik heb (je|uw|het|de|een)?\s?(afspraak|reservering|boeking)?\s?(ge(boekt|reserveerd|pland)|ingepland|aangevraagd|vastgelegd)\b/,
-    /\b(je|uw|de) (afspraak|reservering|boeking) (is|staat) (ge(boekt|reserveerd|pland)|ingepland|bevestigd|vastgelegd|aangevraagd)\b/,
-  ].some((re) => re.test(t));
 }
 
 /**
@@ -757,6 +748,9 @@ export class AgentService {
       // the bot keeps helping and never announces "closed" as a reason to disengage.
       const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
       const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine, hasTravelServices }, { proactiveAsk, outsideBusinessHours });
+      let priceContextLoaded = containsCurrencyAmount(
+        [systemPrompt, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
+      );
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
@@ -878,7 +872,7 @@ export class AgentService {
           }
           // Egress guard (issue #35): never let the model tell the customer a
           // booking/request happened unless one was actually recorded this run.
-          if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingDone(finalContent)) {
+          if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingForAgentNudge(finalContent)) {
             if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
               correctionAttempted = true;
               logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });
@@ -936,6 +930,7 @@ export class AgentService {
             type: 'response',
             content: safeContent,
             quickReplies: slotChips,
+            validationContext: { bookingRecorded, priceContextLoaded },
             ...(escalationRequested ? { handoffRequested: true } : {}),
             ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
             // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
@@ -1105,6 +1100,12 @@ export class AgentService {
             let modelPayload: unknown;
             if (result.success) {
               modelPayload = result.data ?? {};
+              if (
+                tool.name === 'kb_search' &&
+                containsCurrencyAmount(JSON.stringify(modelPayload))
+              ) {
+                priceContextLoaded = true;
+              }
             } else if (result.errorSafeForModel) {
               modelPayload = { error: result.error };
             } else {

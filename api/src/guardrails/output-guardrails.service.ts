@@ -14,7 +14,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { GuardrailOutputLog } from '../database/entities/GuardrailOutputLog';
 import { logger } from '../utils/logger';
-import { validateOutput } from './output-validation';
+import { validateOutput, type OutputValidationContext } from './output-validation';
 import { isGuardrailsEnforcing } from './inbound-guardrails.service';
 
 export type GenerationPath = 'coalescer' | 'legacy' | 'rag' | 'n8n';
@@ -28,6 +28,8 @@ export interface OutputGateInput {
   /** Replacement text to send in ENFORCE mode when the reply is blocked. */
   fallbackMessage: string;
   generationPath: GenerationPath;
+  /** Run-local facts used for backend-backed output checks. */
+  validationContext?: OutputValidationContext;
   /** Persisted outbound message id, when known (best-effort link for tuning). */
   outboundMessageId?: string | null;
 }
@@ -74,7 +76,7 @@ async function writeOutputLog(args: {
  */
 export async function applyOutputGuardrails(input: OutputGateInput): Promise<OutputGateDecision> {
   try {
-    const result = validateOutput(input.content);
+    const result = validateOutput(input.content, input.validationContext);
     if (result.ok) return { content: input.content, blocked: false };
 
     const families = [...new Set(result.violations.map((v) => v.family))];

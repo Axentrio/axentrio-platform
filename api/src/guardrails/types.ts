@@ -15,6 +15,12 @@ export type GuardrailCategory =
   | 'bot_loop'
   | 'suspicious_link';
 
+/** Categories that exist only in the durable guardrail journal. */
+export type GuardrailJournalCategory =
+  | GuardrailCategory
+  | 'missing_tenant'
+  | 'missing_bot';
+
 /** What the inbound gate decided to do with this message.
  *  `block_neutral` is intentionally absent in Slice 1 (no_reply only). */
 export type GuardrailAction = 'proceed' | 'block_silent' | 'over_budget';

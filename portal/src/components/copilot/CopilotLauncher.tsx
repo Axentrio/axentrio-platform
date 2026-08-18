@@ -17,8 +17,13 @@ import { cn } from '@/lib/utils';
 export function CopilotLauncher() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const { open, isOpen } = useCopilotDrawer();
+  const { open, isOpen, suggestions, hasUnseenSuggestions } = useCopilotDrawer();
   const hasFeature = useHasFeature('platformAssistant');
+  const label = !hasFeature
+    ? t('copilot.launcher.tooltipLocked')
+    : hasUnseenSuggestions
+      ? t('copilot.launcher.tooltipWithSuggestions', { count: suggestions.length })
+      : t('copilot.launcher.tooltip');
 
   if (isOpen) return null;
   // Inbox has its own bottom-right composer + Send button; the floating
@@ -28,14 +33,22 @@ export function CopilotLauncher() {
   return (
     <Button
       onClick={open}
-      title={hasFeature ? t('copilot.launcher.tooltip') : t('copilot.launcher.tooltipLocked')}
-      aria-label={hasFeature ? t('copilot.launcher.tooltip') : t('copilot.launcher.tooltipLocked')}
+      title={label}
+      aria-label={label}
       className={cn(
         'fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full shadow-lg p-0',
         'bg-primary-600 text-white hover:bg-primary-700',
       )}
     >
       <Bot className="h-5 w-5" />
+      {hasFeature && hasUnseenSuggestions && (
+        <span
+          aria-hidden
+          className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-warning-500 px-1 text-[10px] text-white"
+        >
+          {suggestions.length}
+        </span>
+      )}
       {!hasFeature && (
         <span
           aria-hidden

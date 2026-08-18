@@ -27,6 +27,8 @@ import {
   useSendCopilotMessageHandler,
   useClearCopilotConversation,
 } from '../../queries/useCopilotQueries';
+import { useHasFeature } from '../../queries/useEntitlementsQueries';
+import { useBotReadiness } from '../../queries/useReadinessQueries';
 import {
   CopilotPlanGateError,
   CopilotRateLimitedError,
@@ -54,10 +56,19 @@ export interface CopilotInflightTurn {
   assistant: CopilotInflightAssistant;
 }
 
+export interface CopilotSuggestion {
+  key: string;
+  label: string;
+  route?: string;
+  cta?: string;
+}
+
 interface CopilotDrawerState {
   isOpen: boolean;
   open: () => void;
   close: () => void;
+  suggestions: CopilotSuggestion[];
+  hasUnseenSuggestions: boolean;
   /** True while a turn is currently streaming. */
   isStreaming: boolean;
   /** In-flight token + tool badges; null when idle. */
@@ -87,6 +98,7 @@ export function useCopilotDrawer(): CopilotDrawerState {
 }
 
 const EMPTY_INFLIGHT: CopilotInflightTurn | null = null;
+const MAX_SUGGESTIONS = 3;
 
 export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -100,8 +112,32 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null);
   const sendHandler = useSendCopilotMessageHandler();
   const clearMutation = useClearCopilotConversation();
+  const hasFeature = useHasFeature('platformAssistant');
+  const { data: readiness } = useBotReadiness(undefined, { enabled: hasFeature });
+  const suggestions = useMemo<CopilotSuggestion[]>(
+    () =>
+      (readiness?.capabilities ?? [])
+        .filter((capability) => capability.state !== 'live')
+        .flatMap((capability) =>
+          capability.missingSteps.map((step) => ({
+            key: `${capability.capability}:${step.id}`,
+            label: step.label,
+            route: step.cta?.route,
+            cta: step.cta?.label,
+          })),
+        )
+        .slice(0, MAX_SUGGESTIONS),
+    [readiness?.capabilities],
+  );
+  const suggestionKey = suggestions.map((suggestion) => suggestion.key).join('|');
+  const [seenSuggestionKey, setSeenSuggestionKey] = useState<string | null>(null);
+  const hasUnseenSuggestions =
+    suggestions.length > 0 && seenSuggestionKey !== suggestionKey;
 
-  const open = useCallback(() => setIsOpen(true), []);
+  const open = useCallback(() => {
+    setSeenSuggestionKey(suggestionKey);
+    setIsOpen(true);
+  }, [suggestionKey]);
   const close = useCallback(() => {
     abortRef.current?.abort();
     setIsOpen(false);
@@ -269,6 +305,8 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
       isOpen,
       open,
       close,
+      suggestions,
+      hasUnseenSuggestions,
       isStreaming,
       inflight,
       forcedToLockedPreview,
@@ -282,6 +320,8 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
       isOpen,
       open,
       close,
+      suggestions,
+      hasUnseenSuggestions,
       isStreaming,
       inflight,
       forcedToLockedPreview,

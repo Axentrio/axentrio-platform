@@ -2590,6 +2590,8 @@
   "copilot": {
     "launcher": {
       "tooltip": "Interroger l'assistant IA de la plateforme",
+      "tooltipWithSuggestions_one": "Interroger l'assistant IA de la plateforme — {{count}} suggestion disponible",
+      "tooltipWithSuggestions_other": "Interroger l'assistant IA de la plateforme — {{count}} suggestions disponibles",
       "tooltipLocked": "Assistant IA de la plateforme — inclus avec Pro"
     },
     "drawer": {

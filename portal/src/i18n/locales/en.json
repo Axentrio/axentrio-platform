@@ -2629,6 +2629,8 @@
   "copilot": {
     "launcher": {
       "tooltip": "Ask the AI Platform Assistant",
+      "tooltipWithSuggestions_one": "Ask the AI Platform Assistant — {{count}} suggestion available",
+      "tooltipWithSuggestions_other": "Ask the AI Platform Assistant — {{count}} suggestions available",
       "tooltipLocked": "AI Platform Assistant — included with Pro"
     },
     "drawer": {

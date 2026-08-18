@@ -17,33 +17,11 @@
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles } from 'lucide-react';
-import { useBotReadiness } from '@/queries/useReadinessQueries';
-
-/** At most this many. A list of chores reads as a lecture. */
-const MAX_SUGGESTIONS = 3;
-
-interface Suggestion {
-  key: string;
-  label: string;
-  route?: string;
-  cta?: string;
-}
+import { useCopilotDrawer } from './CopilotDrawerProvider';
 
 export function CopilotSuggestions({ onAsk }: { onAsk: (question: string) => void }) {
   const { t } = useTranslation();
-  const { data: readiness } = useBotReadiness();
-
-  const suggestions: Suggestion[] = (readiness?.capabilities ?? [])
-    .filter((c) => c.state !== 'live')
-    .flatMap((c) =>
-      c.missingSteps.map((step) => ({
-        key: `${c.capability}:${step.id}`,
-        label: step.label,
-        route: step.cta?.route,
-        cta: step.cta?.label,
-      })),
-    )
-    .slice(0, MAX_SUGGESTIONS);
+  const { suggestions } = useCopilotDrawer();
 
   if (suggestions.length === 0) {
     return (

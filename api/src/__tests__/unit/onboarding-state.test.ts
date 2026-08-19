@@ -53,16 +53,16 @@ describe('SKIP_DISABLES names only toggles that exist', () => {
 });
 
 describe('nextStep — walks the wizard in order', () => {
-  it('asks for a plan before offering paid social channels', () => {
+  it('asks for a plan before bookings, so appointments are not configured on Free', () => {
     expect(ONBOARDING_STEPS).toEqual([
       'language',
       'company',
       'logo',
       'chatbot',
       'documents',
+      'plan',
       'bookings',
       'leads',
-      'plan',
       'social',
     ]);
   });

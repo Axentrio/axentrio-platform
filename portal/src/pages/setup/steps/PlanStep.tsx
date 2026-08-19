@@ -1,18 +1,13 @@
 /**
- * Step 9 — the plan.
+ * Plan — before bookings, because appointments need Pro.
  *
- * A new workspace starts on Free, so this screen is a choice and not a toll gate:
- * staying on Free is a real answer that finishes setup. Pro is recommended and can
- * be chosen here (Checkout grants a 14-day trial) or upgraded later.
+ * Essential is the chatbot-only path. Pro (14-day trial) is the path that can take
+ * a Booking. Free is not offered: it is the cancellation sink and cannot run an Agent.
  *
  * The step is recorded as answered at the moment of choice, INCLUDING before a redirect
- * to Stripe. Marking it only on a completed payment would hand the last gate of setup to
- * a webhook: a customer who abandons checkout, or whose card takes a minute to settle,
- * would come back to a wizard they cannot leave. Free is the safety net that makes
- * this safe — nobody ends up inside the product without a plan.
+ * to Stripe, so abandoning checkout cannot trap them on an unanswered required step.
  *
- * Prices and copy come from the same translation keys as Settings → Billing; a second
- * set of plan cards with their own numbers is a pricing page that silently goes stale.
+ * Prices and copy come from the same translation keys as Settings → Billing.
  */
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -43,8 +38,6 @@ export function PlanStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const checkout = useStartCheckout();
   const [selected, setSelected] = React.useState<CheckoutablePlan | null>(null);
-
-  const keepTrial = () => submit.mutate({ step: 'plan' });
 
   const buy = (planId: CheckoutablePlan) => {
     setSelected(planId);
@@ -122,13 +115,6 @@ export function PlanStep({ submit }: StepProps) {
         ))}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-edge bg-surface-2 p-4 text-center">
-        <p className="text-sm text-text-secondary">{t('setup.steps.plan.trialNote')}</p>
-        <Button variant="ghost" onClick={keepTrial} disabled={busy}>
-          {submit.isPending && !selected && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {t('setup.steps.plan.keepTrial')}
-        </Button>
-      </div>
     </div>
   );
 }

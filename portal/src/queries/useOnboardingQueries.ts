@@ -61,9 +61,9 @@ export const SETUP_STEPS = [
   'logo',
   'chatbot',
   'documents',
+  'plan',
   'bookings',
   'leads',
-  'plan',
   'social',
 ] as const;
 

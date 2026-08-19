@@ -3002,7 +3002,40 @@
         "availabilityLabel": "Wanneer kan men boeken?",
         "slotLabel": "Hoe lang duurt een afspraak?",
         "slotMinutes": "{{minutes}} minuten",
-        "servicesHint": "Individuele diensten, prijzen en uitzonderingsdagen kun je later toevoegen bij Afspraken."
+        "servicesHint": "Kies een vak of voeg één service toe zodat er meteen geboekt kan worden.",
+        "catalogLabel": "Wat doe je?",
+        "catalogHint": "We zetten startservices en prijzen klaar. Je wijzigt ze later onder Afspraken.",
+        "custom": "Ik voeg er zelf een toe",
+        "customNameLabel": "Servicenaam",
+        "customNamePlaceholder": "bijv. Herenknipbeurt",
+        "customDurationLabel": "Hoe lang?",
+        "customPriceLabel": "Prijs in € (optioneel)",
+        "trades": {
+          "barber": {
+            "label": "Kapper",
+            "description": "Knippen en grooming in de stoel."
+          },
+          "plumber": {
+            "label": "Loodgieter",
+            "description": "Herstellingen bij de klant."
+          },
+          "electrician": {
+            "label": "Elektricien",
+            "description": "Installatie en herstelling ter plaatse."
+          },
+          "beauty": {
+            "label": "Schoonheidssalon",
+            "description": "Behandelingen in de salon."
+          },
+          "garage": {
+            "label": "Garage",
+            "description": "Onderhoud in de werkplaats."
+          },
+          "tattoo": {
+            "label": "Tatoeëerder",
+            "description": "Consult en sessies in de studio."
+          }
+        }
       },
       "leads": {
         "title": "Leads vastleggen",
@@ -3018,10 +3051,8 @@
       },
       "plan": {
         "title": "Kies je abonnement",
-        "body": "Je account start op het Free-abonnement. Pro wordt aanbevolen — kies het nu, of upgrade later.",
+        "body": "Pro is aanbevolen als je afspraken aanneemt — 14 dagen proef. Essential is de chatbot zonder boekingen.",
         "choose": "Kies dit abonnement",
-        "trialNote": "Nog niet beslist? Blijf op Free en upgrade wanneer je wilt.",
-        "keepTrial": "Verder met Free",
         "recommended": "Aanbevolen",
         "trialLength": "Inclusief 14 dagen gratis proberen"
       }

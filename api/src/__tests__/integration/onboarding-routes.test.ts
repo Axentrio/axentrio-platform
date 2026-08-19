@@ -127,6 +127,17 @@ beforeEach(() => {
   lookupCompanyByVat.mockReset().mockResolvedValue(FOUND);
 });
 
+describe('test isolation', () => {
+  it('creates a new organization for each workspace', async () => {
+    const a = await signedInTenant();
+    const b = await signedInTenant();
+    expect(a.clerkOrgId).toBeTruthy();
+    expect(b.clerkOrgId).toBeTruthy();
+    expect(a.clerkOrgId).not.toBe(b.clerkOrgId);
+    expect(a.id).not.toBe(b.id);
+  });
+});
+
 describe('GET /onboarding/status', () => {
   it('sends a brand-new workspace to the first step', async () => {
     await signedInTenant();

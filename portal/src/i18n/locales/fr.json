@@ -3001,7 +3001,40 @@
         "availabilityLabel": "Quand peut-on réserver ?",
         "slotLabel": "Quelle est la durée d'un rendez-vous ?",
         "slotMinutes": "{{minutes}} minutes",
-        "servicesHint": "Vous pourrez ajouter des services, des tarifs et des exceptions plus tard, dans Rendez-vous."
+        "servicesHint": "Choisissez un métier ou ajoutez un service pour qu’on puisse réserver tout de suite.",
+        "catalogLabel": "Quelle est votre activité ?",
+        "catalogHint": "Nous ajoutons des services et des prix de départ. Vous pourrez les modifier plus tard dans Rendez-vous.",
+        "custom": "Je l'ajoute moi-même",
+        "customNameLabel": "Nom du service",
+        "customNamePlaceholder": "ex. Coupe homme",
+        "customDurationLabel": "Durée ?",
+        "customPriceLabel": "Prix en € (facultatif)",
+        "trades": {
+          "barber": {
+            "label": "Barbier",
+            "description": "Coupes et soin de la barbe, en salon."
+          },
+          "plumber": {
+            "label": "Plombier",
+            "description": "Déplacements chez le client."
+          },
+          "electrician": {
+            "label": "Électricien",
+            "description": "Installations et réparations sur place."
+          },
+          "beauty": {
+            "label": "Institut de beauté",
+            "description": "Soins réservés en salon."
+          },
+          "garage": {
+            "label": "Garage",
+            "description": "Entretien à l’atelier."
+          },
+          "tattoo": {
+            "label": "Tatoueur",
+            "description": "Consultations et séances en studio."
+          }
+        }
       },
       "leads": {
         "title": "Capture de prospects",
@@ -3017,10 +3050,8 @@
       },
       "plan": {
         "title": "Choisissez votre formule",
-        "body": "Votre compte commence sur la formule Free. Pro est recommandé — choisissez-la maintenant, ou passez à une offre supérieure plus tard.",
+        "body": "Pro est recommandé si vous prenez rendez-vous — essai de 14 jours. Essential est le chatbot sans rendez-vous.",
         "choose": "Choisir cette formule",
-        "trialNote": "Pas encore décidé ? Restez sur Free et passez à une offre supérieure quand vous voulez.",
-        "keepTrial": "Continuer avec Free",
         "recommended": "Recommandé",
         "trialLength": "Comprend 14 jours d'essai gratuit"
       }

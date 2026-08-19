@@ -97,16 +97,16 @@ beforeEach(() => {
   apiPatch.mockReset().mockResolvedValue({});
 });
 
-it("puts the plan before paid social connections", () => {
+it("puts the plan before bookings", () => {
   expect(SETUP_STEPS).toEqual([
     "language",
     "company",
     "logo",
     "chatbot",
     "documents",
+    "plan",
     "bookings",
     "leads",
-    "plan",
     "social",
   ]);
 });
@@ -395,24 +395,16 @@ describe("the company step", () => {
 });
 
 describe("the plan step", () => {
-  it("finishes setup on Free without a payment", async () => {
+  it("does not offer Free — it cannot run an Agent", async () => {
     apiGet.mockResolvedValue(statusAt("plan"));
     renderWizard();
 
     expect(
-      await screen.findByText(/your account starts on the free plan/i),
+      await screen.findByText(/pro is recommended if you take appointments/i),
     ).toBeInTheDocument();
-    await userEvent.click(
-      await screen.findByRole("button", { name: /continue on free/i }),
-    );
-
-    await waitFor(() =>
-      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
-        step: "plan",
-        outcome: "done",
-      }),
-    );
-    expect(apiPost).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: /continue on free/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("records the answer BEFORE leaving for Stripe", async () => {
@@ -454,13 +446,21 @@ describe("the bookings step", () => {
   it("saves the hours and slot length once it is", async () => {
     apiGet.mockImplementation(bookingsStep({ connected: true }));
     apiPut.mockResolvedValue(statusAt("leads"));
+    apiPost.mockResolvedValue({ services: [{ id: "s1" }] });
     renderWizard();
 
+    await userEvent.click(await screen.findByRole("button", { name: /barber/i }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled(),
     );
     await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
 
+    await waitFor(() =>
+      expect(apiPost).toHaveBeenCalledWith(
+        "/scheduler/presets/barber/apply",
+        {},
+      ),
+    );
     await waitFor(() =>
       expect(apiPut).toHaveBeenCalledWith(
         "/scheduler/config",

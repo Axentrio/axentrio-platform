@@ -3040,7 +3040,40 @@
         "availabilityLabel": "When can people book?",
         "slotLabel": "How long is an appointment slot?",
         "slotMinutes": "{{minutes}} minutes",
-        "servicesHint": "You can add individual services, prices and date exceptions later, under Bookings."
+        "servicesHint": "Pick a trade or add one service so someone can book when you finish.",
+        "catalogLabel": "What do you do?",
+        "catalogHint": "We'll add starter services and prices. You can change them later under Bookings.",
+        "custom": "I'll add my own",
+        "customNameLabel": "Service name",
+        "customNamePlaceholder": "e.g. Men's haircut",
+        "customDurationLabel": "How long?",
+        "customPriceLabel": "Price in € (optional)",
+        "trades": {
+          "barber": {
+            "label": "Barber",
+            "description": "Haircuts and grooming, in the chair."
+          },
+          "plumber": {
+            "label": "Plumber",
+            "description": "Call-outs at the customer's address."
+          },
+          "electrician": {
+            "label": "Electrician",
+            "description": "Installs and repairs on site."
+          },
+          "beauty": {
+            "label": "Beauty salon",
+            "description": "Treatments booked in the salon."
+          },
+          "garage": {
+            "label": "Car garage",
+            "description": "Servicing at the workshop."
+          },
+          "tattoo": {
+            "label": "Tattoo artist",
+            "description": "Consults and sessions in the studio."
+          }
+        }
       },
       "leads": {
         "title": "Lead capture",
@@ -3056,10 +3089,8 @@
       },
       "plan": {
         "title": "Choose your plan",
-        "body": "Your account starts on the Free plan. Pro is recommended — choose it now, or upgrade later.",
+        "body": "Pro is recommended if you take appointments — it includes a 14-day trial. Essential is the chatbot without bookings.",
         "choose": "Choose this plan",
-        "trialNote": "Not ready to decide? Stay on Free and upgrade whenever you want.",
-        "keepTrial": "Continue on Free",
         "recommended": "Recommended",
         "trialLength": "Includes a 14-day free trial"
       }

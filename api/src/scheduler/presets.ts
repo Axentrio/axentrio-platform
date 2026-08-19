@@ -158,6 +158,61 @@ export const BUSINESS_PRESETS: BusinessPreset[] = [
     ],
     availability: DEFAULT_AVAILABILITY,
   },
+  {
+    key: 'plumber',
+    label: 'Plumber',
+    description: 'Call-outs and repairs at the customer\'s address.',
+    services: [
+      { name: 'Unblocking', durationMin: 60, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'from', fixedPrice: 90 },
+      { name: 'Leak repair', durationMin: 60, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'from', fixedPrice: 120 },
+      { name: 'Boiler service', durationMin: 90, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'from', fixedPrice: 150 },
+    ],
+    availability: DEFAULT_AVAILABILITY,
+  },
+  {
+    key: 'electrician',
+    label: 'Electrician',
+    description: 'Installs and repairs at the customer\'s address.',
+    services: [
+      { name: 'Socket or switch', durationMin: 60, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'from', fixedPrice: 80 },
+      { name: 'Fuse board', durationMin: 120, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'on_request' },
+      { name: 'Electrical inspection', durationMin: 60, bookingMode: 'request', locationType: 'in_person', customerAddressRequired: true, priceDisplayType: 'from', fixedPrice: 120 },
+    ],
+    availability: DEFAULT_AVAILABILITY,
+  },
+  {
+    key: 'beauty',
+    label: 'Beauty salon',
+    description: 'Treatments booked in the salon.',
+    services: [
+      { name: 'Facial', durationMin: 60, bookingMode: 'auto', locationType: 'in_person', priceDisplayType: 'fixed', fixedPrice: 55 },
+      { name: 'Manicure', durationMin: 45, bookingMode: 'auto', locationType: 'in_person', priceDisplayType: 'fixed', fixedPrice: 35 },
+      { name: 'Waxing', durationMin: 30, bookingMode: 'auto', locationType: 'in_person', priceDisplayType: 'fixed', fixedPrice: 25 },
+    ],
+    availability: DEFAULT_AVAILABILITY,
+  },
+  {
+    key: 'garage',
+    label: 'Car garage',
+    description: 'Servicing and diagnostics at the workshop.',
+    services: [
+      { name: 'Oil change', durationMin: 45, bookingMode: 'request', locationType: 'in_person', priceDisplayType: 'from', fixedPrice: 80 },
+      { name: 'Diagnostics', durationMin: 60, bookingMode: 'request', locationType: 'in_person', priceDisplayType: 'from', fixedPrice: 60 },
+      { name: 'Inspection', durationMin: 45, bookingMode: 'request', locationType: 'in_person', priceDisplayType: 'from', fixedPrice: 50 },
+    ],
+    availability: DEFAULT_AVAILABILITY,
+  },
+  {
+    key: 'tattoo',
+    label: 'Tattoo artist',
+    description: 'Consults and sessions in the studio.',
+    services: [
+      { name: 'Consultation', durationMin: 20, bookingMode: 'auto', locationType: 'in_person', priceDisplayType: 'none' },
+      { name: 'Small tattoo', durationMin: 60, bookingMode: 'request', locationType: 'in_person', priceDisplayType: 'on_request' },
+      { name: 'Touch-up', durationMin: 45, bookingMode: 'request', locationType: 'in_person', priceDisplayType: 'on_request' },
+    ],
+    availability: DEFAULT_AVAILABILITY,
+  },
 ];
 
 /** Picker list shape for `GET /scheduler/presets`. */

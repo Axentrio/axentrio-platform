@@ -20,6 +20,16 @@ vi.mock('@auth/useAppAuth', () => ({
   useAppAuth: () => ({ user: { role: authState.role } }),
 }));
 
+const { tenantState } = vi.hoisted(() => ({
+  tenantState: { activeTenant: null as { tenantId: string; tenantName: string } | null },
+}));
+vi.mock('@/stores/tenantContextStore', () => ({
+  useTenantContextStore: (sel?: (s: { activeTenant: typeof tenantState.activeTenant }) => unknown) => {
+    const state = { activeTenant: tenantState.activeTenant };
+    return sel ? sel(state) : state;
+  },
+}));
+
 // The wizard itself is exercised separately; here it is only a marker for "gate closed".
 vi.mock('./SetupWizard', () => ({ default: () => <div>WIZARD</div> }));
 
@@ -42,6 +52,7 @@ const complete = { state: { steps: {} }, nextStep: null, complete: true };
 beforeEach(() => {
   apiGet.mockReset();
   authState.role = 'admin';
+  tenantState.activeTenant = null;
 });
 
 describe('SetupGate', () => {
@@ -65,14 +76,20 @@ describe('SetupGate', () => {
     expect(await screen.findByText('PRODUCT')).toBeInTheDocument();
   });
 
-  it('never gates a super admin', async () => {
-    // They work inside other people's tenants; answering a customer's setup on their
-    // behalf is not a thing that should be possible.
+  it('never gates a super admin in their own session', async () => {
     authState.role = 'super_admin';
     apiGet.mockResolvedValue(incomplete);
     renderGate();
     expect(await screen.findByText('PRODUCT')).toBeInTheDocument();
     expect(screen.queryByText('WIZARD')).not.toBeInTheDocument();
+  });
+
+  it('shows the wizard when a super admin impersonates an unfinished workspace', async () => {
+    authState.role = 'super_admin';
+    tenantState.activeTenant = { tenantId: 't1', tenantName: 'Setup test' };
+    apiGet.mockResolvedValue(incomplete);
+    renderGate();
+    expect(await screen.findByText('WIZARD')).toBeInTheDocument();
   });
 
   it('tells a non-admin who has to finish, instead of handing them a wizard', async () => {

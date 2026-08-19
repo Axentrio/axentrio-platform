@@ -27,6 +27,8 @@ vi.mock('@/queries/useTenantQueries', () => ({
 vi.mock('@/queries/useSchedulerQueries', () => ({
   useSchedulerConfig: () => ({ data: undefined, isLoading: false }),
   useUpdateSchedulerConfig: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useApplyPreset: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateService: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/queries/useGoogleCalendarQueries', () => ({

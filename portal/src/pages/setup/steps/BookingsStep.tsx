@@ -32,6 +32,8 @@ import {
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
+  useApplyPreset,
+  useCreateService,
   type WeeklyHours,
   type Weekday,
   type ServiceAreaEntry,
@@ -81,6 +83,10 @@ export function bookingHoursSeed(businessHours?: BusinessHours | null) {
 /** Slot intervals people actually book in. Minutes. */
 const SLOT_CHOICES = [15, 30, 60] as const;
 
+/** Pilot trades seeded in setup. Other presets stay on the Bookings empty state. */
+const SETUP_TRADES = ['barber', 'plumber', 'electrician', 'beauty', 'garage', 'tattoo'] as const;
+type SetupTrade = (typeof SETUP_TRADES)[number] | 'custom';
+
 /**
  * Does the wizard's calendar requirement look satisfied?
  *
@@ -110,6 +116,8 @@ export function BookingsStep({ submit }: StepProps) {
   const { data: outlook, isLoading: outlookLoading } = useOutlookCalendarStatus();
   const connectOutlook = useConnectOutlookCalendar();
   const { data: scheduler, isLoading: schedulerLoading } = useSchedulerConfig();
+  const applyPreset = useApplyPreset();
+  const createService = useCreateService();
   const {
     data: tenant,
     isLoading: tenantLoading,
@@ -123,6 +131,10 @@ export function BookingsStep({ submit }: StepProps) {
   const [slotMinutes, setSlotMinutes] = React.useState<number>(30);
   const [serviceArea, setServiceArea] = React.useState<ServiceAreaEntry[]>([]);
   const [seeded, setSeeded] = React.useState(false);
+  const [trade, setTrade] = React.useState<SetupTrade | null>(null);
+  const [customName, setCustomName] = React.useState('');
+  const [customDuration, setCustomDuration] = React.useState(30);
+  const [customPrice, setCustomPrice] = React.useState('');
 
   React.useEffect(() => {
     // The area is seeded OUTSIDE the availability guard below, mirroring SchedulerSettings:
@@ -153,6 +165,11 @@ export function BookingsStep({ submit }: StepProps) {
   const toggleDay = (day: Weekday) =>
     setOpenDays((days) => (days.includes(day) ? days.filter((d) => d !== day) : [...days, day]));
 
+  const existingServices = scheduler?.services ?? [];
+  const catalogReady =
+    existingServices.length > 0 ||
+    (trade === 'custom' ? customName.trim().length > 0 : trade != null);
+
   const save = async () => {
     const weeklyHours: WeeklyHours = {};
 
@@ -160,6 +177,22 @@ export function BookingsStep({ submit }: StepProps) {
       weeklyHours[api] = openDays.includes(api) ? [{ start: opensAt, end: closesAt }] : [];
     }
     try {
+      if (existingServices.length === 0) {
+        if (trade && trade !== 'custom') {
+          await applyPreset.mutateAsync(trade);
+        } else if (trade === 'custom') {
+          const price = Number(customPrice);
+          await createService.mutateAsync({
+            name: customName.trim(),
+            durationMin: customDuration,
+            bookingMode: 'auto',
+            locationType: 'in_person',
+            ...(Number.isFinite(price) && price > 0
+              ? { priceDisplayType: 'fixed', fixedPrice: price }
+              : { priceDisplayType: 'none' }),
+          });
+        }
+      }
       await updateScheduler.mutateAsync({
         provider: 'internal',
         availability: {
@@ -188,7 +221,12 @@ export function BookingsStep({ submit }: StepProps) {
     calendar?.connected === true ? calendar?.accountEmail : outlook?.accountEmail;
   const calendarLoadingAny = calendarLoading || outlookLoading;
   const busy =
-    updateScheduler.isPending || submit.isPending || connect.isPending || connectOutlook.isPending;
+    updateScheduler.isPending ||
+    submit.isPending ||
+    connect.isPending ||
+    connectOutlook.isPending ||
+    applyPreset.isPending ||
+    createService.isPending;
 
   return (
     <div className="space-y-6">
@@ -292,6 +330,92 @@ export function BookingsStep({ submit }: StepProps) {
         <p className="text-xs text-text-muted">{t('setup.steps.bookings.servicesHint')}</p>
       </div>
 
+      {existingServices.length === 0 && (
+        <div className="space-y-3">
+          <Label>{t('setup.steps.bookings.catalogLabel')}</Label>
+          <p className="text-xs text-text-muted">{t('setup.steps.bookings.catalogHint')}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SETUP_TRADES.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTrade(key)}
+                className={cn(
+                  'rounded-lg border px-3 py-2.5 text-left transition-colors',
+                  trade === key
+                    ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                    : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
+                )}
+              >
+                <span className="block text-sm font-medium text-text-primary">
+                  {t(`setup.steps.bookings.trades.${key}.label`)}
+                </span>
+                <span className="block text-xs text-text-muted">
+                  {t(`setup.steps.bookings.trades.${key}.description`)}
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setTrade('custom')}
+              className={cn(
+                'rounded-lg border px-3 py-2.5 text-left transition-colors sm:col-span-2',
+                trade === 'custom'
+                  ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                  : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
+              )}
+            >
+              <span className="block text-sm font-medium text-text-primary">
+                {t('setup.steps.bookings.custom')}
+              </span>
+            </button>
+          </div>
+          {trade === 'custom' && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5 sm:col-span-3">
+                <Label htmlFor="setup-service-name">{t('setup.steps.bookings.customNameLabel')}</Label>
+                <Input
+                  id="setup-service-name"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder={t('setup.steps.bookings.customNamePlaceholder')}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>{t('setup.steps.bookings.customDurationLabel')}</Label>
+                <div className="flex gap-1.5">
+                  {SLOT_CHOICES.map((minutes) => (
+                    <button
+                      key={minutes}
+                      type="button"
+                      onClick={() => setCustomDuration(minutes)}
+                      className={cn(
+                        'flex-1 rounded-lg border px-2 py-2 text-xs font-medium',
+                        customDuration === minutes
+                          ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                          : 'border-edge bg-surface-2 text-text-secondary',
+                      )}
+                    >
+                      {t('setup.steps.bookings.slotMinutes', { minutes })}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="setup-service-price">{t('setup.steps.bookings.customPriceLabel')}</Label>
+                <Input
+                  id="setup-service-price"
+                  inputMode="decimal"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  placeholder="25"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/*
         Where the business travels. Asked HERE because otherwise it is asked nowhere: every
         mobile trade finished setup with no area and then never found the setting, so the
@@ -307,7 +431,7 @@ export function BookingsStep({ submit }: StepProps) {
       />
 
       <div className="flex justify-end">
-        <Button size="lg" onClick={save} disabled={busy || !connected || openDays.length === 0}>
+        <Button size="lg" onClick={save} disabled={busy || !connected || openDays.length === 0 || !catalogReady}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {t('setup.continue')}
         </Button>

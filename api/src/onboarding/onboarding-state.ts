@@ -33,9 +33,9 @@ export const ONBOARDING_STEPS = [
   'logo',
   'chatbot',
   'documents',
+  'plan',
   'bookings',
   'leads',
-  'plan',
   'social',
 ] as const;
 

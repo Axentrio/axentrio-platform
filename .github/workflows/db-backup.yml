@@ -9,20 +9,9 @@ on:
 jobs:
   backup:
     runs-on: ubuntu-latest
+    # 18 Aug 2026: apt install of postgresql-client-17 hung until the 6 h runner cap.
+    timeout-minutes: 20
     steps:
-      - name: Install PostgreSQL 17 client
-        # Crunchy Bridge runs PG17; pin client to match to avoid version drift.
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
-
       - name: Sanity-check DB URL secret
         env:
           DATABASE_URL: ${{ secrets.DATABASE_PUBLIC_URL }}
@@ -37,6 +26,17 @@ jobs:
           MASKED=$(echo "$DATABASE_URL" | sed -E 's|(://[^:]+):[^@]+@|\1:***@|')
           echo "Target: $MASKED"
 
+      # Crunchy Bridge is PG17. Do not apt-install the client: that step hung for 6 h
+      # on 18 Aug 2026 (apt.postgresql.org). The official image already has pg_dump 17.
+      - name: Pull pg_dump image
+        run: |
+          set -euo pipefail
+          for i in 1 2 3; do
+            docker pull postgres:17 && exit 0
+            sleep 10
+          done
+          exit 1
+
       - name: Create database backup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_PUBLIC_URL }}
@@ -45,13 +45,40 @@ jobs:
           set -euo pipefail
           TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           FILENAME="backup_${TIMESTAMP}.sql.gz"
-          # set -o pipefail above ensures pg_dump's exit code propagates through gzip.
-          # Force the v17 binary explicitly: the ubuntu-latest runner ships with
-          # postgresql-client-16 in PATH, which refuses to dump from a v17 server.
-          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" \
-            --no-owner --no-privileges \
-            --clean --if-exists \
-            | gzip -9 > "$FILENAME"
+
+          dump() {
+            docker run --rm \
+              -e PGSSLMODE \
+              postgres:17 \
+              pg_dump "$DATABASE_URL" \
+                --no-owner --no-privileges \
+                --clean --if-exists
+          }
+
+          attempt=1
+          max_attempts=3
+          while true; do
+            set +e
+            dump 2>dump.err | gzip -9 > "$FILENAME"
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            cat dump.err >&2
+            if grep -q 'password authentication failed' dump.err; then
+              echo "::error::pg_dump rejected the DATABASE_PUBLIC_URL password. Rotate the secret."
+              exit 1
+            fi
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::pg_dump failed after ${max_attempts} attempts"
+              exit 1
+            fi
+            echo "pg_dump failed (attempt ${attempt}/${max_attempts}); retry in 20s"
+            attempt=$((attempt + 1))
+            sleep 20
+          done
+
           SIZE=$(stat -c%s "$FILENAME" 2>/dev/null || stat -f%z "$FILENAME")
           # Fail if the dump is suspiciously small (gzip header for empty input is ~20 bytes;
           # a real schema-only dump should be at least a few KB).
@@ -74,6 +101,7 @@ jobs:
           echo "Uploaded $FILENAME to R2"
 
       - name: Cleanup old backups (keep last 30 days)
+        continue-on-error: true
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

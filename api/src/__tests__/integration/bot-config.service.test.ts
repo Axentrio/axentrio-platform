@@ -1,5 +1,5 @@
 /**
- * Unit tests for the bot-config resolvers + writer introduced by #16d.
+ * Integration tests for the bot-config resolvers + writer introduced by #16d.
  *
  * Covers:
  *   - getBotConfigForSession returns the session.botId bot when set

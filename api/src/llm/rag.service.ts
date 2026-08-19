@@ -107,6 +107,7 @@ async function rewriteQuery(
 /**
  * Two indexable queries, then merge. A single ORDER BY of vector + ts_rank
  * cannot use HNSW; `ORDER BY embedding <=> $1` can.
+ * Cast $3 as float8: `1 - $3` makes Postgres bind minSimilarity as integer.
  */
 async function retrieveHybridChunks(
   dataSource: DataSource,
@@ -130,7 +131,7 @@ async function retrieveHybridChunks(
      JOIN knowledge_documents kd ON kd.id = kc."documentId"
      WHERE kc."tenantId" = $2
        AND kd.status = 'indexed'${kbClause}
-       AND (kc.embedding <=> $1::vector) <= (1 - $3)
+       AND (kc.embedding <=> $1::vector) <= (1.0 - $3::float8)
      ORDER BY kc.embedding <=> $1::vector
      LIMIT $4`;
 

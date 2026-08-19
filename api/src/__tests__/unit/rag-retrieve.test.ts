@@ -49,6 +49,8 @@ describe('searchKnowledge retrieve', () => {
     await searchKnowledge(dataSource as never, 't1', 'opening hours', []);
     expect(queries).toHaveLength(2);
     expect(queries[0]).toMatch(/ORDER BY kc.embedding <=> \$1::vector/);
+    // `1 - $3` infers integer and rejects RAG_MIN_SIMILARITY=0.3 (prod 500).
+    expect(queries[0]).toMatch(/\$3::float8/);
     expect(queries[0]).not.toMatch(/ts_rank/);
     expect(queries[1]).toMatch(/ORDER BY ts_rank/);
   });

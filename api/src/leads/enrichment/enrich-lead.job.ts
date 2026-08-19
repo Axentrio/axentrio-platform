@@ -67,9 +67,11 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
          FROM messages m
          JOIN participants p ON p.id = m.participant_id
         WHERE m.session_id = $1 AND m.type = 'text'
-        ORDER BY m.created_at ASC`,
+        ORDER BY m.created_at DESC
+        LIMIT 80`,
       [sessionId],
     );
+  rows.reverse();
   return rows.map((r) => ({
     id: r.id,
     content: r.contentEncrypted ? decrypt(r.content) : r.content,

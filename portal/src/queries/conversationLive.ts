@@ -690,8 +690,12 @@ export function useLiveConversationSync(options: LiveConversationSyncOptions = {
     // Mounting while disconnected means events were already missed: treat the
     // FIRST connect as a catch-up, not only a disconnect->reconnect edge.
     const wasDisconnected = { current: !isConnectedRef.current };
-    const invalidate = () => {
+    const invalidateAllChats = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chats.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.handoffs.all() });
+    };
+    const invalidateListOnly = () => {
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.chats.all(), 'list'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.handoffs.all() });
     };
 
@@ -722,14 +726,18 @@ export function useLiveConversationSync(options: LiveConversationSyncOptions = {
       onConnect: () => {
         if (wasDisconnected.current) {
           wasDisconnected.current = false;
-          invalidate();
+          invalidateAllChats();
         }
       },
     });
 
-    const onFocus = () => invalidate();
+    const onFocus = () => {
+      if (isConnectedRef.current) invalidateListOnly();
+      else invalidateAllChats();
+    };
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
+      if (isConnectedRef.current) return;
       const id = selectedChatIdRef.current;
       if (id) queryClient.invalidateQueries({ queryKey: queryKeys.chats.detail(id) });
     };

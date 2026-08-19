@@ -206,7 +206,7 @@ describe('useLiveConversationSync', () => {
     expect(detail.messages).toHaveLength(1);
   });
 
-  it('window focus invalidates the chat queries', () => {
+  it('window focus invalidates list queries, not every cached thread', () => {
     setup();
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
@@ -214,10 +214,23 @@ describe('useLiveConversationSync', () => {
       window.dispatchEvent(new Event('focus'));
     });
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.chats.all() });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: [...queryKeys.chats.all(), 'list'] });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: queryKeys.chats.all() });
   });
 
-  it('visibilitychange to visible invalidates the open detail query', () => {
+  it('visibilitychange to visible does not refetch detail while the socket is live', () => {
+    setup({ selectedChatId: 'c1' });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it('visibilitychange to visible refetches the open detail when the socket is down', () => {
+    socketState.isConnected = false;
     setup({ selectedChatId: 'c1' });
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 

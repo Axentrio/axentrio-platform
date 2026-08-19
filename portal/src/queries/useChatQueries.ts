@@ -186,7 +186,6 @@ export const chatOptions = {
         const res = (await api.get<Any>('/chats/sessions', { params })) as ChatListResponse;
         return { ...res, data: (res?.data ?? []).map(normalizeChatRow) };
       },
-      refetchInterval: LIVE_QUERY_REFETCH_MS,
       refetchIntervalInBackground: false,
     });
   },
@@ -232,9 +231,14 @@ export const chatOptions = {
  */
 export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQueryReturn {
   const { filters } = options;
+  const { isConnected } = useSocket();
 
   const opts = chatOptions.list(filters);
-  const { data, isLoading, isFetching, error, refetch } = useQuery(opts);
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    ...opts,
+    // Sockets already patch the list. Poll only when the feed is dead.
+    refetchInterval: isConnected ? false : LIVE_QUERY_REFETCH_MS,
+  });
 
   const rawData = data as ChatListResponse | undefined;
   const chats: Chat[] = rawData?.data ?? [];

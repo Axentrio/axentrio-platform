@@ -3,7 +3,7 @@ import { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { extractApiErrorMessage } from '../services/apiClient';
 
-/** Inbox safety net: list/detail poll while the tab is visible so a dead socket never stalls longer than this. */
+/** Inbox safety net: list poll while the socket is down so a dead feed never stalls longer than this. */
 export const LIVE_QUERY_REFETCH_MS = 5000;
 
 function extractErrorMessage(error: unknown): string {

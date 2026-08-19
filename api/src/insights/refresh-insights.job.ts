@@ -104,6 +104,17 @@ async function loadEligibleSessions(
   }));
 }
 
+const TRANSCRIPT_MESSAGE_CAP = 80;
+
+async function loadExistingJudgmentSessionIds(sessionIds: string[]): Promise<Set<string>> {
+  if (sessionIds.length === 0) return new Set();
+  const rows: Array<{ session_id: string }> = await AppDataSource.query(
+    `SELECT session_id FROM chatbot_judgments WHERE session_id = ANY($1::uuid[])`,
+    [sessionIds],
+  );
+  return new Set(rows.map((r) => r.session_id));
+}
+
 async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
   const rows: Array<{
     id: string;
@@ -117,9 +128,11 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
        FROM messages m
        JOIN participants p ON p.id = m.participant_id
        WHERE m.session_id = $1 AND m.type = 'text'
-       ORDER BY m.created_at ASC`,
+       ORDER BY m.created_at DESC
+       LIMIT ${TRANSCRIPT_MESSAGE_CAP}`,
       [sessionId],
     );
+  rows.reverse();
   return rows.map((r) => {
     // Message content is encrypted at rest — the judge must see plaintext.
     // (Caught live: the first prod run judged ciphertext and reported
@@ -162,6 +175,7 @@ export async function refreshTenantInsights(
     state.lastRefreshedAt ??
     new Date(now.getTime() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
   const sessions = await loadEligibleSessions(tenantId, since, BACKFILL_CAP);
+  const alreadyIds = await loadExistingJudgmentSessionIds(sessions.map((s) => s.id));
 
   let watermark: Date | null = null;
   let watermarkFrozen = false;
@@ -172,10 +186,7 @@ export async function refreshTenantInsights(
 
   for (const session of sessions) {
     // Unique(session_id) makes re-judging a no-op risk; skip cheaply instead.
-    const already = await judgmentRepo.findOne({
-      where: { sessionId: session.id },
-    });
-    if (already) {
+    if (alreadyIds.has(session.id)) {
       if (!watermarkFrozen) watermark = session.effectiveEndedAt;
       continue;
     }

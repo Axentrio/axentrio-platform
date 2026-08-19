@@ -36,6 +36,7 @@ interface RetrievedChunk {
   title: string;
   similarity: number;
   metadata: Record<string, any>;
+  keyword_rank?: number;
 }
 
 export interface RagResult {
@@ -51,11 +52,22 @@ export interface RagResult {
  * search can find relevant chunks even for contextual questions like
  * "what about the battery life?" (after discussing a specific product).
  */
+/** Short anaphoric follow-ups need history. A self-contained question does not pay for a rewrite LLM. */
+export function needsQueryRewrite(
+  message: string,
+  history: { role: 'user' | 'assistant'; content: string }[],
+): boolean {
+  if (history.length === 0) return false;
+  const text = message.trim();
+  if (text.length > 80) return false;
+  return /\b(it|that|this|those|these|they|them|he|she|there|same|also|too)\b|^what about|^and\b/i.test(text);
+}
+
 async function rewriteQuery(
   message: string,
   history: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<string> {
-  if (history.length === 0) return message;
+  if (!needsQueryRewrite(message, history)) return message;
 
   try {
     const openai = new OpenAI({ apiKey: config.rag.openaiApiKey });
@@ -93,6 +105,75 @@ async function rewriteQuery(
 }
 
 /**
+ * Two indexable queries, then merge. A single ORDER BY of vector + ts_rank
+ * cannot use HNSW; `ORDER BY embedding <=> $1` can.
+ */
+async function retrieveHybridChunks(
+  dataSource: DataSource,
+  tenantId: string,
+  embeddingStr: string,
+  searchQuery: string,
+  maxChunks: number,
+  knowledgeBaseIds?: string[],
+): Promise<RetrievedChunk[]> {
+  let kbClause = '';
+  const vectorParams: unknown[] = [embeddingStr, tenantId, config.rag.minSimilarity, maxChunks];
+  if (knowledgeBaseIds !== undefined) {
+    vectorParams.push(knowledgeBaseIds);
+    kbClause = ` AND kd."knowledgeBaseId" = ANY($${vectorParams.length}::uuid[])`;
+  }
+
+  const vectorSql = `SELECT kc.id, kc.content, kc.metadata, kd.title,
+            1 - (kc.embedding <=> $1::vector) AS similarity,
+            0::float AS keyword_rank
+     FROM knowledge_chunks kc
+     JOIN knowledge_documents kd ON kd.id = kc."documentId"
+     WHERE kc."tenantId" = $2
+       AND kd.status = 'indexed'${kbClause}
+       AND (kc.embedding <=> $1::vector) <= (1 - $3)
+     ORDER BY kc.embedding <=> $1::vector
+     LIMIT $4`;
+
+  const keywordParams: unknown[] = [searchQuery, tenantId, maxChunks];
+  let keywordKb = '';
+  if (knowledgeBaseIds !== undefined) {
+    keywordParams.push(knowledgeBaseIds);
+    keywordKb = ` AND kd."knowledgeBaseId" = ANY($${keywordParams.length}::uuid[])`;
+  }
+
+  const keywordSql = `SELECT kc.id, kc.content, kc.metadata, kd.title,
+            0::float AS similarity,
+            ts_rank(kc.tsv, websearch_to_tsquery('english', $1)) AS keyword_rank
+     FROM knowledge_chunks kc
+     JOIN knowledge_documents kd ON kd.id = kc."documentId"
+     WHERE kc."tenantId" = $2
+       AND kd.status = 'indexed'${keywordKb}
+       AND kc.tsv @@ websearch_to_tsquery('english', $1)
+     ORDER BY ts_rank(kc.tsv, websearch_to_tsquery('english', $1)) DESC
+     LIMIT $3`;
+
+  const [vectorRows, keywordRows] = await Promise.all([
+    dataSource.query(vectorSql, vectorParams) as Promise<RetrievedChunk[]>,
+    dataSource.query(keywordSql, keywordParams) as Promise<RetrievedChunk[]>,
+  ]);
+
+  const byId = new Map<string, RetrievedChunk>();
+  for (const row of vectorRows) byId.set(row.id, row);
+  for (const row of keywordRows) {
+    const existing = byId.get(row.id);
+    if (existing) {
+      existing.keyword_rank = Math.max(existing.keyword_rank ?? 0, row.keyword_rank ?? 0);
+    } else {
+      byId.set(row.id, row);
+    }
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => (b.similarity + (b.keyword_rank ?? 0) * 0.5) - (a.similarity + (a.keyword_rank ?? 0) * 0.5))
+    .slice(0, maxChunks);
+}
+
+/**
  * Search knowledge base for relevant chunks — used by the internal RAG search endpoint.
  * Search only: no LLM call, no prompt construction, no confidence scoring.
  */
@@ -121,35 +202,20 @@ export async function searchKnowledge(
   logger.debug(`[RAG Search] Query: "${searchQuery}" | tenant: ${tenantId}`);
 
   // Bias the embedding (semantic) toward specialty vocabulary; leave the keyword
-  // tsquery ($5 = searchQuery) untouched so it isn't AND-over-constrained.
+  // tsquery untouched so it isn't AND-over-constrained.
   const embedInput = specialtyTerms && specialtyTerms.length > 0
     ? `${searchQuery} ${specialtyTerms.join(' ')}`
     : searchQuery;
   const queryEmbedding = await embed(embedInput);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-  const params: unknown[] = [embeddingStr, tenantId, config.rag.minSimilarity, maxChunks, searchQuery];
-  let kbClause = '';
-  if (knowledgeBaseIds !== undefined) {
-    params.push(knowledgeBaseIds);
-    kbClause = ` AND kd."knowledgeBaseId" = ANY($${params.length}::uuid[])`;
-  }
-
-  const chunks: RetrievedChunk[] = await dataSource.query(
-    `SELECT kc.id, kc.content, kc.metadata, kd.title,
-            1 - (kc.embedding <=> $1::vector) AS similarity,
-            ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) AS keyword_rank
-     FROM knowledge_chunks kc
-     JOIN knowledge_documents kd ON kd.id = kc."documentId"
-     WHERE kc."tenantId" = $2
-       AND kd.status = 'indexed'${kbClause}
-       AND (
-         1 - (kc.embedding <=> $1::vector) >= $3
-         OR kc.tsv @@ websearch_to_tsquery('english', $5)
-       )
-     ORDER BY (1 - (kc.embedding <=> $1::vector)) + ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) * 0.5 DESC
-     LIMIT $4`,
-    params
+  const chunks = await retrieveHybridChunks(
+    dataSource,
+    tenantId,
+    embeddingStr,
+    searchQuery,
+    maxChunks,
+    knowledgeBaseIds,
   );
 
   logger.info(`[RAG Search] Retrieved ${chunks.length} chunks${chunks.length > 0 ? `, top similarity: ${chunks[0]?.similarity}` : ''}`);
@@ -178,32 +244,16 @@ export async function generateResponse(
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
   logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);
 
-  // Hybrid search: combine vector similarity with keyword matching
-  // Vector similarity is the primary signal; keyword match boosts chunks
-  // that contain exact terms the user searched for (fixes "IPX7", phone numbers, etc.)
-  const params: unknown[] = [embeddingStr, tenantId, config.rag.minSimilarity, config.rag.maxContextChunks, searchQuery];
-  let kbClause = '';
-  if (knowledgeBaseIds !== undefined) {
-    params.push(knowledgeBaseIds);
-    kbClause = ` AND kd."knowledgeBaseId" = ANY($${params.length}::uuid[])`;
-  }
-
-  const chunks: RetrievedChunk[] = noKnowledge ? [] : await dataSource.query(
-    `SELECT kc.id, kc.content, kc.metadata, kd.title,
-            1 - (kc.embedding <=> $1::vector) AS similarity,
-            ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) AS keyword_rank
-     FROM knowledge_chunks kc
-     JOIN knowledge_documents kd ON kd.id = kc."documentId"
-     WHERE kc."tenantId" = $2
-       AND kd.status = 'indexed'${kbClause}
-       AND (
-         1 - (kc.embedding <=> $1::vector) >= $3
-         OR kc.tsv @@ websearch_to_tsquery('english', $5)
-       )
-     ORDER BY (1 - (kc.embedding <=> $1::vector)) + ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) * 0.5 DESC
-     LIMIT $4`,
-    params
-  );
+  const chunks: RetrievedChunk[] = noKnowledge
+    ? []
+    : await retrieveHybridChunks(
+        dataSource,
+        tenantId,
+        embeddingStr,
+        searchQuery,
+        config.rag.maxContextChunks,
+        knowledgeBaseIds,
+      );
 
   logger.info(`[RAG] Retrieved ${chunks.length} chunks${chunks.length > 0 ? `, top similarity: ${chunks[0]?.similarity}` : ''}`);
 

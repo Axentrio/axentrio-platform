@@ -194,8 +194,16 @@ vi.mock("../../database/data-source", () => ({
     },
     query: async (sql: string, params: unknown[]) => {
       st.capturedQueries.push(sql);
-      if (sql.includes("FROM messages"))
-        return st.transcripts[params[0] as string] ?? [];
+      if (sql.includes("FROM messages")) {
+        const rows = st.transcripts[params[0] as string] ?? [];
+        return sql.includes("ORDER BY m.created_at DESC") ? [...rows].reverse() : rows;
+      }
+      if (sql.includes("session_id = ANY")) {
+        const ids = (params[0] as string[]) ?? [];
+        return [...st.existingJudgments]
+          .filter((id) => ids.includes(id))
+          .map((session_id) => ({ session_id }));
+      }
       if (
         sql.includes("judgedInWindow") ||
         sql.includes("JOIN chatbot_judgments")
@@ -519,6 +527,19 @@ describe("refreshTenantInsights — backfill + skip + completeness", () => {
       expect(sql).not.toContain("missing_bot");
       expect(sql).not.toContain("gsl.enforced");
     }
+  });
+});
+
+describe("refreshTenantInsights — transcript window", () => {
+  it("loads the newest 80 text messages, not the whole thread", async () => {
+    st.eligibleSessions = [session("s1", "2026-06-11T10:00:00Z")];
+    st.transcripts = {
+      s1: [{ id: "m1", content: "hi", contentEncrypted: false, sender: "user" }],
+    };
+    await refreshTenantInsights(T, NOW);
+    const sql = st.capturedQueries.find((q) => q.includes("FROM messages"));
+    expect(sql).toMatch(/LIMIT 80/);
+    expect(sql).toMatch(/ORDER BY m.created_at DESC/);
   });
 });
 

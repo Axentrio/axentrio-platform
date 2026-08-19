@@ -1207,7 +1207,11 @@ export class InternalProvider implements BookingProvider {
     // slots free — for a traffic-unaware (>24h) list every slot shares one departure bucket, so a
     // single purchase answers them all — which is exactly why the COUNT is now claimed on the spend
     // path (a cache miss) rather than per slot: burning it on hits is what degraded the later slots.
+    // Enforce path only needs enough clear times to offer. Annotate (owner picker)
+    // still judges the whole list so every diary row can be marked.
+    const TRAVEL_ENFORCE_CLEAR_CAP = 20;
     for (const slot of input.slots) {
+      if (!annotating && cleared.length >= TRAVEL_ENFORCE_CLEAR_CAP) break;
       const slotCandidate = {
         ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
         point: candidate.point,

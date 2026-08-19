@@ -97,21 +97,23 @@ export async function getOwnedBot(botId: string, tenantId: string): Promise<Bot>
 
 export async function ensureAnchorBot(
   tenantId: string,
-  manager: EntityManager = ds().manager,
+  manager?: EntityManager,
 ): Promise<Bot> {
-  const existing = await manager.findOne(Bot, { where: { tenantId, isDefault: true } });
+  const botRepo = manager ? manager.getRepository(Bot) : ds().getRepository(Bot);
+  const tenantRepo = manager ? manager.getRepository(Tenant) : ds().getRepository(Tenant);
+  const existing = await botRepo.findOne({ where: { tenantId, isDefault: true } });
   if (existing) return existing;
 
-  const tenant = await manager.findOne(Tenant, { where: { id: tenantId } });
+  const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
   if (!tenant) throw new AnchorBotMissingError(tenantId);
+  if (typeof botRepo.createQueryBuilder !== 'function') throw new AnchorBotMissingError(tenantId);
 
   const settings = JSON.parse(JSON.stringify(tenant.settings ?? {}));
   if (settings?.ai && 'apiKey' in settings.ai) delete settings.ai.apiKey;
 
-  await manager
+  await botRepo
     .createQueryBuilder()
     .insert()
-    .into(Bot)
     .values({
       tenantId,
       name: tenant.name,
@@ -123,7 +125,7 @@ export async function ensureAnchorBot(
     .orIgnore()
     .execute();
 
-  const bot = await manager.findOne(Bot, { where: { tenantId, isDefault: true } });
+  const bot = await botRepo.findOne({ where: { tenantId, isDefault: true } });
   if (!bot) throw new AnchorBotMissingError(tenantId);
   return bot;
 }

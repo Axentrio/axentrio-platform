@@ -53,6 +53,15 @@ export interface NormalizedEvent {
   sessionId?: string;
   subscription: NormalizedSubscription | null;
   invoiceUrl?: string;
+  /**
+   * Stripe invoice id (`in_…`). Set on invoice.* events and on
+   * `charge.refunded` when the charge points at an invoice.
+   */
+  invoiceId?: string;
+  /** Stripe refund id (`re_…`). Set on `charge.refunded`. */
+  refundId?: string;
+  /** Amount of this refund in the smallest currency unit. */
+  refundAmountCents?: number;
   occurredAt: Date;
   raw: unknown;
 }

@@ -74,6 +74,7 @@ export const queryKeys = {
     users: () => [...queryKeys.admin.all(), 'users'] as const,
     analytics: () => [...queryKeys.admin.all(), 'analytics'] as const,
     tenants: () => [...queryKeys.admin.all(), 'tenants'] as const,
+    legalInvoices: () => [...queryKeys.admin.all(), 'legal-invoices'] as const,
     tenantDetail: (id: string) => [...queryKeys.admin.all(), 'tenant-detail', id] as const,
     tenantAudit: (id: string) => [...queryKeys.admin.tenantDetail(id), 'audit'] as const,
     tenantOverrides: (id: string) => [...queryKeys.admin.tenantDetail(id), 'feature-overrides'] as const,

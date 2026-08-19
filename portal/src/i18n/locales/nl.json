@@ -32,6 +32,7 @@
     "successMeter": "Succesmeter",
     "superAdmin": "Super Admin",
     "allTenants": "Alle klanten",
+    "legalInvoices": "Wettelijke facturen",
     "allUsers": "Alle gebruikers",
     "platformAnalytics": "Platformanalyse",
     "guardrails": "Beveiliging",
@@ -1662,6 +1663,33 @@
         "errorFallback": "Aanmaken van tenant mislukt"
       }
     },
+    "legalInvoices": {
+      "title": "Wettelijke facturen",
+      "subtitle": "Billit-factuurnummer, betaalstatus en Peppol-levering. Stuur een mislukte factuur opnieuw, zonder de Tenant opnieuw te belasten.",
+      "retry": "Opnieuw",
+      "retryWaiting": "Alle wachtende opnieuw",
+      "empty": "Geen wettelijke facturen voor dit filter.",
+      "errors": {
+        "loadFailed": "Wettelijke facturen konden niet worden geladen."
+      },
+      "stats": {
+        "attention": "Opvolging nodig",
+        "total": "Getoonde facturen"
+      },
+      "filters": {
+        "attention": "Opvolging nodig",
+        "all": "Alle"
+      },
+      "columns": {
+        "tenant": "Tenant",
+        "number": "Nummer",
+        "amount": "Bedrag",
+        "status": "Status",
+        "error": "Fout",
+        "when": "Wanneer",
+        "actions": "Acties"
+      }
+    },
     "tenantDetail": {
       "errors": {
         "loadFailed": "Tenant kon niet worden geladen."
@@ -1737,6 +1765,19 @@
           "actor": "Uitvoerder",
           "action": "Actie",
           "details": "Details"
+        }
+      },
+      "legalInvoices": {
+        "title": "Wettelijke facturen",
+        "empty": "Nog geen wettelijke facturen.",
+        "retry": "Opnieuw",
+        "columns": {
+          "number": "Nummer",
+          "payment": "Betaling",
+          "invoice": "Factuur",
+          "peppol": "Peppol",
+          "stripe": "Stripe",
+          "actions": "Acties"
         }
       },
       "tierDialog": {

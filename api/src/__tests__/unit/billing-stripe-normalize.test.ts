@@ -174,6 +174,7 @@ describe('normalizeWebhookEvent — per event type', () => {
   it('maps invoice.paid → invoice.paid with subscriptionId extracted', () => {
     const p = makeProvider();
     const invoice = {
+      id: 'in_invoice_42',
       customer: 'cus_invoice',
       subscription: 'sub_invoice_42',
       hosted_invoice_url: 'https://stripe.example/i',
@@ -183,6 +184,7 @@ describe('normalizeWebhookEvent — per event type', () => {
     expect(normalized!.type).toBe('invoice.paid');
     expect(normalized!.subscriptionId).toBe('sub_invoice_42');
     expect(normalized!.invoiceUrl).toBe('https://stripe.example/i');
+    expect(normalized!.invoiceId).toBe('in_invoice_42');
     expect(normalized!.subscription).toBeNull(); // no NormalizedSubscription for invoice events
   });
 
@@ -269,12 +271,19 @@ describe('normalizeWebhookEvent — per event type', () => {
 
   it('maps charge.refunded → refund.recorded', () => {
     const p = makeProvider();
-    const charge = { customer: 'cus_refund' };
+    const charge = {
+      customer: 'cus_refund',
+      invoice: 'in_refunded',
+      amount_refunded: 9074,
+      refunds: { data: [{ id: 're_1', amount: 9074 }] },
+    };
     const normalized = p.normalizeWebhookEvent(makeEvent('charge.refunded', charge));
 
     expect(normalized!.type).toBe('refund.recorded');
     expect(normalized!.customerId).toBe('cus_refund');
-    // Charges aren't directly subscription-scoped — handler resolves by customer.
+    expect(normalized!.invoiceId).toBe('in_refunded');
+    expect(normalized!.refundId).toBe('re_1');
+    expect(normalized!.refundAmountCents).toBe(9074);
     expect(normalized!.subscriptionId).toBeUndefined();
   });
 

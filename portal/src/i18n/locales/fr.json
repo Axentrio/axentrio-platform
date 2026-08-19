@@ -32,6 +32,7 @@
     "successMeter": "Indice de réussite",
     "superAdmin": "Super administrateur",
     "allTenants": "Tous les clients",
+    "legalInvoices": "Factures légales",
     "allUsers": "Tous les utilisateurs",
     "platformAnalytics": "Analyses de la plateforme",
     "guardrails": "Garde-fous",
@@ -1661,6 +1662,33 @@
         "errorFallback": "Échec de la création du tenant"
       }
     },
+    "legalInvoices": {
+      "title": "Factures légales",
+      "subtitle": "Numéro Billit, statut de paiement et livraison Peppol. Relancez un envoi en échec sans facturer le Tenant une seconde fois.",
+      "retry": "Réessayer",
+      "retryWaiting": "Relancer les en attente",
+      "empty": "Aucune facture légale pour ce filtre.",
+      "errors": {
+        "loadFailed": "Impossible de charger les factures légales."
+      },
+      "stats": {
+        "attention": "À traiter",
+        "total": "Factures affichées"
+      },
+      "filters": {
+        "attention": "À traiter",
+        "all": "Toutes"
+      },
+      "columns": {
+        "tenant": "Tenant",
+        "number": "Numéro",
+        "amount": "Montant",
+        "status": "Statut",
+        "error": "Erreur",
+        "when": "Quand",
+        "actions": "Actions"
+      }
+    },
     "tenantDetail": {
       "errors": {
         "loadFailed": "Impossible de charger le tenant."
@@ -1736,6 +1764,19 @@
           "actor": "Auteur",
           "action": "Action",
           "details": "Détails"
+        }
+      },
+      "legalInvoices": {
+        "title": "Factures légales",
+        "empty": "Aucune facture légale pour le moment.",
+        "retry": "Réessayer",
+        "columns": {
+          "number": "Numéro",
+          "payment": "Paiement",
+          "invoice": "Facture",
+          "peppol": "Peppol",
+          "stripe": "Stripe",
+          "actions": "Actions"
         }
       },
       "tierDialog": {

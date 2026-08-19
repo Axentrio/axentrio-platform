@@ -68,6 +68,7 @@ Dashboard → **Developers → Webhooks → Add endpoint**.
   - `customer.subscription.trial_will_end`
   - `invoice.paid`
   - `invoice.payment_failed`
+  - `charge.refunded` (creates a Billit credit note for a Legal Invoice)
 
 Copy the **Signing secret** (begins with `whsec_`). This becomes `STRIPE_WEBHOOK_SECRET`.
 

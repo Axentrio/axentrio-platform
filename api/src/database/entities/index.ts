@@ -26,6 +26,7 @@ export {
 export { BillingEvent, BillingEventProvider } from './BillingEvent';
 export { StripeWebhookEvent, type StripeWebhookEventStatus } from './StripeWebhookEvent';
 export { TenantTrialReservation } from './TenantTrialReservation';
+export { LegalInvoice } from './LegalInvoice';
 export { FaqSection, type FaqTranslation } from './FaqSection';
 export { FaqItem } from './FaqItem';
 export { DemandSignal } from './DemandSignal';

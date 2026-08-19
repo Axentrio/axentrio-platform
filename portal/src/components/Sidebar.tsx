@@ -28,6 +28,7 @@ import {
   LogOut,
   Shield,
   ShieldAlert,
+  Receipt,
   UserCog,
   TrendingUp,
   HelpCircle,
@@ -125,6 +126,7 @@ const menuItems: MenuItem[] = [
 
 const adminMenuItems: AdminMenuItem[] = [
   { path: '/admin/tenants', labelKey: 'nav.allTenants', icon: Shield, roles: ['super_admin'] },
+  { path: '/admin/legal-invoices', labelKey: 'nav.legalInvoices', icon: Receipt, roles: ['super_admin'] },
   { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
   { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
   { path: '/admin/guardrails', labelKey: 'nav.guardrails', icon: ShieldAlert, roles: ['super_admin'] },

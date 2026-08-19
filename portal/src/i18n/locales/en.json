@@ -32,6 +32,7 @@
     "successMeter": "Success Meter",
     "superAdmin": "Super Admin",
     "allTenants": "All Tenants",
+    "legalInvoices": "Legal invoices",
     "allUsers": "All Users",
     "platformAnalytics": "Platform Analytics",
     "guardrails": "Guardrails",
@@ -1736,6 +1737,33 @@
         "errorFallback": "Failed to create tenant"
       }
     },
+    "legalInvoices": {
+      "title": "Legal invoices",
+      "subtitle": "Billit invoice number, payment status, and Peppol delivery. Retry a failed send without charging the Tenant again.",
+      "retry": "Retry",
+      "retryWaiting": "Retry all waiting",
+      "empty": "No legal invoices match this filter.",
+      "errors": {
+        "loadFailed": "Failed to load legal invoices."
+      },
+      "stats": {
+        "attention": "Need follow-up",
+        "total": "Shown invoices"
+      },
+      "filters": {
+        "attention": "Need follow-up",
+        "all": "All"
+      },
+      "columns": {
+        "tenant": "Tenant",
+        "number": "Number",
+        "amount": "Amount",
+        "status": "Status",
+        "error": "Error",
+        "when": "When",
+        "actions": "Actions"
+      }
+    },
     "tenantDetail": {
       "errors": {
         "loadFailed": "Failed to load tenant."
@@ -1811,6 +1839,19 @@
           "actor": "Actor",
           "action": "Action",
           "details": "Details"
+        }
+      },
+      "legalInvoices": {
+        "title": "Legal invoices",
+        "empty": "No legal invoices yet.",
+        "retry": "Retry",
+        "columns": {
+          "number": "Number",
+          "payment": "Payment",
+          "invoice": "Invoice",
+          "peppol": "Peppol",
+          "stripe": "Stripe",
+          "actions": "Actions"
         }
       },
       "tierDialog": {

@@ -354,6 +354,80 @@ export function useAdminResendInvite(tenantId: string) {
   });
 }
 
+export interface AdminLegalInvoice {
+  id: string;
+  tenantId: string;
+  tenantName: string | null;
+  documentKind: string;
+  stripeInvoiceId: string | null;
+  stripeRefundId: string | null;
+  billitInvoiceNumber: string | null;
+  paymentStatus: string;
+  invoiceStatus: string;
+  peppolStatus: string;
+  lastError: string | null;
+  retryable: boolean;
+  amountInclCents: number;
+  currency: string;
+  createdAt: string;
+}
+
+export interface AdminLegalInvoiceList {
+  invoices: AdminLegalInvoice[];
+  attentionCount: number;
+  total: number;
+}
+
+export function useAdminLegalInvoices() {
+  return useQuery({
+    queryKey: queryKeys.admin.legalInvoices(),
+    queryFn: async () => {
+      const res = await api.get<AdminLegalInvoiceList>('/admin/legal-invoices');
+      return res as AdminLegalInvoiceList;
+    },
+  });
+}
+
+export function useRetryWaitingLegalInvoices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/admin/legal-invoices/retry-waiting'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.legalInvoices() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.all() });
+      toast.success('Retry of waiting legal invoices started');
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : 'Failed to retry waiting legal invoices';
+      toast.error(message);
+    },
+  });
+}
+
+export function useRetryLegalInvoice(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invoiceId: string) =>
+      api.post(`/admin/tenants/${tenantId}/legal-invoices/${invoiceId}/retry`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.legalInvoices() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Legal invoice retry started');
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : 'Failed to retry legal invoice';
+      toast.error(message);
+    },
+  });
+}
+
 export function useAdminCancelInvite(tenantId: string) {
   const queryClient = useQueryClient();
   return useMutation({

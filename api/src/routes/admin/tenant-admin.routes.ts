@@ -2,6 +2,14 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { AppDataSource, runInTransaction } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
+import { LegalInvoice } from '../../database/entities/LegalInvoice';
+import {
+  listLegalInvoicesForAdmin,
+  listLegalInvoicesForTenant,
+  retryLegalInvoice,
+  retryWaitingLegalInvoices,
+  toPublicLegalInvoice,
+} from '../../billing/legal-invoice/service';
 import { setEnterpriseManual, setTierManual } from '../../billing/service';
 import { invalidateEntitlementsAndModules } from '../../modules';
 import { User } from '../../database/entities/User';
@@ -250,6 +258,7 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
     pendingInvites,
     recentAuditLogs,
     liveStripeRows,
+    legalInvoices,
   ] = await Promise.all([
     userRepo.count({ where: { tenantId: tenant.id } }),
     userRepo.find({
@@ -284,6 +293,7 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
         LIMIT 1`,
       [tenant.id],
     ),
+    listLegalInvoicesForTenant(tenant.id, 20),
   ]);
   const hasActiveStripeSubscription = (liveStripeRows as unknown[]).length > 0;
 
@@ -339,7 +349,41 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
       metadata: log.metadata,
       createdAt: log.createdAt,
     })),
+    legalInvoices: legalInvoices.map(toPublicLegalInvoice),
   });
+}));
+
+router.get('/legal-invoices', asyncHandler(async (_req: Request, res: Response) => {
+  const result = await listLegalInvoicesForAdmin(100);
+  sendSuccess(res, result);
+}));
+
+router.post('/legal-invoices/retry-waiting', asyncHandler(async (req: Request, res: Response) => {
+  const result = await retryWaitingLegalInvoices();
+  await logAudit(
+    req.userId!,
+    'legal_invoice.retry_waiting',
+    'legal_invoice',
+    '00000000-0000-0000-0000-000000000000',
+    undefined,
+    { attempted: result.attempted },
+  );
+  sendSuccess(res, result);
+}));
+
+router.post('/tenants/:id/legal-invoices/:invoiceId/retry', asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.id;
+  const invoiceId = req.params.invoiceId;
+  const row = await AppDataSource.getRepository(LegalInvoice).findOne({
+    where: { id: invoiceId, tenantId },
+  });
+  if (!row) throw new NotFoundError('Legal invoice not found');
+  const result = await retryLegalInvoice(invoiceId);
+  await logAudit(req.userId!, 'legal_invoice.retry', 'legal_invoice', invoiceId, tenantId, {
+    outcome: result.outcome,
+  });
+  const updated = await AppDataSource.getRepository(LegalInvoice).findOneByOrFail({ id: invoiceId });
+  sendSuccess(res, { ...toPublicLegalInvoice(updated), outcome: result.outcome });
 }));
 
 // POST /admin/tenants — create tenant with Clerk org

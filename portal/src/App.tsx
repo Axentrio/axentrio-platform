@@ -20,6 +20,7 @@ import { useNotificationSound } from '@websocket/notificationSound';
 import { OrganizationRequired } from '@auth/OrganizationRequired';
 import { AppAuthProvider } from '@auth/AppAuthProvider';
 import { ProtectedRoute, SupervisorRoute, SuperAdminRoute } from '@auth/ProtectedRoute';
+import { afterAuthRedirectPath } from '@auth/afterAuthRedirect';
 
 // Layout
 import { ErrorBoundary } from '@components/ui/error-boundary';
@@ -64,6 +65,7 @@ import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
 import AdminStudio from '@pages/admin/AdminStudio';
 import AdminBotTemplateDetail from '@pages/admin/AdminBotTemplateDetail';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
+import AdminLegalInvoices from '@pages/admin/AdminLegalInvoices';
 import Help from '@pages/help/Help';
 
 // Public legal pages — rendered outside the Clerk auth gate (see early return in App)
@@ -352,6 +354,7 @@ function AppRoutes() {
                     <Route element={<SuperAdminRoute />}>
                       <Route path="/admin/tenants" element={<AdminTenants />} />
                       <Route path="/admin/tenants/:id" element={<AdminTenantDetail />} />
+                      <Route path="/admin/legal-invoices" element={<AdminLegalInvoices />} />
                       <Route path="/admin/users" element={<AdminUsers />} />
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
                       <Route path="/admin/guardrails" element={<AdminGuardrails />} />
@@ -414,8 +417,9 @@ const App: React.FC = () => {
         <SignedOut>
           <div className="flex items-center justify-center h-screen bg-surface-1">
             <SignIn
-              forceRedirectUrl="/"
-              signUpForceRedirectUrl="/"
+              forceRedirectUrl={afterAuthRedirectPath(window.location)}
+              signUpForceRedirectUrl={afterAuthRedirectPath(window.location)}
+              fallbackRedirectUrl="/"
             />
           </div>
         </SignedOut>

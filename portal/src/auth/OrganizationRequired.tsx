@@ -1,5 +1,6 @@
 import React from 'react';
 import { useOrganization, OrganizationList } from '@clerk/clerk-react';
+import { afterAuthRedirectPath } from './afterAuthRedirect';
 
 export const OrganizationRequired: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { organization, isLoaded } = useOrganization();
@@ -30,6 +31,8 @@ export const OrganizationRequired: React.FC<{ children: React.ReactNode }> = ({ 
       <div className="h-full flex flex-col items-center justify-center">
         <h2 className="text-xl font-semibold text-text-primary mb-6">Select an Organization</h2>
         <OrganizationList
+          afterSelectOrganizationUrl={afterAuthRedirectPath(window.location)}
+          afterCreateOrganizationUrl={afterAuthRedirectPath(window.location)}
           appearance={{
             elements: {
               rootBox: 'mx-auto',

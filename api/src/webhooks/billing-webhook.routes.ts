@@ -42,6 +42,10 @@ import {
   runStripeWebhookIdempotent,
 } from '../billing/events';
 import {
+  scheduleFromInvoicePaid,
+  scheduleFromRefund,
+} from '../billing/legal-invoice/service';
+import {
   getBillingProvider,
   isWebhookProvider,
 } from '../billing/provider-registry';
@@ -228,6 +232,11 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
       res.status(200).json({ alreadyProcessed: true });
       return;
     case 'processed':
+      if (normalized.type === 'invoice.paid') {
+        void scheduleFromInvoicePaid(normalized);
+      } else if (normalized.type === 'refund.recorded') {
+        void scheduleFromRefund(normalized);
+      }
       res.status(200).json({ received: true, outcome: outcome.outcome });
       return;
     case 'failed':

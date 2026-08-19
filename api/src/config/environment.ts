@@ -198,6 +198,9 @@ const envSchema = z.object({
   // Billing endpoints will fail at call time. Use only for environments
   // that legitimately can't configure Stripe yet (early staging deploys).
   SKIP_BILLING_BOOT_CHECK: z.string().optional(),
+  BILLIT_API_URL: z.string().default('https://api.sandbox.billit.be'),
+  BILLIT_API_KEY: z.string().optional(),
+  BILLIT_PARTY_ID: z.string().optional(),
 });
 
 // Parse and validate environment variables
@@ -517,6 +520,11 @@ export const config = {
       priceEssential: env.STRIPE_PRICE_ESSENTIAL ?? '',
       pricePro: env.STRIPE_PRICE_PRO ?? '',
       priceEnterprise: env.STRIPE_PRICE_ENTERPRISE ?? '',
+    },
+    billit: {
+      apiUrl: env.BILLIT_API_URL,
+      apiKey: env.BILLIT_API_KEY ?? '',
+      partyId: env.BILLIT_PARTY_ID ?? '',
     },
   },
 } as const;

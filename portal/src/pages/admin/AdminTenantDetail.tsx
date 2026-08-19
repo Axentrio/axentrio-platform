@@ -34,6 +34,7 @@ import {
   useAdminResendInvite,
   useAdminCancelInvite,
   useSetTenantTier,
+  useRetryLegalInvoice,
   type ManualTier,
 } from '../../queries/useAdminQueries';
 import { queryKeys } from '../../queries/queryKeys';
@@ -56,6 +57,7 @@ import {
 } from '@/components/ui/select';
 import { InlineError } from '@/components/ui/inline-error';
 import { TenantEntitlementsPanel } from '../../components/admin/TenantEntitlementsPanel';
+import { LegalInvoiceStatusPills } from '@/components/admin/LegalInvoiceStatusPills';
 import {
   Table,
   TableHeader,
@@ -111,6 +113,20 @@ interface TenantDetailData {
     entityId: string;
     actorName: string;
     metadata: Record<string, unknown> | null;
+    createdAt: string;
+  }>;
+  legalInvoices?: Array<{
+    id: string;
+    documentKind: string;
+    stripeInvoiceId: string | null;
+    billitInvoiceNumber: string | null;
+    paymentStatus: string;
+    invoiceStatus: string;
+    peppolStatus: string;
+    lastError: string | null;
+    retryable?: boolean;
+    amountInclCents?: number;
+    currency?: string;
     createdAt: string;
   }>;
 }
@@ -170,6 +186,7 @@ const AdminTenantDetail: React.FC = () => {
   const inviteMember = useAdminInviteMember(id!);
   const resendInvite = useAdminResendInvite(id!);
   const cancelInvite = useAdminCancelInvite(id!);
+  const retryLegalInvoice = useRetryLegalInvoice(id ?? '');
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -546,6 +563,69 @@ const AdminTenantDetail: React.FC = () => {
           </Table>
         </Card>
       )}
+
+      <Card variant="glass" className="overflow-hidden">
+        <div className="px-6 py-4 border-b border-edge">
+          <h3 className="font-semibold text-text-primary">{t('admin.tenantDetail.legalInvoices.title')}</h3>
+        </div>
+        {(tenant.legalInvoices ?? []).length === 0 ? (
+          <div className="px-6 py-8 text-text-muted text-center text-sm">
+            {t('admin.tenantDetail.legalInvoices.empty')}
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('admin.tenantDetail.legalInvoices.columns.number')}</TableHead>
+                <TableHead>{t('admin.legalInvoices.columns.status')}</TableHead>
+                <TableHead>{t('admin.legalInvoices.columns.error')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.legalInvoices.columns.stripe')}</TableHead>
+                <TableHead className="text-right">{t('admin.tenantDetail.legalInvoices.columns.actions')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(tenant.legalInvoices ?? []).map((row) => {
+                const canRetry = row.retryable
+                  ?? (row.invoiceStatus === 'failed'
+                    || row.invoiceStatus === 'manual_review'
+                    || row.invoiceStatus === 'draft'
+                    || row.peppolStatus === 'failed'
+                    || row.peppolStatus === 'not_available');
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-mono text-xs">
+                      {row.billitInvoiceNumber ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <LegalInvoiceStatusPills
+                        paymentStatus={row.paymentStatus}
+                        invoiceStatus={row.invoiceStatus}
+                        peppolStatus={row.peppolStatus}
+                      />
+                    </TableCell>
+                    <TableCell className="text-xs text-status-busy max-w-[200px]">
+                      {row.lastError ?? '—'}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{row.stripeInvoiceId ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      {canRetry ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={retryLegalInvoice.isPending}
+                          onClick={() => retryLegalInvoice.mutate(row.id)}
+                        >
+                          {t('admin.tenantDetail.legalInvoices.retry')}
+                        </Button>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
 
       {/* Audit Log */}
       <Card variant="glass" className="overflow-hidden">

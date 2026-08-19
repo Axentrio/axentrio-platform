@@ -37,6 +37,7 @@ import { TenantBillingAccount } from './entities/TenantBillingAccount';
 import { BillingEvent } from './entities/BillingEvent';
 import { StripeWebhookEvent } from './entities/StripeWebhookEvent';
 import { TenantTrialReservation } from './entities/TenantTrialReservation';
+import { LegalInvoice } from './entities/LegalInvoice';
 import { FaqSection } from './entities/FaqSection';
 import { FaqItem } from './entities/FaqItem';
 import { DemandSignal } from './entities/DemandSignal';
@@ -120,6 +121,7 @@ export const AppDataSource = new DataSource({
     BillingEvent,
     StripeWebhookEvent,
     TenantTrialReservation,
+    LegalInvoice,
     FaqSection,
     FaqItem,
     DemandSignal,

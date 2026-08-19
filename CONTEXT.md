@@ -48,6 +48,18 @@ _Avoid_: KPI, success metric, business result, outcome insight (an Outcome is no
 A Tenant's subscription level, stored on `Tenant.tier`. Marketed values are **Essential**, **Pro**, **Enterprise**. The DB enum additionally contains **`free`** as an internal-only cancellation terminal state — never offered for signup, never shown in upgrade UI, never sold. Cancellation lands a Tenant on `free`; reactivation moves them back to a marketed tier via Stripe.
 _Avoid_: plan, subscription level, account type (use Tier).
 
+**Legal Invoice**:
+The official accounting invoice for one paid Tenant subscription period. Created in Billit after Stripe confirms payment. Distinct from a Stripe payment receipt.
+_Avoid_: Stripe invoice, PDF invoice, bill, customer invoice.
+
+**Credit Note**:
+The official accounting document that reverses a Legal Invoice after a Stripe refund.
+_Avoid_: refund invoice, negative invoice, credit invoice.
+
+**Peppol Status**:
+Whether a Legal Invoice was delivered on the Peppol network. Values: `not_required`, `pending`, `sent`, `failed`, `not_available`.
+_Avoid_: e-invoice status, UBL status, delivery flag.
+
 **Channel**:
 A messaging surface a Tenant's customers reach the Agent through. The **widget** is the native channel (always available — it is the product); **WhatsApp, Messenger, Instagram, and Telegram** are external channels, each connected via a `ChannelConnection` and individually gated by a Feature (Pro+ tiers). Which bot answers a channel is the connection's routing assignment, not an entitlement.
 _Avoid_: integration (that's calendar/Cal.com territory), platform, social (the sidebar label "Social Media" is a UI alias).

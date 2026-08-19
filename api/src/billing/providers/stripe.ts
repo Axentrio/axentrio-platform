@@ -679,6 +679,7 @@ export class StripeBillingProvider implements BillingProvider {
           subscriptionId: subId ?? undefined,
           subscription: null,
           invoiceUrl: invoice.hosted_invoice_url ?? undefined,
+          invoiceId: invoice.id,
           occurredAt,
           raw: event,
         };
@@ -689,12 +690,24 @@ export class StripeBillingProvider implements BillingProvider {
           typeof charge.customer === 'string'
             ? charge.customer
             : charge.customer?.id ?? '';
+        const invoiceRef = (charge as { invoice?: string | { id?: string } }).invoice;
+        const invoiceId =
+          typeof invoiceRef === 'string'
+            ? invoiceRef
+            : invoiceRef && typeof invoiceRef === 'object'
+              ? invoiceRef.id
+              : undefined;
+        const refunds = charge.refunds?.data ?? [];
+        const latest = refunds[refunds.length - 1];
         return {
           providerEventId: event.id,
           type: 'refund.recorded',
           customerId,
           subscriptionId: undefined,
           subscription: null,
+          invoiceId,
+          refundId: latest?.id,
+          refundAmountCents: latest?.amount ?? charge.amount_refunded,
           occurredAt,
           raw: event,
         };

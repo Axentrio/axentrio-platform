@@ -36,7 +36,7 @@ export default function SuccessMeter() {
             defaultValue: 'Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically',
           }),
           t('insights.locked.bullet3', {
-            defaultValue: 'Refreshed nightly from your real conversations',
+            defaultValue: 'Press Analyse now to update from your real conversations',
           }),
         ]}
       />

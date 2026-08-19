@@ -532,6 +532,38 @@ describe('Inbox takeover failure toasts', () => {
   });
 });
 
+describe('Inbox filter deep-link', () => {
+  it('opens the Handoff queue from ?filter=handoff (/queue alias)', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/inbox?filter=handoff']}>
+          <Inbox />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('No pending handoffs')).toBeInTheDocument();
+  });
+
+  it('opens the Handoff queue from ?filter=handsoff', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/inbox?filter=handsoff']}>
+          <Inbox />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('No pending handoffs')).toBeInTheDocument();
+  });
+});
+
 describe('Inbox takeover visibility', () => {
   it('offers Take Over on a bot-owned chat, not only during handoff', async () => {
     renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot' }));

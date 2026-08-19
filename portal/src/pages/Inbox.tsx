@@ -81,6 +81,14 @@ import type { HandoffRequest } from '@app-types/index';
 
 type InboxTab = 'all' | 'bot' | 'handsoff' | 'human';
 
+/** `/queue` redirects to `?filter=handoff`; the tab key is the legacy `handsoff`. */
+function inboxTabFromFilter(raw: string | null): InboxTab {
+  if (raw === 'all' || raw === 'bot' || raw === 'handsoff' || raw === 'human') return raw;
+  if (raw === 'handoff') return 'handsoff';
+  if (raw === 'agent') return 'human';
+  return 'all';
+}
+
 interface RawAgent {
   id: string;
   name: string;
@@ -167,11 +175,11 @@ const Inbox: React.FC = () => {
 
   // Query params for deep-linking from redirects
   const [searchParams] = useSearchParams();
-  const initialFilter = searchParams.get('filter') as InboxTab | null;
+  const initialFilter = inboxTabFromFilter(searchParams.get('filter'));
   const initialChatId = searchParams.get('chat');
 
   // Tabs & filters
-  const [activeTab, setActiveTab] = useState<InboxTab>(initialFilter || 'all');
+  const [activeTab, setActiveTab] = useState<InboxTab>(initialFilter);
 
   // Selected chat (right panel)
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);

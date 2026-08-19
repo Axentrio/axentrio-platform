@@ -31,7 +31,7 @@ export default defineConfig({
     globalSetup: isNotificationPrefsUnitRun ? undefined : ['./src/__tests__/global-setup.ts'],
     setupFiles: isNotificationPrefsUnitRun
       ? []
-      : ['./src/__tests__/env-setup.ts', './src/__tests__/setup.ts'],
+      : ['./src/__tests__/env-setup.ts', './src/__tests__/silence-logs.ts', './src/__tests__/setup.ts'],
     include: ['src/__tests__/**/*.test.ts', 'src/services/notification-prefs.service.test.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,

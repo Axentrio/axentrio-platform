@@ -19,6 +19,7 @@ export default defineConfig({
       'src/__tests__/unit/**/*.test.ts',
       'src/services/notification-prefs.service.test.ts',
     ],
+    setupFiles: ['./src/__tests__/silence-logs.ts'],
     testTimeout: 10000,
     // Isolated module graphs (default) keep vi.mock per file. No shared
     // database, Redis, or process-global provider, so files can run together.

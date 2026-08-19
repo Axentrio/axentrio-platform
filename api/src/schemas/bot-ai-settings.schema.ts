@@ -15,6 +15,8 @@ import { z } from 'zod';
 export const putBotAiSettingsSchema = z
   .object({
     enabled: z.boolean(),
+    // Default greeting language. Later replies follow the visitor.
+    language: z.enum(['en', 'nl', 'fr']).optional(),
     // Required key, but accepts null / empty string (saved as null) — matches today.
     supportEmail: z.string().email().max(200).nullable().or(z.literal('')),
     // Free-text supplementary context (guardrails §11b) — rendered as a fenced

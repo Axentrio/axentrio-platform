@@ -27,6 +27,7 @@ import {
 } from '../services/bot-config.service';
 import { getBotKnowledgeBaseIds } from './bot-knowledge-bases';
 import { defaultBotAi } from '../config/default-bot-settings';
+import { resolveBotLanguage, resolveGreetingMessage } from '../config/bot-language';
 import { putBotAiSettingsSchema } from '../schemas/bot-ai-settings.schema';
 import { testChatSchema } from '../schemas/ai-settings.schema';
 import { BotSettings } from '../database/entities/Bot';
@@ -110,6 +111,9 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,
+    ...(data.language === undefined
+      ? (existing.language ? { language: existing.language } : {})
+      : { language: data.language }),
     // T18: never persist the legacy brandVoice.templateId — the authoritative
     // binding lives on Bot.template_id (set via PUT /bots/:id/template). Strip it
     // even if an old client still sends it.
@@ -122,7 +126,13 @@ export async function updateBotAiSettings(req: Request, res: Response) {
         ? { businessName: data.brandVoice.businessName.trim() }
         : {}),
     },
-    guardrails: data.guardrails,
+    guardrails: {
+      ...data.guardrails,
+      greetingMessage: resolveGreetingMessage(
+        data.guardrails.greetingMessage,
+        resolveBotLanguage(data.language ?? existing.language),
+      ),
+    },
     // Free-text supplementary context (§11b). Full-replace, so: preserve the
     // existing value when the client omits the field (don't silently clear it),
     // persist a non-empty value, and clear only on an explicit blank (codex).

@@ -21,7 +21,12 @@ import { Bot } from '../database/entities/Bot';
 import { enforceCountLimit } from '../billing/enforce';
 import { effectiveBotConfig, withEffectiveConfig } from '../templates/template-resolver';
 import { substituteVariables } from '../llm/prompt-builder';
-import { defaultBotAi, WIDGET_GREETING_QUICK_REPLIES } from '../config/default-bot-settings';
+import { defaultBotAi } from '../config/default-bot-settings';
+import {
+  greetingQuickReplies,
+  resolveBotLanguage,
+  resolveGreetingMessage,
+} from '../config/bot-language';
 import { encrypt } from '../utils/encryption';
 import { emitConversationUpsert } from '../realtime/conversation-events';
 import { ValidationError } from '../middleware/error-handler';
@@ -207,7 +212,8 @@ export async function ensureWidgetGreeting(
       const eff = await effectiveBotConfig(bot);
       const botAi = bot.settings?.ai ?? defaultBotAi(bot.name);
       const aiForGreeting = withEffectiveConfig(botAi, eff);
-      const rawGreeting = aiForGreeting.guardrails?.greetingMessage ?? '';
+      const language = resolveBotLanguage(bot.settings?.ai?.language ?? botAi.language);
+      const rawGreeting = resolveGreetingMessage(aiForGreeting.guardrails?.greetingMessage, language);
       const greetingMessage = rawGreeting
         ? substituteVariables(rawGreeting, aiForGreeting, { businessName: tenant.name })
         : '';
@@ -241,7 +247,7 @@ export async function ensureWidgetGreeting(
           status: 'sent' as Message['status'],
           sentAt: new Date(),
           metadata: {
-            quickReplies: [...WIDGET_GREETING_QUICK_REPLIES],
+            quickReplies: [...greetingQuickReplies(language)],
           },
         }),
       );

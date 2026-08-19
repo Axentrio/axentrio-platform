@@ -184,6 +184,19 @@ describe('AiBotForm', () => {
     expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
   });
 
+  it('saves the default language next to voice tone', async () => {
+    const { user } = renderForm();
+    mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+
+    expect(screen.getByLabelText('Language')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Language'));
+    await user.click(await screen.findByRole('option', { name: 'Nederlands' }));
+
+    await waitFor(() => expect(mockMutate).toHaveBeenCalled());
+    const payload = mockMutate.mock.calls[0][0] as { language: string };
+    expect(payload.language).toBe('nl');
+  });
+
   it('does not persist a templateId in the ai-settings payload (T18)', async () => {
     const { user } = renderForm();
     mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());

@@ -898,6 +898,15 @@
         },
         "customTone": {
           "placeholder": "ex. spirituel, concis, sans emojis"
+        },
+        "language": {
+          "label": "Langue",
+          "helper": "Utilise pour le premier message d'accueil uniquement. Les reponses suivantes suivent le visiteur.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Francais"
+          }
         }
       },
       "instructions": {

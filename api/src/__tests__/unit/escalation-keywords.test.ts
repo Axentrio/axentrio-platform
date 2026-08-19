@@ -29,7 +29,7 @@ describe('greeting chip \u2194 default escalation keywords', () => {
     () => {
       const oldStored = ['speak to someone', 'human agent', 'talk to a person'];
       const keywords = effectiveEscalationKeywords(oldStored);
-      expect(keywords).toHaveLength(4);
+      expect(keywords).toHaveLength(6);
       expect(coveredByKeyword('Talk to someone', oldStored)).toBe(false);
       expect(coveredByKeyword('Talk to someone', keywords)).toBe(true);
     },

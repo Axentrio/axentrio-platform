@@ -116,6 +116,17 @@ const TONE_PRESETS = [
   { value: 'formal', labelKey: 'ai.bot.identity.tones.formal' },
 ] as const;
 
+const BOT_LANGUAGES = ['en', 'nl', 'fr'] as const;
+type BotLanguage = (typeof BOT_LANGUAGES)[number];
+const STOCK_GREETINGS: Record<BotLanguage, string> = {
+  en: 'Welcome! How can I help you today?',
+  nl: 'Welkom! Waarmee kan ik je helpen?',
+  fr: 'Bienvenue ! Comment puis-je vous aider ?',
+};
+function isBotLanguage(value: string): value is BotLanguage {
+  return (BOT_LANGUAGES as readonly string[]).includes(value);
+}
+
 /** Per-channel prompt overrides — mirrors the API's `ai.channelOverrides.social`.
  *  `social` = every messaging channel (WhatsApp / Messenger / Instagram / Telegram);
  *  the web widget is never affected. An empty tone means "same as the main tone". */
@@ -128,6 +139,7 @@ type FormSnapshot = {
   businessName: string;
   supportEmail: string;
   effectiveTone: string;
+  language: BotLanguage;
   greetingMessage: string;
   fallbackMessage: string;
   offHoursMessage: string;
@@ -222,6 +234,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [supportEmail, setSupportEmail] = useState('');
   const [tone, setTone] = useState('friendly');
   const [customTone, setCustomTone] = useState('');
+  const [language, setLanguage] = useState<BotLanguage>('en');
   const [greetingMessage, setGreetingMessage] = useState('');
   const [fallbackMessage, setFallbackMessage] = useState('');
   const [offHoursMessage, setOffHoursMessage] = useState('');
@@ -273,6 +286,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
     const hTone = serverTone;
     const hCustomTone = isPreset ? '' : serverTone;
+    const rawLanguage = (aiSettings as { language?: string }).language;
+    const hLanguage: BotLanguage = isBotLanguage(rawLanguage ?? '') ? (rawLanguage as BotLanguage) : 'en';
     const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
     const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
     const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
@@ -290,6 +305,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setSupportEmail(hSupportEmail);
     setTone(hTone);
     setCustomTone(hCustomTone);
+    setLanguage(hLanguage);
     setGreetingMessage(hGreeting);
     setFallbackMessage(hFallback);
     setOffHoursMessage(hOffHours);
@@ -307,6 +323,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       businessName: hBusinessName,
       supportEmail: hSupportEmail,
       effectiveTone: computeEffectiveTone(hTone, hCustomTone),
+      language: hLanguage,
       greetingMessage: hGreeting,
       fallbackMessage: hFallback,
       offHoursMessage: hOffHours,
@@ -420,6 +437,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     businessName,
     supportEmail,
     effectiveTone,
+    language,
     greetingMessage,
     fallbackMessage,
     offHoursMessage,
@@ -456,6 +474,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       updateSettings.mutate(
         {
           enabled,
+          language,
           supportEmail: supportEmail || null,
           brandVoice: {
             name: botName || 'AI Assistant',
@@ -479,7 +498,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues, socialOverride],
+    [updateSettings, enabled, language, supportEmail, botName, businessName, effectiveTone, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues, socialOverride],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -636,6 +655,34 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 />
               )}
               <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
+            </div>
+            <div>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.language.label')}</Label>
+              <Select
+                value={language}
+                onValueChange={(v) => {
+                  const next = isBotLanguage(v) ? v : 'en';
+                  setLanguage(next);
+                  setGreetingMessage((prev) => {
+                    const stock = Object.values(STOCK_GREETINGS);
+                    if (!prev.trim() || stock.includes(prev)) return STOCK_GREETINGS[next];
+                    return prev;
+                  });
+                }}
+                disabled={readOnly}
+              >
+                <SelectTrigger className="h-9" aria-label={t('ai.bot.identity.language.label')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BOT_LANGUAGES.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {t(`ai.bot.identity.language.options.${code}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.language.helper')}</p>
             </div>
           </div>
         </Section>

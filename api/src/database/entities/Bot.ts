@@ -83,6 +83,8 @@ export interface BotSettings {
     enabled: boolean;
     provider?: 'openai' | 'anthropic' | null;
     model?: string | null;
+    /** Default greeting language. Later replies follow the visitor. */
+    language?: 'en' | 'nl' | 'fr';
     supportEmail?: string | null;
     /** Free-text supplementary context — rendered as a fenced, LOWEST-authority
      *  block in the prompt; can never override platform rules. Guardrails §11b. */

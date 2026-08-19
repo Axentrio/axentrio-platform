@@ -10,6 +10,10 @@
  */
 import type { BotSettings } from '../database/entities/Bot';
 import { DEFAULT_SKILLS } from './default-skills';
+import {
+  DEFAULT_GREETING_BY_LANGUAGE,
+  GREETING_QUICK_REPLIES_BY_LANGUAGE,
+} from './bot-language';
 
 /** Default keyword short-circuit. Must cover every greeting-chip handoff phrase. */
 export const DEFAULT_ESCALATION_KEYWORDS = [
@@ -17,6 +21,8 @@ export const DEFAULT_ESCALATION_KEYWORDS = [
   'human agent',
   'talk to a person',
   'talk to someone',
+  'praat met iemand',
+  "parler à quelqu'un",
 ] as const;
 
 /** Stored list unioned with defaults so old bots still match greeting-chip phrases. */
@@ -25,12 +31,7 @@ export function effectiveEscalationKeywords(stored?: readonly string[] | null): 
 }
 
 /** First-message chips on a new widget session. Last item is the handoff chip. */
-export const WIDGET_GREETING_QUICK_REPLIES = [
-  'Book appointment',
-  'Our services',
-  'Pricing',
-  'Talk to someone',
-] as const;
+export const WIDGET_GREETING_QUICK_REPLIES = GREETING_QUICK_REPLIES_BY_LANGUAGE.en;
 
 /** Default behavioural `ai` block for a bot. `name` seeds the brand-voice name. */
 export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
@@ -38,13 +39,14 @@ export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
     enabled: true,
     provider: 'openai',
     model: 'gpt-4o-mini',
+    language: 'en',
     brandVoice: { name: `${name} Assistant`, tone: 'friendly', templateId: null },
     guardrails: {
       topicsToAvoid: [],
       escalationKeywords: [...DEFAULT_ESCALATION_KEYWORDS],
       confidenceThreshold: 0.7,
       maxResponseLength: 500,
-      greetingMessage: 'Welcome! How can I help you today?',
+      greetingMessage: DEFAULT_GREETING_BY_LANGUAGE.en,
       fallbackMessage: 'Let me connect you with our team.',
       offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
     },

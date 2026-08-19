@@ -899,6 +899,15 @@
         },
         "customTone": {
           "placeholder": "bijv. spits, beknopt, geen emoji's"
+        },
+        "language": {
+          "label": "Taal",
+          "helper": "Alleen voor de eerste begroeting. Daarna volgt de bot de taal van de bezoeker.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Francais"
+          }
         }
       },
       "instructions": {

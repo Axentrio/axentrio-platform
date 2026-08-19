@@ -906,6 +906,15 @@
         },
         "customTone": {
           "placeholder": "e.g. witty, concise, no emojis"
+        },
+        "language": {
+          "label": "Language",
+          "helper": "Used for the first greeting only. Later replies follow the visitor.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Francais"
+          }
         }
       },
       "instructions": {

@@ -138,6 +138,17 @@ describe('Per-bot AI settings', () => {
       expect(res.body.data.apiKey).toBeUndefined();
     });
 
+    it('defaults language to English when the bot has no ai settings', async () => {
+      const t = await createTestTenant();
+      const b = await createTestAnchorBot(t, { settings: {} as Bot['settings'] });
+      const u = await createTestUser(t.id, { role: 'admin' });
+      configureMockAuth(auth, { userId: u.id, tenantId: t.id, role: 'admin' });
+
+      const res = await request(app).get(`/api/v1/bots/${b.id}/ai-settings`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.language).toBe('en');
+    });
+
     it('fills a full default shape when the bot has no ai settings', async () => {
       const t = await createTestTenant();
       const b = await createTestAnchorBot(t, { settings: {} as Bot['settings'] });
@@ -204,6 +215,56 @@ describe('Per-bot AI settings', () => {
       expect(res.status).toBe(200);
       const bot = await AppDataSource.getRepository(Bot).findOneOrFail({ where: { id: botId } });
       expect(bot.settings.ai?.brandVoice.businessName).toBeUndefined();
+    });
+
+    it('persists language and rewrites a stock greeting', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bots/${botId}/ai-settings`)
+        .send(fullAiBody({
+          language: 'nl',
+          guardrails: {
+            topicsToAvoid: [],
+            escalationKeywords: ['human'],
+            confidenceThreshold: 0.6,
+            maxResponseLength: 400,
+            greetingMessage: 'Welcome! How can I help you today?',
+            fallbackMessage: 'Let me connect you.',
+            offHoursMessage: 'Closed.',
+          },
+        }));
+      expect(res.status).toBe(200);
+      expect(res.body.data.language).toBe('nl');
+      expect(res.body.data.guardrails.greetingMessage).toBe('Welkom! Waarmee kan ik je helpen?');
+      const bot = await AppDataSource.getRepository(Bot).findOneOrFail({ where: { id: botId } });
+      expect(bot.settings.ai?.language).toBe('nl');
+      expect(bot.settings.ai?.guardrails.greetingMessage).toBe('Welkom! Waarmee kan ik je helpen?');
+    });
+
+    it('keeps a custom greeting when language changes', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bots/${botId}/ai-settings`)
+        .send(fullAiBody({
+          language: 'fr',
+          guardrails: {
+            topicsToAvoid: [],
+            escalationKeywords: ['human'],
+            confidenceThreshold: 0.6,
+            maxResponseLength: 400,
+            greetingMessage: 'Hey hey! Wat speelt er?',
+            fallbackMessage: 'Let me connect you.',
+            offHoursMessage: 'Closed.',
+          },
+        }));
+      expect(res.status).toBe(200);
+      expect(res.body.data.language).toBe('fr');
+      expect(res.body.data.guardrails.greetingMessage).toBe('Hey hey! Wat speelt er?');
+    });
+
+    it('rejects an unknown language', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bots/${botId}/ai-settings`)
+        .send(fullAiBody({ language: 'de' }));
+      expect(res.status).toBe(422);
     });
 
     it('normalizes empty supportEmail to null', async () => {

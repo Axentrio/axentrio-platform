@@ -21,7 +21,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U drill"
+          --health-cmd "pg_isready -U drill -d restore_drill"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -64,13 +64,18 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --network host -e PGPASSWORD postgres:17 \
-            psql -h 127.0.0.1 -U drill -d restore_drill -v ON_ERROR_STOP=1 <<'SQL'
-          SELECT count(*) AS public_tables
-            FROM pg_tables WHERE schemaname = 'public';
-          SELECT to_regclass('public.tenants') AS tenants_table;
-          SELECT to_regclass('public.chat_sessions') AS chat_sessions_table;
-          SELECT version();
-          SQL
+            psql -h 127.0.0.1 -U drill -d restore_drill -v ON_ERROR_STOP=1 \
+            -c "SELECT count(*) AS public_tables FROM pg_tables WHERE schemaname = 'public';" \
+            -c "SELECT to_regclass('public.tenants') AS tenants_table;" \
+            -c "SELECT to_regclass('public.chat_sessions') AS chat_sessions_table;"
+          TABLES=$(docker run --rm --network host -e PGPASSWORD postgres:17 \
+            psql -h 127.0.0.1 -U drill -d restore_drill -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public';")
+          if [ "${TABLES:-0}" -lt 10 ]; then
+            echo "::error::Restore looks empty (public tables=$TABLES)"
+            exit 1
+          fi
+          echo "Restore ok: ${TABLES} public tables"
 
       - name: Delete dump from runner
         if: always()

@@ -11,9 +11,9 @@
  *   locked out of the product they pay for is a far worse failure than one who skipped
  *   a wizard. Only a definite "not finished" closes it.
  *
- *   Super admins, except when impersonating. Sitting in their own session they skip
- *   the wizard. Impersonating an unfinished workspace shows it — otherwise there is
- *   no way to review first-run setup without a second account.
+ *   Super admins on a FINISHED workspace. An unfinished one still shows the wizard,
+ *   including when they have switched into a newly created org (they are a Clerk
+ *   member, so it is not impersonation).
  *
  *   Non-admins. Only admins can write setup, so a member of a half-set-up workspace is
  *   told who has to finish it rather than being handed a wizard that will refuse them.
@@ -22,19 +22,13 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
-import { useTenantContextStore } from '@/stores/tenantContextStore';
 import { useSetupStatus } from '@/queries/useOnboardingQueries';
 import SetupWizard from './SetupWizard';
 
 export const SetupGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t } = useTranslation();
   const { user } = useAppAuth();
-  const activeTenant = useTenantContextStore((s) => s.activeTenant);
   const { data: status, isLoading, isError } = useSetupStatus();
-  const impersonating = user?.role === 'super_admin' && !!activeTenant;
-
-  // Own session: skip. Impersonating an unfinished tenant: fall through and show setup.
-  if (user?.role === 'super_admin' && !impersonating) return <>{children}</>;
 
   if (isLoading) {
     return (

@@ -76,17 +76,16 @@ describe('SetupGate', () => {
     expect(await screen.findByText('PRODUCT')).toBeInTheDocument();
   });
 
-  it('never gates a super admin in their own session', async () => {
+  it('lets a super admin through a finished workspace', async () => {
     authState.role = 'super_admin';
-    apiGet.mockResolvedValue(incomplete);
+    apiGet.mockResolvedValue(complete);
     renderGate();
     expect(await screen.findByText('PRODUCT')).toBeInTheDocument();
     expect(screen.queryByText('WIZARD')).not.toBeInTheDocument();
   });
 
-  it('shows the wizard when a super admin impersonates an unfinished workspace', async () => {
+  it('shows the wizard when a super admin is in an unfinished workspace', async () => {
     authState.role = 'super_admin';
-    tenantState.activeTenant = { tenantId: 't1', tenantName: 'Setup test' };
     apiGet.mockResolvedValue(incomplete);
     renderGate();
     expect(await screen.findByText('WIZARD')).toBeInTheDocument();

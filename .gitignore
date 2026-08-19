@@ -74,3 +74,12 @@ portal/.env
 docs/Axentrio-App-Review-Submission-Packet.pdf
 docs/meta-google-review-packet.md
 docs/handoff-composable-templates-enablement.md
+
+# Local session / capture leftovers (keep on disk, do not commit)
+.pi/
+output/
+*.har
+docs/reports/
+docs/microsoft-outlook-integration-setup.pdf
+api/AGENTS.md
+claude

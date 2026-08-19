@@ -128,13 +128,11 @@ beforeEach(() => {
 });
 
 describe('test isolation', () => {
-  it('creates a new organization for each workspace', async () => {
+  it('creates a new workspace for each signed-in tenant', async () => {
     const a = await signedInTenant();
     const b = await signedInTenant();
-    expect(a.clerkOrgId).toBeTruthy();
-    expect(b.clerkOrgId).toBeTruthy();
-    expect(a.clerkOrgId).not.toBe(b.clerkOrgId);
     expect(a.id).not.toBe(b.id);
+    expect(a.slug).not.toBe(b.slug);
   });
 });
 

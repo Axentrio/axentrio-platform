@@ -26,9 +26,6 @@ export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise
       name: 'Test Tenant',
       slug: `test-${crypto.randomBytes(4).toString('hex')}`,
       apiKey: `cb_${crypto.randomBytes(32).toString('base64url')}`,
-      // Unique Clerk org per tenant so onboarding tests never share an organization
-      // (grandfathered/complete state on one org must not leak into the next).
-      clerkOrgId: `org_${crypto.randomBytes(8).toString('hex')}`,
       tier: 'pro',
       status: 'active',
       settings: {},

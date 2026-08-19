@@ -43,7 +43,12 @@ jobs:
         run: npm run test:unit
 
   api-integration:
+    name: api-integration (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     services:
       postgres:
@@ -98,7 +103,7 @@ jobs:
 
       - name: Run API integration tests
         working-directory: api
-        run: npm run test:integration
+        run: npx vitest run --config vitest.integration.config.ts --shard=${{ matrix.shard }}/3
 
   portal-build:
     runs-on: ubuntu-latest

@@ -6,7 +6,7 @@
  *   - Anchor-fallback when session.botId is null (and logs)
  *   - BotPausedConfigError when session.botId points to a paused bot
  *   - BotNotFoundConfigError when session.botId is soft-deleted
- *   - getAnchorBotConfig throws AnchorBotMissingError when no anchor exists
+ *   - getAnchorBotConfig creates the anchor when no anchor exists
  *   - getLlmRuntimeConfigForSession returns separate botAiSettings + apiKey
  *   - updateAnchorBotSettings section-level deep-merge (theme.primaryColor
  *     preserves theme.logoUrl)
@@ -111,11 +111,25 @@ describe('getBotConfigForSession', () => {
 });
 
 describe('getAnchorBotConfig', () => {
-  it('throws AnchorBotMissingError when no anchor exists', async () => {
-    const tenant = await createTestTenant();
-    // No anchor created.
+  it('creates the anchor from tenant settings when no anchor exists', async () => {
+    const tenant = await createTestTenant({
+      settings: {
+        theme: { primaryColor: '#abcdef' },
+        ai: { enabled: true, apiKey: 'sk-tenant-only' },
+      } as Tenant['settings'],
+    });
 
-    await expect(getAnchorBotConfig(tenant.id)).rejects.toBeInstanceOf(AnchorBotMissingError);
+    const { bot, settings } = await getAnchorBotConfig(tenant.id);
+
+    expect(bot).toMatchObject({
+      tenantId: tenant.id,
+      name: tenant.name,
+      publicKey: tenant.apiKey,
+      status: 'active',
+      isDefault: true,
+    });
+    expect(settings.theme?.primaryColor).toBe('#abcdef');
+    expect((settings.ai as any)?.apiKey).toBeUndefined();
   });
 
   it('returns the anchor bot and its settings', async () => {

@@ -63,15 +63,16 @@ export function emptyAccountInformation(): AccountInformation {
 export function prefillAccountInformation(sources: AccountInformationSources): AccountInformation {
   const company = sources.company ?? null;
   const name = (company?.name ?? sources.tenantName ?? '').trim();
+  const vatNumber = (company?.vatNumber ?? '').trim();
   return {
     officialBusinessName: name,
-    vatNumber: (company?.vatNumber ?? '').trim(),
+    vatNumber,
     contactPerson: '',
     invoiceAddress: {
       street: (company?.street ?? '').trim(),
       postalCode: (company?.postalCode ?? '').trim(),
       city: (company?.city ?? '').trim(),
-      country: 'BE',
+      country: /^([A-Z]{2})/.exec(vatNumber.toUpperCase())?.[1] ?? 'BE',
     },
     invoiceEmail: (sources.billingEmail ?? '').trim(),
     phone: null,

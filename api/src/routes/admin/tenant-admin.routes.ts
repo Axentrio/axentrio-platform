@@ -32,6 +32,7 @@ import { ERROR_CODES } from '../../middleware/error-codes';
 import { validate } from '../../middleware/validate';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import { createTenantSchema } from '../../schemas';
+import { ensureAnchorBot } from '../../services/bot-config.service';
 
 const router = Router();
 
@@ -431,6 +432,7 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
         settings: mergedSettings,
       });
       await manager.save(t);
+      await ensureAnchorBot(t.id, manager);
       return t;
     });
     await logAudit(req.userId!, 'tenant.created', 'tenant', tenant.id, tenant.id, {

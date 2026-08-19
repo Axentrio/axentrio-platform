@@ -2938,10 +2938,13 @@
         "vatLabel": "VAT number",
         "lookup": "Look up",
         "lookingUp": "Checking the register — this can take a few seconds.",
+        "lookupFailed": "Lookup failed. You can fill the company details yourself.",
+        "lookupRateLimited": "Too many lookups. Try again in a minute.",
         "lookupStatus": {
           "found": "Found in the official register.",
           "not_found": "That number isn't registered. Check it, or fill the details in yourself.",
-          "invalid_format": "That doesn't look like a Belgian VAT number. Example: BE 0400.378.485",
+          "invalid_format": "That VAT number isn't in a valid format. Example: BE 0400.378.485",
+          "unsupported": "We can't look this VAT number up automatically. Fill in the company details yourself.",
           "unavailable": "The register isn't responding right now. Fill the details in yourself and carry on — you can verify later."
         },
         "nameLabel": "Company name",

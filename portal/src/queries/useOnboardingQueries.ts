@@ -139,11 +139,16 @@ export function useCompleteSetup() {
   });
 }
 
-export type CompanyLookupStatus = 'found' | 'not_found' | 'invalid_format' | 'unavailable';
+export type CompanyLookupStatus =
+  | 'found'
+  | 'not_found'
+  | 'invalid_format'
+  | 'unsupported'
+  | 'unavailable';
 
 export interface CompanyLookupResult {
   status: CompanyLookupStatus;
-  company: (SetupCompany & { enterpriseNumber: string; countryCode: 'BE' }) | null;
+  company: (SetupCompany & { enterpriseNumber: string; countryCode: string }) | null;
   cached: boolean;
 }
 

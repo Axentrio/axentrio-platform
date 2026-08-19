@@ -420,19 +420,14 @@ describe('PUT /onboarding/step — skipping switches the feature off', () => {
     // customer who said "not now" to a chatbot must not have one answering visitors.
     const tenant = await signedInTenant();
     const botRepo = AppDataSource.getRepository(Bot);
-    await botRepo.save(
-      botRepo.create({
-        tenantId: tenant.id,
-        name: 'Anchor',
-        publicKey: tenant.apiKey,
-        isDefault: true,
-        settings: { ai: { enabled: true } } as never,
-      }),
-    );
 
-    await request(app).put('/api/v1/onboarding/step').send({ step: 'chatbot', outcome: 'skipped' });
+    const res = await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({ step: 'chatbot', outcome: 'skipped' });
 
+    expect(res.status).toBe(200);
     const bot = await botRepo.findOneOrFail({ where: { tenantId: tenant.id, isDefault: true } });
+    expect(bot.publicKey).toBe(tenant.apiKey);
     expect((bot.settings as { ai?: { enabled?: boolean } }).ai?.enabled).toBe(false);
   });
 

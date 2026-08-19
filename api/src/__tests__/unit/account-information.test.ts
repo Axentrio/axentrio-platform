@@ -51,6 +51,13 @@ describe('prefillAccountInformation', () => {
     expect(out.phone).toBeNull();
   });
 
+  it('uses the VAT prefix as the invoice country', () => {
+    const out = prefillAccountInformation({
+      company: { ...COMPANY, vatNumber: 'NL123456789B01' },
+    });
+    expect(out.invoiceAddress.country).toBe('NL');
+  });
+
   it('empty sources stay empty, not undefined', () => {
     expect(prefillAccountInformation({})).toEqual(emptyAccountInformation());
   });

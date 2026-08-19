@@ -28,9 +28,9 @@
 import axios from 'axios';
 import type Redis from 'ioredis';
 import { logger } from '../../utils/logger';
-import { parseBelgianVat, splitLegalForm } from './vat-number';
+import { normalizeAccountVat, parseBelgianVat, splitLegalForm } from './vat-number';
 
-export type LookupStatus = 'found' | 'not_found' | 'invalid_format' | 'unavailable';
+export type LookupStatus = 'found' | 'not_found' | 'invalid_format' | 'unsupported' | 'unavailable';
 
 export interface CompanyDetails {
   vatNumber: string;
@@ -41,7 +41,7 @@ export interface CompanyDetails {
   street: string | null;
   postalCode: string | null;
   city: string | null;
-  countryCode: 'BE';
+  countryCode: string;
 }
 
 export interface LookupResult {
@@ -52,6 +52,9 @@ export interface LookupResult {
 }
 
 const VIES_BASE = 'https://ec.europa.eu/taxation_customs/vies/rest-api/ms';
+const VIES_COUNTRY_CODES = new Set(
+  'AT BE BG CY CZ DE DK EE EL ES FI FR HR HU IE IT LT LU LV MT NL PL PT RO SE SI SK'.split(' '),
+);
 
 /**
  * Past this the customer has decided the form is broken. Chosen from the measured
@@ -63,7 +66,8 @@ const TIMEOUT_MS = 10_000;
 /** A week. The underlying facts change on the order of years. */
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-const cacheKey = (enterpriseNumber: string) => `company-lookup:be:${enterpriseNumber}`;
+const cacheKey = (countryCode: string, nationalNumber: string) =>
+  `company-lookup:${countryCode.toLowerCase()}:${nationalNumber}`;
 
 /**
  * VIES returns `"Edingensesteenweg 196\n1500 Halle"` — street on the first line, then
@@ -98,17 +102,42 @@ export async function lookupCompanyByVat(
   rawVat: string,
   deps: { redis?: Redis | null } = {},
 ): Promise<LookupResult> {
-  // Foreign country prefixes must not reach parseBelgianVat: it strips letters
-  // and zero-pads, so DE/PT/GB + 9 digits would become a Belgian VIES lookup.
-  const prefix = String(rawVat).trim().toUpperCase().slice(0, 2);
-  if (/^[A-Z]{2}$/.test(prefix) && prefix !== 'BE') {
-    return { status: 'invalid_format', company: null, cached: false };
+  const raw = String(rawVat).trim().toUpperCase();
+  const prefix = /^([A-Z]{2})/.exec(raw)?.[1];
+  let countryCode: string;
+  let nationalNumber: string;
+  let vatNumber: string;
+
+  if (prefix && prefix !== 'BE') {
+    if (!VIES_COUNTRY_CODES.has(prefix)) {
+      const compact = raw.replace(/[.\s-]/g, '');
+      const plausibleVat = /^[A-Z]{2}[A-Z0-9]*\d[A-Z0-9]*$/.test(compact);
+      return {
+        status: plausibleVat ? 'unsupported' : 'invalid_format',
+        company: null,
+        cached: false,
+      };
+    }
+
+    const normalised = normalizeAccountVat(rawVat);
+    if (!normalised.ok || !normalised.value.startsWith(prefix)) {
+      return { status: 'invalid_format', company: null, cached: false };
+    }
+    nationalNumber = normalised.value.slice(2);
+    if (!/^[A-Z0-9]{2,12}$/.test(nationalNumber)) {
+      return { status: 'invalid_format', company: null, cached: false };
+    }
+    countryCode = prefix;
+    vatNumber = normalised.value;
+  } else {
+    const parsed = parseBelgianVat(rawVat);
+    if (!parsed) return { status: 'invalid_format', company: null, cached: false };
+    countryCode = 'BE';
+    nationalNumber = parsed.enterpriseNumber;
+    vatNumber = parsed.vatNumber;
   }
 
-  const parsed = parseBelgianVat(rawVat);
-  if (!parsed) return { status: 'invalid_format', company: null, cached: false };
-
-  const key = cacheKey(parsed.enterpriseNumber);
+  const key = cacheKey(countryCode, nationalNumber);
 
   if (deps.redis) {
     try {
@@ -126,7 +155,7 @@ export async function lookupCompanyByVat(
   let body: ViesResponse;
   try {
     const res = await axios.get<ViesResponse>(
-      `${VIES_BASE}/BE/vat/${parsed.enterpriseNumber}`,
+      `${VIES_BASE}/${countryCode}/vat/${nationalNumber}`,
       { timeout: TIMEOUT_MS, validateStatus: (s) => s === 200 },
     );
     body = res.data ?? {};
@@ -134,7 +163,7 @@ export async function lookupCompanyByVat(
     // Deliberately not rethrown. A register that is slow, rate-limiting or down must
     // never be able to stop someone signing up.
     logger.warn('[company-lookup] VIES unavailable', {
-      enterpriseNumber: parsed.enterpriseNumber,
+      vatNumber,
       error: err instanceof Error ? err.message : 'unknown',
     });
     return { status: 'unavailable', company: null, cached: false };
@@ -142,17 +171,34 @@ export async function lookupCompanyByVat(
 
   const result: Omit<LookupResult, 'cached'> = body.isValid
     ? (() => {
+        if (countryCode !== 'BE') {
+          const address = (body.address ?? '').trim();
+          return {
+            status: 'found' as const,
+            company: {
+              vatNumber,
+              enterpriseNumber: nationalNumber,
+              name: (body.name ?? '').trim(),
+              legalForm: null,
+              street: address && address !== '---' ? address : null,
+              postalCode: null,
+              city: null,
+              countryCode,
+            },
+          };
+        }
+
         const { name, legalForm } = splitLegalForm(body.name);
         const address = parseViesAddress(body.address);
         return {
           status: 'found' as const,
           company: {
-            vatNumber: parsed.vatNumber,
-            enterpriseNumber: parsed.enterpriseNumber,
+            vatNumber,
+            enterpriseNumber: nationalNumber,
             name,
             legalForm,
             ...address,
-            countryCode: 'BE' as const,
+            countryCode,
           },
         };
       })()

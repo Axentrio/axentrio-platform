@@ -2899,10 +2899,13 @@
         "vatLabel": "Numéro de TVA",
         "lookup": "Rechercher",
         "lookingUp": "Consultation du registre — cela peut prendre quelques secondes.",
+        "lookupFailed": "Échec de la recherche. Vous pouvez saisir vous-même les informations de l'entreprise.",
+        "lookupRateLimited": "Trop de recherches. Réessayez dans une minute.",
         "lookupStatus": {
           "found": "Trouvé dans le registre officiel.",
           "not_found": "Ce numéro n'est pas enregistré. Vérifiez-le, ou saisissez les données vous-même.",
-          "invalid_format": "Cela ne ressemble pas à un numéro de TVA belge. Exemple : BE 0400.378.485",
+          "invalid_format": "Ce numéro de TVA n'a pas un format valide. Exemple : BE 0400.378.485",
+          "unsupported": "Nous ne pouvons pas rechercher automatiquement ce numéro de TVA. Saisissez vous-même les informations de l'entreprise.",
           "unavailable": "Le registre ne répond pas pour l'instant. Saisissez les données vous-même et continuez — la vérification pourra se faire plus tard."
         },
         "nameLabel": "Nom de l'entreprise",

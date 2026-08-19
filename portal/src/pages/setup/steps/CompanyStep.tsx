@@ -10,11 +10,13 @@
  * them and what the screen says about it.
  */
 import React from 'react';
+import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { Building2, CheckCircle2, Loader2, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import {
   useCompanyLookup,
   type CompanyLookupStatus,
@@ -50,6 +52,7 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
       : EMPTY,
   );
   const [outcome, setOutcome] = React.useState<CompanyLookupStatus | null>(null);
+  const [lookupError, setLookupError] = React.useState<'lookupFailed' | 'lookupRateLimited' | null>(null);
   const [verified, setVerified] = React.useState(stored?.verified ?? false);
   const [presence, setPresence] = React.useState<'online' | 'physical' | ''>(
     stored?.presence === 'physical' || stored?.presence === 'online' ? stored.presence : '',
@@ -59,18 +62,29 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
     setFields((f) => ({ ...f, [key]: e.target.value }));
 
   const runLookup = async () => {
-    if (!vat.trim()) return;
-    const result = await lookup.mutateAsync(vat.trim());
-    setOutcome(result.status);
-    setVerified(result.status === 'found');
-    if (result.company) {
-      setFields({
-        name: result.company.name,
-        legalForm: result.company.legalForm ?? '',
-        street: result.company.street ?? '',
-        postalCode: result.company.postalCode ?? '',
-        city: result.company.city ?? '',
-      });
+    if (!vat.trim() || lookup.isPending) return;
+    setLookupError(null);
+    try {
+      const result = await lookup.mutateAsync(vat.trim());
+      setOutcome(result.status);
+      setVerified(result.status === 'found');
+      if (result.company) {
+        setFields({
+          name: result.company.name,
+          legalForm: result.company.legalForm ?? '',
+          street: result.company.street ?? '',
+          postalCode: result.company.postalCode ?? '',
+          city: result.company.city ?? '',
+        });
+      }
+    } catch (error) {
+      setOutcome(null);
+      setVerified(false);
+      setLookupError(
+        axios.isAxiosError(error) && error.response?.status === 429
+          ? 'lookupRateLimited'
+          : 'lookupFailed',
+      );
     }
   };
 
@@ -89,10 +103,18 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
     });
 
   const canSave =
-    vat.trim().length > 0 && fields.name.trim().length > 0 && !!presence && !submit.isPending;
+    vat.trim().length > 0 &&
+    fields.name.trim().length > 0 &&
+    !!presence &&
+    !lookup.isPending &&
+    !submit.isPending;
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      <LoadingOverlay
+        isLoading={lookup.isPending}
+        message={t('setup.steps.company.lookingUp')}
+      />
       <div className="space-y-1.5">
         <h2 className="text-xl font-semibold text-text-primary">{t('setup.steps.company.title')}</h2>
         <p className="text-sm text-text-secondary">{t('setup.steps.company.body')}</p>
@@ -124,9 +146,10 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
             {t('setup.steps.company.lookup')}
           </Button>
         </div>
-        {/* The wait is long enough to need saying out loud. */}
-        {lookup.isPending && (
-          <p className="text-xs text-text-muted">{t('setup.steps.company.lookingUp')}</p>
+        {lookupError && !lookup.isPending && (
+          <p className="text-xs text-text-muted">
+            {t(`setup.steps.company.${lookupError}`)}
+          </p>
         )}
         {outcome && !lookup.isPending && (
           <p

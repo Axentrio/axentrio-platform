@@ -162,13 +162,40 @@ describe('lookupCompanyByVat', () => {
     expect(axiosGet).not.toHaveBeenCalled();
   });
 
-  it('skips Belgian VIES for a non-BE VAT rather than calling the register', async () => {
-    for (const raw of ['NL123456789B01', 'DE123456789', 'GB123456789']) {
+  it('looks up other EU VAT numbers without applying Belgian name or address parsing', async () => {
+    for (const [raw, countryCode] of [
+      ['NL123456789B01', 'NL'],
+      ['DE123456789', 'DE'],
+    ]) {
       axiosGet.mockClear();
+      axiosGet.mockResolvedValue({
+        data: {
+          isValid: true,
+          name: 'BV Example Company',
+          address: 'Keizersgracht 1\n1015 Amsterdam',
+        },
+      });
       const r = await lookupCompanyByVat(raw);
-      expect(r.status).toBe('invalid_format');
-      expect(axiosGet).not.toHaveBeenCalled();
+      expect(r).toMatchObject({
+        status: 'found',
+        company: {
+          vatNumber: raw,
+          name: 'BV Example Company',
+          legalForm: null,
+          street: 'Keizersgracht 1\n1015 Amsterdam',
+          postalCode: null,
+          city: null,
+          countryCode,
+        },
+      });
+      expect(axiosGet.mock.calls[0][0]).toContain(`/ms/${countryCode}/vat/`);
     }
+  });
+
+  it('fails open for unsupported country prefixes without calling VIES', async () => {
+    const r = await lookupCompanyByVat('GB123456789');
+    expect(r.status).toBe('unsupported');
+    expect(axiosGet).not.toHaveBeenCalled();
   });
 
   it('degrades to unavailable when the register is down, and never throws', async () => {

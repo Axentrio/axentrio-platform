@@ -23,7 +23,7 @@
  *      know when #16c (`chat_sessions.bot_id NOT NULL` migration) is safe.
  */
 
-import { DataSource, IsNull } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { Bot, BotSettings } from '../database/entities/Bot';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
@@ -95,6 +95,39 @@ export async function getOwnedBot(botId: string, tenantId: string): Promise<Bot>
   return bot;
 }
 
+export async function ensureAnchorBot(
+  tenantId: string,
+  manager: EntityManager = ds().manager,
+): Promise<Bot> {
+  const existing = await manager.findOne(Bot, { where: { tenantId, isDefault: true } });
+  if (existing) return existing;
+
+  const tenant = await manager.findOne(Tenant, { where: { id: tenantId } });
+  if (!tenant) throw new AnchorBotMissingError(tenantId);
+
+  const settings = JSON.parse(JSON.stringify(tenant.settings ?? {}));
+  if (settings?.ai && 'apiKey' in settings.ai) delete settings.ai.apiKey;
+
+  await manager
+    .createQueryBuilder()
+    .insert()
+    .into(Bot)
+    .values({
+      tenantId,
+      name: tenant.name,
+      publicKey: tenant.apiKey,
+      status: 'active',
+      isDefault: true,
+      settings,
+    })
+    .orIgnore()
+    .execute();
+
+  const bot = await manager.findOne(Bot, { where: { tenantId, isDefault: true } });
+  if (!bot) throw new AnchorBotMissingError(tenantId);
+  return bot;
+}
+
 /**
  * Load the tenant's anchor bot. Used by admin/management endpoints that
  * target the tenant rather than a specific session. v1: only the anchor
@@ -108,10 +141,7 @@ export async function getOwnedBot(botId: string, tenantId: string): Promise<Bot>
 export async function getAnchorBotConfig(
   tenantId: string,
 ): Promise<{ bot: Bot; settings: BotSettings }> {
-  const bot = await ds().getRepository(Bot).findOne({
-    where: { tenantId, isDefault: true },
-  });
-  if (!bot) throw new AnchorBotMissingError(tenantId);
+  const bot = await ensureAnchorBot(tenantId);
   return { bot, settings: bot.settings ?? ({} as BotSettings) };
 }
 

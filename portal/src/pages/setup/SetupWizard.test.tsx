@@ -334,6 +334,31 @@ describe("the company step", () => {
     expect(screen.getByDisplayValue("Halle")).toBeInTheDocument();
   });
 
+  it("blocks Continue behind the lookup overlay and explains rate limits", async () => {
+    let rejectLookup!: (reason?: unknown) => void;
+    const pendingLookup = new Promise<never>((_resolve, reject) => {
+      rejectLookup = reject;
+    });
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith("/onboarding/company-lookup")
+        ? pendingLookup
+        : Promise.resolve(statusAt("company")),
+    );
+    renderWizard();
+
+    await userEvent.type(await screen.findByLabelText(/vat number/i), "NL123456789B01");
+    await userEvent.type(screen.getByLabelText(/company name/i), "Example BV");
+    await userEvent.click(screen.getByLabelText(/online business/i));
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: /look up/i }));
+    expect(await screen.findByText(/checking the register/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled();
+
+    rejectLookup({ isAxiosError: true, response: { status: 429 } });
+    expect(await screen.findByText(/too many lookups/i)).toBeInTheDocument();
+  });
+
   it("lets the customer continue when the register is down", async () => {
     // The explicit product rule: losing a signup to someone else's downtime is far
     // worse than an unverified company record.

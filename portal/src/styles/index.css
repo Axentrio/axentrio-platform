@@ -57,6 +57,8 @@
   }
 
   .dark {
+    color-scheme: dark;
+
     /* shadcn CSS variables — DARK theme */
     --background: 228 18% 7%;
     --foreground: 228 47% 96%;

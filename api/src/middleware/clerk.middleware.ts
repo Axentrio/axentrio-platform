@@ -11,12 +11,12 @@ import { AppDataSource, runInTransaction } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
-import { Bot } from '../database/entities/Bot';
 import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
 import { DEFAULT_ESCALATION_KEYWORDS } from '../config/default-bot-settings';
+import { ensureAnchorBot } from '../services/bot-config.service';
 import { logger } from '../utils/logger';
 import type { RequestUser, UserRole } from '../types';
 import {
@@ -180,39 +180,8 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
             throw new Error('autoProvision: tenant not found after insert');
           }
 
-          // Multi-bot: create the tenant's anchor Bot in the same tx. Its
-          // public_key == the tenant's api_key so the widget resolves
-          // identically; settings is the tenant's settings minus the
-          // tenant-level LLM secret (ai.apiKey). Idempotent + race-safe via
-          // ON CONFLICT DO NOTHING (the one-default-per-tenant partial unique
-          // index catches a concurrent provision).
-          const anchorSettings = JSON.parse(JSON.stringify(t.settings ?? {}));
-          if (anchorSettings?.ai && 'apiKey' in anchorSettings.ai) {
-            delete anchorSettings.ai.apiKey;
-          }
-          await manager
-            .createQueryBuilder()
-            .insert()
-            .into(Bot)
-            .values({
-              tenantId: t.id,
-              name: t.name,
-              publicKey: t.apiKey,
-              status: 'active',
-              isDefault: true,
-              settings: anchorSettings,
-            })
-            .orIgnore()
-            .execute();
-
-          // Attach the tenant's shared primary KB to the anchor within this same
-          // tx (re-read the row since the insert used orIgnore and returns no id),
-          // so a freshly-provisioned tenant's bot answers from shared knowledge —
-          // not the empty-KB state the backfill repairs for existing tenants.
-          const anchor = await manager.findOne(Bot, { where: { tenantId: t.id, isDefault: true } });
-          if (anchor) {
-            await ensureSharedKbAttached(manager, t.id, anchor.id);
-          }
+          const anchor = await ensureAnchorBot(t.id, manager);
+          await ensureSharedKbAttached(manager, t.id, anchor.id);
 
           return { tenant: t };
         });

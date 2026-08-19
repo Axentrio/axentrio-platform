@@ -2900,10 +2900,13 @@
         "vatLabel": "Btw-nummer",
         "lookup": "Opzoeken",
         "lookingUp": "We raadplegen het register — dit kan enkele seconden duren.",
+        "lookupFailed": "Opzoeken mislukt. Je kunt de bedrijfsgegevens zelf invullen.",
+        "lookupRateLimited": "Te veel opzoekingen. Probeer het over een minuut opnieuw.",
         "lookupStatus": {
           "found": "Gevonden in het officiële register.",
           "not_found": "Dat nummer is niet geregistreerd. Controleer het, of vul de gegevens zelf in.",
-          "invalid_format": "Dit lijkt geen Belgisch btw-nummer. Voorbeeld: BE 0400.378.485",
+          "invalid_format": "Dit btw-nummer heeft geen geldig formaat. Voorbeeld: BE 0400.378.485",
+          "unsupported": "We kunnen dit btw-nummer niet automatisch opzoeken. Vul de bedrijfsgegevens zelf in.",
           "unavailable": "Het register reageert momenteel niet. Vul de gegevens zelf in en ga verder — verifiëren kan later."
         },
         "nameLabel": "Bedrijfsnaam",

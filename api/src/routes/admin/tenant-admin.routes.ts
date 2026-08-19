@@ -349,7 +349,7 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
       metadata: log.metadata,
       createdAt: log.createdAt,
     })),
-    legalInvoices: legalInvoices.map(toPublicLegalInvoice),
+    legalInvoices: legalInvoices.map((row) => toPublicLegalInvoice(row)),
   });
 }));
 

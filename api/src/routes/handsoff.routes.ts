@@ -18,6 +18,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { pendingHandoffSocketPayload } from '../realtime/pending-handoff-payload';
 import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
@@ -33,6 +34,14 @@ const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
 const handoffRepository = AppDataSource.getRepository(HandoffRequest);
+
+/** Same super-admin flag as POST /chats/:id/takeover. Agent row may live on home tenant. */
+function commandScope(req: { user?: { role?: string }; tenant?: { id: string } }) {
+  return {
+    ...(req.tenant?.id ? { tenantId: req.tenant.id } : {}),
+    allowForeignAgent: req.user?.role === 'super_admin',
+  };
+}
 
 /**
  * POST /handoff/request
@@ -99,12 +108,16 @@ router.post(
     );
 
     // Notify agents via WebSocket
-    emitToTenantAgents(tenantId!, 'handoff:requested', {
-      sessionId,
-      handoffId: result.handoffId,
-      reason: reason || 'User requested',
-      requestedAt: new Date().toISOString(),
-    });
+    emitToTenantAgents(
+      tenantId!,
+      'handoff:requested',
+      pendingHandoffSocketPayload({
+        sessionId,
+        visitorId: session.visitorId,
+        reason: reason || 'User requested',
+        handoffId: result.handoffId,
+      }),
+    );
 
     // Notify session
     emitToSession(tenantId!, sessionId, 'handoff:pending', {
@@ -185,7 +198,7 @@ router.post(
       agent!.id,
       { mode: 'indefinite' },
       undefined,
-      { tenantId },
+      commandScope(req),
     );
 
     // Notify session
@@ -247,7 +260,7 @@ router.post(
       sessionId,
       { kind: 'agent', agentId: agent!.id },
       undefined,
-      { tenantId, reason },
+      { ...commandScope(req), reason },
     );
 
     emitToTenantAgents(tenantId!, 'handoff:rejected', {
@@ -297,7 +310,7 @@ router.post(
       sessionId,
       agent!.id,
       undefined,
-      { tenantId, reason },
+      { ...commandScope(req), reason },
     );
 
     // Notify session
@@ -434,15 +447,13 @@ router.post(
 
     // Accepting a queue item IS the claim command, keyed by sessionId (plan B1:
     // no second takeover call, no handoff-id/session-id translation anywhere
-    // else). The service accepts the open handoff row in the same transaction —
-    // and it verifies the agent belongs to the session's tenant, which this
-    // legacy route never did.
+    // else). Super-admin agent rows live on the home tenant.
     await conversationCommands.claimConversation(
       handoff.sessionId,
       agentId!,
       { mode: 'indefinite' },
       undefined,
-      {},
+      commandScope(req),
     );
 
     // B-PR3a: normalized ownership event to BOTH rooms, post-commit.
@@ -493,7 +504,7 @@ router.post(
       handoff.sessionId,
       { kind: 'agent', agentId: req.user!.id },
       undefined,
-      { reason: reason || 'Declined by agent' },
+      { ...commandScope(req), reason: reason || 'Declined by agent' },
     );
 
     // B-PR3a: normalized ownership event to BOTH rooms, post-commit.

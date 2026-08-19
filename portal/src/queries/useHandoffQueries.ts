@@ -48,7 +48,8 @@ export function useHandoffsQuery(status: 'pending' | 'assigned' | 'resolved' | '
   useEffect(() => {
     const handlers = registerHandlers({
       onHandoffNew: (newHandoff: HandoffRequest) => {
-        if (newHandoff.status === status) {
+        const incomingStatus = newHandoff.status ?? 'pending';
+        if (incomingStatus === status) {
           queryClient.setQueryData<HandoffRequest[]>(
             queryKeys.handoffs.list(status),
             (prev = []) => {

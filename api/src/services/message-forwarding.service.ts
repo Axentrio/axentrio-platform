@@ -23,6 +23,7 @@ import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { composeSystemPrompt } from '../llm/compose-system-prompt';
 import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
+import { pendingHandoffSocketPayload } from '../realtime/pending-handoff-payload';
 import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
@@ -44,7 +45,6 @@ import { conversationCommands } from './conversation-command.service';
 import { runInboundGate, writeRoutingDropLog } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
-import { isOutsideBusinessHours } from '../utils/format-business-hours';
 import { renderChannelAddressControls } from '../channels/address-controls';
 import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
 import { effectiveEscalationKeywords } from '../config/default-bot-settings';
@@ -323,9 +323,7 @@ export async function forwardMessageToN8n(
       session,
       savedMessage.type,
       plainContent,
-      botSettings,
       aiSettings,
-      bot.businessTimezone,
     );
     if (auto) {
       const botParticipant = await ensureBotParticipant(session, aiSettings);
@@ -449,39 +447,13 @@ export async function advanceCoalescedWatermark(sessionId: string, messageId: st
 // diverge (the coalescer previously skipped both gates). Returns null when the
 // agent should run normally. Mirrors the legacy gate: text turns on bot-owned
 // sessions with AI enabled only.
-/**
- * Off-hours kill-switch, read per-call so it is togglable at runtime (and in
- * tests). Default ON: the AI runs off-hours and the `## AVAILABILITY` prompt fact
- * tells it the business is currently closed, so it keeps helping (opening hours are
- * informational). Set OFF_HOURS_AI_REPLY=false to restore the old behaviour — a
- * canned off-hours reply that short-circuits the agent — instantly, no deploy.
- */
-function offHoursCannedReplyEnabled(): boolean {
-  return process.env.OFF_HOURS_AI_REPLY === 'false';
-}
-
 function localAutoresponse(
   session: ChatSession,
   messageType: Message['type'],
   plainContent: string,
-  botSettings: BotSettings,
   aiSettings: BotAiSettings,
-  businessTimezone: string,
-): { kind: 'off_hours' | 'escalation'; message: string } | null {
+): { kind: 'escalation'; message: string } | null {
   if (session.status !== 'bot' || messageType !== 'text' || !aiSettings?.enabled) return null;
-
-  // Off-hours. With the kill-switch ON (default) the AI runs and the
-  // `## AVAILABILITY` fact carries the closed state into the prompt; only the
-  // switch OFF short-circuits with the canned message. Detection is the shared
-  // `isOutsideBusinessHours` predicate — one definition for the gate and the
-  // prompt — anchored to the bot's canonical `businessTimezone`, never the
-  // browser-written `businessHours.timezone`.
-  if (offHoursCannedReplyEnabled() && isOutsideBusinessHours(botSettings.businessHours, businessTimezone)) {
-    return {
-      kind: 'off_hours',
-      message: aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon.",
-    };
-  }
 
   const escalationKeywords = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords);
   const lowerContent = plainContent.toLowerCase();
@@ -1637,11 +1609,10 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
   let auto = guardrailReply
     ? { kind: 'guardrail' as const, message: guardrailReply }
-    : localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings, bot.businessTimezone);
-  // The hwm itself didn't trip off-hours/escalation — but an EARLIER message in
-  // this coalesced burst might contain an escalation keyword (the legacy path sees
-  // each message individually; we must scan the whole window for parity). Off-hours
-  // is time-based so it's already covered by the hwm check above.
+    : localAutoresponse(session, pending.type, pendingPlain, aiSettings);
+  // The hwm itself didn't trip escalation — but an EARLIER message in this
+  // coalesced burst might contain an escalation keyword (the legacy path sees
+  // each message individually; we must scan the whole window for parity).
   if (!auto) {
     const kwCount = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords).length;
     // windowMsgs is the small guardrails window (newest 11). If it's at the cap
@@ -1655,16 +1626,15 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     for (const m of scan) {
       if (m.id === pending.id || m.type !== 'text') continue;
       const mc = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
-      const esc = localAutoresponse(session, 'text', mc, botSettings, aiSettings, bot.businessTimezone);
+      const esc = localAutoresponse(session, 'text', mc, aiSettings);
       if (esc?.kind === 'escalation') { auto = esc; break; }
     }
   }
   if (auto) {
-    // off-hours is stale-guarded (a newer message arriving mid-finalize should be
-    // handled as its own turn, not double-replied with the canned off-hours msg).
-    // escalation is NOT stale-guarded: hand off immediately; the human sees newer
-    // messages and the takeover gate stops further bot replies.
-    const staleGuard = auto.kind === 'off_hours' || auto.kind === 'guardrail';
+    // Guardrail warn-replies are stale-guarded (a newer message arriving
+    // mid-finalize should be its own turn). Escalation is not: hand off now;
+    // the human sees newer messages and the takeover gate stops further bot replies.
+    const staleGuard = auto.kind === 'guardrail';
     if (auto.kind === 'guardrail') {
       const fin = await finalizeReply(session, botParticipant.id, auto.message, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
       if (fin.status === 'stale') return 'stale';
@@ -2051,12 +2021,16 @@ async function handleBotHandoff(
   const handoffId = result.handoffId!;
 
   // Notify agents
-  emitToTenantAgents(session.tenantId, 'handoff:requested', {
-    sessionId: session.id,
-    handoffId,
-    reason,
-    requestedAt: new Date().toISOString(),
-  });
+  emitToTenantAgents(
+    session.tenantId,
+    'handoff:requested',
+    pendingHandoffSocketPayload({
+      sessionId: session.id,
+      visitorId: session.visitorId,
+      reason,
+      handoffId,
+    }),
+  );
 
   // B-PR3a: normalized ownership event to BOTH rooms, post-commit. The in-hand
   // entity's ownership/status/version were just synced from the command result.

@@ -55,6 +55,7 @@ import {
   createTestUser,
   createTestAgent,
   createTestSession,
+  createTestHandoffRequest,
 } from "../helpers/factories";
 
 let homeTenantId: string;
@@ -163,5 +164,64 @@ describe("conversation commands — X-Tenant-Context", () => {
       .send({ idempotencyKey: "nope", mode: "indefinite" });
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("legacy handoff accept — X-Tenant-Context", () => {
+  async function pendingHandoff() {
+    const session = await createTestSession(targetTenantId, {
+      status: "handoff",
+      ownership: "handoff_requested",
+    });
+    const handoff = await createTestHandoffRequest(session.id, targetTenantId);
+    return { session, handoff };
+  }
+
+  function asSuperAdmin(homeOrTarget: "home" | "target") {
+    Object.assign(auth, {
+      userId: homeUserId,
+      tenantId: homeOrTarget === "home" ? homeTenantId : targetTenantId,
+      agentId: homeAgentId,
+      role: "super_admin",
+    });
+  }
+
+  it("a SUPER ADMIN can POST /handoffs/accept in the impersonated tenant", async () => {
+    const { session } = await pendingHandoff();
+    asSuperAdmin("home");
+
+    const res = await request(app)
+      .post("/api/v1/handoffs/accept")
+      .set("x-tenant-context", targetTenantId)
+      .send({ sessionId: session.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.session.assignedAgent.id).toBe(homeAgentId);
+  });
+
+  it("a SUPER ADMIN org-switched into the tenant can POST /handoffs/accept", async () => {
+    const { session } = await pendingHandoff();
+    asSuperAdmin("target");
+
+    const res = await request(app)
+      .post("/api/v1/handoffs/accept")
+      .send({ sessionId: session.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.session.assignedAgent.id).toBe(homeAgentId);
+  });
+
+  it("a SUPER ADMIN can POST /handoffs/:id/accept in the impersonated tenant", async () => {
+    const { handoff } = await pendingHandoff();
+    asSuperAdmin("home");
+
+    const res = await request(app)
+      .post(`/api/v1/handoffs/${handoff.id}/accept`)
+      .set("x-tenant-context", targetTenantId)
+      .send();
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.handoff.status).toBe("accepted");
+    expect(res.body.data.handoff.assignedAgentId).toBe(homeAgentId);
   });
 });

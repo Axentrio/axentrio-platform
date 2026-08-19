@@ -39,6 +39,7 @@ import {
 } from '../services/bot-resolution.service';
 import { encrypt } from '../utils/encryption';
 import { routeOutboundMessage } from '../channels/outbound-router';
+import { pendingHandoffSocketPayload } from '../realtime/pending-handoff-payload';
 
 // Per-session mutex to serialise message saves and prevent race conditions
 // on messageCount increments and session updates.
@@ -753,11 +754,15 @@ async function handleHandoffRequest(
     );
 
     // Notify agents about handoff request
-    io?.to(`agents:${tenantId}`).emit('handoff:requested', {
-      sessionId,
-      reason,
-      requestedAt: new Date().toISOString(),
-    });
+    io?.to(`agents:${tenantId}`).emit(
+      'handoff:requested',
+      pendingHandoffSocketPayload({
+        sessionId,
+        visitorId: session.visitorId,
+        reason,
+        handoffId: commandResult.handoffId,
+      }),
+    );
 
     // B-PR3a: normalized ownership event, post-commit, when the state moved.
     if (commandResult.outcome === 'requested') {

@@ -634,24 +634,6 @@ describe('runTurn — local autoresponders (parity with the legacy path)', () =>
     (day) => ({ day, closed: true, open: '09:00', close: '17:00' }),
   );
 
-  it('kill-switch OFF: sends the off-hours message instead of running the agent', async () => {
-    vi.stubEnv('OFF_HOURS_AI_REPLY', 'false');
-    const runMock = vi.fn();
-    initializeAgentService({ run: runMock } as unknown as AgentService);
-
-    const tenant = await makeTenantWith({}, { businessHours: { enabled: true, timezone: 'UTC', schedule: closedEveryDay } });
-    const session = await createTestSession(tenant.id, { status: 'bot' });
-    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
-    const msg = await createTestMessage(session.id, tenant.id, user.id, { content: 'hello' });
-
-    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
-    const status = await runTurn(fresh, msg);
-
-    expect(status).toBe('answered');
-    expect(runMock).not.toHaveBeenCalled();
-    expect(await countBotMessages(session.id)).toBe(1); // off-hours message
-  });
-
   it('default: runs the agent off-hours (the AI keeps helping)', async () => {
     const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Agent replied' });
     initializeAgentService({ run: runMock } as unknown as AgentService);

@@ -287,6 +287,26 @@ describe('normalizeWebhookEvent — per event type', () => {
     expect(normalized!.subscriptionId).toBeUndefined();
   });
 
+  it('ignores charge.dispute.funds_withdrawn — funds leave at open, not at loss', () => {
+    const p = makeProvider();
+    const dispute = { id: 'dp_1', amount: 9074, charge: 'ch_1', status: 'needs_response' };
+    expect(p.normalizeWebhookEvent(makeEvent('charge.dispute.funds_withdrawn', dispute))).toBeNull();
+  });
+
+  it('maps charge.dispute.closed lost → refund.recorded', () => {
+    const p = makeProvider();
+    const dispute = { id: 'dp_lost', amount: 9074, charge: 'ch_1', status: 'lost' };
+    const normalized = p.normalizeWebhookEvent(makeEvent('charge.dispute.closed', dispute));
+    expect(normalized!.type).toBe('refund.recorded');
+    expect(normalized!.refundId).toBe('dp_lost');
+  });
+
+  it('ignores charge.dispute.closed when the Tenant won', () => {
+    const p = makeProvider();
+    const dispute = { id: 'dp_won', amount: 9074, charge: 'ch_1', status: 'won' };
+    expect(p.normalizeWebhookEvent(makeEvent('charge.dispute.closed', dispute))).toBeNull();
+  });
+
   it('returns null for ignored event types', () => {
     const p = makeProvider();
     const normalized = p.normalizeWebhookEvent(makeEvent('payment_intent.created', {}));

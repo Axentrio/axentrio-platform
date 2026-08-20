@@ -183,3 +183,106 @@ describe('POST /api/v1/webhooks/billing/stripe invoice.paid', () => {
     });
   });
 });
+
+describe('POST /api/v1/webhooks/billing/stripe charge.dispute.closed', () => {
+  it('returns 200 and then creates a Credit Note for a lost chargeback', async () => {
+    const tenant = await createTestTenant({
+      officialBusinessName: 'Example BV',
+      vatNumber: 'BE0400378485',
+      vatVerified: true,
+      invoiceEmail: 'billing@example.com',
+      invoiceAddress: {
+        street: 'Example Street',
+        streetNumber: '1',
+        postalCode: '2000',
+        city: 'Antwerp',
+        country: 'BE',
+      },
+    });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      customerId: 'cus_dispute',
+      subscriptionId: 'sub_dispute',
+      status: 'active',
+      currentPlanId: 'pro',
+      isPrimary: true,
+    });
+    const repo = AppDataSource.getRepository(LegalInvoice);
+    await repo.save(
+      repo.create({
+        tenantId: tenant.id,
+        documentKind: 'invoice',
+        stripeInvoiceId: 'in_disputed',
+        billitOrderId: '1',
+        billitInvoiceNumber: '2026-0300',
+        paymentStatus: 'paid',
+        invoiceStatus: 'sent',
+        peppolStatus: 'sent',
+        peppolRequired: true,
+        currency: 'EUR',
+        amountExclCents: 7499,
+        vatAmountCents: 1575,
+        amountInclCents: 9074,
+        reviewReasons: [],
+        retryCount: 0,
+      }),
+    );
+
+    const event = {
+      id: `evt_dp_${tenant.id.slice(0, 8)}`,
+      type: 'charge.dispute.closed',
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: 'dp_e2e',
+          amount: 9074,
+          charge: 'ch_e2e',
+          status: 'lost',
+        },
+      },
+    };
+
+    setStripeClient({
+      webhooks: { constructEvent: vi.fn(() => event) },
+      charges: {
+        retrieve: vi.fn(async () => ({
+          id: 'ch_e2e',
+          customer: 'cus_dispute',
+          invoice: 'in_disputed',
+        })),
+      },
+    } as never);
+    setBillitClient({
+      isConfigured: () => true,
+      consumeNextNumber: vi.fn(async () => 'CN-2026-0300'),
+      createOrder: vi.fn(async () => ({ orderId: '300', orderNumber: 'CN-2026-0300' })),
+      sendOrders: vi.fn(async () => undefined),
+      getOrder: vi.fn(async (id: string) => ({ orderId: id, orderNumber: 'CN-2026-0300', isSent: true })),
+      lookupPeppol: vi.fn(async () => ({
+        registered: true,
+        documentTypes: ['BISv3Invoice', 'BISv3CreditNote'],
+      })),
+    });
+
+    const res = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+
+    expect(res.status).toBe(200);
+
+    await vi.waitFor(async () => {
+      const credit = await repo.findOneBy({ stripeRefundId: 'dp_e2e' });
+      expect(credit).toBeTruthy();
+      expect(credit!.documentKind).toBe('credit_note');
+      expect(credit!.invoiceStatus).toBe('sent');
+      expect(credit!.peppolStatus).toBe('sent');
+    });
+    const original = await repo.findOneByOrFail({
+      stripeInvoiceId: 'in_disputed',
+      documentKind: 'invoice',
+    });
+    expect(original.invoiceStatus).toBe('credited');
+  });
+});

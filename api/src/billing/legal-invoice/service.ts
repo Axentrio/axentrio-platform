@@ -328,6 +328,10 @@ export async function processStripeRefund(input: {
     credit.creditedFromId = original?.id ?? credit.creditedFromId;
   }
 
+  if (!existing && original?.invoiceStatus === 'credited') {
+    return { outcome: 'already_credited', legalInvoiceId: original.id };
+  }
+
   if (!original || !original.billitInvoiceNumber) {
     credit.invoiceStatus = 'manual_review';
     credit.lastError = original ? 'original_missing_billit_number' : 'original_legal_invoice_missing';
@@ -592,43 +596,92 @@ export async function scheduleFromInvoicePaid(event: NormalizedEvent): Promise<v
   }
 }
 
-export async function scheduleFromRefund(event: NormalizedEvent): Promise<void> {
+function readId(value: unknown): string | null {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (value && typeof value === 'object' && 'id' in value) {
+    const id = (value as { id?: unknown }).id;
+    if (typeof id === 'string' && id.length > 0) return id;
+  }
+  return null;
+}
+
+async function resolveChargeContext(event: NormalizedEvent): Promise<{
+  invoiceId: string | null;
+  chargeId: string | null;
+  customerId: string;
+  refundId: string | null;
+  amountCents: number;
+}> {
   const raw = event.raw as {
     data?: {
       object?: {
         id?: string;
+        charge?: string | { id?: string };
         invoice?: string | { id?: string };
+        amount?: number;
         amount_refunded?: number;
         refunds?: { data?: Array<{ id?: string; amount?: number }> };
       };
     };
   };
-  const charge = raw?.data?.object;
-  const refunds = charge?.refunds?.data ?? [];
+  const obj = raw?.data?.object;
+  const refunds = obj?.refunds?.data ?? [];
   const latest = refunds[refunds.length - 1];
-  const stripeRefundId = event.refundId ?? latest?.id;
-  if (!stripeRefundId) {
-    logger.warn('Credit note skipped: no Stripe refund id');
+  let invoiceId = invoiceIdFromEvent(event);
+  let chargeId = event.chargeId ?? readId(obj?.charge);
+  if (!chargeId && typeof obj?.id === 'string' && obj.id.startsWith('ch_')) {
+    chargeId = obj.id;
+  }
+  let customerId = event.customerId;
+  if ((!invoiceId || !customerId) && chargeId) {
+    try {
+      const charge = await getStripeClient().charges.retrieve(chargeId);
+      if (!invoiceId) invoiceId = readId((charge as { invoice?: unknown }).invoice);
+      if (!customerId) customerId = readId(charge.customer) ?? '';
+    } catch (err) {
+      logger.warn('Credit note: Stripe charge retrieve failed', {
+        chargeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return {
+    invoiceId,
+    chargeId,
+    customerId,
+    refundId: event.refundId ?? latest?.id ?? null,
+    amountCents: event.refundAmountCents ?? latest?.amount ?? obj?.amount ?? obj?.amount_refunded ?? 0,
+  };
+}
+
+export async function scheduleFromRefund(event: NormalizedEvent): Promise<void> {
+  const ctx = await resolveChargeContext(event);
+  if (!ctx.refundId) {
+    logger.warn('Credit note skipped: no Stripe refund or dispute id');
     return;
   }
-  const tenantId = await resolveTenantId(event);
+  const tenantId = await resolveTenantId({ ...event, customerId: ctx.customerId || event.customerId });
   if (!tenantId) {
-    logger.warn('Credit note skipped: no Tenant for refund', { stripeRefundId });
+    logger.warn('Credit note skipped: no Tenant for refund', { stripeRefundId: ctx.refundId });
     return;
   }
   try {
     const result = await processStripeRefund({
       tenantId,
-      stripeInvoiceId: invoiceIdFromEvent(event),
-      stripeRefundId,
-      stripeChargeId: typeof charge?.id === 'string' ? charge.id : null,
-      amountRefundedCents: event.refundAmountCents ?? latest?.amount ?? charge?.amount_refunded ?? 0,
+      stripeInvoiceId: ctx.invoiceId,
+      stripeRefundId: ctx.refundId,
+      stripeChargeId: ctx.chargeId,
+      amountRefundedCents: ctx.amountCents,
     });
-    logger.info('Credit note processed', { tenantId, stripeRefundId, outcome: result.outcome });
+    logger.info('Credit note processed', {
+      tenantId,
+      stripeRefundId: ctx.refundId,
+      outcome: result.outcome,
+    });
   } catch (err) {
     logger.error('Credit note processing threw', {
       tenantId,
-      stripeRefundId,
+      stripeRefundId: ctx.refundId,
       error: err instanceof Error ? err.message : String(err),
     });
   }

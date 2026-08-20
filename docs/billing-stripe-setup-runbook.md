@@ -69,6 +69,7 @@ Dashboard → **Developers → Webhooks → Add endpoint**.
   - `invoice.paid`
   - `invoice.payment_failed`
   - `charge.refunded` (creates a Billit credit note for a Legal Invoice)
+  - `charge.dispute.closed` (Credit Note only when status is `lost`; ignored when won. Do not use `funds_withdrawn` — that fires when the dispute opens.)
 
 Copy the **Signing secret** (begins with `whsec_`). This becomes `STRIPE_WEBHOOK_SECRET`.
 
@@ -115,6 +116,20 @@ For each of `card`, `bancontact`, `ideal`, `sepa_debit`, run a Pro trial signup 
 | sepa_debit | | | |
 
 If any non-card method fails verification (e.g. mandate setup blocked during trial), remove it from the `payment_method_types` array in PR6's Checkout-session params and record a new deviation in `docs/subscription-epic-deviations.md`.
+
+## When you turn on Billit
+
+Do this in the Stripe Dashboard before the first live Legal Invoice. The code is already in the API. Stripe will not send the events until someone with Dashboard access adds them.
+
+1. Open Developers → Webhooks → the Axentrio billing endpoint.
+2. Add these events if they are missing:
+   - `charge.refunded`
+   - `charge.dispute.closed`
+3. Save. Do not create a second endpoint.
+4. Set `BILLIT_API_KEY` and `BILLIT_PARTY_ID` on the API.
+5. Super Admin → Legal Invoices → retry waiting drafts.
+
+A lost chargeback uses the same Credit Note path as a refund. A won dispute does nothing.
 
 ## What this runbook does NOT cover
 

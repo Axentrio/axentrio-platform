@@ -432,4 +432,48 @@ describe('processStripeRefund', () => {
     expect(billit.createOrder).toHaveBeenCalledTimes(1);
     expect(billit.sendOrders).toHaveBeenCalledTimes(2);
   });
+
+  it('does not create a second Credit Note when the Legal Invoice is already credited', async () => {
+    const tenant = await createTestTenant({
+      officialBusinessName: 'Example BV',
+      vatNumber: 'BE0400378485',
+      vatVerified: true,
+      invoiceEmail: 'billing@example.com',
+      invoiceAddress: { street: 'Example Street', postalCode: '2000', city: 'Antwerp', country: 'BE' },
+    });
+    const repo = AppDataSource.getRepository(LegalInvoice);
+    const original = await repo.save(
+      repo.create({
+        tenantId: tenant.id,
+        documentKind: 'invoice',
+        stripeInvoiceId: 'in_already_credited',
+        billitOrderId: '1',
+        billitInvoiceNumber: '2026-0001',
+        paymentStatus: 'refunded',
+        invoiceStatus: 'credited',
+        peppolStatus: 'sent',
+        peppolRequired: true,
+        currency: 'EUR',
+        amountExclCents: 7499,
+        vatAmountCents: 1575,
+        amountInclCents: 9074,
+        reviewReasons: [],
+        retryCount: 0,
+      }),
+    );
+    const billit = billitMock();
+    setBillitClient(billit);
+
+    const result = await processStripeRefund({
+      tenantId: tenant.id,
+      stripeInvoiceId: 'in_already_credited',
+      stripeRefundId: 'dp_after_refund',
+      amountRefundedCents: 9074,
+    });
+
+    expect(result.outcome).toBe('already_credited');
+    expect(result.legalInvoiceId).toBe(original.id);
+    expect(billit.createOrder).not.toHaveBeenCalled();
+    expect(await repo.count({ where: { stripeRefundId: 'dp_after_refund' } })).toBe(0);
+  });
 });

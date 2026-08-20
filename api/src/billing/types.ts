@@ -55,13 +55,18 @@ export interface NormalizedEvent {
   invoiceUrl?: string;
   /**
    * Stripe invoice id (`in_…`). Set on invoice.* events and on
-   * `charge.refunded` when the charge points at an invoice.
+   * `charge.refunded` / lost disputes when the charge points at an invoice.
    */
   invoiceId?: string;
-  /** Stripe refund id (`re_…`). Set on `charge.refunded`. */
+  /**
+   * Stripe refund id (`re_…`) or dispute id (`dp_…`). Set on
+   * `charge.refunded` and lost chargebacks.
+   */
   refundId?: string;
-  /** Amount of this refund in the smallest currency unit. */
+  /** Amount of this refund or lost dispute in the smallest currency unit. */
   refundAmountCents?: number;
+  /** Stripe charge id (`ch_…`). Set on refunds and disputes. */
+  chargeId?: string;
   occurredAt: Date;
   raw: unknown;
 }

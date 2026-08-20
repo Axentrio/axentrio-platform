@@ -4,13 +4,13 @@
  * Rendered by /settings/channels and the AI & Content "Social" tab.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
   MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2, Lock, PowerOff,
 } from 'lucide-react';
-import { SiFacebook } from 'react-icons/si';
+import { SiFacebook, SiInstagram, SiWhatsapp } from 'react-icons/si';
 import { CHANNEL_COLORS, CHANNEL_ICONS, CHANNEL_LABELS } from '@/lib/channelMeta';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

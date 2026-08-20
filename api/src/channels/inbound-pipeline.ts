@@ -503,8 +503,8 @@ export async function findOrCreateConversation(
       if (incoming) {
         await fillEmptyDisplayName({
           session: existingBinding.session as ChatSession,
-          participant,
-          binding: existingBinding,
+          participant: participant as Participant,
+          binding: existingBinding as ConversationBinding,
           incoming,
         });
       }

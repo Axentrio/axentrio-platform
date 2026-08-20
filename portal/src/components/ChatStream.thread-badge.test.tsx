@@ -29,7 +29,6 @@ function makeChat(id: string): Chat {
     userName: `Visitor ${id}`,
     status: 'bot',
     messages: [],
-    metadata: { source: 'widget' },
     createdAt: '2026-08-14T09:00:00.000Z',
     updatedAt: '2026-08-14T09:00:00.000Z',
     lastActivityAt: '2026-08-14T09:00:00.000Z',

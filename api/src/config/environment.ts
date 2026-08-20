@@ -194,6 +194,7 @@ const envSchema = z.object({
   STRIPE_PRICE_PRO: z.string().optional(),
   STRIPE_PRICE_ENTERPRISE: z.string().optional(),
   BILLING_TRIAL_DAYS: z.string().default('14').transform(Number),
+  ONBOARDING_PRO_TRIAL: z.enum(['true', 'false']).optional(),
   // Escape hatch: when 'true', boot proceeds without Stripe creds.
   // Billing endpoints will fail at call time. Use only for environments
   // that legitimately can't configure Stripe yet (early staging deploys).
@@ -526,6 +527,14 @@ export const config = {
       apiKey: env.BILLIT_API_KEY ?? '',
       partyId: env.BILLIT_PARTY_ID ?? '',
     },
+  },
+
+  onboarding: {
+    // Experimental: set false to revert new orgs to Free. Granted trials still expire on read.
+    grantProTrial:
+      env.ONBOARDING_PRO_TRIAL !== undefined
+        ? env.ONBOARDING_PRO_TRIAL === 'true'
+        : env.NODE_ENV === 'development' || env.NODE_ENV === 'staging',
   },
 } as const;
 

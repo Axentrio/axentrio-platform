@@ -10,7 +10,11 @@ import {
   retryWaitingLegalInvoices,
   toPublicLegalInvoice,
 } from '../../billing/legal-invoice/service';
-import { setEnterpriseManual, setTierManual } from '../../billing/service';
+import {
+  grantOnboardingProTrial,
+  setEnterpriseManual,
+  setTierManual,
+} from '../../billing/service';
 import { invalidateEntitlementsAndModules } from '../../modules';
 import { User } from '../../database/entities/User';
 import { ChatSession } from '../../database/entities/ChatSession';
@@ -33,6 +37,7 @@ import { validate } from '../../middleware/validate';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import { createTenantSchema } from '../../schemas';
 import { ensureAnchorBot } from '../../services/bot-config.service';
+import { config } from '../../config/environment';
 
 const router = Router();
 
@@ -389,11 +394,8 @@ router.post('/tenants/:id/legal-invoices/:invoiceId/retry', asyncHandler(async (
 
 // POST /admin/tenants — create tenant with Clerk org
 router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: Request, res: Response) => {
-  // `tier` from body is ignored — every new tenant starts at `tier='free'`
-  // in the forward-trial model (PR6/PR7). The 14-day Pro trial is granted
-  // at Checkout time (via Stripe `trial_period_days`) and is gated by the
-  // `chatbot_tenant_trial_reservations` table. Super-admin can move tenants to
-  // Enterprise after creation via POST /admin/tenants/:id/set-enterprise.
+  // `tier` from body is ignored. The onboarding experiment may grant Pro;
+  // otherwise the tenant stays Free with no billing row.
   const { name, settings, adminEmail } = req.body;
 
   // featureToggles is NOT a settings sub-key — it has its own column with a
@@ -432,12 +434,16 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
         settings: mergedSettings,
       });
       await manager.save(t);
+      if (config.onboarding.grantProTrial) {
+        await grantOnboardingProTrial(t.id, manager);
+        t.tier = 'pro';
+      }
       await ensureAnchorBot(t.id, manager);
       return t;
     });
     await logAudit(req.userId!, 'tenant.created', 'tenant', tenant.id, tenant.id, {
       name,
-      tier: 'free',
+      tier: tenant.tier,
     });
   } catch (dbError) {
     // Compensating transaction: delete the Clerk org

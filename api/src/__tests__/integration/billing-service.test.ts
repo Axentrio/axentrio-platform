@@ -19,6 +19,7 @@ import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 import { BillingEvent } from '../../database/entities/BillingEvent';
+import { TenantTrialReservation } from '../../database/entities/TenantTrialReservation';
 import {
   startCheckout,
   changePlan,
@@ -29,7 +30,10 @@ import {
   openCustomerPortal,
   setTierManual,
   getBillingState,
+  grantOnboardingProTrial,
 } from '../../billing/service';
+import { getEntitlements } from '../../billing/entitlements';
+import { expireOnboardingProTrial } from '../../billing/onboarding-trial';
 import {
   setStripeClient,
   StripeBillingProvider,
@@ -721,5 +725,76 @@ describe('getBillingState — never-subscribed tenant', () => {
     expect(state.cancelAtPeriodEnd).toBe(false);
     expect(state.pendingPlanId).toBeNull();
     expect(state.events).toEqual([]);
+  });
+});
+
+describe('onboarding Pro trial', () => {
+  it('grants one manual Pro trial and consumes the Stripe trial reservation', async () => {
+    const tenant = await createTestTenant({ tier: 'free' });
+    const startedAt = Date.now();
+
+    expect(await grantOnboardingProTrial(tenant.id)).toEqual({ changed: true });
+    const billing = await AppDataSource.getRepository(TenantBillingAccount).findOneByOrFail({
+      tenantId: tenant.id,
+      isPrimary: true,
+    });
+    const firstTrialEnd = billing.trialEnd!.getTime();
+
+    expect((await AppDataSource.getRepository(Tenant).findOneByOrFail({ id: tenant.id })).tier)
+      .toBe('pro');
+    expect(billing).toMatchObject({
+      provider: 'manual',
+      status: 'trialing',
+      currentPlanId: 'pro',
+    });
+    expect(firstTrialEnd - startedAt).toBeGreaterThan(13 * 24 * 60 * 60 * 1000);
+    expect(await AppDataSource.getRepository(TenantTrialReservation).findOneBy({
+      tenantId: tenant.id,
+    })).not.toBeNull();
+
+    expect(await grantOnboardingProTrial(tenant.id)).toEqual({ changed: false });
+    expect((
+      await AppDataSource.getRepository(TenantBillingAccount).findOneByOrFail({
+        tenantId: tenant.id,
+        isPrimary: true,
+      })
+    ).trialEnd!.getTime()).toBe(firstTrialEnd);
+  });
+
+  it('expires only after trial_end', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const billing = await createTestBillingAccount(tenant.id);
+
+    expect(await expireOnboardingProTrial(tenant.id)).toBe(false);
+
+    billing.trialEnd = new Date(Date.now() - 1000);
+    await AppDataSource.getRepository(TenantBillingAccount).save(billing);
+
+    expect(await expireOnboardingProTrial(tenant.id)).toBe(true);
+  });
+
+  it('expires on a billing-state read', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestBillingAccount(tenant.id, {
+      trialEnd: new Date(Date.now() - 1000),
+    });
+
+    const state = await getBillingState(tenant.id);
+
+    expect(state).toMatchObject({ tier: 'free', status: 'none', planId: 'free' });
+    expect(state.trialEnd).toBeNull();
+  });
+
+  it('expires on an entitlement read', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestBillingAccount(tenant.id, {
+      trialEnd: new Date(Date.now() - 1000),
+    });
+
+    const entitlements = await getEntitlements(tenant.id);
+
+    expect(entitlements).toMatchObject({ planId: 'free', billable: false });
+    expect((await AppDataSource.getRepository(Tenant).findOneByOrFail({ id: tenant.id })).tier)
+      .toBe('free');
   });
 });

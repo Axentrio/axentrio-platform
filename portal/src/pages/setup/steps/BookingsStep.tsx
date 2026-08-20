@@ -39,7 +39,13 @@ import {
   type ServiceAreaEntry,
 } from '@/queries/useSchedulerQueries';
 import { useTenantSettings } from '@/queries/useTenantQueries';
-import type { BusinessHours, WeekDay } from '@/queries/useBotsQueries';
+import {
+  useBots,
+  type BotTemplateView,
+  type BusinessHours,
+  type WeekDay,
+} from '@/queries/useBotsQueries';
+import { api } from '@/services/apiClient';
 import type { StepProps } from './types';
 
 /**
@@ -124,6 +130,8 @@ export function BookingsStep({ submit }: StepProps) {
     isFetching: tenantFetching,
   } = useTenantSettings();
   const updateScheduler = useUpdateSchedulerConfig();
+  const { data: botsData, isLoading: botsLoading } = useBots();
+  const anchorBot = botsData?.bots?.find((bot) => bot.isDefault) ?? botsData?.bots?.[0];
 
   const [openDays, setOpenDays] = React.useState<Weekday[]>(DEFAULT_OPEN_DAYS);
   const [opensAt, setOpensAt] = React.useState(DEFAULT_OPENS_AT);
@@ -180,6 +188,24 @@ export function BookingsStep({ submit }: StepProps) {
       if (existingServices.length === 0) {
         if (trade && trade !== 'custom') {
           await applyPreset.mutateAsync(trade);
+          if (anchorBot) {
+            try {
+              const templates = await api.get<BotTemplateView>(`/bots/${anchorBot.id}/templates`);
+              const key =
+                trade === 'plumber' &&
+                templates.available.some((template) => template.key === 'plumber_Pro')
+                  ? 'plumber_Pro'
+                  : trade;
+              const template = templates.available.find((candidate) => candidate.key === key);
+              if (template) {
+                await api.put(`/bots/${anchorBot.id}/template`, {
+                  bindings: [{ templateId: template.id, version: 'latest' }],
+                });
+              }
+            } catch {
+              // Preset setup is still useful when templates are unavailable or not billable.
+            }
+          }
         } else if (trade === 'custom') {
           const price = Number(customPrice);
           await createService.mutateAsync({
@@ -225,6 +251,7 @@ export function BookingsStep({ submit }: StepProps) {
     submit.isPending ||
     connect.isPending ||
     connectOutlook.isPending ||
+    botsLoading ||
     applyPreset.isPending ||
     createService.isPending;
 

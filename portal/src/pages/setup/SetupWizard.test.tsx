@@ -63,7 +63,13 @@ function statusAt(step: SetupStep, steps: Record<string, string> = {}) {
  * The bookings step reads the calendar connection and the scheduler config, so its
  * tests need a router rather than one blanket resolve.
  */
-function bookingsStep({ connected = false } = {}) {
+function bookingsStep({
+  connected = false,
+  templateKeys,
+}: {
+  connected?: boolean;
+  templateKeys?: string[];
+} = {}) {
   return (url: string) => {
     if (url.startsWith("/integrations/google/status")) {
       return Promise.resolve({
@@ -73,6 +79,21 @@ function bookingsStep({ connected = false } = {}) {
     }
     if (url.startsWith("/scheduler/config"))
       return Promise.resolve({ availability: null });
+    if (url === "/bots" && templateKeys)
+      return Promise.resolve({
+        bots: [{ id: "bot-1", isDefault: true }],
+        used: 1,
+        limit: 1,
+      });
+    if (url === "/bots/bot-1/templates" && templateKeys)
+      return Promise.resolve({
+        available: templateKeys.map((key) => ({
+          id: `template-${key}`,
+          key,
+        })),
+        bindings: [],
+        mode: "or",
+      });
     return Promise.resolve(statusAt("bookings"));
   };
 }
@@ -453,6 +474,30 @@ describe("the plan step", () => {
       apiPost.mock.invocationCallOrder[0],
     );
   });
+
+  it("continues an existing Pro trial without starting checkout", async () => {
+    apiGet.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/billing/state"
+          ? { tier: "pro", status: "trialing" }
+          : statusAt("plan"),
+      ),
+    );
+    renderWizard();
+
+    expect(
+      await screen.findByText(/you’re on a 14-day pro trial/i),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+        step: "plan",
+        outcome: "done",
+      }),
+    );
+    expect(apiPost).not.toHaveBeenCalled();
+  });
 });
 
 describe("the bookings step", () => {
@@ -513,5 +558,50 @@ describe("the bookings step", () => {
       "tue",
       "wed",
     ]);
+  });
+
+  it("binds the matching Studio template after applying a trade preset", async () => {
+    apiGet.mockImplementation(
+      bookingsStep({ connected: true, templateKeys: ["barber"] }),
+    );
+    apiPut.mockResolvedValue(statusAt("leads"));
+    apiPost.mockResolvedValue({ services: [{ id: "s1" }] });
+    renderWizard();
+
+    await userEvent.click(await screen.findByRole("button", { name: /barber/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/bots/bot-1/template", {
+        bindings: [{ templateId: "template-barber", version: "latest" }],
+      }),
+    );
+    expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+      step: "bookings",
+      outcome: "done",
+    });
+  });
+
+  it("continues when the trade has no available Studio template", async () => {
+    apiGet.mockImplementation(
+      bookingsStep({ connected: true, templateKeys: [] }),
+    );
+    apiPut.mockResolvedValue(statusAt("leads"));
+    apiPost.mockResolvedValue({ services: [{ id: "s1" }] });
+    renderWizard();
+
+    await userEvent.click(await screen.findByRole("button", { name: /barber/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+        step: "bookings",
+        outcome: "done",
+      }),
+    );
+    expect(apiPut).not.toHaveBeenCalledWith(
+      "/bots/bot-1/template",
+      expect.anything(),
+    );
   });
 });

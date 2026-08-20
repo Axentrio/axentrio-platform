@@ -24,6 +24,10 @@ vi.mock('@/queries/useTenantQueries', () => ({
   useTenantSettings: () => tenantQuery,
 }));
 
+vi.mock('@/queries/useBotsQueries', () => ({
+  useBots: () => ({ data: undefined }),
+}));
+
 vi.mock('@/queries/useSchedulerQueries', () => ({
   useSchedulerConfig: () => ({ data: undefined, isLoading: false }),
   useUpdateSchedulerConfig: () => ({ mutateAsync: vi.fn(), isPending: false }),

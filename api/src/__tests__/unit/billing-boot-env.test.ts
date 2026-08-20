@@ -25,9 +25,13 @@ const REQUIRED = [
   'STRIPE_PRICE_ENTERPRISE',
 ] as const;
 
-function runBootCheck(envOverrides: Record<string, string | undefined>): {
+function runBootCheck(
+  envOverrides: Record<string, string | undefined>,
+  script = "require('./src/config/environment');",
+): {
   status: number | null;
   stderr: string;
+  stdout: string;
 } {
   // Minimum env to get past pre-Stripe validation in environment.ts. We
   // load real .env values for everything else and only override the bits
@@ -68,7 +72,7 @@ function runBootCheck(envOverrides: Record<string, string | undefined>): {
       '-r',
       'ts-node/register/transpile-only',
       '-e',
-      "require('./src/config/environment');",
+      script,
     ],
     {
       cwd: apiRoot,
@@ -77,7 +81,11 @@ function runBootCheck(envOverrides: Record<string, string | undefined>): {
       timeout: 30_000,
     },
   );
-  return { status: result.status, stderr: result.stderr ?? '' };
+  return {
+    status: result.status,
+    stderr: result.stderr ?? '',
+    stdout: result.stdout ?? '',
+  };
 }
 
 describe('Boot-time Stripe env validation', () => {
@@ -124,5 +132,30 @@ describe('Boot-time Stripe env validation', () => {
     const { status, stderr } = runBootCheck(overrides);
     expect(status).toBe(0);
     expect(stderr).toMatch(/\[non-production boot\]/);
+  });
+});
+
+describe('ONBOARDING_PRO_TRIAL defaults', () => {
+  it.each([
+    ['development', undefined, true],
+    ['staging', undefined, true],
+    ['production', undefined, false],
+    ['test', undefined, false],
+    ['development', 'false', false],
+    ['production', 'true', true],
+  ] as const)('%s with %s resolves to %s', (nodeEnv, flag, expected) => {
+    const overrides: Record<string, string | undefined> = {
+      NODE_ENV: nodeEnv,
+      ONBOARDING_PRO_TRIAL: flag,
+    };
+    for (const key of REQUIRED) overrides[key] = `dummy_${key.toLowerCase()}`;
+
+    const result = runBootCheck(
+      overrides,
+      "console.log(require('./src/config/environment').config.onboarding.grantProTrial);",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(String(expected));
   });
 });

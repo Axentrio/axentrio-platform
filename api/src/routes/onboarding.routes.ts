@@ -28,6 +28,7 @@ import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services
 import { invalidateEntitlementsAndModules } from '../modules';
 import { logAudit } from '../utils/audit';
 import { prefillAccountInformation } from '../account/account-information';
+import { getEntitlements } from '../billing/entitlements';
 import {
   emptyState,
   isComplete,
@@ -129,9 +130,6 @@ async function saveState(tenantId: string, state: OnboardingState): Promise<void
  * `feature_toggles` column the Settings screen writes — so "not now" during setup and
  * "off" later are one decision, not two half-decisions.
  *
- * Never turns anything ON. A tenant who says yes to bookings has only expressed intent;
- * the feature is theirs already by entitlement, and writing `true` here could exceed
- * their plan, which the toggles route explicitly rejects.
  */
 async function applySkipEffects(tenantId: string, step: OnboardingStep): Promise<void> {
   // The website assistant is not an entitlement — it is `ai.enabled` on the tenant's
@@ -150,10 +148,19 @@ async function applySkipEffects(tenantId: string, step: OnboardingStep): Promise
   const keys = SKIP_DISABLES[step];
   if (!keys?.length) return;
 
+  await writeFeatureToggles(
+    tenantId,
+    Object.fromEntries(keys.map((key) => [key, false])),
+  );
+}
+
+async function writeFeatureToggles(
+  tenantId: string,
+  changes: Record<string, boolean>,
+): Promise<void> {
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   const current = (tenant?.featureToggles ?? {}) as Record<string, boolean>;
-  const next = { ...current };
-  for (const key of keys) next[key] = false;
+  const next = { ...current, ...changes };
 
   await AppDataSource.query(
     `UPDATE tenants SET feature_toggles = $2::jsonb, updated_at = now() WHERE id = $1`,
@@ -162,6 +169,14 @@ async function applySkipEffects(tenantId: string, step: OnboardingStep): Promise
   // Feature-gated modules cache their active list, so a toggle-off that skips this
   // leaves the bot holding tools for a feature the tenant just declined.
   await invalidateEntitlementsAndModules(tenantId);
+}
+
+async function applyDoneEffects(tenantId: string, step: OnboardingStep): Promise<void> {
+  if (step !== 'bookings') return;
+  const { entitledFeatures } = await getEntitlements(tenantId);
+  await writeFeatureToggles(tenantId, {
+    bookings: entitledFeatures.bookings === true,
+  });
 }
 
 /**
@@ -278,6 +293,7 @@ router.put(
 
     state.steps[step] = outcome;
     if (outcome === 'skipped') await applySkipEffects(tenantId, step);
+    if (outcome === 'done') await applyDoneEffects(tenantId, step);
 
     await saveState(tenantId, state);
     sendSuccess(res, { state, nextStep: nextStep(state), complete: isComplete(state) });

@@ -431,13 +431,18 @@ describe('PUT /onboarding/step — skipping switches the feature off', () => {
     expect((bot.settings as { ai?: { enabled?: boolean } }).ai?.enabled).toBe(false);
   });
 
-  it('leaves toggles alone when the step is answered rather than skipped', async () => {
-    // Saying yes is intent, not entitlement. Writing `true` here could exceed the
-    // tenant's plan, which the feature-toggles route explicitly refuses.
+  it('turns bookings on when an entitled customer finishes the step', async () => {
     const tenant = await signedInTenant();
     await request(app).put('/api/v1/onboarding/step').send({ step: 'bookings', outcome: 'done' });
 
-    expect((await reload(tenant.id)).featureToggles ?? {}).not.toHaveProperty('bookings');
+    expect((await reload(tenant.id)).featureToggles).toMatchObject({ bookings: true });
+  });
+
+  it('clamps bookings off when the tenant is not entitled', async () => {
+    const tenant = await signedInTenant({ tier: 'free' });
+    await request(app).put('/api/v1/onboarding/step').send({ step: 'bookings', outcome: 'done' });
+
+    expect((await reload(tenant.id)).featureToggles).toMatchObject({ bookings: false });
   });
 
   it('preserves toggles it was not asked about', async () => {

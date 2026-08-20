@@ -53,8 +53,13 @@ vi.mock('../../middleware/super-admin.middleware', () => ({
 }));
 
 vi.mock('../../services/clerk-sync.service', () => ({
+  createClerkOrganization: (name: string) =>
+    Promise.resolve({ id: `org_${name.toLowerCase().replace(/\W+/g, '_')}_${Date.now()}`, name }),
+  addMemberToClerkOrganization: () => Promise.resolve(true),
   inviteToClerkOrganization: () => Promise.resolve(true),
   removeFromClerkOrganization: () => Promise.resolve(true),
+  deleteClerkOrganization: () => Promise.resolve(true),
+  updateClerkOrganization: () => Promise.resolve(true),
   getAllOrgMemberships: () => Promise.resolve([]),
 }));
 

@@ -15,6 +15,7 @@ import { enforceFeatureDependencies } from './feature-taxonomy';
 import { TENANT_TOGGLEABLE_FEATURES, isOptInFeature } from './feature-toggles';
 import type { TenantFeatureToggles } from '../contracts/entitlements';
 import type { Entitlements, FeatureKey, InternalPlanId } from './types';
+import { expireOnboardingProTrial } from './onboarding-trial';
 
 /**
  * Entitlements are read on the hot path (feature gates + LLM rate limit run on
@@ -45,6 +46,10 @@ export class TenantNotFoundError extends Error {
  * changes, not by directly editing tenant columns.
  */
 export async function getEntitlements(tenantId: string): Promise<Entitlements> {
+  if (await expireOnboardingProTrial(tenantId)) {
+    await invalidateEntitlements(tenantId);
+  }
+
   return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },

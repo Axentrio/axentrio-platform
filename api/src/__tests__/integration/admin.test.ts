@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
 const { auth } = createAuthMocks();
@@ -22,12 +22,18 @@ import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { PendingInvite } from '../../database/entities/PendingInvite';
 import { BillingEvent } from '../../database/entities/BillingEvent';
+import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
+import { config } from '../../config/environment';
 import {
   createTestTenant,
   createTestUser,
   createTestPendingInvite,
   createTestBillingAccount,
 } from '../helpers/factories';
+
+afterEach(() => {
+  Object.assign(config.onboarding, { grantProTrial: false });
+});
 
 describe('Admin Invite Resend/Cancel', () => {
   let tenantId: string;
@@ -167,6 +173,42 @@ describe('Admin Invite Resend/Cancel', () => {
       const row = (res.body.data as Array<{ id: string; hasActiveStripeSubscription?: boolean }>)
         .find((t) => t.id === tenantId);
       expect(row?.hasActiveStripeSubscription).toBe(true);
+    });
+  });
+
+  describe('POST /api/v1/admin/tenants — onboarding trial flag', () => {
+    it('creates a Free tenant with no billing row when disabled', async () => {
+      Object.assign(config.onboarding, { grantProTrial: false });
+
+      const res = await request(app)
+        .post('/api/v1/admin/tenants')
+        .send({ name: 'Free Workspace' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.tier).toBe('free');
+      expect(await AppDataSource.getRepository(TenantBillingAccount).findOneBy({
+        tenantId: res.body.data.id,
+        isPrimary: true,
+      })).toBeNull();
+    });
+
+    it('creates a Pro trial when enabled', async () => {
+      Object.assign(config.onboarding, { grantProTrial: true });
+
+      const res = await request(app)
+        .post('/api/v1/admin/tenants')
+        .send({ name: 'Trial Workspace' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.tier).toBe('pro');
+      expect(await AppDataSource.getRepository(TenantBillingAccount).findOneByOrFail({
+        tenantId: res.body.data.id,
+        isPrimary: true,
+      })).toMatchObject({
+        provider: 'manual',
+        status: 'trialing',
+        currentPlanId: 'pro',
+      });
     });
   });
 });

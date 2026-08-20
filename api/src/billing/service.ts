@@ -14,10 +14,9 @@
  *   - getBillingState               (read-only)
  *   - setTierManual / setEnterpriseManual (local-only, self-audit)
  *
- * The reverse-trial flow (seedTrialAccount / expireTrialIfStillManual /
- * sweepExpiredTrials) was retired in PR7: trial state is now owned by
- * Stripe (forward trial via Checkout `trial_period_days`), and the
- * `chatbot_tenant_trial_reservations` table is the source of truth for
+ * The old reverse-trial sweep remains retired. Stripe owns Checkout trials;
+ * the experimental onboarding trial below is manual and expires lazily on
+ * reads. `chatbot_tenant_trial_reservations` remains the source of truth for
  * "has this tenant consumed their first-signup-only trial?".
  *
  * Plan: .scratch/plan-m0-foundation-reshape.md § PR6, § PR7.
@@ -36,6 +35,8 @@ import { getBillingProvider } from './provider-registry';
 import { getStripeClient } from './providers/stripe';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { BillingProviderError, CheckoutablePlanId } from './types';
+import { config } from '../config/environment';
+import { expireOnboardingProTrial } from './onboarding-trial';
 
 const STRIPE = 'stripe' as const;
 
@@ -500,8 +501,9 @@ export async function updateVatId(
 }
 
 /**
- * Read-only snapshot of the tenant's billing state — used by the portal
- * Billing page and by route-level UI gating. Returns primary-row fields,
+ * Snapshot of the tenant's billing state — used by the portal Billing page
+ * and by route-level UI gating. Lazily expires an onboarding trial, then
+ * returns primary-row fields,
  * a `hasStripeSubscription` flag for "Subscribe" vs "Manage" UI decisions,
  * and the last 20 `billing_events` rows.
  */
@@ -529,6 +531,10 @@ export interface BillingState {
 }
 
 export async function getBillingState(tenantId: string): Promise<BillingState> {
+  if (await expireOnboardingProTrial(tenantId)) {
+    await invalidateEntitlementsAndModules(tenantId);
+  }
+
   const [tenant, primary, events] = await Promise.all([
     AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
@@ -604,6 +610,57 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
     hasStripeSubscription,
     events: history,
   };
+}
+
+/**
+ * Grant the experimental first-signup Pro trial. The reservation insert is
+ * the idempotency gate and also prevents Stripe from granting a second trial.
+ */
+export async function grantOnboardingProTrial(
+  tenantId: string,
+  manager?: typeof AppDataSource.manager,
+): Promise<{ changed: boolean }> {
+  const grant = async (tx: typeof AppDataSource.manager): Promise<{ changed: boolean }> => {
+    const reserved: Array<{ tenant_id: string }> = await tx.query(
+      `INSERT INTO chatbot_tenant_trial_reservations (tenant_id)
+       VALUES ($1)
+       ON CONFLICT DO NOTHING
+       RETURNING tenant_id`,
+      [tenantId],
+    );
+    if (reserved.length === 0) return { changed: false };
+
+    const trialEnd = new Date(
+      Date.now() + config.billing.trialDays * 24 * 60 * 60 * 1000,
+    );
+    await tx.query(
+      `UPDATE tenant_billing_accounts
+          SET is_primary = false, updated_at = now()
+        WHERE tenant_id = $1 AND is_primary = true`,
+      [tenantId],
+    );
+    await tx.query(
+      `INSERT INTO tenant_billing_accounts
+         (tenant_id, provider, status, current_plan_id, is_primary,
+          trial_end, raw_provider_data)
+       VALUES ($1, 'manual', 'trialing', 'pro', true, $2, '{}'::jsonb)
+       ON CONFLICT (tenant_id, provider) DO UPDATE
+         SET status = 'trialing',
+             current_plan_id = 'pro',
+             is_primary = true,
+             trial_end = $2,
+             updated_at = now()`,
+      [tenantId, trialEnd],
+    );
+    await tx.update(Tenant, { id: tenantId }, { tier: 'pro' });
+    return { changed: true };
+  };
+
+  const result = manager
+    ? await grant(manager)
+    : await runInTransaction(grant);
+  await invalidateEntitlementsAndModules(tenantId);
+  return result;
 }
 
 /**

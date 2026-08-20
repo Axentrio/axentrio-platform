@@ -26,6 +26,7 @@ import {
   ForbiddenError,
 } from './error-handler';
 import { ERROR_CODES } from './error-codes';
+import { grantOnboardingProTrial } from '../billing/service';
 
 export interface ProvisionedRequest extends Request {
   clerkUserId?: string;
@@ -129,10 +130,6 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
       const slug = await ensureUniqueSlug(orgName, tenantRepo);
       const apiKey = crypto.randomBytes(32).toString('hex');
 
-      // Forward-trial model (PR6/PR7): a fresh tenant starts at `tier='free'`
-      // with NO billing row. The 14-day Pro trial is granted at Checkout
-      // time (via Stripe `trial_period_days`) and is gated by the
-      // `chatbot_tenant_trial_reservations` table for first-signup-only semantics.
       // ON CONFLICT(clerk_org_id) DO NOTHING makes concurrent autoProvision
       // requests race-safe.
       try {
@@ -178,6 +175,11 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
           const t = await manager.findOne(Tenant, { where: { clerkOrgId } });
           if (!t) {
             throw new Error('autoProvision: tenant not found after insert');
+          }
+
+          if (config.onboarding.grantProTrial) {
+            await grantOnboardingProTrial(t.id, manager);
+            t.tier = 'pro';
           }
 
           const anchor = await ensureAnchorBot(t.id, manager);

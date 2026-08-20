@@ -14,7 +14,11 @@ import { useTranslation } from 'react-i18next';
 import { Check, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useStartCheckout, type CheckoutablePlan } from '@/queries/useBillingQueries';
+import {
+  useBillingState,
+  useStartCheckout,
+  type CheckoutablePlan,
+} from '@/queries/useBillingQueries';
 import type { StepProps } from './types';
 
 /** Mirrors SELF_SERVE_PLANS in Settings → Billing, in upgrade-rank order. */
@@ -36,8 +40,13 @@ const FEATURE_KEYS: Record<CheckoutablePlan, string[]> = {
 
 export function PlanStep({ submit }: StepProps) {
   const { t } = useTranslation();
+  const { data: billing, isLoading: billingLoading } = useBillingState();
   const checkout = useStartCheckout();
   const [selected, setSelected] = React.useState<CheckoutablePlan | null>(null);
+  const alreadyCovered =
+    billing?.status === 'trialing' ||
+    ((billing?.tier === 'pro' || billing?.tier === 'enterprise') &&
+      billing.status === 'active');
 
   const buy = (planId: CheckoutablePlan) => {
     setSelected(planId);
@@ -56,7 +65,33 @@ export function PlanStep({ submit }: StepProps) {
     );
   };
 
-  const busy = submit.isPending || checkout.isPending;
+  const busy = billingLoading || submit.isPending || checkout.isPending;
+
+  if (alreadyCovered) {
+    const onTrial = billing?.status === 'trialing';
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1.5">
+          <h2 className="text-xl font-semibold text-text-primary">{t('setup.steps.plan.title')}</h2>
+          <p className="text-sm text-text-secondary">
+            {onTrial
+              ? 'You’re on a 14-day Pro trial. Bookings and the assistant are on. Add a card later in Billing.'
+              : `Your ${billing?.tier === 'enterprise' ? 'Enterprise' : 'Pro'} plan is already active. Bookings and the assistant are on.`}
+          </p>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            size="lg"
+            disabled={submit.isPending}
+            onClick={() => submit.mutate({ step: 'plan' })}
+          >
+            {submit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t('setup.continue')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

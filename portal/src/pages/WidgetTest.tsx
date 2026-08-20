@@ -36,7 +36,7 @@ interface ChatMessage {
   content: string;
   sender: 'visitor' | 'bot' | 'agent';
   timestamp: Date;
-  metadata?: { quickReplies?: string[] } | null;
+  metadata?: { quickReplies?: Array<string | { title?: string; value?: string }> } | null;
 }
 
 interface LogEntry {
@@ -171,20 +171,25 @@ function ChatWidget({
                 </div>
                 {isLastBotMsg && quickReplies.length > 0 && (
                   <div className="flex flex-wrap gap-2 pl-8 mt-1">
-                    {quickReplies.map((qr: string) => (
-                      <button
-                        type="button"
-                        key={qr}
-                        onClick={() => {
-                          // Remove quick replies after click
-                          setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, metadata: null } : m));
-                          onSend(null, qr);
-                        }}
-                        className="text-[12px] font-medium px-3 py-1.5 rounded-full border-[1.5px] border-[#4338ca] text-[#4338ca] bg-white hover:bg-[#4338ca] hover:text-white transition-colors cursor-pointer"
-                      >
-                        {qr}
-                      </button>
-                    ))}
+                    {quickReplies.map((qr) => {
+                      const title = typeof qr === 'string' ? qr : qr.title || qr.value || '';
+                      const value = typeof qr === 'string' ? qr : qr.value || qr.title || '';
+                      if (!title) return null;
+                      return (
+                        <button
+                          type="button"
+                          key={value}
+                          onClick={() => {
+                            // Remove quick replies after click
+                            setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, metadata: null } : m));
+                            onSend(null, value);
+                          }}
+                          className="text-[12px] font-medium px-3 py-1.5 rounded-full border-[1.5px] border-[#4338ca] text-[#4338ca] bg-white hover:bg-[#4338ca] hover:text-white transition-colors cursor-pointer"
+                        >
+                          {title}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </React.Fragment>

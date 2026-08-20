@@ -17,24 +17,20 @@
  *    `message:send` fire-and-forget emit is gone.
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  useQuery,
-  useQueryClient,
-  queryOptions,
-} from '@tanstack/react-query';
-import axios from 'axios';
-import { api, handleApiError } from '../services/apiClient';
-import { queryKeys } from './queryKeys';
-import { useSocket } from '@websocket/SocketContext';
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
+import axios from "axios";
+import { api, handleApiError } from "../services/apiClient";
+import { queryKeys } from "./queryKeys";
+import { useSocket } from "@websocket/SocketContext";
 import {
   applyCommandConversation,
   newUuid,
   normalizeChatStatus,
   seedChatDetail,
   type ChatDetailCacheEntry,
-} from './conversationLive';
-import { LIVE_QUERY_REFETCH_MS } from './queryConfig';
+} from "./conversationLive";
+import { LIVE_QUERY_REFETCH_MS } from "./queryConfig";
 import type {
   Chat,
   ChatStatus,
@@ -48,7 +44,7 @@ import type {
   ThreadBoundary,
   ThreadDuplicateEntry,
   ThreadMessagePayload,
-} from '@app-types/index';
+} from "@app-types/index";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,7 +81,7 @@ interface UseChatsQueryReturn {
 
 /** Composer send outcome — drives the ChatWindow state machine. */
 export interface SendMessageResult {
-  status: 'sent' | 'conflict' | 'failed';
+  status: "sent" | "conflict" | "failed";
   /** 409 code: 'conversation_already_claimed' | 'conversation_closed' | ... */
   code?: string;
   message?: string;
@@ -108,7 +104,7 @@ interface UseChatDetailReturn {
 
 /** POST /chats/:sessionId/messages response (after envelope unwrap). */
 interface SendReplyResponse {
-  outcome: 'sent' | 'duplicate';
+  outcome: "sent" | "duplicate";
   autoClaimed: boolean;
   message: { id: string; createdAt: string };
   conversation?: CommandConversationSummary;
@@ -124,7 +120,9 @@ function normalizeChatRow(row: Chat): Chat {
 
 /** Normalize a GET /chats/:id payload: status vocabulary + per-message
  *  delivery state (server message.status 'failed' → retryable FAILED). */
-export function normalizeChatDetail<T extends { status?: string; messages?: Any[] }>(raw: T): T {
+export function normalizeChatDetail<
+  T extends { status?: string; messages?: Any[] },
+>(raw: T): T {
   return {
     ...raw,
     status: normalizeChatStatus(raw.status),
@@ -133,7 +131,9 @@ export function normalizeChatDetail<T extends { status?: string; messages?: Any[
           messages: raw.messages.map((m: Any) => ({
             ...m,
             chatId: m.chatId ?? m.sessionId,
-            ...(m.status === 'failed' ? { deliveryState: 'failed' as const } : {}),
+            ...(m.status === "failed"
+              ? { deliveryState: "failed" as const }
+              : {}),
           })),
         }
       : {}),
@@ -161,7 +161,10 @@ export function buildChatListParams(
   if (!filters) return params;
   if (filters.tenantId) params.tenantId = filters.tenantId;
   if (filters.status) {
-    const statusMap: Record<string, string> = { handsoff: 'handoff', human: 'active' };
+    const statusMap: Record<string, string> = {
+      handsoff: "handoff",
+      human: "active",
+    };
     params.status = statusMap[filters.status] || filters.status;
   }
   if (filters.assignedAgentId) params.assignedAgentId = filters.assignedAgentId;
@@ -183,7 +186,9 @@ export const chatOptions = {
     return queryOptions({
       queryKey: queryKeys.chats.list(params as Record<string, unknown>),
       queryFn: async () => {
-        const res = (await api.get<Any>('/chats/sessions', { params })) as ChatListResponse;
+        const res = (await api.get<Any>("/chats/sessions", {
+          params,
+        })) as ChatListResponse;
         return { ...res, data: (res?.data ?? []).map(normalizeChatRow) };
       },
       refetchIntervalInBackground: false,
@@ -195,7 +200,9 @@ export const chatOptions = {
     queryOptions({
       queryKey: queryKeys.chats.detail(chatId),
       queryFn: async () => {
-        const raw = (await api.get<Any>(`/chats/${chatId}`)) as ChatDetailResponse;
+        const raw = (await api.get<Any>(
+          `/chats/${chatId}`,
+        )) as ChatDetailResponse;
         return normalizeChatDetail(raw) as ChatDetailResponse;
       },
       enabled: !!chatId,
@@ -212,7 +219,8 @@ export const chatOptions = {
   thread: (chatId: string) =>
     queryOptions({
       queryKey: queryKeys.chats.thread(chatId),
-      queryFn: async () => (await api.get<Any>(`/chats/${chatId}/thread`)) as ChatThreadResponse,
+      queryFn: async () =>
+        (await api.get<Any>(`/chats/${chatId}/thread`)) as ChatThreadResponse,
       enabled: !!chatId,
       staleTime: 60 * 1000,
     }),
@@ -229,15 +237,18 @@ export const chatOptions = {
  * useLiveConversationSync (mounted once by the Inbox), which patches EVERY
  * cached list variant — so this hook needs no socket wiring of its own.
  */
-export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQueryReturn {
+export function useChatsQuery(
+  options: UseChatsQueryOptions = {},
+): UseChatsQueryReturn {
   const { filters } = options;
-  const { isConnected } = useSocket();
 
   const opts = chatOptions.list(filters);
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     ...opts,
-    // Sockets already patch the list. Poll only when the feed is dead.
-    refetchInterval: isConnected ? false : LIVE_QUERY_REFETCH_MS,
+    // Sockets patch the list for instant updates, but polling ALWAYS runs as
+    // the safety net: a socket can be connected-but-deaf (room/adapter issues),
+    // which used to freeze the list until a tab change or reload.
+    refetchInterval: LIVE_QUERY_REFETCH_MS,
   });
 
   const rawData = data as ChatListResponse | undefined;
@@ -274,9 +285,9 @@ export function threadMessageToMessage(m: ThreadMessagePayload): Message {
   return {
     id: m.id,
     chatId: m.sessionId,
-    type: (m.type || 'text') as MessageType,
+    type: (m.type || "text") as MessageType,
     content: m.content,
-    sender: (m.sender || 'user') as MessageSender,
+    sender: (m.sender || "user") as MessageSender,
     ...(m.senderName ? { senderName: m.senderName } : {}),
     isRead: true,
     createdAt: m.createdAt,
@@ -314,7 +325,7 @@ export interface UseChatThreadReturn {
  * possible-duplicates audit. Runs only when a chat is selected.
  */
 export function useChatThread(chatId: string | undefined): UseChatThreadReturn {
-  const { data, isLoading, error } = useQuery(chatOptions.thread(chatId ?? ''));
+  const { data, isLoading, error } = useQuery(chatOptions.thread(chatId ?? ""));
   const thread = (data as ChatThreadResponse | undefined) ?? null;
 
   const earlierSessions = useMemo<EarlierThreadSession[]>(() => {
@@ -334,7 +345,10 @@ export function useChatThread(chatId: string | undefined): UseChatThreadReturn {
   return {
     thread,
     earlierSessions,
-    earlierCount: Math.max(earlierSessions.length, (thread?.totalSessions ?? 1) - 1),
+    earlierCount: Math.max(
+      earlierSessions.length,
+      (thread?.totalSessions ?? 1) - 1,
+    ),
     truncated: thread?.truncated ?? false,
     possibleDuplicates: thread?.possibleDuplicates ?? [],
     isLoading,
@@ -356,10 +370,14 @@ function conflictCodeOf(err: unknown): string | undefined {
   const data = err.response.data as
     | { error?: { code?: string } | string }
     | undefined;
-  if (data?.error && typeof data.error === 'object' && typeof data.error.code === 'string') {
+  if (
+    data?.error &&
+    typeof data.error === "object" &&
+    typeof data.error.code === "string"
+  ) {
     return data.error.code;
   }
-  return status === 409 ? 'conflict' : undefined;
+  return status === 409 ? "conflict" : undefined;
 }
 
 /**
@@ -419,7 +437,9 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
         if (typing.chatId !== chatId) return;
         setTypingUsers((prev) => {
           if (typing.isTyping) {
-            return prev.includes(typing.userName) ? prev : [...prev, typing.userName];
+            return prev.includes(typing.userName)
+              ? prev
+              : [...prev, typing.userName];
           }
           return prev.filter((name) => name !== typing.userName);
         });
@@ -442,11 +462,14 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
 
   const patchMessages = useCallback(
     (updater: (messages: Message[]) => Message[]) => {
-      queryClient.setQueryData<ChatDetailResponse>(queryKeys.chats.detail(chatId), (old) => {
-        const messages = updater(old?.messages ?? []);
-        if (!old) return seedChatDetail(chatId, { messages });
-        return { ...old, messages };
-      });
+      queryClient.setQueryData<ChatDetailResponse>(
+        queryKeys.chats.detail(chatId),
+        (old) => {
+          const messages = updater(old?.messages ?? []);
+          if (!old) return seedChatDetail(chatId, { messages });
+          return { ...old, messages };
+        },
+      );
     },
     [chatId, queryClient],
   );
@@ -478,10 +501,13 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
       opts: { keepBubbleOnConflict?: boolean } = {},
     ): Promise<SendMessageResult> => {
       try {
-        const res = await api.post<SendReplyResponse>(`/chats/${chatId}/messages`, {
-          clientMessageId,
-          content,
-        });
+        const res = await api.post<SendReplyResponse>(
+          `/chats/${chatId}/messages`,
+          {
+            clientMessageId,
+            content,
+          },
+        );
         const serverId = res.message.id;
         patchMessages((msgs) => {
           if (msgs.some((m) => m.id === serverId)) {
@@ -490,28 +516,33 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
             // drop-or-map in one reduce instead of filter().map().
             const next: Message[] = [];
             for (const m of msgs) {
-              if (m.clientMessageId === clientMessageId && m.id !== serverId) continue;
+              if (m.clientMessageId === clientMessageId && m.id !== serverId)
+                continue;
               next.push(
-                m.id === serverId ? { ...m, clientMessageId, deliveryState: 'sent' as const } : m,
+                m.id === serverId
+                  ? { ...m, clientMessageId, deliveryState: "sent" as const }
+                  : m,
               );
             }
             return next;
           }
-          const idx = msgs.findIndex((m) => m.clientMessageId === clientMessageId);
+          const idx = msgs.findIndex(
+            (m) => m.clientMessageId === clientMessageId,
+          );
           if (idx === -1) return msgs; // cache was replaced (refetch) — REST copy owns it
           const next = [...msgs];
           next[idx] = {
             ...next[idx],
             id: serverId,
             createdAt: res.message.createdAt ?? next[idx].createdAt,
-            deliveryState: 'sent',
+            deliveryState: "sent",
           };
           return next;
         });
         // The auto-claim means ownership flipped to this operator — fold the
         // response summary into the list + detail caches (no follow-up GET).
         applyCommandConversation(queryClient, res.conversation);
-        return { status: 'sent' };
+        return { status: "sent" };
       } catch (err) {
         const code = conflictCodeOf(err);
         if (code) {
@@ -520,8 +551,9 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
             // is the ONLY copy of the text — keep it retryable, never remove.
             patchMessages((msgs) =>
               msgs.map((m) =>
-                m.clientMessageId === clientMessageId && m.deliveryState === 'pending'
-                  ? { ...m, deliveryState: 'failed' as const }
+                m.clientMessageId === clientMessageId &&
+                m.deliveryState === "pending"
+                  ? { ...m, deliveryState: "failed" as const }
                   : m,
               ),
             );
@@ -530,22 +562,27 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
             // A bubble the socket already confirmed is never removed.
             patchMessages((msgs) =>
               msgs.filter(
-                (m) => !(m.clientMessageId === clientMessageId && m.deliveryState !== 'sent'),
+                (m) =>
+                  !(
+                    m.clientMessageId === clientMessageId &&
+                    m.deliveryState !== "sent"
+                  ),
               ),
             );
           }
-          return { status: 'conflict', code, message: handleApiError(err) };
+          return { status: "conflict", code, message: handleApiError(err) };
         }
         // Only a still-pending bubble may become FAILED — a socket-confirmed
         // ('sent') bubble is never downgraded by a late rejection.
         patchMessages((msgs) =>
           msgs.map((m) =>
-            m.clientMessageId === clientMessageId && m.deliveryState === 'pending'
-              ? { ...m, deliveryState: 'failed' as const }
+            m.clientMessageId === clientMessageId &&
+            m.deliveryState === "pending"
+              ? { ...m, deliveryState: "failed" as const }
               : m,
           ),
         );
-        return { status: 'failed', message: handleApiError(err) };
+        return { status: "failed", message: handleApiError(err) };
       }
     },
     [chatId, patchMessages, queryClient],
@@ -554,38 +591,48 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
   const sendMessage = useCallback(
     async (content: string): Promise<SendMessageResult> => {
       const trimmed = content.trim();
-      if (!chatId || !trimmed) return { status: 'failed', message: 'Empty message' };
+      if (!chatId || !trimmed)
+        return { status: "failed", message: "Empty message" };
       const clientMessageId = newUuid();
       const optimistic: Message = {
         id: clientMessageId,
         clientMessageId,
         chatId,
-        type: 'text',
+        type: "text",
         content: trimmed,
-        sender: 'agent',
+        sender: "agent",
         isRead: true,
         createdAt: new Date().toISOString(),
-        deliveryState: 'pending',
+        deliveryState: "pending",
       };
       patchMessages((msgs) => [...msgs, optimistic]);
-      return postReply(clientMessageId, trimmed, { keepBubbleOnConflict: false });
+      return postReply(clientMessageId, trimmed, {
+        keepBubbleOnConflict: false,
+      });
     },
     [chatId, patchMessages, postReply],
   );
 
   const retryMessage = useCallback(
     async (clientMessageId: string): Promise<SendMessageResult> => {
-      const entry = queryClient.getQueryData<ChatDetailResponse>(queryKeys.chats.detail(chatId));
-      const target = (entry?.messages ?? []).find(
-        (m) => m.clientMessageId === clientMessageId && m.deliveryState === 'failed',
+      const entry = queryClient.getQueryData<ChatDetailResponse>(
+        queryKeys.chats.detail(chatId),
       );
-      if (!target) return { status: 'failed', message: 'Nothing to retry' };
+      const target = (entry?.messages ?? []).find(
+        (m) =>
+          m.clientMessageId === clientMessageId && m.deliveryState === "failed",
+      );
+      if (!target) return { status: "failed", message: "Nothing to retry" };
       patchMessages((msgs) =>
         msgs.map((m) =>
-          m.clientMessageId === clientMessageId ? { ...m, deliveryState: 'pending' as const } : m,
+          m.clientMessageId === clientMessageId
+            ? { ...m, deliveryState: "pending" as const }
+            : m,
         ),
       );
-      return postReply(clientMessageId, target.content, { keepBubbleOnConflict: true });
+      return postReply(clientMessageId, target.content, {
+        keepBubbleOnConflict: true,
+      });
     },
     [chatId, patchMessages, postReply, queryClient],
   );

@@ -14,6 +14,8 @@ export interface ToolContext {
   /** SpecialtyCatalog S5: selected-specialty aliases/tags that bias KB retrieval
    *  (embedding only). Set by agent.service; absent ⇒ no bias. */
   specialtyTerms?: string[];
+  /** False when a human already owns the session. Absent = treat as bot-owned. */
+  botOwned?: boolean;
 }
 
 export interface ToolResult {

@@ -540,4 +540,15 @@ describe('EscalationTool', () => {
     expect((result.data as any).sessionId).toBeUndefined();
     expect((result.data as any).tenantId).toBeUndefined();
   });
+
+  it('refuses to escalate when the session is not bot-owned', async () => {
+    const tool = new EscalationTool();
+    const result = await tool.execute({ reason: 'asked for a person' }, makeCtx({ botOwned: false }));
+
+    expect(result.success).toBe(true);
+    expect((result.data as any).alreadyActive).toBe(true);
+    expect((result.data as any).escalated).toBeUndefined();
+    expect((result.data as any).guidance).toMatch(/human is already involved/i);
+    expect((result.data as any).sessionId).toBeUndefined();
+  });
 });

@@ -910,6 +910,76 @@ describe('AgentService', () => {
     expect(createBooking.execute).not.toHaveBeenCalled();
   });
 
+  it('does not latch handoffRequested when session is not bot-owned', async () => {
+    const escalate: ToolAdapter = {
+      name: 'escalate_to_human',
+      description: 'Escalate',
+      parameters: { type: 'object', properties: { reason: { type: 'string' } } },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { escalated: true } }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([escalate]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'escalate_to_human', arguments: { reason: 'asked for a person' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Let me get someone.',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'I want a human',
+      { id: 's1', tenantId: 't1', status: 'handoff', ownership: 'human_owned' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    expect(result.handoffRequested).toBeUndefined();
+    expect(escalate.execute).toHaveBeenCalledWith(
+      { reason: 'asked for a person' },
+      expect.objectContaining({ botOwned: false }),
+    );
+  });
+
+  it('latches handoffRequested when escalate succeeds on a bot-owned session', async () => {
+    const escalate: ToolAdapter = {
+      name: 'escalate_to_human',
+      description: 'Escalate',
+      parameters: { type: 'object', properties: { reason: { type: 'string' } } },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { escalated: true } }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([escalate]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'escalate_to_human', arguments: { reason: 'asked for a person' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Connecting you now.',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'I want a human',
+      { id: 's1', tenantId: 't1', status: 'bot', ownership: 'bot_owned' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    expect(result.handoffRequested).toBe(true);
+  });
+
   it('returns budget_exceeded when over budget', async () => {
     mockMeteringIsOverBudget.mockResolvedValue(true);
 

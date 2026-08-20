@@ -61,7 +61,7 @@ const IF_BLOCK_RE = /\{\{#if (\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g;
 // NOTE: does NOT restate identity ("You are …") or tone — the agent brand-voice
 // lines and the base-mode preamble already do. This adds the generic vertical
 // CONTEXT only, so it composes after them without duplication.
-const GENERIC_SERVICE_CORE = `You help customers of {businessName}. Answer their questions about this service business — its services, opening hours, pricing, location, contact details, and policies. Use the knowledge base for anything factual; if you don't have the information, say so honestly and offer to pass the question to the team. Keep replies clear and practical, focused on what this business actually offers — never invent details, and don't answer unrelated or general-knowledge questions.`;
+const GENERIC_SERVICE_CORE = `You help customers of {businessName}. Answer their questions about this service business — its services, opening hours, pricing, location, contact details, and policies. Use the knowledge base for anything factual; if you don't have the information, say so honestly. Do not offer a human for missing address, hours, or prices. Keep replies clear and practical, focused on what this business actually offers — never invent details, and don't answer unrelated or general-knowledge questions.`;
 
 // Back-compat alias: the base/rag empty-instructions fallback historically used a
 // minimal block; it now resolves to the richer generic core (AC4).
@@ -516,12 +516,16 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     }
     if (addressDisabled) {
       overrideBits.push(
-        'The business address is intentionally not part of this profile — do not provide or volunteer a business address, and do not infer or retrieve one from the knowledge base, including prefetched knowledge.',
+        'The business address is intentionally not part of this profile — do not provide or volunteer a business address, and do not infer or retrieve one from the knowledge base, including prefetched knowledge. If asked, say you do not have one. Do not escalate or offer a human for this.',
+      );
+    } else if (!configuredAddress) {
+      overrideBits.push(
+        'No business address is configured in this prompt. If the customer asks where you are or for the address and kb_search does not return one, say so. Do not escalate or offer a human for this.',
       );
     }
     const configuredOverride = overrideBits.length ? ` ${overrideBits.join(' ')}` : '';
     sections.push(
-      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — ${topics.join(', ')}, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering.${configuredOverride} NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
+      `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — ${topics.join(', ')}, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering.${configuredOverride} NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly. For simple business facts (address, hours, prices), state that the fact is not configured and move on — do not offer a human. For anything else, offer to connect them with the team.`
     );
     ledger.include(K.KNOWLEDGE);
   } else {
@@ -578,7 +582,7 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // person → capture contact → ask-then-escalate — before it could run.
   const canEscalate = tools.some((t) => t.name === 'escalate_to_human');
   if (canEscalate) {
-    sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent, call the escalate_to_human tool.');
+    sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent, call the escalate_to_human tool. A missing business address, hours, or prices is not a reason to escalate.');
     ledger.include(K.ESCALATION);
   } else {
     ledger.exclude(K.ESCALATION, 'toolAbsent');

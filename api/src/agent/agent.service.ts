@@ -489,6 +489,11 @@ export class AgentService {
     // a provider error AFTER the tool succeeded still returns
     // `handoffRequested: true` from the catch below.
     let escalationRequested = false;
+    // Same gate message-forwarding uses to run the bot. Missing ownership
+    // (tests / older rows) defaults to bot_owned, matching the DB default.
+    const sessionBotOwned =
+      (session.ownership ?? 'bot_owned') === 'bot_owned' &&
+      (session.status === 'bot' || session.status === 'waiting');
 
     try {
       let tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
@@ -1010,6 +1015,7 @@ export class AgentService {
             dataSource: AppDataSource,
             conversationHistory: messages,
             specialtyTerms: specialtyTerms.length ? specialtyTerms : undefined,
+            botOwned: sessionBotOwned,
           };
 
           try {
@@ -1021,7 +1027,7 @@ export class AgentService {
             // The customer asked for a human and the escalation tool accepted it.
             // Latched (never reset) so whatever exit this run takes carries
             // `handoffRequested: true` — the forwarding mapping owes them a human.
-            if (tool.name === 'escalate_to_human' && result.success) escalationRequested = true;
+            if (tool.name === 'escalate_to_human' && result.success && sessionBotOwned) escalationRequested = true;
             if (result.success && result.replyFact?.kind === 'booking_address') {
               const merged = mergeAddressFacts(pendingAddressFact, result.replyFact);
               pendingAddressFact = merged.fact;

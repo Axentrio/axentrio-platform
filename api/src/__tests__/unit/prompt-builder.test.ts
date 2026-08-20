@@ -102,6 +102,28 @@ describe('PromptBuilder', () => {
     expect(promptNoKb).not.toContain('## KNOWLEDGE');
   });
 
+  it('empty venueLine: address questions do not offer a human', () => {
+    const { prompt } = builder.build(
+      baseTenant,
+      baseTenant.settings as any,
+      mockTools,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { venueLine: '' },
+    );
+    expect(prompt).toContain('No business address is configured');
+    expect(prompt).toContain('Do not escalate or offer a human for this');
+    expect(prompt).toContain('For simple business facts (address, hours, prices), state that the fact is not configured and move on — do not offer a human');
+    expect(prompt).not.toContain('If the search comes back empty, say so honestly and offer to connect them with the team.');
+  });
+
   it('does not source a disabled address from the knowledge base', () => {
     const settings = {
       ...baseTenant.settings,
@@ -110,6 +132,7 @@ describe('PromptBuilder', () => {
     const { prompt } = builder.build(baseTenant, settings as any, mockTools);
     expect(prompt).not.toContain('services, opening hours, prices, policies, location, contact details');
     expect(prompt).toContain('do not provide or volunteer a business address');
+    expect(prompt).toContain('Do not escalate or offer a human for this');
   });
 
   it('does not send opening-hours questions to kb_search when hours are already configured', () => {

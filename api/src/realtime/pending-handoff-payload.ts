@@ -1,7 +1,11 @@
+import { displayNameFromSession } from './conversation-serializer';
+import type { ChatSession } from '../database/entities/ChatSession';
+
 /** Queue card the Inbox Handoff tab inserts on `handoff:requested`. */
 export function pendingHandoffSocketPayload(input: {
   sessionId: string;
   visitorId?: string | null;
+  metadata?: ChatSession['metadata'] | null;
   reason?: string;
   priority?: string;
   handoffId?: string | null;
@@ -17,7 +21,9 @@ export function pendingHandoffSocketPayload(input: {
     priority: input.priority ?? 'medium',
     waitTime: 0,
     requestedAt: (input.requestedAt ?? new Date()).toISOString(),
-    userName: visitorId ? `Visitor ${visitorId.slice(0, 8)}` : undefined,
+    userName: visitorId || input.metadata
+      ? displayNameFromSession({ visitorId, metadata: input.metadata ?? {} })
+      : undefined,
     handoffId: input.handoffId ?? undefined,
   };
 }

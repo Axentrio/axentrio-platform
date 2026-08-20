@@ -218,3 +218,24 @@ describe('ChatWindow composer', () => {
     );
   });
 });
+
+describe('ChatWindow system events', () => {
+  it('renders a handoff system message as caption text, not a File card', () => {
+    const sys: Message = {
+      id: 'sys-1',
+      chatId: 'c1',
+      type: 'system',
+      content: 'Handoff requested: escalation trigger',
+      sender: 'system',
+      senderName: 'System',
+      isRead: true,
+      createdAt: '2026-08-20T16:41:00.000Z',
+    };
+    mockDetail([sys]);
+    render(<ChatWindow chat={makeChat()} />);
+    expect(screen.getByTestId('system-event')).toHaveTextContent(
+      'Handoff requested: escalation trigger',
+    );
+    expect(screen.queryByText(/^File$/)).not.toBeInTheDocument();
+  });
+});

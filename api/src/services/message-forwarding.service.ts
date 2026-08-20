@@ -2027,6 +2027,7 @@ async function handleBotHandoff(
     pendingHandoffSocketPayload({
       sessionId: session.id,
       visitorId: session.visitorId,
+      metadata: session.metadata,
       reason,
       handoffId,
     }),

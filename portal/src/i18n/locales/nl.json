@@ -2063,7 +2063,8 @@
     },
     "chat": {
       "anonymousUser": "Anonieme gebruiker",
-      "anonymous": "Anoniem"
+      "anonymous": "Anoniem",
+      "rename": "Gesprek hernoemen"
     },
     "handoff": {
       "empty": {

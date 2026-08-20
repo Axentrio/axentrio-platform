@@ -10,7 +10,8 @@ import { useSearchParams } from 'react-router-dom';
 import {
   MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2, Lock, PowerOff,
 } from 'lucide-react';
-import { SiTelegram, SiMessenger, SiInstagram, SiWhatsapp, SiFacebook } from 'react-icons/si';
+import { SiFacebook } from 'react-icons/si';
+import { CHANNEL_COLORS, CHANNEL_ICONS, CHANNEL_LABELS } from '@/lib/channelMeta';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,28 +56,6 @@ import { timeAgo } from '@/utils/timeAgo';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
-
-const CHANNEL_ICONS: Record<string, React.ElementType> = {
-  telegram: SiTelegram,
-  messenger: SiMessenger,
-  instagram: SiInstagram,
-  whatsapp: SiWhatsapp,
-};
-
-const CHANNEL_LABELS: Record<string, string> = {
-  telegram: 'Telegram',
-  messenger: 'Messenger',
-  instagram: 'Instagram',
-  whatsapp: 'WhatsApp',
-};
-
-// Brand tint for the channel icon tile.
-const CHANNEL_COLORS: Record<string, string> = {
-  telegram: 'bg-sky-500/15 text-sky-400',
-  messenger: 'bg-blue-500/15 text-blue-400',
-  instagram: 'bg-pink-500/15 text-pink-400',
-  whatsapp: 'bg-emerald-500/15 text-emerald-400',
-};
 
 // Status indicator: colored dot + text.
 const STATUS_DOT: Record<string, string> = {

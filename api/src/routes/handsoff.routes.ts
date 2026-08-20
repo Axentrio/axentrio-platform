@@ -19,6 +19,7 @@ import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { pendingHandoffSocketPayload } from '../realtime/pending-handoff-payload';
+import { displayNameFromSession } from '../realtime/conversation-serializer';
 import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
@@ -114,6 +115,7 @@ router.post(
       pendingHandoffSocketPayload({
         sessionId,
         visitorId: session.visitorId,
+        metadata: session.metadata,
         reason: reason || 'User requested',
         handoffId: result.handoffId,
       }),
@@ -394,7 +396,6 @@ router.get(
     const sessionsWithPreview = result.data.map((session) => {
       const lastMessage = lastBySession.get(session.id);
       const hr = handoffBySession.get(session.id);
-      const visitorId = session.visitorId ?? '';
       return {
         id: session.id,
         chatId: session.id,
@@ -405,7 +406,7 @@ router.get(
         priority: hr?.priority ?? 'medium',
         waitTime: hr ? hr.getWaitTime() : 0,
         requestedAt: hr?.requestedAt ?? session.createdAt,
-        userName: visitorId ? `Visitor ${visitorId.slice(0, 8)}` : undefined,
+        userName: displayNameFromSession(session),
         metadata: session.metadata,
         createdAt: session.createdAt,
         lastMessage: lastMessage

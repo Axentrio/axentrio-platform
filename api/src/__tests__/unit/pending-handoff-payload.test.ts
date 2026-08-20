@@ -24,4 +24,13 @@ describe('pendingHandoffSocketPayload', () => {
       handoffId: 'ho-1',
     });
   });
+
+  it('uses session metadata displayName when present', () => {
+    const payload = pendingHandoffSocketPayload({
+      sessionId: 'sess-1',
+      visitorId: 'abcdefghij',
+      metadata: { customData: { displayName: 'Ada Lovelace' } },
+    });
+    expect(payload.userName).toBe('Ada Lovelace');
+  });
 });

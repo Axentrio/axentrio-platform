@@ -23,6 +23,7 @@ import { useChatDetail, useChatThread, type EarlierThreadSession } from '../quer
 import { useNotificationSound } from '@websocket/notificationSound';
 import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedResponsePicker';
 import { ChatStatusBadge } from './StatusBadge';
+import { ChannelBadge } from './ChannelBadge';
 import { TypingIndicator, CompactTypingIndicator } from './TypingIndicator';
 import { FileAttachment } from './FilePreview';
 import { Button } from '@/components/ui/button';
@@ -186,6 +187,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   // Auto-resize textarea
   const renderMessage = (message: Message) => {
+    if (message.type === 'system' || message.sender === 'system') {
+      return (
+        <div
+          key={message.clientMessageId ?? message.id}
+          className="flex justify-center mb-4"
+          data-testid="system-event"
+        >
+          <p className="text-xs text-text-muted text-center max-w-[80%]">{message.content}</p>
+        </div>
+      );
+    }
+
     const isAgent = message.sender === 'agent';
     const isBot = message.sender === 'bot';
     const isVisitor = !isAgent && !isBot;
@@ -339,9 +352,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <User className="w-5 h-5 text-text-secondary" />
           </div>
           <div>
-            <h3 className="font-semibold text-text-primary">
-              {chat.userName || t('inbox.chat.anonymousUser')}
-            </h3>
+            <div className="flex items-center gap-2 min-w-0">
+              <h3 className="font-semibold text-text-primary truncate">
+                {chat.userName || t('inbox.chat.anonymousUser')}
+              </h3>
+              <ChannelBadge channel={chat.channel} source={chat.metadata?.source} />
+            </div>
             <div className="flex items-center gap-2">
               <ChatStatusBadge status={chat.status} size="sm" />
               {chat.tenantName && (

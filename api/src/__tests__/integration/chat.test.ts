@@ -49,6 +49,7 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
+import { Participant } from '../../database/entities/Participant';
 import {
   createTestTenant,
   createTestUser,
@@ -104,6 +105,60 @@ describe('Chat Lifecycle', () => {
       const ids = filtered.body.data.map((s: { id: string }) => s.id);
       expect(ids).toContain(paused.id);
       expect(ids).not.toContain(normal.id);
+    });
+
+    it('GET /chats/:id exposes userName and channel', async () => {
+      const s = await createTestSession(tenantId, {
+        status: 'bot',
+        channel: 'whatsapp',
+        metadata: { customData: { displayName: 'Ada Lovelace' } },
+      });
+      const res = await request(app).get(`/api/v1/chats/${s.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.userName).toBe('Ada Lovelace');
+      expect(res.body.data.channel).toBe('whatsapp');
+    });
+
+    it('PATCH /chats/:id persists rename and emits conversation:upsert', async () => {
+      const { emitToTenantAgents } = await import('../../websocket/socket.handler');
+      const s = await createTestSession(tenantId, { status: 'bot' });
+      await createTestParticipant(s.id, { type: 'user', name: 'Visitor' });
+
+      const res = await request(app)
+        .patch(`/api/v1/chats/${s.id}`)
+        .send({ userName: '  Ada Lovelace  ' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.userName).toBe('Ada Lovelace');
+
+      const fresh = await AppDataSource.getRepository(ChatSession).findOneBy({ id: s.id });
+      expect(fresh?.metadata?.customData?.displayName).toBe('Ada Lovelace');
+      const participant = await AppDataSource.getRepository(Participant).findOne({
+        where: { sessionId: s.id, type: 'user' },
+      });
+      expect(participant?.name).toBe('Ada Lovelace');
+
+      expect(emitToTenantAgents).toHaveBeenCalledWith(
+        tenantId,
+        'conversation:upsert',
+        expect.objectContaining({
+          conversation: expect.objectContaining({ id: s.id, userName: 'Ada Lovelace' }),
+        }),
+      );
+    });
+
+    it('PATCH /chats/:id rejects an empty name', async () => {
+      const s = await createTestSession(tenantId, { status: 'bot' });
+      const res = await request(app).patch(`/api/v1/chats/${s.id}`).send({ userName: '   ' });
+      expect(res.status).toBe(422);
+    });
+
+    it('PATCH /chats/:id rejects control-character names', async () => {
+      const s = await createTestSession(tenantId, { status: 'bot' });
+      const nul = await request(app).patch(`/api/v1/chats/${s.id}`).send({ userName: '\0' });
+      expect(nul.status).toBe(422);
+      const newline = await request(app).patch(`/api/v1/chats/${s.id}`).send({ userName: '\n' });
+      expect(newline.status).toBe(422);
     });
 
     it('GET /chats/:id exposes guardrail state', async () => {

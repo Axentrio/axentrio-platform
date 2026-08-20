@@ -759,6 +759,7 @@ async function handleHandoffRequest(
       pendingHandoffSocketPayload({
         sessionId,
         visitorId: session.visitorId,
+        metadata: session.metadata,
         reason,
         handoffId: commandResult.handoffId,
       }),

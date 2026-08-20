@@ -35,6 +35,8 @@ function makeChat(id: string): Chat {
     lastActivityAt: '2026-08-14T09:00:00.000Z',
     lastMessage: 'hello there',
     messageCount: 3,
+    channel: 'whatsapp',
+    metadata: { source: 'whatsapp' },
   };
 }
 
@@ -86,6 +88,7 @@ describe('ChatStream earlier-conversations badge (B-PR4b)', () => {
     expect(useChatThreadMock).toHaveBeenCalledWith('c1');
     // The badge sits in the selected row (c1), not the other one.
     expect(badges[0].closest('[role="button"]')).toHaveTextContent('Visitor c1');
+    expect(screen.getAllByLabelText('WhatsApp').length).toBeGreaterThan(0);
   });
 
   it('shows no badge when the selected customer has no history', () => {

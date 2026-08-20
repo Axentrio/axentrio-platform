@@ -25,6 +25,7 @@ import { queryKeys } from "./queryKeys";
 import { useSocket } from "@websocket/SocketContext";
 import {
   applyCommandConversation,
+  mergeDefined,
   newUuid,
   normalizeChatStatus,
   seedChatDetail,
@@ -392,6 +393,47 @@ function conflictCodeOf(err: unknown): string | undefined {
  *   pending bubble; `retryMessage` re-sends a FAILED bubble with the SAME
  *   clientMessageId (server-side idempotent).
  */
+/** PATCH /chats/:id { userName } — optimistic list + detail via mergeDefined. */
+export function useRenameConversation() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (chatId: string, userName: string) => {
+      const patch = { userName };
+      const previous = queryClient.getQueriesData({
+        queryKey: queryKeys.chats.all(),
+      });
+      queryClient.setQueriesData<{ data?: Chat[] }>(
+        { queryKey: queryKeys.chats.all() },
+        (old) => {
+          if (!old) return old;
+          if (Array.isArray(old.data)) {
+            return {
+              ...old,
+              data: old.data.map((row) =>
+                row.id === chatId ? mergeDefined(row, patch) : row,
+              ),
+            };
+          }
+          return old;
+        },
+      );
+      queryClient.setQueryData<ChatDetailCacheEntry>(
+        queryKeys.chats.detail(chatId),
+        (old) => (old ? mergeDefined(old, patch) : old),
+      );
+      try {
+        await api.patch(`/chats/${chatId}`, { userName });
+      } catch (err) {
+        for (const [key, data] of previous) {
+          queryClient.setQueryData(key, data);
+        }
+        throw err;
+      }
+    },
+    [queryClient],
+  );
+}
+
 export function useChatDetail(chatId: string): UseChatDetailReturn {
   const queryClient = useQueryClient();
   const {

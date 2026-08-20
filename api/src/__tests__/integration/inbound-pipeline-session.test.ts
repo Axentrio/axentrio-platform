@@ -8,7 +8,8 @@ import { describe, it, expect } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { Bot } from '../../database/entities/Bot';
-import { findOrCreateConversation, processInboundEvent } from '../../channels/inbound-pipeline';
+import { ChatSession } from '../../database/entities/ChatSession';
+import { findOrCreateConversation, fillEmptyDisplayName, processInboundEvent } from '../../channels/inbound-pipeline';
 import { upsertLead } from '../../leads/lead-capture.service';
 import { createTestTenant, createTestAnchorBot } from '../helpers/factories';
 import type { NormalizedEvent } from '../../channels/types';
@@ -17,6 +18,7 @@ import crypto from 'crypto';
 // Keep these tests about the inbound→lead wiring; stub the fire-and-forget fan-out.
 import { vi } from 'vitest';
 const upsertLeadSpy = vi.hoisted(() => vi.fn());
+const fetchMetaProfileMock = vi.hoisted(() => vi.fn());
 vi.mock('../../leads/lead-capture.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../leads/lead-capture.service')>();
   return {
@@ -32,6 +34,9 @@ vi.mock('../../channels/channel-entitlement', () => ({
 }));
 vi.mock('../../services/turn-coalescer', () => ({
   scheduleTurn: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../channels/meta/profile.service', () => ({
+  fetchMetaProfile: (...args: unknown[]) => fetchMetaProfileMock(...args),
 }));
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
@@ -69,7 +74,10 @@ function messengerTextEvent(userId: string): NormalizedEvent {
   };
 }
 
-async function createMessengerConnection(tenantId: string): Promise<ChannelConnection> {
+async function createMessengerConnection(
+  tenantId: string,
+  credentials: Record<string, unknown> = {},
+): Promise<ChannelConnection> {
   const repo = AppDataSource.getRepository(ChannelConnection);
   return repo.save(
     repo.create({
@@ -77,9 +85,118 @@ async function createMessengerConnection(tenantId: string): Promise<ChannelConne
       channel: 'messenger',
       status: 'active',
       platformAccountId: `page_${Date.now()}`,
+      credentials,
     }),
   );
 }
+
+describe('inbound-pipeline · display names', () => {
+  it('fill-if-empty backfills participant, binding, and session metadata on reuse', async () => {
+    const tenant = await createTestTenant();
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id);
+    const userId = `psid_fill_${crypto.randomBytes(4).toString('hex')}`;
+
+    const first = await findOrCreateConversation(
+      { ...messengerTextEvent(userId), sender: { externalUserId: userId, externalThreadId: userId } },
+      connection,
+    );
+    expect(first.participant.name).toBe('Visitor');
+    expect(first.binding.externalUserName).toBeNull();
+    expect(first.session.metadata?.customData?.displayName).toBeUndefined();
+
+    const second = await findOrCreateConversation(
+      messengerTextEvent(userId),
+      connection,
+    );
+    expect(second.created).toBe(false);
+    expect(second.participant.name).toBe('Test User');
+    expect(second.binding.externalUserName).toBe('Test User');
+    expect(second.session.metadata?.customData?.displayName).toBe('Test User');
+  });
+
+  it('fill-if-empty writes only targeted columns — stale takeover fields stay untouched', async () => {
+    const tenant = await createTestTenant();
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id);
+    const userId = `psid_stale_${crypto.randomBytes(4).toString('hex')}`;
+
+    const first = await findOrCreateConversation(
+      { ...messengerTextEvent(userId), sender: { externalUserId: userId, externalThreadId: userId } },
+      connection,
+    );
+
+    const sessionRepo = AppDataSource.getRepository(ChatSession);
+    await sessionRepo.update(
+      { id: first.session.id },
+      {
+        ownership: 'human_owned',
+        status: 'active',
+        ownershipVersion: 7,
+        messageCount: 12,
+        transcriptRevision: 3,
+      },
+    );
+
+    first.session.ownership = 'bot_owned';
+    first.session.status = 'waiting';
+    first.session.ownershipVersion = 0;
+    first.session.messageCount = 0;
+    first.session.transcriptRevision = 0;
+
+    await fillEmptyDisplayName({
+      session: first.session,
+      participant: first.participant,
+      binding: first.binding,
+      incoming: 'Test User',
+    });
+
+    const fresh = await sessionRepo.findOneByOrFail({ id: first.session.id });
+    expect(fresh.metadata?.customData?.displayName).toBe('Test User');
+    expect(fresh.ownership).toBe('human_owned');
+    expect(fresh.status).toBe('active');
+    expect(fresh.ownershipVersion).toBe(7);
+    expect(fresh.messageCount).toBe(12);
+    expect(fresh.transcriptRevision).toBe(3);
+  });
+
+  it('fetches a Meta profile name and persists it', async () => {
+    fetchMetaProfileMock.mockReset().mockResolvedValue({ displayName: 'Ada Lovelace' });
+    const tenant = await createTestTenant();
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id, { pageAccessToken: 'tok' });
+    const userId = `psid_meta_${crypto.randomBytes(4).toString('hex')}`;
+    const event = {
+      ...messengerTextEvent(userId),
+      sender: { externalUserId: userId, externalThreadId: userId },
+    };
+
+    await processInboundEvent(event, connection);
+
+    expect(fetchMetaProfileMock).toHaveBeenCalled();
+    const { session } = await findOrCreateConversation(event, connection);
+    expect(session.metadata?.customData?.displayName).toBe('Ada Lovelace');
+  });
+
+  it('never persists Meta fallback labels', async () => {
+    fetchMetaProfileMock.mockReset().mockResolvedValue({ displayName: 'Facebook User' });
+    const tenant = await createTestTenant();
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id, { pageAccessToken: 'tok' });
+    const userId = `psid_fb_${crypto.randomBytes(4).toString('hex')}`;
+    const event = {
+      ...messengerTextEvent(userId),
+      sender: { externalUserId: userId, externalThreadId: userId },
+    };
+
+    await processInboundEvent(event, connection);
+
+    const { session, participant, binding } = await findOrCreateConversation(event, connection);
+    expect(session.metadata?.customData?.displayName).toBeUndefined();
+    expect(participant.name).toBe('Visitor');
+    expect(binding.externalUserName).toBeNull();
+  });
+});
 
 describe('inbound-pipeline · findOrCreateConversation (channel session bot_id)', () => {
   it('creates a session bound to the tenant anchor bot', async () => {

@@ -133,6 +133,31 @@ export function resolveAssignedAgentName(agent: Agent | null | undefined): strin
   return agent.user.name || agent.user.email || agent.userId;
 }
 
+const META_FALLBACK_NAMES = new Set(['Facebook User', 'Instagram User']);
+
+export function trimmedName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || META_FALLBACK_NAMES.has(trimmed)) return undefined;
+  return trimmed;
+}
+
+/**
+ * Inbox display name. Rename + inbound stamps live on
+ * `metadata.customData.displayName`; widget create can set `metadata.name`.
+ * Binding.externalUserName is platform identity — never preferred here so a
+ * manual rename wins until reopen.
+ */
+export function displayNameFromSession(
+  session: Pick<ChatSession, 'visitorId' | 'metadata'>,
+): string {
+  const custom = trimmedName(session.metadata?.customData?.displayName);
+  if (custom) return custom;
+  const widgetName = trimmedName((session.metadata as { name?: unknown } | undefined)?.name);
+  if (widgetName) return widgetName;
+  return `Visitor ${session.visitorId?.substring(0, 8) || 'Anonymous'}`;
+}
+
 export interface ConversationSummaryDto {
   // ── Legacy GET /chat/sessions row (unchanged keys and semantics) ──────────
   id: string;
@@ -208,7 +233,7 @@ export function serializeConversationSummary(
     status: session.status,
     aiAutoReplyEnabled: session.aiAutoReplyEnabled,
     guardrailStatus: session.guardrailStatus,
-    userName: `Visitor ${session.visitorId?.substring(0, 8) || 'Anonymous'}`,
+    userName: displayNameFromSession(session),
     assignedAgent: assignedAgentId ? { id: assignedAgentId } : null,
     ...(agentRelationLoaded ? { assignedAgentName: resolveAssignedAgentName(session.assignedAgent) } : {}),
     messageCount: session.messageCount,

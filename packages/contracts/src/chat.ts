@@ -23,6 +23,8 @@ export interface SessionSummary {
   lastMessageAt: string;
   lastActivityAt: string;
   source: string;
+  /** Messaging channel (widget / telegram / messenger / instagram / whatsapp). */
+  channel?: string;
   createdAt: string;
 }
 
@@ -46,6 +48,8 @@ export interface Conversation {
   tenantId: string;
   status: SessionStatus;
   visitorId: string;
+  userName?: string;
+  channel?: string;
   assignedAgentId: string | null;
   assignedAgentName: string | null;
   messages: ConversationMessage[];

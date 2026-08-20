@@ -42,11 +42,12 @@ export function requireWidgetSessionMatch(req: import('express').Request, _res: 
 }
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
-import { sendMessageSchema, chatListQuerySchema } from '../schemas';
+import { sendMessageSchema, chatListQuerySchema, renameChatSchema } from '../schemas';
 import { emitWebhookEvent } from '../webhooks/webhook.emitter';
 import {
   serializeConversationSummary,
   resolveAssignedAgentName,
+  displayNameFromSession,
   previewFromRaw,
   computeCustomerThreadId,
   type CustomerThreadBinding,
@@ -889,6 +890,8 @@ router.get(
       aiAutoReplyEnabled: session.aiAutoReplyEnabled,
       guardrailStatus: session.guardrailStatus,
       visitorId: session.visitorId,
+      userName: displayNameFromSession(session),
+      channel: session.channel,
       assignedAgentId: session.assignedAgentId,
       assignedAgentName: resolveAssignedAgentName(session.assignedAgent ?? null),
       // Ownership + human-control facts so a deep-linked (GET-first) timed chat
@@ -916,6 +919,49 @@ router.get(
       closedAt: session.endedAt,
     });
   })
+);
+
+/**
+ * PATCH /chat/:id
+ * Agent rename of the conversation display name. Writes session metadata +
+ * the user participant only — binding.externalUserName stays platform identity.
+ */
+router.patch(
+  '/:id',
+  requireClerkAuth, autoProvision, resolveTenantContext,
+  validate(renameChatSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const userName = (req.body as { userName: string }).userName;
+    const tenantId = req.user?.tenantId;
+
+    const session = await sessionRepository.findOne({ where: { id, tenantId } });
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    const metadata = {
+      ...session.metadata,
+      customData: {
+        ...session.metadata?.customData,
+        displayName: userName,
+      },
+    };
+    await sessionRepository.update({ id, tenantId }, { metadata });
+
+    await AppDataSource.getRepository(Participant).update(
+      { sessionId: id, type: 'user', isDeleted: false },
+      { name: userName, isAnonymous: false },
+    );
+
+    await emitConversationUpsertForSession(id, tenantId);
+
+    sendSuccess(res, {
+      id: session.id,
+      userName,
+      channel: session.channel,
+    });
+  }),
 );
 
 /**

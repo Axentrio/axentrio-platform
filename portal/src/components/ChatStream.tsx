@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, MessageSquare, Clock, User, ShieldAlert, History } from 'lucide-react';
 import { useChatsQuery, useChatThread } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
+import { ChannelBadge } from './ChannelBadge';
 import { TenantSelector } from './TenantSelector';
 import { useDebounce } from '@hooks/useDebounce';
 import { Input } from '@/components/ui/input';
@@ -262,6 +263,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                     <span className="font-medium text-text-primary truncate">
                       {chat.userName || t('inbox.chat.anonymous')}
                     </span>
+                    <ChannelBadge channel={chat.channel} source={chat.metadata?.source} />
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
                     {siblingCount > 1 && (
                       <span

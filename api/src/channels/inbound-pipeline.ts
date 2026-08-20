@@ -29,6 +29,9 @@ import { getUploadService } from '../file-handling/upload.service';
 import { upsertLead } from '../leads/lead-capture.service';
 import { Not, IsNull } from 'typeorm';
 import { applyChannelAddressControl } from './address-controls';
+import { fetchMetaProfile } from './meta/profile.service';
+import { getMetaPageAccessToken } from './credential-utils';
+import { trimmedName } from '../realtime/conversation-serializer';
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -102,6 +105,13 @@ export async function processInboundEvent(
     }
 
     // ── 4. Message / postback events ─────────────────────────────────────
+    if (
+      (connection.channel === 'messenger' || connection.channel === 'instagram') &&
+      !trimmedName(event.sender.displayName)
+    ) {
+      event = await attachMetaSenderName(event, connection);
+    }
+
     const { session, participant, binding, created, sessionCreated } = await findOrCreateConversation(event, connection);
 
     // Address buttons are server-observed actions, not sentences for the model to interpret.
@@ -362,6 +372,81 @@ async function resolveChannelBotId(connection: ChannelConnection): Promise<strin
   return anchorBot.id;
 }
 
+async function attachMetaSenderName(
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+): Promise<NormalizedEvent> {
+  const existing = await getRepository(ConversationBinding).findOne({
+    where: {
+      channelConnectionId: connection.id,
+      externalUserId: event.sender.externalUserId,
+      externalThreadId: event.sender.externalThreadId,
+    },
+    select: ['id', 'externalUserName'],
+  });
+  if (trimmedName(existing?.externalUserName)) {
+    return event;
+  }
+
+  const token = getMetaPageAccessToken(connection.credentials ?? {});
+  if (!token) return event;
+
+  const channel = connection.channel === 'instagram' ? 'instagram' : 'messenger';
+  const profile = await fetchMetaProfile(event.sender.externalUserId, token, channel);
+  const name = trimmedName(profile.displayName);
+  if (!name) return event;
+
+  return {
+    ...event,
+    sender: {
+      ...event.sender,
+      displayName: name,
+      avatarUrl: profile.avatarUrl || event.sender.avatarUrl,
+    },
+  };
+}
+
+/** Targeted-column backfill. Exported so the stale-row race can be asserted. */
+export async function fillEmptyDisplayName(opts: {
+  session: ChatSession;
+  participant: Participant;
+  binding: ConversationBinding;
+  incoming: string;
+}): Promise<void> {
+  const { session, participant, binding, incoming } = opts;
+  const participantEmpty = !trimmedName(participant.name) || participant.name === 'Visitor';
+  const bindingEmpty = !trimmedName(binding.externalUserName);
+  const metaEmpty = !trimmedName(session.metadata?.customData?.displayName);
+  if (!participantEmpty && !bindingEmpty && !metaEmpty) return;
+
+  if (participantEmpty) {
+    participant.name = incoming;
+    participant.isAnonymous = false;
+    await getRepository(Participant).update(
+      { id: participant.id },
+      { name: incoming, isAnonymous: false },
+    );
+  }
+  if (bindingEmpty) {
+    binding.externalUserName = incoming;
+    await getRepository(ConversationBinding).update(
+      { id: binding.id },
+      { externalUserName: incoming },
+    );
+  }
+  if (metaEmpty) {
+    const metadata = {
+      ...session.metadata,
+      customData: {
+        ...session.metadata?.customData,
+        displayName: incoming,
+      },
+    };
+    session.metadata = metadata;
+    await getRepository(ChatSession).update({ id: session.id }, { metadata });
+  }
+}
+
 /**
  * Find an existing conversation binding or create a new session + participant + binding.
  * Exported for regression testing of the per-tenant session creation (bot_id).
@@ -414,6 +499,15 @@ export async function findOrCreateConversation(
     });
 
     if (participant) {
+      const incoming = trimmedName(event.sender.displayName);
+      if (incoming) {
+        await fillEmptyDisplayName({
+          session: existingBinding.session as ChatSession,
+          participant,
+          binding: existingBinding,
+          incoming,
+        });
+      }
       logger.info('[inbound] Reusing active session', {
         sessionId: existingBinding.sessionId, bindingId: existingBinding.id,
       });
@@ -464,7 +558,7 @@ export async function findOrCreateConversation(
           customData: {
             externalUserId: event.sender.externalUserId,
             externalThreadId: event.sender.externalThreadId,
-            displayName: event.sender.displayName,
+            displayName: trimmedName(event.sender.displayName),
           },
         },
       } as DeepPartial<ChatSession>);
@@ -473,9 +567,9 @@ export async function findOrCreateConversation(
       const newParticipant = manager.create(Participant, {
         sessionId: savedSession.id,
         type: 'user',
-        name: event.sender.displayName || 'Visitor',
+        name: trimmedName(event.sender.displayName) || 'Visitor',
         avatarUrl: event.sender.avatarUrl || undefined,
-        isAnonymous: !event.sender.displayName,
+        isAnonymous: !trimmedName(event.sender.displayName),
         joinedAt: now,
       } as DeepPartial<Participant>);
       const savedParticipant = await manager.save(Participant, newParticipant) as Participant;
@@ -489,7 +583,7 @@ export async function findOrCreateConversation(
       // found" on outbound). Update the relation too so the FK persists correctly.
       existingBinding.session = savedSession;
       existingBinding.sessionId = savedSession.id;
-      existingBinding.externalUserName = event.sender.displayName || existingBinding.externalUserName;
+      existingBinding.externalUserName = trimmedName(event.sender.displayName) || existingBinding.externalUserName;
       existingBinding.externalAvatarUrl = event.sender.avatarUrl || existingBinding.externalAvatarUrl;
       const updatedBinding = await manager.save(ConversationBinding, existingBinding) as ConversationBinding;
 
@@ -542,7 +636,7 @@ export async function findOrCreateConversation(
         customData: {
           externalUserId: event.sender.externalUserId,
           externalThreadId: event.sender.externalThreadId,
-          displayName: event.sender.displayName,
+          displayName: trimmedName(event.sender.displayName),
         },
       },
     } as DeepPartial<ChatSession>);
@@ -551,9 +645,9 @@ export async function findOrCreateConversation(
     const participantData = manager.create(Participant, {
       sessionId: savedSession.id,
       type: 'user',
-      name: event.sender.displayName || 'Visitor',
+      name: trimmedName(event.sender.displayName) || 'Visitor',
       avatarUrl: event.sender.avatarUrl || undefined,
-      isAnonymous: !event.sender.displayName,
+      isAnonymous: !trimmedName(event.sender.displayName),
       joinedAt: now,
     } as DeepPartial<Participant>);
     const savedParticipant = await manager.save(Participant, participantData) as Participant;
@@ -563,7 +657,7 @@ export async function findOrCreateConversation(
       channelConnectionId: connection.id,
       externalUserId: event.sender.externalUserId,
       externalThreadId: event.sender.externalThreadId,
-      externalUserName: event.sender.displayName || null,
+      externalUserName: trimmedName(event.sender.displayName) || null,
       externalAvatarUrl: event.sender.avatarUrl || null,
       platformUserData: event.sender.platformData || {},
     } as DeepPartial<ConversationBinding>);

@@ -2101,7 +2101,8 @@
     },
     "chat": {
       "anonymousUser": "Anonymous User",
-      "anonymous": "Anonymous"
+      "anonymous": "Anonymous",
+      "rename": "Rename conversation"
     },
     "handoff": {
       "empty": {

@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ChatStream } from '@components/ChatStream';
+import { ConversationName } from '@components/ConversationName';
 import { ChatWindow } from '@components/ChatWindow';
 import { HumanControlBadge, TakeoverMenu } from '@components/HumanControl';
 import type { TakeoverPolicy } from '@utils/humanControl';
@@ -648,9 +649,13 @@ const Inbox: React.FC = () => {
                     <ArrowLeft className="w-5 h-5 text-text-secondary" />
                   </button>
                   <div>
-                    <h2 className="font-semibold text-text-primary">
-                      {selectedChat.userName || t('inbox.chat.anonymousUser')}
-                    </h2>
+                    <ConversationName
+                      chat={selectedChat}
+                      heading="h2"
+                      onRenamed={(userName) =>
+                        setSelectedChat((prev) => (prev ? mergeDefined(prev, { userName }) : prev))
+                      }
+                    />
                     <div className="flex items-center gap-2 text-sm text-text-secondary">
                       <ChatStatusBadge status={selectedChat.status} size="sm" />
                       {isGuardrailPaused && (

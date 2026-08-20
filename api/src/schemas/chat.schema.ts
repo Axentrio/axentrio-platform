@@ -11,6 +11,14 @@ export const sendMessageSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+export const renameChatSchema = z.object({
+  userName: z
+    .string()
+    .trim()
+    .transform((s) => s.replace(/[\p{Cc}\p{Cf}]/gu, ''))
+    .pipe(z.string().min(1, 'Name is required').max(100)),
+});
+
 export const chatListQuerySchema = z.object({
   status: z.enum(['active', 'closed', 'waiting', 'handoff', 'bot']).optional(),
   // Filter to guardrail-paused conversations (AI auto-reply disabled by a guardrail).

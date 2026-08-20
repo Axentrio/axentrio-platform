@@ -588,9 +588,10 @@ export class AgentService {
         });
         customerName = binding?.externalUserName ?? undefined;
       }
-      // Anchor the prompt's date context to the booking timezone (booking bots only;
-      // one indexed lookup). Non-booking bots fall back to server/UTC as before.
-      let bookingTimezone: string | undefined;
+      // Anchor "Today is …" to the bot's canonical timezone for EVERY bot. Booking
+      // used to be the only path that passed it, so a non-booking bot mixed UTC/server
+      // dates and could answer "were you open yesterday?" against the wrong weekday.
+      let bookingTimezone: string | undefined = bot.businessTimezone;
       let bookingConfigured = false;
       // Rendered values for the {services} / {openingHours} placeholders. Built from
       // the SAME rows this block already loads (no extra queries).

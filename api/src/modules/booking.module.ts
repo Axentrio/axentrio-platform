@@ -209,7 +209,7 @@ const OPERATIONAL_WEEKDAY_ORDER: { key: string; label: string }[] = [
 
 function exceptionBlock(overrides: string[]): string {
   return overrides.length
-    ? `\nThese specific dates OVERRIDE the hours above — they win even for a 24/7 business. Never tell a customer you are open on one of these closed dates:\n${overrides.join('\n')}`
+    ? `\nThese specific dates OVERRIDE the weekly hours above — they win even for a 24/7 business. CLOSED dates are closed all day — never say open. Dates with hours are open ONLY at those hours, even if the weekly schedule says that weekday is closed:\n${overrides.join('\n')}`
     : '';
 }
 
@@ -221,16 +221,17 @@ export function buildOperationalHoursSection(
 ): string | null {
   const overrides = upcomingOverrideLines(bh.dateOverrides, timezone, now);
   const exceptions = exceptionBlock(overrides);
-  const lines = OPERATIONAL_WEEKDAY_ORDER.flatMap(({ key, label }) => {
+  const lines = OPERATIONAL_WEEKDAY_ORDER.map(({ key, label }) => {
     const day = bh.schedule.find((s) => s && typeof s.day === 'string' && s.day.toLowerCase() === key);
     if (!day || day.closed || typeof day.open !== 'string' || typeof day.close !== 'string' || !day.open || !day.close) {
-      return [];
+      return `- ${label}: closed`;
     }
-    return [`- ${label}: ${day.open}–${day.close}`];
+    return `- ${label}: ${day.open}–${day.close}`;
   });
-  if (!lines.length && !exceptions) return null;
-  const weekly = lines.length
-    ? `The business is open at these times. State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
+  const hasOpen = lines.some((line) => !line.endsWith(': closed'));
+  if (!hasOpen && !exceptions) return null;
+  const weekly = hasOpen
+    ? `The business is open at these times. State these when the customer asks about opening hours.\n${lines.join('\n')}`
     : `No weekly opening hours are configured.`;
   return `\n## OPENING HOURS\n${weekly}${exceptions}`;
 }
@@ -251,14 +252,18 @@ export function buildHoursSection(
   if (rule.availabilityMode === 'always_open') {
     return `\n## OPENING HOURS\nThis business takes bookings 24/7 — there are no fixed opening hours. If a customer asks when you are open, tell them you're available around the clock.${exceptions}`;
   }
-  const lines = WEEKDAY_ORDER.flatMap(({ key, label }) => {
+  const lines = WEEKDAY_ORDER.map(({ key, label }) => {
     const wins = rule.weeklyHours?.[key];
-    return wins && wins.length ? [`- ${label}: ${fmtWindows(wins)}`] : [];
+    return wins && wins.length ? `- ${label}: ${fmtWindows(wins)}` : `- ${label}: closed`;
+  });
+  const hasOpen = WEEKDAY_ORDER.some(({ key }) => {
+    const wins = rule.weeklyHours?.[key];
+    return !!(wins && wins.length);
   });
   // Nothing reliable to state at all — no weekly hours AND no exceptions.
-  if (!lines.length && !exceptions) return null;
-  const weekly = lines.length
-    ? `The business is open at these times. State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`
+  if (!hasOpen && !exceptions) return null;
+  const weekly = hasOpen
+    ? `The business is open at these times. State these when the customer asks about opening hours.\n${lines.join('\n')}`
     : `No weekly opening hours are configured.`;
   return `\n## OPENING HOURS\n${weekly}${exceptions}`;
 }
@@ -297,35 +302,39 @@ export function formatServicesForPlaceholder(services: ServiceType[]): string {
  * important thing this string can carry.
  *
  * Kept SHORT deliberately: this is an inline value inside somebody's prose, not a section.
- * Only closures are summarised — a date with one-off hours still resolves correctly at
- * booking time, and spelling every variation out here would swamp the sentence it sits in.
+ * Closed weekdays are named (so "yesterday" can bind) and upcoming overrides — closures
+ * AND one-off hours — are summarised, capped at 3 of both kinds together.
  */
 export function formatHoursForPlaceholder(rule: AvailabilityRule | null, now: Date = new Date()): string {
   if (!rule) return '';
   const base =
     rule.availabilityMode === 'always_open'
       ? 'open 24/7'
-      : WEEKDAY_ORDER.flatMap(({ key, label }) => {
+      : WEEKDAY_ORDER.map(({ key, label }) => {
           const wins = rule.weeklyHours?.[key];
-          return wins && wins.length ? [`${label} ${fmtWindows(wins)}`] : [];
+          return wins && wins.length ? `${label} ${fmtWindows(wins)}` : `${label} closed`;
         }).join(', ');
 
   const today = DateTime.fromJSDate(now).setZone(rule.timezone || 'UTC').toFormat('yyyy-MM-dd');
-  const closures = (Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [])
+  const notes = (Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [])
     .filter((o) => {
-      if (!o || typeof o.date !== 'string' || !o.closed) return false;
-      return isRelevantOn(o, today);
+      if (!o || typeof o.date !== 'string' || !isRelevantOn(o, today)) return false;
+      if (o.closed) return true;
+      const wins = Array.isArray(o.windows) ? o.windows : [];
+      return wins.some((w) => w && w.start && w.end);
     })
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
     .map((o) => {
       const end = overrideSpanEnd(o);
-      return end ? `${o.date} to ${end}` : o.date;
+      const span = end ? `${o.date} to ${end}` : o.date;
+      if (o.closed) return `closed ${span}`;
+      const wins = (Array.isArray(o.windows) ? o.windows : []).filter((w) => w && w.start && w.end);
+      return `${span} open ${fmtWindows(wins)}`;
     });
 
-  if (!closures.length) return base;
-  const closed = `closed ${closures.join(', ')}`;
-  return base ? `${base} · ${closed}` : closed;
+  if (!notes.length) return base;
+  return base ? `${base} · ${notes.join(' · ')}` : notes.join(' · ');
 }
 
 /**

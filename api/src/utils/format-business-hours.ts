@@ -68,7 +68,34 @@ function localDateInZone(now: Date, timezone: string): string {
   }
 }
 
-/** e.g. "Mon 09:00–17:00, Wed 10:00–14:00". Matches the booking hours formatting. */
+const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+
+function windowsNote(o: DateOverride): string {
+  return (Array.isArray(o.windows) ? o.windows : [])
+    .filter((w) => w && typeof w.start === 'string' && typeof w.end === 'string' && w.start && w.end)
+    .map((w) => `${w.start}–${w.end}`)
+    .join(', ');
+}
+
+/** Compact override notes for `{openingHours}`: closures AND one-off hours, cap 3. */
+function overrideNotes(overrides: DateOverride[] | undefined, today: string): string {
+  return (Array.isArray(overrides) ? overrides : [])
+    .filter((o) => {
+      if (!o || typeof o.date !== 'string' || !today || !isRelevantOn(o, today)) return false;
+      return !!o.closed || !!windowsNote(o);
+    })
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3)
+    .map((o) => {
+      const end = overrideSpanEnd(o);
+      const span = end ? `${o.date} to ${end}` : o.date;
+      if (o.closed) return `closed ${span}`;
+      return `${span} open ${windowsNote(o)}`;
+    })
+    .join(' · ');
+}
+
+/** e.g. "Mon 09:00–17:00, Wed closed". Closed weekdays are named so "yesterday" can bind. */
 export function formatBusinessHoursForPlaceholder(
   bh?: BusinessHours | null,
   now: Date = new Date(),
@@ -76,29 +103,23 @@ export function formatBusinessHoursForPlaceholder(
   timezone: string = 'UTC',
 ): string {
   if (!isBusinessHoursConfigured(bh)) return '';
-  const weekly = bh.schedule
-    .filter((d) => d && !d.closed && typeof d.open === 'string' && typeof d.close === 'string' && d.open && d.close)
-    .map((d) => {
-      const key = typeof d.day === 'string' ? d.day.toLowerCase() : '';
-      return `${DAY_LABEL[key] ?? d.day} ${d.open}–${d.close}`;
-    })
-    .join(', ');
+  const weekly = WEEKDAY_KEYS.map((key) => {
+    const d = bh.schedule.find((s) => s && typeof s.day === 'string' && s.day.toLowerCase() === key);
+    const label = DAY_LABEL[key];
+    if (!d || d.closed || typeof d.open !== 'string' || typeof d.close !== 'string' || !d.open || !d.close) {
+      return `${label} closed`;
+    }
+    return `${label} ${d.open}–${d.close}`;
+  }).join(', ');
 
-  // Closures are part of the answer: otherwise `{openingHours}` quotes the weekly
-  // grid on a day the owner marked closed. "Today" is the local calendar date in
-  // the business timezone — UTC dropped a still-current holiday after midnight Z.
+  // Overrides are part of the answer: otherwise `{openingHours}` quotes the weekly
+  // grid on a day the owner marked closed or opened with one-off hours. "Today" is
+  // the local calendar date in the business timezone — UTC dropped a still-current
+  // holiday after midnight Z.
   const today = localDateInZone(now, timezone);
-  const closures = (Array.isArray(bh.dateOverrides) ? bh.dateOverrides : [])
-    .filter((o) => o && typeof o.date === 'string' && o.closed && today && isRelevantOn(o, today))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, 3)
-    .map((o) => {
-      const end = overrideSpanEnd(o);
-      return end ? `${o.date} to ${end}` : o.date;
-    });
-  if (!closures.length) return weekly;
-  const closed = `closed ${closures.join(', ')}`;
-  return weekly ? `${weekly} · ${closed}` : closed;
+  const notes = overrideNotes(bh.dateOverrides, today);
+  if (!notes) return weekly;
+  return weekly ? `${weekly} · ${notes}` : notes;
 }
 
 /**

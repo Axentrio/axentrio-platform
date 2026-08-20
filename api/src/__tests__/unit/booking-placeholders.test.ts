@@ -38,7 +38,7 @@ describe('formatHoursForPlaceholder', () => {
     expect(formatHoursForPlaceholder({ availabilityMode: 'always_open' } as any)).toBe('open 24/7');
   });
 
-  it('renders only the days with windows, in weekday order', () => {
+  it('renders every weekday, naming closed days so yesterday can bind', () => {
     const rule = {
       availabilityMode: 'weekly',
       timezone: 'Europe/Brussels',
@@ -47,12 +47,26 @@ describe('formatHoursForPlaceholder', () => {
         wed: [{ start: '10:00', end: '14:00' }],
       },
     } as any;
-    expect(formatHoursForPlaceholder(rule)).toBe('Mon 09:00–17:00, Wed 10:00–14:00');
+    expect(formatHoursForPlaceholder(rule)).toBe(
+      'Mon 09:00–17:00, Tue closed, Wed 10:00–14:00, Thu closed, Fri closed, Sat closed, Sun closed',
+    );
+  });
+
+  it('states one-off hours that open a normally-closed Sunday', () => {
+    const rule = {
+      availabilityMode: 'weekly',
+      timezone: 'Europe/Brussels',
+      weeklyHours: { mon: [{ start: '09:00', end: '17:00' }] },
+      dateOverrides: [{ date: '2026-10-04', closed: false, windows: [{ start: '09:00', end: '16:00' }] }],
+    } as any;
+    const out = formatHoursForPlaceholder(rule, new Date('2026-08-20T10:00:00Z'));
+    expect(out).toContain('Sun closed');
+    expect(out).toContain('2026-10-04 open 09:00–16:00');
   });
 });
 
 describe('formatBusinessHoursForPlaceholder (non-booking bots)', () => {
-  it('renders only the open days; disabled / absent → empty', () => {
+  it('names every weekday, including closed days', () => {
     const bh = {
       enabled: true,
       schedule: [
@@ -61,7 +75,9 @@ describe('formatBusinessHoursForPlaceholder (non-booking bots)', () => {
         { day: 'wednesday', open: '10:00', close: '14:00', closed: false },
       ],
     } as any;
-    expect(formatBusinessHoursForPlaceholder(bh)).toBe('Mon 09:00–17:00, Wed 10:00–14:00');
+    expect(formatBusinessHoursForPlaceholder(bh)).toBe(
+      'Mon 09:00–17:00, Tue closed, Wed 10:00–14:00, Thu closed, Fri closed, Sat closed, Sun closed',
+    );
     expect(formatBusinessHoursForPlaceholder({ ...bh, enabled: false })).toBe('');
     expect(formatBusinessHoursForPlaceholder(null)).toBe('');
   });
@@ -72,9 +88,24 @@ describe('formatBusinessHoursForPlaceholder (non-booking bots)', () => {
       schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
       dateOverrides: [{ date: '2026-12-25', closed: true }],
     } as any;
-    expect(formatBusinessHoursForPlaceholder(bh, new Date('2026-12-01T10:00:00Z'))).toBe(
-      'Mon 09:00–17:00 · closed 2026-12-25',
+    expect(formatBusinessHoursForPlaceholder(bh, new Date('2026-12-01T10:00:00Z'))).toContain(
+      'closed 2026-12-25',
     );
+    expect(formatBusinessHoursForPlaceholder(bh, new Date('2026-12-01T10:00:00Z'))).toContain('Mon 09:00–17:00');
+  });
+
+  it('states one-off hours that open a normally-closed Sunday', () => {
+    const bh = {
+      enabled: true,
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'sunday', open: '', close: '', closed: true },
+      ],
+      dateOverrides: [{ date: '2026-10-04', closed: false, windows: [{ start: '09:00', end: '16:00' }] }],
+    } as any;
+    const out = formatBusinessHoursForPlaceholder(bh, new Date('2026-08-20T10:00:00Z'), 'Europe/Brussels');
+    expect(out).toContain('Sun closed');
+    expect(out).toContain('2026-10-04 open 09:00–16:00');
   });
 });
 
@@ -175,7 +206,7 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
       NOW,
     )!;
     expect(out).toContain('open 09:00–12:00 only');
-    expect(out).not.toContain('CLOSED');
+    expect(out).not.toContain('2026-12-24 (Thursday 24 December): CLOSED');
   });
 
   it('drops overrides that have already passed', () => {
@@ -237,8 +268,34 @@ describe('buildHoursSection — date overrides reach the prompt', () => {
     expect(out).not.toContain('Europe/Brussels');
   });
 
-  it('falls back to the availability rule when operational hours are not configured', () => {
-    const out = buildHoursSection(rule(), NOW, { hours: { enabled: false, schedule: [] }, timezone: 'Europe/Brussels' })!;
+  it('states a closed Wednesday as closed, not by omitting it', () => {
+    const operational = {
+      enabled: true,
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'wednesday', open: '', close: '', closed: true },
+      ],
+    };
+    const out = buildHoursSection(null, NOW, { hours: operational, timezone: 'Europe/Brussels' })!;
+    expect(out).toContain('- Wed: closed');
     expect(out).toContain('- Mon: 09:00–17:00');
+    expect(out).not.toMatch(/days not listed are closed/i);
+  });
+
+  it('states one-off hours that open a normally-closed day', () => {
+    const operational = {
+      enabled: true,
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'sunday', open: '', close: '', closed: true },
+      ],
+      dateOverrides: [{ date: '2026-12-06', closed: false, windows: [{ start: '09:00', end: '16:00' }] }],
+    };
+    const out = buildHoursSection(null, NOW, { hours: operational, timezone: 'Europe/Brussels' })!;
+    expect(out).toContain('- Sun: closed');
+    expect(out).toContain('2026-12-06');
+    expect(out).toContain('open 09:00–16:00 only');
+    expect(out).toMatch(/OVERRIDE the weekly hours/i);
+    expect(out).not.toMatch(/Never tell a customer you are open on one of these closed dates/i);
   });
 });

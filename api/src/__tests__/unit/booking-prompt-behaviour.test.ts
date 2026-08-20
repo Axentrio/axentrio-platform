@@ -472,10 +472,10 @@ describe('{openingHours} carries closures', () => {
     expect(out).not.toContain('2026-01-01');
   });
 
-  it('ignores a one-off HOURS override — only closures are summarised', () => {
+  it('states a one-off HOURS override (not only closures)', () => {
     const out = formatHoursForPlaceholder(
       RULE({ dateOverrides: [{ date: '2026-12-25', windows: [{ start: '10:00', end: '12:00' }] }] }), NOW);
-    expect(out).not.toContain('2026-12-25');
+    expect(out).toContain('2026-12-25 open 10:00–12:00');
   });
 
   it('still says 24/7 for an always-open business, plus its closures', () => {
@@ -488,7 +488,7 @@ describe('{openingHours} carries closures', () => {
   it('caps the list so it stays an inline value', () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ date: `2026-09-0${(i % 9) + 1}`, closed: true }));
     const out = formatHoursForPlaceholder(RULE({ dateOverrides: many }), NOW);
-    expect(out.length).toBeLessThan(160);
+    expect(out.split(' · ').length).toBe(4); // weekly grid + 3 override notes
   });
 });
 

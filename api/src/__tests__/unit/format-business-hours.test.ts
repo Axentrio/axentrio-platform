@@ -220,6 +220,33 @@ describe('isOutsideBusinessHours', () => {
   });
 });
 
+describe('formatBusinessHoursForPlaceholder — closed weekdays and one-off hours', () => {
+  it('names a closed Wednesday so yesterday can bind', () => {
+    const hours = bh({
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'wednesday', open: '', close: '', closed: true },
+        { day: 'thursday', open: '09:00', close: '17:00', closed: false },
+      ],
+    });
+    expect(formatBusinessHoursForPlaceholder(hours)).toContain('Wed closed');
+    expect(formatBusinessHoursForPlaceholder(hours)).toContain('Mon 09:00–17:00');
+  });
+
+  it('states one-off hours that open a normally-closed Sunday', () => {
+    const hours = bh({
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'sunday', open: '', close: '', closed: true },
+      ],
+      dateOverrides: [{ date: '2026-10-04', closed: false, windows: [{ start: '09:00', end: '16:00' }] }],
+    });
+    const out = formatBusinessHoursForPlaceholder(hours, new Date('2026-08-20T10:00:00Z'), 'Europe/Brussels');
+    expect(out).toContain('Sun closed');
+    expect(out).toContain('2026-10-04 open 09:00–16:00');
+  });
+});
+
 describe('formatBusinessHoursForPlaceholder — timezone-correct closures', () => {
   const hours = {
     enabled: true,

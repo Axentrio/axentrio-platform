@@ -648,7 +648,7 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
   // Skip if a module section already contributed the heading — one source only.
   if (configuredHours && !sections.some((s) => s.includes('## OPENING HOURS'))) {
     sections.push(
-      `\n## OPENING HOURS\nThe business is open at these times. State these when the customer asks about opening hours; they override anything in the knowledge base.\n${configuredHours}`,
+      `\n## OPENING HOURS\nThe business is open at these times. State these when the customer asks about opening hours; they override anything in the knowledge base. Days not listed are closed.\n${configuredHours}`,
     );
   }
 

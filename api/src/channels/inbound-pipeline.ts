@@ -4,7 +4,7 @@
  *   dedupe → status-update | (find/create conversation → save message → broadcast → forward)
  */
 
-import { DeepPartial, EntityManager } from 'typeorm';
+import type { DeepPartial, EntityManager } from 'typeorm';
 import { AppDataSource, getRepository } from '../database/data-source';
 import { WebhookEventLog } from '../database/entities/WebhookEventLog';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -12,9 +12,9 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Bot } from '../database/entities/Bot';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
-import { ChannelConnection } from '../database/entities/ChannelConnection';
+import type { ChannelConnection } from '../database/entities/ChannelConnection';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
-import { NormalizedEvent } from './types';
+import type { NormalizedEvent } from './types';
 import { isChannelEntitled } from './channel-entitlement';
 import { encrypt } from '../utils/encryption';
 import { MAX_MESSAGE_CONTENT_CHARS, classifyMessage } from '../guardrails/classify';

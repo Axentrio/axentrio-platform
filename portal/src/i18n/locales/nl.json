@@ -1070,13 +1070,14 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "Tekst",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "Website"
         },
         "searchPlaceholder": "Zoek documenten…",
         "addDocument": "Document toevoegen",
         "empty": {
           "title": "Nog geen documenten",
-          "descriptionAdmin": "Upload PDF's, plak tekst of voeg FAQ's toe zodat je AI-bot kan antwoorden op basis van je bedrijfsinformatie.",
+          "descriptionAdmin": "Upload PDF's, plak tekst, voeg FAQ's toe of importeer een website zodat je AI-bot kan antwoorden op basis van je bedrijfsinformatie.",
           "descriptionViewer": "Er zijn nog geen documenten toegevoegd aan de kennisbank.",
           "addFirst": "Voeg je eerste document toe"
         },
@@ -1106,11 +1107,16 @@
         "docx": {
           "label": "DOCX",
           "description": "Upload een Word-document"
+        },
+        "url": {
+          "label": "Website",
+          "description": "Importeer pagina's van je site"
         }
       },
       "modal": {
         "add": {
-          "title": "Document toevoegen"
+          "title": "Document toevoegen",
+          "titleWebsite": "Website toevoegen"
         },
         "edit": {
           "title": "Document bewerken"
@@ -1138,6 +1144,11 @@
             "browse": "blader",
             "maxSize": "Tot 25 MB"
           },
+          "websiteUrl": {
+            "label": "Website-URL",
+            "placeholder": "https://www.jouw-bedrijf.be",
+            "helper": "We importeren pagina's van deze site in je kennisbank."
+          },
           "content": {
             "label": "Inhoud",
             "placeholder": {
@@ -1148,7 +1159,8 @@
         },
         "actions": {
           "saveChanges": "Wijzigingen opslaan",
-          "addDocument": "Document toevoegen"
+          "addDocument": "Document toevoegen",
+          "addWebsite": "Website toevoegen"
         }
       },
       "card": {
@@ -1156,7 +1168,8 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "TEKST",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "WEBSITE"
         },
         "status": {
           "indexed": "Geïndexeerd",
@@ -1174,7 +1187,8 @@
         "chunks_other": "{{count}} fragmenten",
         "actions": {
           "retry": "Opnieuw proberen",
-          "retryProcessing": "Verwerking opnieuw proberen"
+          "retryProcessing": "Verwerking opnieuw proberen",
+          "refresh": "Vernieuwen"
         }
       }
     },

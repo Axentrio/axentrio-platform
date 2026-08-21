@@ -1,33 +1,46 @@
-import crypto from 'crypto';
-import { Request, Response } from 'express';
-import { KnowledgeService } from './knowledge.service';
-import { AppDataSource } from '../database/data-source';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { createS3Client } from '../config/s3.config';
-import { config } from '../config/environment';
-import { getValidationService } from '../file-handling/validation.service';
-import { encrypt } from '../utils/encryption';
-import { logger } from '../utils/logger';
-import { generateResponse } from '../llm/rag.service';
+import crypto from "crypto";
+import { Request, Response } from "express";
+import { KnowledgeService } from "./knowledge.service";
+import { AppDataSource } from "../database/data-source";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { createS3Client } from "../config/s3.config";
+import { config } from "../config/environment";
+import { getValidationService } from "../file-handling/validation.service";
+import { encrypt } from "../utils/encryption";
+import { logger } from "../utils/logger";
+import { generateResponse } from "../llm/rag.service";
 import {
   updateKnowledgeBaseSchema,
   createDocumentSchema,
   updateDocumentSchema,
   listDocumentsSchema,
-} from '../schemas/knowledge.schema';
-import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
-import { Tenant } from '../database/entities/Tenant';
-import { buildSystemPrompt } from '../llm/prompt-builder';
-import { rethrowIfUpstreamRateLimit } from '../llm/upstream-error';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
-import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
-import { ERROR_CODES } from '../middleware/error-codes';
+  importWebsiteSchema,
+} from "../schemas/knowledge.schema";
+import {
+  updateAiSettingsSchema,
+  testChatSchema,
+} from "../schemas/ai-settings.schema";
+import { Tenant } from "../database/entities/Tenant";
+import { buildSystemPrompt } from "../llm/prompt-builder";
+import { rethrowIfUpstreamRateLimit } from "../llm/upstream-error";
+import {
+  resolveBoundTemplates,
+  composeTemplateBodies,
+  effectiveConfigFromList,
+  withEffectiveConfig,
+} from "../templates/template-resolver";
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from "../llm/defaults";
+import { sendSuccess, sendCreated, sendNoContent } from "../utils/response";
+import {
+  ApiError,
+  BadRequestError,
+  NotFoundError,
+} from "../middleware/error-handler";
+import { ERROR_CODES } from "../middleware/error-codes";
 import {
   getAnchorBotConfig,
   replaceAnchorBotSettingsSection,
-} from '../services/bot-config.service';
+} from "../services/bot-config.service";
 
 let knowledgeService: KnowledgeService;
 
@@ -47,21 +60,33 @@ export async function getKnowledgeBase(req: Request, res: Response) {
 export async function updateKnowledgeBase(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const data = updateKnowledgeBaseSchema.parse(req.body);
-  const { kb, configChanged } = await getService().updateKnowledgeBase(tenantId, data);
+  const { kb, configChanged } = await getService().updateKnowledgeBase(
+    tenantId,
+    data,
+  );
 
   if (configChanged) {
     // reprocessAllDocuments already set all docs to pending and returned them
-    const pendingDocs = await getService().reprocessAllDocuments(tenantId, kb.id);
+    const pendingDocs = await getService().reprocessAllDocuments(
+      tenantId,
+      kb.id,
+    );
     for (const doc of pendingDocs) {
       try {
-        const { addJob } = await import('../queue/message-queue');
-        await addJob('knowledge-processing', {
-          documentId: doc.id,
-          tenantId,
-          processingVersion: doc.processingVersion,
-        }, { jobId: `kb-${doc.id}-v${doc.processingVersion}` });
+        const { addJob } = await import("../queue/message-queue");
+        await addJob(
+          "knowledge-processing",
+          {
+            documentId: doc.id,
+            tenantId,
+            processingVersion: doc.processingVersion,
+          },
+          { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+        );
       } catch (err) {
-        logger.warn(`Failed to queue reprocessing for doc ${doc.id}`, { error: err });
+        logger.warn(`Failed to queue reprocessing for doc ${doc.id}`, {
+          error: err,
+        });
       }
     }
   }
@@ -82,14 +107,20 @@ export async function createDocument(req: Request, res: Response) {
   const doc = await getService().createDocument(tenantId, data);
 
   try {
-    const { addJob } = await import('../queue/message-queue');
-    await addJob('knowledge-processing', {
-      documentId: doc.id,
-      tenantId,
-      processingVersion: doc.processingVersion,
-    }, { jobId: `kb-${doc.id}-v${doc.processingVersion}` });
+    const { addJob } = await import("../queue/message-queue");
+    await addJob(
+      "knowledge-processing",
+      {
+        documentId: doc.id,
+        tenantId,
+        processingVersion: doc.processingVersion,
+      },
+      { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+    );
   } catch (err) {
-    logger.warn('Failed to queue ingestion job, document stays pending', { error: err });
+    logger.warn("Failed to queue ingestion job, document stays pending", {
+      error: err,
+    });
   }
 
   sendCreated(res, doc);
@@ -99,7 +130,7 @@ export async function getDocument(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const doc = await getService().getDocument(tenantId, req.params.id);
   if (!doc) {
-    throw new NotFoundError('Document not found');
+    throw new NotFoundError("Document not found");
   }
   sendSuccess(res, doc);
 }
@@ -110,14 +141,18 @@ export async function updateDocument(req: Request, res: Response) {
   const doc = await getService().updateDocument(tenantId, req.params.id, data);
 
   try {
-    const { addJob } = await import('../queue/message-queue');
-    await addJob('knowledge-processing', {
-      documentId: doc.id,
-      tenantId,
-      processingVersion: doc.processingVersion,
-    }, { jobId: `kb-${doc.id}-v${doc.processingVersion}` });
+    const { addJob } = await import("../queue/message-queue");
+    await addJob(
+      "knowledge-processing",
+      {
+        documentId: doc.id,
+        tenantId,
+        processingVersion: doc.processingVersion,
+      },
+      { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+    );
   } catch (err) {
-    logger.warn('Failed to queue reprocessing job', { error: err });
+    logger.warn("Failed to queue reprocessing job", { error: err });
   }
 
   sendSuccess(res, doc);
@@ -134,28 +169,71 @@ export async function retryDocument(req: Request, res: Response) {
   const doc = await getService().retryDocument(tenantId, req.params.id);
 
   try {
-    const { addJob } = await import('../queue/message-queue');
-    await addJob('knowledge-processing', {
-      documentId: doc.id,
-      tenantId,
-      processingVersion: doc.processingVersion,
-    }, { jobId: `kb-${doc.id}-v${doc.processingVersion}` });
+    const { addJob } = await import("../queue/message-queue");
+    await addJob(
+      "knowledge-processing",
+      {
+        documentId: doc.id,
+        tenantId,
+        processingVersion: doc.processingVersion,
+      },
+      { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+    );
   } catch (err) {
-    logger.warn('Failed to queue retry job', { error: err });
+    logger.warn("Failed to queue retry job", { error: err });
   }
 
   sendSuccess(res, doc);
+}
+
+export async function importWebsite(req: Request, res: Response) {
+  const tenantId = (req as { tenantId: string }).tenantId;
+  const data = importWebsiteSchema.parse(req.body);
+  const { startWebsiteImport } = await import("./website-crawl.service");
+  const kb = await getService().resolveKnowledgeBase(tenantId, data.kbId);
+  const result = await startWebsiteImport(getService(), {
+    tenantId,
+    url: data.url,
+    followLinks: data.followLinks,
+    maxPages: data.maxPages,
+    kbId: kb.id,
+  });
+  sendCreated(res, result);
+}
+
+export async function refreshUrlDocument(req: Request, res: Response) {
+  const tenantId = (req as { tenantId: string }).tenantId;
+  const doc = await getService().getDocument(tenantId, req.params.id);
+  if (!doc || doc.type !== "url" || !doc.sourceUrl) {
+    throw new BadRequestError("Not a website document");
+  }
+  // Refresh re-runs the crawl for the page's ORIGIN, not just this one page,
+  // so new child pages are picked up and existing ones are upserted.
+  const parsed = new URL(doc.sourceUrl);
+  const origin = `${parsed.protocol}//${parsed.host}`;
+  const { startWebsiteImport } = await import("./website-crawl.service");
+  const result = await startWebsiteImport(getService(), {
+    tenantId,
+    url: origin,
+    followLinks: true,
+    kbId: doc.knowledgeBaseId,
+  });
+  sendSuccess(res, result);
 }
 
 export async function uploadFile(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const file = (req as any).file;
   if (!file) {
-    throw new BadRequestError('No file provided');
+    throw new BadRequestError("No file provided");
   }
 
   if (!config.s3?.bucket) {
-    throw new ApiError('File storage is not configured', 503, ERROR_CODES.FILE_SERVICE_UNAVAILABLE);
+    throw new ApiError(
+      "File storage is not configured",
+      503,
+      ERROR_CODES.FILE_SERVICE_UNAVAILABLE,
+    );
   }
 
   // Magic-number validation (#20): the route fileFilter only trusts the client
@@ -171,31 +249,40 @@ export async function uploadFile(req: Request, res: Response) {
     tenantId,
   );
   if (!validation.valid) {
-    throw new BadRequestError(validation.errors.join('; ') || 'File failed validation');
+    throw new BadRequestError(
+      validation.errors.join("; ") || "File failed validation",
+    );
   }
   const KB_ALLOWED_TYPES = [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ];
-  if (!validation.detectedMimeType || !KB_ALLOWED_TYPES.includes(validation.detectedMimeType)) {
-    throw new BadRequestError('Uploaded file is not a valid PDF or Word document');
+  if (
+    !validation.detectedMimeType ||
+    !KB_ALLOWED_TYPES.includes(validation.detectedMimeType)
+  ) {
+    throw new BadRequestError(
+      "Uploaded file is not a valid PDF or Word document",
+    );
   }
 
   // Sanitize the filename before it becomes part of the S3 object key (path
   // traversal / control chars) — mirrors s3.config.ts + upload.service.ts.
-  const safeName = (file.originalname || 'file')
-    .replace(/[^a-zA-Z0-9.-]/g, '_')
-    .replace(/_{2,}/g, '_')
+  const safeName = (file.originalname || "file")
+    .replace(/[^a-zA-Z0-9.-]/g, "_")
+    .replace(/_{2,}/g, "_")
     .slice(0, 100);
   const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${safeName}`;
 
   const s3 = createS3Client();
-  await s3.send(new PutObjectCommand({
-    Bucket: config.s3.bucket,
-    Key: key,
-    Body: file.buffer,
-    ContentType: validation.detectedMimeType,
-  }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: config.s3.bucket,
+      Key: key,
+      Body: file.buffer,
+      ContentType: validation.detectedMimeType,
+    }),
+  );
 
   const token = getService().registerUploadToken(tenantId, key);
   sendSuccess(res, { uploadToken: token });
@@ -217,11 +304,15 @@ export async function getAiSettings(req: Request, res: Response) {
   const botAi = botSettings.ai;
 
   if (botAi) {
-    const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({ where: { id: tenantId } });
+    const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({
+      where: { id: tenantId },
+    });
     const tenantApiKey = tenant.settings?.ai?.apiKey;
     // Bot.settings.ai never carries apiKey — strip it defensively in case a
     // stale row from before the cutover still has it set.
-    const { apiKey: _stale, ...rest } = botAi as { apiKey?: string } & typeof botAi;
+    const { apiKey: _stale, ...rest } = botAi as {
+      apiKey?: string;
+    } & typeof botAi;
     sendSuccess(res, { ...rest, hasApiKey: !!tenantApiKey });
   } else {
     // Portal-tolerance audit (plan §2.3): all `useGetAiSettings` callers in
@@ -247,19 +338,28 @@ export async function updateAiSettings(req: Request, res: Response) {
   delete updatedBotAi.apiKey;
 
   if (data.enabled !== undefined) updatedBotAi.enabled = data.enabled;
-  if (data.provider !== undefined) updatedBotAi.provider = data.provider ?? null;
+  if (data.provider !== undefined)
+    updatedBotAi.provider = data.provider ?? null;
   if (data.model !== undefined) updatedBotAi.model = data.model ?? null;
   if (data.supportEmail !== undefined) {
     updatedBotAi.supportEmail = data.supportEmail || null;
   }
-  if (data.brandVoice) updatedBotAi.brandVoice = { ...existingBotAi.brandVoice, ...data.brandVoice };
-  if (data.guardrails) updatedBotAi.guardrails = { ...existingBotAi.guardrails, ...data.guardrails };
+  if (data.brandVoice)
+    updatedBotAi.brandVoice = {
+      ...existingBotAi.brandVoice,
+      ...data.brandVoice,
+    };
+  if (data.guardrails)
+    updatedBotAi.guardrails = {
+      ...existingBotAi.guardrails,
+      ...data.guardrails,
+    };
 
   // Wholesale section replacement on `ai` (not a partial patch): the
   // controller builds the full new ai shape from existingBotAi + the input.
   // Replace-section also strips any stale apiKey defensively (per the service
   // header — bot.settings.ai never carries apiKey).
-  await replaceAnchorBotSettingsSection(tenantId, 'ai', updatedBotAi);
+  await replaceAnchorBotSettingsSection(tenantId, "ai", updatedBotAi);
 
   // Handle the apiKey + webhook auto-provision on the tenant row.
   const tenantRepo = AppDataSource.getRepository(Tenant);
@@ -303,17 +403,21 @@ export async function testChat(req: Request, res: Response) {
   const { bot, settings: botSettings } = await getAnchorBotConfig(tenantId);
   const botAi = botSettings.ai;
   if (!botAi?.enabled) {
-    throw new BadRequestError('AI is not enabled. Save your AI settings first.');
+    throw new BadRequestError(
+      "AI is not enabled. Save your AI settings first.",
+    );
   }
   if (!botAi.brandVoice?.name) {
-    throw new BadRequestError('Incomplete AI settings. Set a chatbot name first.');
+    throw new BadRequestError(
+      "Incomplete AI settings. Set a chatbot name first.",
+    );
   }
 
   const tenantApiKey = tenant.settings?.ai?.apiKey;
   // Merge for downstream consumers that still expect a single `aiSettings`
   // object (e.g. `generateResponse`). The apiKey is read-only here — we are
   // NOT writing this merged shape anywhere.
-  type TenantAi = NonNullable<NonNullable<Tenant['settings']>['ai']>;
+  type TenantAi = NonNullable<NonNullable<Tenant["settings"]>["ai"]>;
   const ai: TenantAi = { ...botAi, apiKey: tenantApiKey ?? null } as TenantAi;
 
   // Platform-standardised model/provider (not per-bot/tenant).
@@ -323,7 +427,10 @@ export async function testChat(req: Request, res: Response) {
   // Resolve the bound template once → body (layer 2) + effective tone/guardrails,
   // so the preview matches the live composed prompt exactly.
   const resolvedList = await resolveBoundTemplates(bot);
-  const templateBody = composeTemplateBodies(resolvedList, bot.templateMode ?? 'or');
+  const templateBody = composeTemplateBodies(
+    resolvedList,
+    bot.templateMode ?? "or",
+  );
   const aiEff = withEffectiveConfig(ai, effectiveConfigFromList(resolvedList));
 
   if (useKnowledgeBase) {
@@ -332,18 +439,26 @@ export async function testChat(req: Request, res: Response) {
       // TODO(multi-bot Phase 3 UI): when the test/preview chat targets a
       // specific bot, pass that bot's attached KB ids here. For now this
       // tenant-level preview stays tenant-wide (knowledgeBaseIds omitted).
-      result = await generateResponse(AppDataSource, tenantId, aiEff, message, history, undefined, templateBody);
+      result = await generateResponse(
+        AppDataSource,
+        tenantId,
+        aiEff,
+        message,
+        history,
+        undefined,
+        templateBody,
+      );
     } catch (err: any) {
       rethrowIfUpstreamRateLimit(err);
-      const msg = err?.message || '';
-      if (msg.includes('OPENAI_API_KEY')) {
+      const msg = err?.message || "";
+      if (msg.includes("OPENAI_API_KEY")) {
         throw new BadRequestError(
-          'Knowledge base requires OPENAI_API_KEY environment variable for embeddings.',
+          "Knowledge base requires OPENAI_API_KEY environment variable for embeddings.",
         );
       }
-      logger.error('Test chat RAG failed', err);
+      logger.error("Test chat RAG failed", err);
       throw new ApiError(
-        'RAG pipeline failed. Check server logs.',
+        "RAG pipeline failed. Check server logs.",
         500,
         ERROR_CODES.UPSTREAM_FAILED,
       );
@@ -352,23 +467,29 @@ export async function testChat(req: Request, res: Response) {
       response:
         result.response ||
         aiEff.guardrails?.fallbackMessage ||
-        'I could not find an answer in the knowledge base.',
+        "I could not find an answer in the knowledge base.",
       provider,
       model,
       confidence: result.confidence,
       chunksUsed: result.chunks.length,
     });
   } else {
-    const { getProvider } = await import('../llm/provider-factory');
+    const { getProvider } = await import("../llm/provider-factory");
     // Secret apiKey path — still sourced from tenant (per architectural rule).
     const llm = getProvider(provider, tenantApiKey ?? undefined);
 
-    const systemPrompt = buildSystemPrompt(aiEff, { businessName: tenant.name, templateBody });
+    const systemPrompt = buildSystemPrompt(aiEff, {
+      businessName: tenant.name,
+      templateBody,
+    });
 
     const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-      { role: 'user' as const, content: message },
+      { role: "system" as const, content: systemPrompt },
+      ...history.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      { role: "user" as const, content: message },
     ];
 
     let response;
@@ -381,9 +502,9 @@ export async function testChat(req: Request, res: Response) {
       });
     } catch (err) {
       rethrowIfUpstreamRateLimit(err);
-      logger.error('Test chat LLM call failed', err);
+      logger.error("Test chat LLM call failed", err);
       throw new ApiError(
-        'LLM call failed. Check your API key and model.',
+        "LLM call failed. Check your API key and model.",
         500,
         ERROR_CODES.UPSTREAM_FAILED,
       );

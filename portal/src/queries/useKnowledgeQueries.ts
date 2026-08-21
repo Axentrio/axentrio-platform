@@ -1,7 +1,12 @@
-import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
-import { queryKeys } from './queryKeys';
-import { toast } from 'sonner';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
+import { api } from "../services/apiClient";
+import { queryKeys } from "./queryKeys";
+import { toast } from "sonner";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -9,17 +14,21 @@ type Any = any;
 // --- Query Options ---
 
 export const knowledgeOptions = {
-  documents: () => queryOptions({
-    queryKey: queryKeys.knowledge.documents(),
-    queryFn: async () => {
-      const res = await api.get<Any>('/knowledge/documents', { params: { limit: 100 } });
-      return Array.isArray(res) ? res : res?.documents ?? [];
-    },
-  }),
-  stats: () => queryOptions({
-    queryKey: queryKeys.knowledge.stats(),
-    queryFn: () => api.get<Any>('/knowledge/stats'),
-  }),
+  documents: () =>
+    queryOptions({
+      queryKey: queryKeys.knowledge.documents(),
+      queryFn: async () => {
+        const res = await api.get<Any>("/knowledge/documents", {
+          params: { limit: 100 },
+        });
+        return Array.isArray(res) ? res : (res?.documents ?? []);
+      },
+    }),
+  stats: () =>
+    queryOptions({
+      queryKey: queryKeys.knowledge.stats(),
+      queryFn: () => api.get<Any>("/knowledge/stats"),
+    }),
 };
 
 // --- Query Hooks ---
@@ -30,8 +39,11 @@ export function useKnowledgeDocuments() {
     // Auto-poll every 5s while any document is pending/processing
     refetchInterval: (query) => {
       const data = query.state.data;
-      const hasProcessing = Array.isArray(data) &&
-        data.some((d: Any) => d.status === 'pending' || d.status === 'processing');
+      const hasProcessing =
+        Array.isArray(data) &&
+        data.some(
+          (d: Any) => d.status === "pending" || d.status === "processing",
+        );
       return hasProcessing ? 5000 : false;
     },
   });
@@ -46,28 +58,46 @@ export function useKnowledgeStats() {
 export function useCreateDocument() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { type: string; title: string; sourceContent?: string; uploadToken?: string; metadata?: Record<string, Any> }) =>
-      api.post('/knowledge/documents', data),
+    mutationFn: (data: {
+      type: string;
+      title: string;
+      sourceContent?: string;
+      uploadToken?: string;
+      metadata?: Record<string, Any>;
+    }) => api.post("/knowledge/documents", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
-      toast.success('Document created');
+      toast.success("Document created");
     },
-    onError: () => toast.error('Failed to create document'),
+    onError: () => toast.error("Failed to create document"),
   });
 }
 
 export function useUpdateDocument() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { title?: string; sourceContent?: string; metadata?: Record<string, Any> } }) =>
-      api.put(`/knowledge/documents/${id}`, data),
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: {
+        title?: string;
+        sourceContent?: string;
+        metadata?: Record<string, Any>;
+      };
+    }) => api.put(`/knowledge/documents/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
-      toast.success('Document updated');
+      toast.success("Document updated");
     },
-    onError: () => toast.error('Failed to update document'),
+    onError: () => toast.error("Failed to update document"),
   });
 }
 
@@ -76,11 +106,48 @@ export function useDeleteDocument() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/knowledge/documents/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
-      toast.success('Document deleted');
+      toast.success("Document deleted");
     },
-    onError: () => toast.error('Failed to delete document'),
+    onError: () => toast.error("Failed to delete document"),
+  });
+}
+
+export function useImportWebsite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      url: string;
+      followLinks?: boolean;
+      maxPages?: number;
+      kbId?: string;
+    }) => api.post("/knowledge/documents/website", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
+      toast.success("Website import started");
+    },
+    onError: () => toast.error("Failed to import website"),
+  });
+}
+
+export function useRefreshWebsiteDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/knowledge/documents/${id}/refresh`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
+      toast.success("Website refresh started");
+    },
+    onError: () => toast.error("Failed to refresh website"),
   });
 }
 
@@ -89,11 +156,13 @@ export function useRetryDocument() {
   return useMutation({
     mutationFn: (id: string) => api.post(`/knowledge/documents/${id}/retry`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.documents(),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
-      toast.success('Document reprocessing started');
+      toast.success("Document reprocessing started");
     },
-    onError: () => toast.error('Failed to retry document'),
+    onError: () => toast.error("Failed to retry document"),
   });
 }
 
@@ -101,12 +170,16 @@ export function useUploadFile() {
   return useMutation({
     mutationFn: async (file: File) => {
       const formData = new FormData();
-      formData.append('file', file);
-      return api.post<{ uploadToken: string }>('/knowledge/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      formData.append("file", file);
+      return api.post<{ uploadToken: string }>(
+        "/knowledge/documents/upload",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        },
+      );
     },
-    onError: () => toast.error('File upload failed'),
+    onError: () => toast.error("File upload failed"),
   });
 }
 
@@ -114,25 +187,27 @@ export function useUpdateAiSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Record<string, Any>) =>
-      api.patch('/tenants/me/ai-settings', data),
+      api.patch("/tenants/me/ai-settings", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
-      queryClient.invalidateQueries({ queryKey: [...queryKeys.tenants.me(), 'ai-settings'] });
+      queryClient.invalidateQueries({
+        queryKey: [...queryKeys.tenants.me(), "ai-settings"],
+      });
     },
-    onError: () => toast.error('Failed to save AI settings'),
+    onError: () => toast.error("Failed to save AI settings"),
   });
 }
 
 export function useGetAiSettings(options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: [...queryKeys.tenants.me(), 'ai-settings'] as const,
-    queryFn: () => api.get<Any>('/tenants/me/ai-settings'),
+    queryKey: [...queryKeys.tenants.me(), "ai-settings"] as const,
+    queryFn: () => api.get<Any>("/tenants/me/ai-settings"),
     enabled: options?.enabled ?? true,
   });
 }
 
 interface TestChatMessage {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -146,7 +221,10 @@ export interface TestChatResponse {
 
 export function useTestChat() {
   return useMutation({
-    mutationFn: (data: { message: string; history: TestChatMessage[]; useKnowledgeBase: boolean }) =>
-      api.post<TestChatResponse>('/tenants/me/ai-settings/test-chat', data),
+    mutationFn: (data: {
+      message: string;
+      history: TestChatMessage[];
+      useKnowledgeBase: boolean;
+    }) => api.post<TestChatResponse>("/tenants/me/ai-settings/test-chat", data),
   });
 }

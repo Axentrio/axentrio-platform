@@ -1,0 +1,13 @@
+# Chromium crawl worker. The Alpine API image does not include a browser.
+# Run this service against the same Redis as the API so it can consume
+# the `website-crawl` queue. Until this service is deployed, the API
+# process still registers the processor and falls back to HTML fetch
+# when Playwright is missing.
+FROM mcr.microsoft.com/playwright:v1.50.0-jammy
+
+WORKDIR /app
+COPY api/package*.json ./
+RUN npm ci --omit=dev
+COPY api/dist ./dist
+
+CMD ["node", "dist/crawl-worker.js"]

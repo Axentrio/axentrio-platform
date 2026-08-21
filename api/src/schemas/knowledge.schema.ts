@@ -1,13 +1,13 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const updateKnowledgeBaseSchema = z.object({
   chunkSize: z.number().min(100).max(5000).optional(),
   chunkOverlap: z.number().min(0).max(1000).optional(),
-  status: z.enum(['active', 'inactive']).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
 });
 
 export const createDocumentSchema = z.object({
-  type: z.enum(['text', 'faq', 'pdf', 'docx']),
+  type: z.enum(["text", "faq", "pdf", "docx"]),
   title: z.string().min(1).max(255),
   sourceContent: z.string().max(500000).optional(),
   uploadToken: z.string().uuid().optional(),
@@ -20,9 +20,16 @@ export const updateDocumentSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+export const importWebsiteSchema = z.object({
+  url: z.string().url().max(2048),
+  followLinks: z.boolean().optional().default(true),
+  maxPages: z.number().int().min(1).max(50).optional(),
+  kbId: z.string().uuid().optional(),
+});
+
 export const listDocumentsSchema = z.object({
-  status: z.enum(['pending', 'processing', 'indexed', 'failed']).optional(),
-  type: z.enum(['text', 'faq', 'pdf', 'docx']).optional(),
+  status: z.enum(["pending", "processing", "indexed", "failed"]).optional(),
+  type: z.enum(["text", "faq", "pdf", "docx", "url"]).optional(),
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
 });

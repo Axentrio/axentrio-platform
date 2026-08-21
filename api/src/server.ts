@@ -2,112 +2,129 @@
  * Chatbot Platform API Server
  * Express + Socket.io with Redis adapter for multi-server scaling
  */
-import { initSentry, Sentry } from './config/sentry';
+import { initSentry, Sentry } from "./config/sentry";
 initSentry();
 
-import 'reflect-metadata';
-import express from 'express';
-import { createServer } from 'http';
-import cors from 'cors';
-import { resolveCorsDecision } from './security/cors';
-import helmet from 'helmet';
+import "reflect-metadata";
+import express from "express";
+import { createServer } from "http";
+import cors from "cors";
+import { resolveCorsDecision } from "./security/cors";
+import helmet from "helmet";
 
-import { clerkMiddleware } from '@clerk/express';
-import { config } from './config/environment';
-import { logger } from './utils/logger';
-import { returningRows } from './utils/raw-sql';
-import { BUILD_COMMIT } from './utils/build-info';
-import { AppDataSource, checkDatabaseHealth } from './database/data-source';
-import { initializeRedis, closeRedis, isRedisAvailable, getRedisClient } from './config/redis';
-import { initializeSocketIO } from './websocket/socket.handler';
+import { clerkMiddleware } from "@clerk/express";
+import { config } from "./config/environment";
+import { logger } from "./utils/logger";
+import { returningRows } from "./utils/raw-sql";
+import { BUILD_COMMIT } from "./utils/build-info";
+import { AppDataSource, checkDatabaseHealth } from "./database/data-source";
+import {
+  initializeRedis,
+  closeRedis,
+  isRedisAvailable,
+  getRedisClient,
+} from "./config/redis";
+import { initializeSocketIO } from "./websocket/socket.handler";
 
 // Security middleware
-import { cspMiddleware, securityHeadersMiddleware } from './security/csp.middleware';
-import { xssMiddleware } from './security/xss-protection';
+import {
+  cspMiddleware,
+  securityHeadersMiddleware,
+} from "./security/csp.middleware";
+import { xssMiddleware } from "./security/xss-protection";
 
 // Routes
-import authRoutes from './routes/auth.routes';
-import chatRoutes from './routes/chat.routes';
-import conversationCommandRoutes from './routes/conversation-commands.routes';
-import handoffRoutes from './routes/handsoff.routes';
-import agentRoutes from './routes/agents.routes';
-import { tenantRouter as tenantRoutes } from './routes/tenants';
-import { widgetRouter as widgetRoutes } from './routes/widget';
-import fileRoutes from './routes/files.routes';
-import analyticsRoutes from './routes/analytics.routes';
-import insightsRoutes from './routes/insights.routes';
-import onboardingRoutes from './routes/onboarding.routes';
-import notificationRoutes from './routes/notifications.routes';
-import mobileDevicesRoutes from './routes/mobile-devices.routes';
-import userRoutes from './routes/users.routes';
-import clerkWebhookRoutes from './routes/clerk-webhook.routes';
-import webhookAdminRoutes from './routes/webhook-admin.routes';
-import adminRoutes from './routes/admin.routes';
-import billingRoutes from './routes/billing.routes';
-import knowledgeRoutes from './knowledge/knowledge.routes';
-import schedulerRoutes from './scheduler/scheduler.routes';
-import googleCalendarRoutes, { googleCalendarCallbackRouter } from './integrations/google/google-calendar.routes';
-import outlookCalendarRoutes, { outlookCalendarCallbackRouter } from './integrations/microsoft/outlook-calendar.routes';
-import { bookingPublicRouter } from './scheduler/booking-public.routes';
-import { digestUnsubscribeRouter } from './routes/digest-unsubscribe.routes';
-import aiSettingsRoutes from './knowledge/ai-settings.routes';
-import widgetAppearanceRoutes from './widget/widget-appearance.routes';
-import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
-import integrationsRoutes from './knowledge/integrations.routes';
-import featureTogglesRoutes from './routes/feature-toggles.routes';
-import accountInformationRoutes from './routes/account-information.routes';
-import eventWebhooksRoutes from './routes/event-webhooks.routes';
-import cannedResponseRoutes from './routes/canned-responses.routes';
-import botsRoutes from './routes/bots.routes';
-import skillReadinessRoutes from './routes/skill-readiness.routes';
-import demandSignalsRoutes from './routes/demand-signals.routes';
-import leadsRoutes from './routes/leads.routes';
-import entitlementsRoutes from './routes/entitlements.routes';
-import faqRoutes from './routes/faq.routes';
-import copilotRoutes from './copilot/routes';
-import skillsRoutes from './routes/skills.routes';
-import automationsRoutes from './routes/automations.routes';
-import sessionManagementRoutes from './routes/session-management.routes';
-import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
+import authRoutes from "./routes/auth.routes";
+import chatRoutes from "./routes/chat.routes";
+import conversationCommandRoutes from "./routes/conversation-commands.routes";
+import handoffRoutes from "./routes/handsoff.routes";
+import agentRoutes from "./routes/agents.routes";
+import { tenantRouter as tenantRoutes } from "./routes/tenants";
+import { widgetRouter as widgetRoutes } from "./routes/widget";
+import fileRoutes from "./routes/files.routes";
+import analyticsRoutes from "./routes/analytics.routes";
+import insightsRoutes from "./routes/insights.routes";
+import onboardingRoutes from "./routes/onboarding.routes";
+import notificationRoutes from "./routes/notifications.routes";
+import mobileDevicesRoutes from "./routes/mobile-devices.routes";
+import userRoutes from "./routes/users.routes";
+import clerkWebhookRoutes from "./routes/clerk-webhook.routes";
+import webhookAdminRoutes from "./routes/webhook-admin.routes";
+import adminRoutes from "./routes/admin.routes";
+import billingRoutes from "./routes/billing.routes";
+import knowledgeRoutes from "./knowledge/knowledge.routes";
+import schedulerRoutes from "./scheduler/scheduler.routes";
+import googleCalendarRoutes, {
+  googleCalendarCallbackRouter,
+} from "./integrations/google/google-calendar.routes";
+import outlookCalendarRoutes, {
+  outlookCalendarCallbackRouter,
+} from "./integrations/microsoft/outlook-calendar.routes";
+import { bookingPublicRouter } from "./scheduler/booking-public.routes";
+import { digestUnsubscribeRouter } from "./routes/digest-unsubscribe.routes";
+import aiSettingsRoutes from "./knowledge/ai-settings.routes";
+import widgetAppearanceRoutes from "./widget/widget-appearance.routes";
+import {
+  widgetVersionHash,
+  widgetPath as widgetJsPath,
+} from "./widget/widget-version";
+import integrationsRoutes from "./knowledge/integrations.routes";
+import featureTogglesRoutes from "./routes/feature-toggles.routes";
+import accountInformationRoutes from "./routes/account-information.routes";
+import eventWebhooksRoutes from "./routes/event-webhooks.routes";
+import cannedResponseRoutes from "./routes/canned-responses.routes";
+import botsRoutes from "./routes/bots.routes";
+import skillReadinessRoutes from "./routes/skill-readiness.routes";
+import demandSignalsRoutes from "./routes/demand-signals.routes";
+import leadsRoutes from "./routes/leads.routes";
+import entitlementsRoutes from "./routes/entitlements.routes";
+import faqRoutes from "./routes/faq.routes";
+import copilotRoutes from "./copilot/routes";
+import skillsRoutes from "./routes/skills.routes";
+import automationsRoutes from "./routes/automations.routes";
+import sessionManagementRoutes from "./routes/session-management.routes";
+import { requireClerkAuth, autoProvision } from "./middleware/clerk.middleware";
 
 // Webhook integration
-import { initializeAgentService } from './services/message-forwarding.service';
-import ragSearchRoutes from './rag/rag-search.routes';
-import bookingRoutes from './booking/booking.routes';
+import { initializeAgentService } from "./services/message-forwarding.service";
+import ragSearchRoutes from "./rag/rag-search.routes";
+import bookingRoutes from "./booking/booking.routes";
 
 // Platform agent
-import { ToolRegistry } from './agent/tool-registry';
-import { PromptBuilder } from './agent/prompt-builder';
-import { MeteringService } from './agent/metering.service';
-import { TraceLogger } from './agent/trace-logger';
-import { AgentService } from './agent/agent.service';
+import { ToolRegistry } from "./agent/tool-registry";
+import { PromptBuilder } from "./agent/prompt-builder";
+import { MeteringService } from "./agent/metering.service";
+import { TraceLogger } from "./agent/trace-logger";
+import { AgentService } from "./agent/agent.service";
 
 // Channel integrations
-import metaWebhookRoutes from './channels/meta/webhook.routes';
-import { billingWebhookRoutes } from './webhooks/billing-webhook.routes';
-import channelWebhookRoutes from './channels/channel-webhook.routes';
-import channelManagementRoutes from './channels/channel-management.routes';
-import { registerChannelAdapter } from './channels/channel-registry';
-import { telegramAdapter } from './channels/telegram';
-import { messengerAdapter, instagramAdapter } from './channels/meta';
-import { whatsappAdapter } from './channels/whatsapp';
-import whatsappWebhookRoutes from './channels/whatsapp/webhook.routes';
-import { registerIntegrationProviders } from './integrations';
-import metaOAuthRoutes, { metaOAuthCallbackRouter } from './channels/meta/oauth.routes';
+import metaWebhookRoutes from "./channels/meta/webhook.routes";
+import { billingWebhookRoutes } from "./webhooks/billing-webhook.routes";
+import channelWebhookRoutes from "./channels/channel-webhook.routes";
+import channelManagementRoutes from "./channels/channel-management.routes";
+import { registerChannelAdapter } from "./channels/channel-registry";
+import { telegramAdapter } from "./channels/telegram";
+import { messengerAdapter, instagramAdapter } from "./channels/meta";
+import { whatsappAdapter } from "./channels/whatsapp";
+import whatsappWebhookRoutes from "./channels/whatsapp/webhook.routes";
+import { registerIntegrationProviders } from "./integrations";
+import metaOAuthRoutes, {
+  metaOAuthCallbackRouter,
+} from "./channels/meta/oauth.routes";
 
 // Middleware
-import { rateLimitByIp } from './middleware/rate-limit.middleware';
-import { errorHandler, notFoundHandler } from './middleware/error-handler';
-import { requestIdMiddleware } from './middleware/request-id.middleware';
-import { httpLoggerMiddleware } from './middleware/http-logger.middleware';
-import { timeoutMiddleware } from './middleware/timeout.middleware';
+import { rateLimitByIp } from "./middleware/rate-limit.middleware";
+import { errorHandler, notFoundHandler } from "./middleware/error-handler";
+import { requestIdMiddleware } from "./middleware/request-id.middleware";
+import { httpLoggerMiddleware } from "./middleware/http-logger.middleware";
+import { timeoutMiddleware } from "./middleware/timeout.middleware";
 
 const app = express();
 
 // Trust the single Railway proxy hop so `req.ip` resolves to the real client IP
 // from X-Forwarded-For. Without this, rate limiting reads a spoofable raw header
 // and can be bypassed by rotating X-Forwarded-For. See security audit #I.
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 
 const httpServer = createServer(app);
 const REDIS_READINESS_TIMEOUT_MS = 1000;
@@ -128,11 +145,11 @@ async function checkRedisReadiness(): Promise<boolean> {
       redis.ping(),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
-          reject(new Error('Redis readiness check timed out'));
+          reject(new Error("Redis readiness check timed out"));
         }, REDIS_READINESS_TIMEOUT_MS);
       }),
     ]);
-    return response === 'PONG';
+    return response === "PONG";
   } catch {
     return false;
   } finally {
@@ -144,20 +161,36 @@ async function checkRedisReadiness(): Promise<boolean> {
 
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
-app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
+app.use(
+  "/api/v1/webhooks/clerk",
+  express.raw({ type: "application/json" }),
+  clerkWebhookRoutes,
+);
 
 // Meta webhook — must use raw body parser for HMAC verification
-app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
+app.use(
+  "/api/v1/channels/meta/webhook",
+  express.raw({ type: "application/json" }),
+  metaWebhookRoutes,
+);
 
 // WhatsApp Cloud API webhook — raw body parser for HMAC verification (same
 // scheme as Meta; mounted before express.json() so the Buffer is intact).
-app.use('/api/v1/channels/whatsapp/webhook', express.raw({ type: 'application/json' }), whatsappWebhookRoutes);
+app.use(
+  "/api/v1/channels/whatsapp/webhook",
+  express.raw({ type: "application/json" }),
+  whatsappWebhookRoutes,
+);
 
 // Billing webhooks — must use raw body parser for HMAC verification.
 // Mount BEFORE app-level express.json() so verifyWebhook receives the raw
 // Buffer intact. See § Webhook event handling middleware ordering invariant
 // in .scratch/plan-billing.md.
-app.use('/api/v1/webhooks/billing', express.raw({ type: 'application/json' }), billingWebhookRoutes);
+app.use(
+  "/api/v1/webhooks/billing",
+  express.raw({ type: "application/json" }),
+  billingWebhookRoutes,
+);
 
 // Request ID — must come before any routes so every response (including widget
 // routes mounted below and the /widget.js static serve) carries x-request-id
@@ -180,37 +213,58 @@ app.use(httpLoggerMiddleware);
 // instead of the old 1-hour stale window. Customers who want strict
 // cache-busting can embed `<script src=".../widget.js?v=<widgetVersion>">`
 // — the query string is informational; same file is served either way.
-const widgetEtag = `"${widgetVersionHash}"`;
-app.get('/widget.js', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
-  res.setHeader('ETag', widgetEtag);
-  res.setHeader('Content-Type', 'application/javascript');
+function allowWidgetOrigin(req: express.Request, res: express.Response): void {
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin.length > 0) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
 
-  if (req.headers['if-none-match'] === widgetEtag) {
+const widgetEtag = `"${widgetVersionHash}"`;
+app.get("/widget.js", (req, res) => {
+  allowWidgetOrigin(req, res);
+  res.setHeader("Cache-Control", "public, max-age=300, must-revalidate");
+  res.setHeader("ETag", widgetEtag);
+  res.setHeader("Content-Type", "application/javascript");
+
+  if (req.headers["if-none-match"] === widgetEtag) {
     res.status(304).end();
     return;
   }
 
   res.sendFile(widgetJsPath, (err) => {
     if (err) {
-      logger.error('Failed to serve widget.js', { path: widgetJsPath, error: err.message });
-      res.status(404).send('// widget.js not found');
+      logger.error("Failed to serve widget.js", {
+        path: widgetJsPath,
+        error: err.message,
+      });
+      res.status(404).send("// widget.js not found");
     }
   });
 });
 
 // Widget API — open CORS for cross-origin embedding on customer sites
 // Must be before helmet/CSP which sets restrictive CORP headers
-app.use('/api/v1/widget', (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-  next();
-}, express.json(), widgetRoutes);
+app.use(
+  "/api/v1/widget",
+  (req, res, next) => {
+    allowWidgetOrigin(req, res);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  },
+  express.json(),
+  widgetRoutes,
+);
 
 // Security middleware stack. Apply in every environment except test (was
 // production-only). Mounted AFTER the pre-stack widget routes (/widget.js,
@@ -225,34 +279,46 @@ if (applySecurityHeaders) {
 // Per-request CORS options so `credentials` is decided per origin — a static
 // `credentials:true` would emit Access-Control-Allow-Credentials even for `*`.
 // Wildcard never yields credentials; explicit allowlist (+ Clerk) does. See #D.
-app.use(cors((req, callback) => {
-  const decision = resolveCorsDecision(req.headers.origin);
-  if (decision.origin === false) {
-    logger.warn(`CORS request blocked from origin: ${req.headers.origin}`);
-  }
-  callback(null, {
-    origin: decision.origin,
-    credentials: decision.credentials,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Session-ID', 'X-Tenant-Context'],
-    // Response headers the PORTAL is allowed to read. The portal is a different
-    // origin from the api, so without this a browser can only see the 7 CORS-
-    // safelisted headers — `Content-Disposition` and our export signals would
-    // read as `undefined` in the client while looking correct in same-process
-    // supertest assertions. Download filenames and the truncation warning both
-    // depend on these being exposed.
-    exposedHeaders: ['Content-Disposition', 'X-Export-Truncated', 'X-Export-Row-Limit'],
-  });
-}));
+app.use(
+  cors((req, callback) => {
+    const decision = resolveCorsDecision(req.headers.origin);
+    if (decision.origin === false) {
+      logger.warn(`CORS request blocked from origin: ${req.headers.origin}`);
+    }
+    callback(null, {
+      origin: decision.origin,
+      credentials: decision.credentials,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Tenant-ID",
+        "X-Session-ID",
+        "X-Tenant-Context",
+      ],
+      // Response headers the PORTAL is allowed to read. The portal is a different
+      // origin from the api, so without this a browser can only see the 7 CORS-
+      // safelisted headers — `Content-Disposition` and our export signals would
+      // read as `undefined` in the client while looking correct in same-process
+      // supertest assertions. Download filenames and the truncation warning both
+      // depend on these being exposed.
+      exposedHeaders: [
+        "Content-Disposition",
+        "X-Export-Truncated",
+        "X-Export-Row-Limit",
+      ],
+    });
+  }),
+);
 
 // Health check (no prefix, for Railway). Placed AFTER cors() so the
 // response carries Access-Control-Allow-Origin (browsers fetching it
 // from the portal need it), BEFORE express.json/rate-limit/clerk since
 // the endpoint has no body, must stay unauthenticated, and Railway
 // probes it every ~30s.
-app.get('/health', (_req, res) => {
+app.get("/health", (_req, res) => {
   res.json({
-    status: 'healthy',
+    status: "healthy",
     timestamp: new Date().toISOString(),
     // WHICH COMMIT IS THIS, which nothing could answer until now. See `utils/build-info` for why
     // it is baked into the image rather than injected as a variable - the short version is that a
@@ -261,7 +327,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/health/ready', async (_req, res) => {
+app.get("/health/ready", async (_req, res) => {
   const [postgresHealthy, redisHealthy] = await Promise.all([
     checkDatabaseHealth(),
     checkRedisReadiness(),
@@ -269,90 +335,95 @@ app.get('/health/ready', async (_req, res) => {
 
   const ready = postgresHealthy;
   res.status(ready ? 200 : 503).json({
-    status: ready ? 'ready' : 'not_ready',
+    status: ready ? "ready" : "not_ready",
     timestamp: new Date().toISOString(),
     dependencies: {
       postgres: {
-        status: postgresHealthy ? 'up' : 'down',
+        status: postgresHealthy ? "up" : "down",
         required: true,
       },
       redis: {
-        status: redisHealthy ? 'up' : 'down',
+        status: redisHealthy ? "up" : "down",
         required: false,
       },
     },
   });
 });
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(rateLimitByIp);
 
 // Meta OAuth callback — after CORS but before Clerk (Facebook redirects here unauthenticated)
-app.use('/api/v1/channels/meta/oauth', metaOAuthCallbackRouter);
+app.use("/api/v1/channels/meta/oauth", metaOAuthCallbackRouter);
 // Public Google OAuth callback (Google redirects the browser here, no auth header).
-app.use('/api/v1/integrations/google', googleCalendarCallbackRouter);
+app.use("/api/v1/integrations/google", googleCalendarCallbackRouter);
 // Public Microsoft/Outlook OAuth callback (MS redirects the browser here, no auth header).
-app.use('/api/v1/integrations/outlook', outlookCalendarCallbackRouter);
+app.use("/api/v1/integrations/outlook", outlookCalendarCallbackRouter);
 // Public self-service booking pages (reached from email links; signed-token auth).
-app.use('/api/v1/bookings', bookingPublicRouter);
+app.use("/api/v1/bookings", bookingPublicRouter);
 // Public one-click digest unsubscribe (reached from email links; signed-token auth).
-app.use('/api/v1/unsubscribe', digestUnsubscribeRouter);
+app.use("/api/v1/unsubscribe", digestUnsubscribeRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());
 
 // API routes under /api/v1
 const apiRouter = express.Router();
-apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
-apiRouter.use('/insights', insightsRoutes);
-apiRouter.use('/onboarding', onboardingRoutes);
+apiRouter.use("/analytics", timeoutMiddleware(60000), analyticsRoutes);
+apiRouter.use("/insights", insightsRoutes);
+apiRouter.use("/onboarding", onboardingRoutes);
 // Copilot SSE stream can run up to 60s (agent loop hard timeout) plus a
 // few hundred ms for the final UPDATE + trace INSERT + clean SSE close.
 // 90s leaves headroom without letting a runaway loop hang the connection.
-apiRouter.use('/copilot', timeoutMiddleware(90000), copilotRoutes);
+apiRouter.use("/copilot", timeoutMiddleware(90000), copilotRoutes);
 apiRouter.use(timeoutMiddleware(30000));
-apiRouter.use('/auth', authRoutes);
+apiRouter.use("/auth", authRoutes);
 // Command routes FIRST: /takeover|/release|/cancel|/messages don't exist in
 // chat.routes; the shared /close path forwards widget-token requests through.
-apiRouter.use('/chats', conversationCommandRoutes);
-apiRouter.use('/chats', chatRoutes);
-apiRouter.use('/chats', sessionManagementRoutes);
-apiRouter.use('/handoffs', handoffRoutes);
-apiRouter.use('/agents', agentRoutes);
-apiRouter.use('/users', userRoutes);
-apiRouter.use('/tenants', tenantRoutes);
-apiRouter.use('/widget', widgetRoutes);
-apiRouter.use('/files', fileRoutes);
-apiRouter.use('/notifications', notificationRoutes);
-apiRouter.use('/mobile/devices', mobileDevicesRoutes);
-apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
-apiRouter.use('/admin', adminRoutes);
-apiRouter.use('/billing', billingRoutes);
-apiRouter.use('/knowledge', knowledgeRoutes);
-apiRouter.use('/scheduler', schedulerRoutes);
-apiRouter.use('/integrations/google', googleCalendarRoutes);
-apiRouter.use('/integrations/outlook', outlookCalendarRoutes);
-apiRouter.use('/canned-responses', cannedResponseRoutes);
-apiRouter.use('/bots', botsRoutes);
+apiRouter.use("/chats", conversationCommandRoutes);
+apiRouter.use("/chats", chatRoutes);
+apiRouter.use("/chats", sessionManagementRoutes);
+apiRouter.use("/handoffs", handoffRoutes);
+apiRouter.use("/agents", agentRoutes);
+apiRouter.use("/users", userRoutes);
+apiRouter.use("/tenants", tenantRoutes);
+apiRouter.use("/widget", widgetRoutes);
+apiRouter.use("/files", fileRoutes);
+apiRouter.use("/notifications", notificationRoutes);
+apiRouter.use("/mobile/devices", mobileDevicesRoutes);
+apiRouter.use(
+  "/tenants/me/webhooks",
+  requireClerkAuth,
+  autoProvision,
+  webhookAdminRoutes,
+);
+apiRouter.use("/admin", adminRoutes);
+apiRouter.use("/billing", billingRoutes);
+apiRouter.use("/knowledge", knowledgeRoutes);
+apiRouter.use("/scheduler", schedulerRoutes);
+apiRouter.use("/integrations/google", googleCalendarRoutes);
+apiRouter.use("/integrations/outlook", outlookCalendarRoutes);
+apiRouter.use("/canned-responses", cannedResponseRoutes);
+apiRouter.use("/bots", botsRoutes);
 // Additive Phase-6 endpoint on the same base (own router, won't touch bots CRUD).
-apiRouter.use('/bots', skillReadinessRoutes);
-apiRouter.use('/demand-signals', demandSignalsRoutes);
-apiRouter.use('/leads', leadsRoutes);
-apiRouter.use('/entitlements', entitlementsRoutes);
-apiRouter.use('/faq', faqRoutes);
-apiRouter.use('/tenants/me', aiSettingsRoutes);
-apiRouter.use('/tenants/me', widgetAppearanceRoutes);
-apiRouter.use('/tenants/me', integrationsRoutes);
-apiRouter.use('/tenants/me', featureTogglesRoutes);
-apiRouter.use('/tenants/me', accountInformationRoutes);
+apiRouter.use("/bots", skillReadinessRoutes);
+apiRouter.use("/demand-signals", demandSignalsRoutes);
+apiRouter.use("/leads", leadsRoutes);
+apiRouter.use("/entitlements", entitlementsRoutes);
+apiRouter.use("/faq", faqRoutes);
+apiRouter.use("/tenants/me", aiSettingsRoutes);
+apiRouter.use("/tenants/me", widgetAppearanceRoutes);
+apiRouter.use("/tenants/me", integrationsRoutes);
+apiRouter.use("/tenants/me", featureTogglesRoutes);
+apiRouter.use("/tenants/me", accountInformationRoutes);
 // The WRITER for tenant.settings.eventWebhooks, which the emitter has always read
 // but which nothing could populate until now.
-apiRouter.use('/tenants/me/event-webhooks', eventWebhooksRoutes);
-apiRouter.use('/tenants', skillsRoutes);
-apiRouter.use('/tenants', automationsRoutes);
+apiRouter.use("/tenants/me/event-webhooks", eventWebhooksRoutes);
+apiRouter.use("/tenants", skillsRoutes);
+apiRouter.use("/tenants", automationsRoutes);
 
-app.use('/api/v1', apiRouter);
+app.use("/api/v1", apiRouter);
 
 // Sentry error handler (must be before other error handlers)
 Sentry.setupExpressErrorHandler(app);
@@ -364,23 +435,25 @@ app.use(errorHandler);
 // Boot sequence
 async function startServer(): Promise<void> {
   try {
-    logger.info('Starting Chatbot Platform API...');
+    logger.info("Starting Chatbot Platform API...");
 
     await AppDataSource.initialize();
-    logger.info('Database connection established');
+    logger.info("Database connection established");
 
     // Run pending migrations on startup — skipped when the schema is built from
     // entities via DB_SYNCHRONIZE (local dev; migrate-from-scratch isn't supported).
-    if (process.env.DB_SYNCHRONIZE === 'true') {
-      logger.info('DB_SYNCHRONIZE=true — schema synchronized from entities; skipping migrations');
+    if (process.env.DB_SYNCHRONIZE === "true") {
+      logger.info(
+        "DB_SYNCHRONIZE=true — schema synchronized from entities; skipping migrations",
+      );
     } else {
       const pending = await AppDataSource.showMigrations();
       if (pending) {
-        logger.info('Running pending database migrations...');
+        logger.info("Running pending database migrations...");
         await AppDataSource.runMigrations();
-        logger.info('Database migrations completed');
+        logger.info("Database migrations completed");
       } else {
-        logger.info('Database schema is up to date');
+        logger.info("Database schema is up to date");
       }
     }
 
@@ -389,60 +462,99 @@ async function startServer(): Promise<void> {
     // its corpus, and silent fall-through would deliver "I don't know"
     // to every question.
     {
-      const { hydrateCopilotDocs } = await import('./copilot/hydrate');
+      const { hydrateCopilotDocs } = await import("./copilot/hydrate");
       await hydrateCopilotDocs(AppDataSource);
     }
 
     await initializeRedis();
     if (config.server.isProduction && !isRedisAvailable()) {
-      logger.warn('Redis unavailable in production — continuing with optional Redis features disabled');
+      logger.warn(
+        "Redis unavailable in production — continuing with optional Redis features disabled",
+      );
     }
 
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)
     try {
-      const { initializeQueues } = await import('./queue/message-queue');
+      const { initializeQueues } = await import("./queue/message-queue");
       await initializeQueues();
-      logger.info('Message queue initialized');
+      logger.info("Message queue initialized");
     } catch (err) {
-      logger.warn('Queue initialization failed, falling back to synchronous processing', { error: err });
+      logger.warn(
+        "Queue initialization failed, falling back to synchronous processing",
+        { error: err },
+      );
     }
 
     // Register knowledge ingestion processor
     try {
-      const { registerProcessor } = await import('./queue/message-queue');
-      const { createIngestionProcessor } = await import('./knowledge/ingestion.worker');
-      const { createS3Client } = await import('./config/s3.config');
+      const { registerProcessor } = await import("./queue/message-queue");
+      const { createIngestionProcessor } = await import(
+        "./knowledge/ingestion.worker"
+      );
+      const { createS3Client } = await import("./config/s3.config");
       const s3Client = config.s3?.bucket ? createS3Client() : null;
-      registerProcessor('knowledge-processing', createIngestionProcessor(AppDataSource, s3Client));
-      logger.info('Knowledge ingestion processor registered');
+      registerProcessor(
+        "knowledge-processing",
+        createIngestionProcessor(AppDataSource, s3Client),
+      );
+      logger.info("Knowledge ingestion processor registered");
 
-      const { createNotificationProcessor } = await import('./notifications/notification.worker');
-      registerProcessor('notifications', createNotificationProcessor(AppDataSource));
-      logger.info('Notification push processor registered');
+      // Interim path: the API also consumes crawls (HTML fetch fallback,
+      // no Chromium) until the dedicated worker service built from
+      // Dockerfile.website-crawl runs against the same Redis.
+      const { createWebsiteCrawlProcessor, WEBSITE_CRAWL_QUEUE } = await import(
+        "./knowledge/website-crawl.worker"
+      );
+      registerProcessor(
+        WEBSITE_CRAWL_QUEUE,
+        createWebsiteCrawlProcessor(AppDataSource),
+      );
+      logger.info("Website crawl processor registered");
 
-      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./booking/booking-providers/reminders');
+      const { createNotificationProcessor } = await import(
+        "./notifications/notification.worker"
+      );
+      registerProcessor(
+        "notifications",
+        createNotificationProcessor(AppDataSource),
+      );
+      logger.info("Notification push processor registered");
+
+      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import(
+        "./booking/booking-providers/reminders"
+      );
       registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());
-      logger.info('Booking reminder processor registered');
+      logger.info("Booking reminder processor registered");
 
       // Message turn coalescer (burst debounce). The processor has a deps-ready
       // guard, so registering it before forwarding/agent init (below) is safe —
       // an early job re-arms until those are wired.
-      const { TURN_COALESCE_QUEUE, coalesceProcessor } = await import('./services/turn-coalescer');
+      const { TURN_COALESCE_QUEUE, coalesceProcessor } = await import(
+        "./services/turn-coalescer"
+      );
       registerProcessor(TURN_COALESCE_QUEUE, coalesceProcessor);
-      logger.info('Turn coalescer processor registered');
+      logger.info("Turn coalescer processor registered");
     } catch (err) {
-      logger.warn('Knowledge ingestion processor registration failed', { error: err });
+      logger.warn("Knowledge ingestion processor registration failed", {
+        error: err,
+      });
     }
 
     // Register Stripe billing provider — boot env validation already
     // guaranteed the secret/webhook/price IDs are present outside test.
     try {
-      const { StripeBillingProvider } = await import('./billing/providers/stripe');
-      const { registerBillingProvider } = await import('./billing/provider-registry');
+      const { StripeBillingProvider } = await import(
+        "./billing/providers/stripe"
+      );
+      const { registerBillingProvider } = await import(
+        "./billing/provider-registry"
+      );
       registerBillingProvider(new StripeBillingProvider());
-      logger.info('Stripe billing provider registered');
+      logger.info("Stripe billing provider registered");
     } catch (err) {
-      logger.error('Stripe billing provider registration failed', { error: err });
+      logger.error("Stripe billing provider registration failed", {
+        error: err,
+      });
       if (config.server.isProduction) {
         throw err;
       }
@@ -453,33 +565,41 @@ async function startServer(): Promise<void> {
 
     // Initialize platform agent service
     try {
-      const { getRedisClient } = await import('./config/redis');
+      const { getRedisClient } = await import("./config/redis");
       const redisClient = getRedisClient();
       const toolRegistry = new ToolRegistry();
       const promptBuilder = new PromptBuilder();
       const metering = new MeteringService(redisClient as any);
       const traceLogger = new TraceLogger();
-      const agentSvc = new AgentService(toolRegistry, promptBuilder, metering, traceLogger);
+      const agentSvc = new AgentService(
+        toolRegistry,
+        promptBuilder,
+        metering,
+        traceLogger,
+      );
       initializeAgentService(agentSvc);
-      logger.info('Platform agent service initialized');
+      logger.info("Platform agent service initialized");
     } catch (err) {
-      logger.warn('Platform agent initialization failed — agent path disabled', { error: err });
+      logger.warn(
+        "Platform agent initialization failed — agent path disabled",
+        { error: err },
+      );
     }
 
     // Initialize automation engine
     try {
-      const { initializeAutomations } = await import('./automations');
+      const { initializeAutomations } = await import("./automations");
       initializeAutomations();
-      logger.info('Automation engine initialized');
+      logger.info("Automation engine initialized");
     } catch (err) {
-      logger.warn('Automation engine initialization failed', { error: err });
+      logger.warn("Automation engine initialization failed", { error: err });
     }
 
     // Internal RAG search endpoint for n8n (independent of webhook module)
-    apiRouter.use('/internal/rag', ragSearchRoutes);
+    apiRouter.use("/internal/rag", ragSearchRoutes);
 
     // Internal booking endpoints for n8n
-    apiRouter.use('/internal/booking', bookingRoutes);
+    apiRouter.use("/internal/booking", bookingRoutes);
 
     initializeSocketIO(httpServer);
 
@@ -490,10 +610,12 @@ async function startServer(): Promise<void> {
     registerChannelAdapter(whatsappAdapter);
     registerIntegrationProviders();
     apiRouter.use(channelWebhookRoutes);
-    apiRouter.use('/channels', channelManagementRoutes);
-    apiRouter.use('/channels/meta/oauth', metaOAuthRoutes); // Authenticated routes (url, pages, connect)
+    apiRouter.use("/channels", channelManagementRoutes);
+    apiRouter.use("/channels/meta/oauth", metaOAuthRoutes); // Authenticated routes (url, pages, connect)
     // Note: OAuth callback mounted at app level before Clerk for unauthenticated Facebook redirect
-    logger.info('Channel adapters registered: telegram, messenger, instagram, whatsapp');
+    logger.info(
+      "Channel adapters registered: telegram, messenger, instagram, whatsapp",
+    );
 
     // Cleanup old webhook event logs and message deliveries (7-day retention)
     const cleanupChannelLogs = async () => {
@@ -508,7 +630,7 @@ async function startServer(): Promise<void> {
           [cutoff],
         );
       } catch (error) {
-        logger.error('Channel event log cleanup failed', { error });
+        logger.error("Channel event log cleanup failed", { error });
       }
     };
     setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000);
@@ -521,25 +643,29 @@ async function startServer(): Promise<void> {
 
         do {
           // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
-          const deletedRows = returningRows<{ id: string }>(await AppDataSource.query(
-            `DELETE FROM audit_logs WHERE id IN (
+          const deletedRows = returningRows<{ id: string }>(
+            await AppDataSource.query(
+              `DELETE FROM audit_logs WHERE id IN (
               SELECT id FROM audit_logs
               WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
               ORDER BY created_at ASC
               LIMIT 1000
             )
             RETURNING id`,
-            [config.audit.retentionDays]
-          ));
+              [config.audit.retentionDays],
+            ),
+          );
           batchDeleted = deletedRows.length;
           totalDeleted += batchDeleted;
         } while (batchDeleted === 1000);
 
         if (totalDeleted > 0) {
-          logger.info('Audit log cleanup complete', { deletedCount: totalDeleted });
+          logger.info("Audit log cleanup complete", {
+            deletedCount: totalDeleted,
+          });
         }
       } catch (error) {
-        logger.error('Audit log cleanup failed', { error });
+        logger.error("Audit log cleanup failed", { error });
       }
     };
 
@@ -558,11 +684,12 @@ async function startServer(): Promise<void> {
         let batchClosed: number;
         let batches = 0;
         do {
-          const rows = returningRows<{ id: string }>(await AppDataSource.query(
-            // Bulk sweep, deliberately NOT per-row through the command service
-            // (thousands of rows). ownership + version move in the SAME statement
-            // so the columns can never desync and an in-flight AI commit is fenced.
-            `UPDATE chat_sessions
+          const rows = returningRows<{ id: string }>(
+            await AppDataSource.query(
+              // Bulk sweep, deliberately NOT per-row through the command service
+              // (thousands of rows). ownership + version move in the SAME statement
+              // so the columns can never desync and an in-flight AI commit is fenced.
+              `UPDATE chat_sessions
              SET status = 'closed', ownership = 'closed',
                  ownership_version = ownership_version + 1,
                  ended_at = NOW(), updated_at = NOW()
@@ -578,12 +705,16 @@ async function startServer(): Promise<void> {
                FOR UPDATE SKIP LOCKED
              )
              RETURNING id`,
-            [cutoff, STALE_BATCH_SIZE]
-          ));
+              [cutoff, STALE_BATCH_SIZE],
+            ),
+          );
           batchClosed = rows.length;
           totalClosed += batchClosed;
           batches++;
-        } while (batchClosed === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);
+        } while (
+          batchClosed === STALE_BATCH_SIZE &&
+          batches < STALE_MAX_BATCHES
+        );
 
         if (totalClosed > 0) {
           logger.info(`Auto-closed ${totalClosed} stale sessions`);
@@ -597,7 +728,9 @@ async function startServer(): Promise<void> {
         // (cancelHandoff also times out the open HandoffRequest row, which the
         // old raw UPDATE left dangling as 'requested' forever).
         const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
-        const { conversationCommands } = await import('./services/conversation-command.service');
+        const { conversationCommands } = await import(
+          "./services/conversation-command.service"
+        );
         let totalReturned = 0;
         let returnedBatch: number;
         batches = 0;
@@ -608,28 +741,28 @@ async function startServer(): Promise<void> {
              AND last_activity_at < $1
              AND last_activity_at IS NOT NULL
              LIMIT $2`,
-            [handoffCutoff, STALE_BATCH_SIZE]
+            [handoffCutoff, STALE_BATCH_SIZE],
           )) as Array<{ id: string }>;
           returnedBatch = 0;
           for (const row of stale) {
             try {
-              const result = await conversationCommands.cancelHandoff(
-                row.id,
-                { kind: 'system', source: 'stale_handoff_sweep' },
-              );
-              if (result.outcome === 'cancelled') {
+              const result = await conversationCommands.cancelHandoff(row.id, {
+                kind: "system",
+                source: "stale_handoff_sweep",
+              });
+              if (result.outcome === "cancelled") {
                 returnedBatch++;
                 // B-PR3a: normalized ownership event, post-commit — a swept
                 // conversation must leave the operators' pending list live.
                 const { emitConversationUpsertForSession } = await import(
-                  './realtime/conversation-events'
+                  "./realtime/conversation-events"
                 );
                 await emitConversationUpsertForSession(row.id);
               }
             } catch (err) {
               // A concurrent claim/close between SELECT and cancel is expected;
               // the command's own state checks make the sweep re-entrant.
-              logger.debug('Stale handoff sweep skipped a session', {
+              logger.debug("Stale handoff sweep skipped a session", {
                 sessionId: row.id,
                 error: err instanceof Error ? err.message : String(err),
               });
@@ -637,13 +770,18 @@ async function startServer(): Promise<void> {
           }
           totalReturned += returnedBatch;
           batches++;
-        } while (returnedBatch === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);
+        } while (
+          returnedBatch === STALE_BATCH_SIZE &&
+          batches < STALE_MAX_BATCHES
+        );
 
         if (totalReturned > 0) {
-          logger.info(`Auto-returned ${totalReturned} stale handoff sessions to bot`);
+          logger.info(
+            `Auto-returned ${totalReturned} stale handoff sessions to bot`,
+          );
         }
       } catch (error) {
-        logger.error('Stale session cleanup failed', { error });
+        logger.error("Stale session cleanup failed", { error });
       }
     };
     setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
@@ -659,10 +797,12 @@ async function startServer(): Promise<void> {
     // worker must not exist (the codex-locked ordering that gated B-PR2b).
     const sweepTimedControl = async () => {
       try {
-        const { sweepExpiredTimedControl } = await import('./services/timed-control-expiry.service');
+        const { sweepExpiredTimedControl } = await import(
+          "./services/timed-control-expiry.service"
+        );
         await sweepExpiredTimedControl();
       } catch (error) {
-        logger.error('Timed-control expiry sweep failed', { error });
+        logger.error("Timed-control expiry sweep failed", { error });
       }
     };
     setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
@@ -675,10 +815,12 @@ async function startServer(): Promise<void> {
     // (FOR UPDATE SKIP LOCKED claims disjoint rows).
     const sweepHandoffOutboxTick = async () => {
       try {
-        const { sweepHandoffOutbox } = await import('./notifications/notification-outbox.worker');
+        const { sweepHandoffOutbox } = await import(
+          "./notifications/notification-outbox.worker"
+        );
         await sweepHandoffOutbox();
       } catch (error) {
-        logger.error('Handoff-notification outbox sweep failed', { error });
+        logger.error("Handoff-notification outbox sweep failed", { error });
       }
     };
     setInterval(sweepHandoffOutboxTick, 30 * 1000); // Run every 30 seconds
@@ -687,18 +829,23 @@ async function startServer(): Promise<void> {
     // platform LLM budget, and a background pass on this budget previously caused
     // customer-facing 429s on live replies. Enable per-environment only after the
     // abstain-rate metrics are being watched. Mirrors TURN_COALESCER_ENABLED.
-    if (process.env.LEAD_ENRICHMENT_ENABLED === 'true') {
-      const { runLeadEnrichmentSweep } = await import('./leads/enrichment/enrich-lead.job');
+    if (process.env.LEAD_ENRICHMENT_ENABLED === "true") {
+      const { runLeadEnrichmentSweep } = await import(
+        "./leads/enrichment/enrich-lead.job"
+      );
       // 5-minute tick; the job is internally sequential and re-entrancy-guarded, so a
       // slow sweep can never overlap itself.
-      setInterval(() => {
-        void runLeadEnrichmentSweep().catch((err) => {
-          logger.error('[lead-enrich] sweep failed', {
-            error: err instanceof Error ? err.message : String(err),
+      setInterval(
+        () => {
+          void runLeadEnrichmentSweep().catch((err) => {
+            logger.error("[lead-enrich] sweep failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-        });
-      }, 5 * 60 * 1000);
-      logger.info('[lead-enrich] sweep enabled (5m tick)');
+        },
+        5 * 60 * 1000,
+      );
+      logger.info("[lead-enrich] sweep enabled (5m tick)");
     }
 
     // Cleanup old agent traces (30-day retention)
@@ -707,10 +854,10 @@ async function startServer(): Promise<void> {
         const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         await AppDataSource.query(
           `DELETE FROM agent_traces WHERE created_at < $1`,
-          [cutoff]
+          [cutoff],
         );
       } catch (error) {
-        logger.error('Agent trace cleanup failed', { error });
+        logger.error("Agent trace cleanup failed", { error });
       }
     };
     setInterval(cleanupAgentTraces, 24 * 60 * 60 * 1000); // Daily
@@ -721,10 +868,12 @@ async function startServer(): Promise<void> {
     // Erasure is per-tenant opt-in via `settings.leadRetentionDays`; unset = keep.
     const sweepRetention = async () => {
       try {
-        const { sweepLeadRetention } = await import('./leads/lead-retention.service');
+        const { sweepLeadRetention } = await import(
+          "./leads/lead-retention.service"
+        );
         await sweepLeadRetention();
       } catch (err) {
-        logger.error('[lead-retention] sweep failed', {
+        logger.error("[lead-retention] sweep failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -743,13 +892,12 @@ async function startServer(): Promise<void> {
     // interval, so a redeploy does not leave it silent until the first tick.
     const travelHealth = async () => {
       try {
-        const { runTravelHealthCheck, reconcileObservedDegradation } = await import(
-          './booking/travel/travel-health'
-        );
+        const { runTravelHealthCheck, reconcileObservedDegradation } =
+          await import("./booking/travel/travel-health");
         await runTravelHealthCheck();
         await reconcileObservedDegradation();
       } catch (err) {
-        logger.error('[travel-health] check failed', {
+        logger.error("[travel-health] check failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -761,10 +909,12 @@ async function startServer(): Promise<void> {
     // detector alone would only ever catch the cases that arrive after it.
     const sweepSharedItineraries = async () => {
       try {
-        const { reconcileSharedItineraries } = await import('./booking/travel/travel-health');
+        const { reconcileSharedItineraries } = await import(
+          "./booking/travel/travel-health"
+        );
         await reconcileSharedItineraries();
       } catch (err) {
-        logger.error('[travel-health] shared-itinerary reconciliation failed', {
+        logger.error("[travel-health] shared-itinerary reconciliation failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -781,7 +931,9 @@ async function startServer(): Promise<void> {
     // THE INTERVAL IS NOT SET HERE, unlike every sweep above it. The age at which this one
     // deletes is derived from how often it runs, so the two numbers cannot live in different
     // files — see `startCoordinateExpirySweep`.
-    const { startCoordinateExpirySweep } = await import('./booking/travel/coordinate-retention.service');
+    const { startCoordinateExpirySweep } = await import(
+      "./booking/travel/coordinate-retention.service"
+    );
     startCoordinateExpirySweep();
 
     // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
@@ -794,10 +946,12 @@ async function startServer(): Promise<void> {
     // a feature that does not work.
     const sweepRepeats = async () => {
       try {
-        const { sweepRepeatCustomers } = await import('./leads/repeat-detection.service');
+        const { sweepRepeatCustomers } = await import(
+          "./leads/repeat-detection.service"
+        );
         await sweepRepeatCustomers();
       } catch (err) {
-        logger.error('[lead-repeat] sweep failed', {
+        logger.error("[lead-repeat] sweep failed", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -810,23 +964,30 @@ async function startServer(): Promise<void> {
     setInterval(sweepRepeats, 24 * 60 * 60 * 1000); // Daily
 
     // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
-    const { reconcilePendingBookingSyncs } = await import('./scheduler/sync-reconciler');
-    setInterval(() => {
-      reconcilePendingBookingSyncs().catch((error) =>
-        logger.error('Booking sync reconciliation failed', { error })
-      );
-    }, 5 * 60 * 1000); // Every 5 minutes
+    const { reconcilePendingBookingSyncs } = await import(
+      "./scheduler/sync-reconciler"
+    );
+    setInterval(
+      () => {
+        reconcilePendingBookingSyncs().catch((error) =>
+          logger.error("Booking sync reconciliation failed", { error }),
+        );
+      },
+      5 * 60 * 1000,
+    ); // Every 5 minutes
 
     // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
     // silently-broken one (expired token, revoked permission, page disconnect)
     // flips to error + notifies even with no outbound traffic to trigger the
     // reactive probe. Ships DARK: opt-in via CHANNEL_HEALTH_SWEEP_ENABLED. Reuses
     // the debounced probe path (Redis NX dedupe), first run delayed past boot.
-    if (process.env.CHANNEL_HEALTH_SWEEP_ENABLED === 'true') {
-      const { sweepStaleChannels } = await import('./channels/health-check.service');
+    if (process.env.CHANNEL_HEALTH_SWEEP_ENABLED === "true") {
+      const { sweepStaleChannels } = await import(
+        "./channels/health-check.service"
+      );
       const runChannelSweep = () =>
         sweepStaleChannels().catch((error) =>
-          logger.error('Channel health sweep failed', { error })
+          logger.error("Channel health sweep failed", { error }),
         );
       setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
       setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
@@ -839,13 +1000,13 @@ async function startServer(): Promise<void> {
     // itself. Alerts only on a state CHANGE, so a standing outage sends one email,
     // not one per tick. Opt-out rather than opt-in: the failure it catches is
     // total, so the safe default is on.
-    if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== 'false') {
-      const { runProviderHealthCheck } = await import('./llm/provider-health');
+    if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== "false") {
+      const { runProviderHealthCheck } = await import("./llm/provider-health");
       const runProbe = () =>
         runProviderHealthCheck().catch((error) =>
           // runProviderHealthCheck never throws by design; this is belt-and-braces
           // so a probe bug can never take down the boot sequence.
-          logger.error('Provider health probe failed', { error }),
+          logger.error("Provider health probe failed", { error }),
         );
       setTimeout(runProbe, 60 * 1000); // first run 1 min after boot, once warm
       setInterval(runProbe, 5 * 60 * 1000);
@@ -855,19 +1016,26 @@ async function startServer(): Promise<void> {
     // unacknowledged past the SLA so enforce-driven pauses/handoffs aren't silently
     // abandoned. Ships DARK: opt-in via SLA_SWEEP_ENABLED (enable once B1 desktop
     // delivery is confirmed). Bucketed + capped so it can't spam.
-    if (process.env.SLA_SWEEP_ENABLED === 'true') {
-      const { sweepOverdueHandoffsAndPauses } = await import('./notifications/sla-sweep');
-      setInterval(() => {
-        sweepOverdueHandoffsAndPauses().catch((error) =>
-          logger.error('SLA sweep failed', { error })
-        );
-      }, 5 * 60 * 1000); // every 5 minutes
+    if (process.env.SLA_SWEEP_ENABLED === "true") {
+      const { sweepOverdueHandoffsAndPauses } = await import(
+        "./notifications/sla-sweep"
+      );
+      setInterval(
+        () => {
+          sweepOverdueHandoffsAndPauses().catch((error) =>
+            logger.error("SLA sweep failed", { error }),
+          );
+        },
+        5 * 60 * 1000,
+      ); // every 5 minutes
     }
 
     // Nightly Insights refresh — judges closed/handoff sessions and
     // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
     // gapInsights Feature per ADR-0013).
-    const { registerInsightsRefreshJob } = await import('./insights/refresh-insights.job');
+    const { registerInsightsRefreshJob } = await import(
+      "./insights/refresh-insights.job"
+    );
     registerInsightsRefreshJob();
 
     const PORT = config.server.port;
@@ -876,7 +1044,7 @@ async function startServer(): Promise<void> {
       logger.info(`Health check: http://localhost:${PORT}/health`);
     });
   } catch (error) {
-    logger.error('Failed to start server:', error);
+    logger.error("Failed to start server:", error);
     process.exit(1);
   }
 }
@@ -891,40 +1059,40 @@ async function shutdown(signal: string): Promise<void> {
 
   // Force exit after 30s if graceful shutdown stalls
   const forceExit = setTimeout(() => {
-    logger.error('Graceful shutdown timed out, forcing exit');
+    logger.error("Graceful shutdown timed out, forcing exit");
     process.exit(1);
   }, 30000);
 
   httpServer.close(() => {
-    logger.info('HTTP server stopped accepting new connections');
+    logger.info("HTTP server stopped accepting new connections");
   });
 
   try {
     if (AppDataSource.isInitialized) await AppDataSource.destroy();
     await closeRedis();
     clearTimeout(forceExit);
-    logger.info('Graceful shutdown completed');
+    logger.info("Graceful shutdown completed");
     process.exit(0);
   } catch (error) {
-    logger.error('Error during shutdown:', error);
+    logger.error("Error during shutdown:", error);
     clearTimeout(forceExit);
     process.exit(1);
   }
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception:', err);
-  shutdown('uncaughtException');
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught exception:", err);
+  shutdown("uncaughtException");
 });
-process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled rejection:', reason);
-  shutdown('unhandledRejection');
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled rejection:", reason);
+  shutdown("unhandledRejection");
 });
 
 // Only start the server when running directly (not when imported by tests)
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== "test") {
   startServer();
 }
 export { app };

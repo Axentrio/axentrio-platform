@@ -1,15 +1,15 @@
-import { DataSource } from 'typeorm';
-import { KnowledgeDocument } from '../database/entities/KnowledgeDocument';
-import { KnowledgeBase } from '../database/entities/KnowledgeBase';
-import { extractText } from './document-extractors/text.extractor';
-import { extractPdf } from './document-extractors/pdf.extractor';
-import { extractDocx } from './document-extractors/docx.extractor';
-import { chunkText } from './chunking.service';
-import { embed, embedBatch } from './embedding.service';
-import { preprocess } from './content-preprocessor.service';
-import { config } from '../config/environment';
-import { logger } from '../utils/logger';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { DataSource } from "typeorm";
+import { KnowledgeDocument } from "../database/entities/KnowledgeDocument";
+import { KnowledgeBase } from "../database/entities/KnowledgeBase";
+import { extractText } from "./document-extractors/text.extractor";
+import { extractPdf } from "./document-extractors/pdf.extractor";
+import { extractDocx } from "./document-extractors/docx.extractor";
+import { chunkText } from "./chunking.service";
+import { embed, embedBatch } from "./embedding.service";
+import { preprocess } from "./content-preprocessor.service";
+import { config } from "../config/environment";
+import { logger } from "../utils/logger";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
 interface IngestionJobData {
   documentId: string;
@@ -17,7 +17,10 @@ interface IngestionJobData {
   processingVersion: number;
 }
 
-export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Client | null) {
+export function createIngestionProcessor(
+  dataSource: DataSource,
+  s3Client: S3Client | null,
+) {
   const docRepo = dataSource.getRepository(KnowledgeDocument);
   const kbRepo = dataSource.getRepository(KnowledgeBase);
 
@@ -32,15 +35,18 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
     }
 
     try {
-      doc.status = 'processing';
+      doc.status = "processing";
       await docRepo.save(doc);
 
       let text: string;
-      if (doc.type === 'text' || doc.type === 'faq') {
-        text = extractText(doc.sourceContent || '');
+      const inlineTypes: ReadonlySet<string> = new Set(["text", "faq", "url"]);
+      if (inlineTypes.has(doc.type)) {
+        text = extractText(doc.sourceContent || "");
       } else if (doc.storagePath) {
         if (!s3Client || !config.s3?.bucket) {
-          throw new Error('S3 is not configured but document requires file download');
+          throw new Error(
+            "S3 is not configured but document requires file download",
+          );
         }
         const command = new GetObjectCommand({
           Bucket: config.s3.bucket,
@@ -49,7 +55,7 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
         const response = await s3Client.send(command);
         const buffer = Buffer.from(await response.Body!.transformToByteArray());
 
-        if (doc.type === 'pdf') {
+        if (doc.type === "pdf") {
           text = await extractPdf(buffer);
         } else {
           text = await extractDocx(buffer);
@@ -59,52 +65,76 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
       }
 
       if (!text.trim()) {
-        throw new Error('No text content found');
+        throw new Error("No text content found");
       }
 
       if (text.length > config.rag.maxExtractedChars) {
         text = text.slice(0, config.rag.maxExtractedChars);
-        logger.warn(`Document ${documentId} text truncated to ${config.rag.maxExtractedChars} chars`);
+        logger.warn(
+          `Document ${documentId} text truncated to ${config.rag.maxExtractedChars} chars`,
+        );
       }
 
       // Preprocess: classify and transform content
       const preprocessResult = await preprocess(text);
       const processedText = preprocessResult.transformedText;
-      logger.info(`[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})`);
+      logger.info(
+        `[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})`,
+      );
 
       // Re-check for stale job after LLM preprocessing
-      const freshCheckAfterPreprocess = await docRepo.findOne({ where: { id: documentId, tenantId } });
-      if (!freshCheckAfterPreprocess || freshCheckAfterPreprocess.processingVersion !== processingVersion) {
-        logger.info(`Stale job for document ${documentId} after preprocessing, discarding`);
+      const freshCheckAfterPreprocess = await docRepo.findOne({
+        where: { id: documentId, tenantId },
+      });
+      if (
+        !freshCheckAfterPreprocess ||
+        freshCheckAfterPreprocess.processingVersion !== processingVersion
+      ) {
+        logger.info(
+          `Stale job for document ${documentId} after preprocessing, discarding`,
+        );
         return;
       }
 
       // Guard against empty output from preprocessing
       if (!processedText.trim()) {
-        doc.status = 'indexed';
+        doc.status = "indexed";
         doc.chunkCount = 0;
         doc.errorMessage = null;
-        doc.qualityReport = { ...preprocessResult.qualityReport, chunksCreated: 0 };
+        doc.qualityReport = {
+          ...preprocessResult.qualityReport,
+          chunksCreated: 0,
+        };
         await docRepo.save(doc);
-        logger.warn(`[Ingestion] Document ${documentId} produced no usable content after preprocessing`);
+        logger.warn(
+          `[Ingestion] Document ${documentId} produced no usable content after preprocessing`,
+        );
         return;
       }
 
       // Multi-bot: fetch the document's OWN KnowledgeBase (a tenant may now
       // have several), not "the tenant's KB".
-      const kb = await kbRepo.findOneOrFail({ where: { id: doc.knowledgeBaseId } });
+      const kb = await kbRepo.findOneOrFail({
+        where: { id: doc.knowledgeBaseId },
+      });
       let chunks = chunkText(processedText, kb.chunkSize, kb.chunkOverlap);
 
       if (chunks.length > config.rag.maxChunksPerDoc) {
-        logger.warn(`Document ${documentId} capped at ${config.rag.maxChunksPerDoc} chunks (had ${chunks.length})`);
+        logger.warn(
+          `Document ${documentId} capped at ${config.rag.maxChunksPerDoc} chunks (had ${chunks.length})`,
+        );
         chunks = chunks.slice(0, config.rag.maxChunksPerDoc);
       }
 
       const embeddings = await embedBatch(chunks.map((c) => c.content));
 
-      const freshDoc = await docRepo.findOne({ where: { id: documentId, tenantId } });
+      const freshDoc = await docRepo.findOne({
+        where: { id: documentId, tenantId },
+      });
       if (!freshDoc || freshDoc.processingVersion !== processingVersion) {
-        logger.info(`Document ${documentId} version changed during embedding, discarding`);
+        logger.info(
+          `Document ${documentId} version changed during embedding, discarding`,
+        );
         return;
       }
 
@@ -113,10 +143,14 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
       const summaryContent = summaryText
         ? `[Document: ${doc.title}] ${summaryText}`
         : `[Document: ${doc.title}]`;
-      const summaryEmbedding = summaryContent.length > 10 ? await embed(summaryContent) : null;
+      const summaryEmbedding =
+        summaryContent.length > 10 ? await embed(summaryContent) : null;
 
       await dataSource.transaction(async (manager) => {
-        await manager.query(`DELETE FROM knowledge_chunks WHERE "documentId" = $1`, [documentId]);
+        await manager.query(
+          `DELETE FROM knowledge_chunks WHERE "documentId" = $1`,
+          [documentId],
+        );
 
         for (let i = 0; i < chunks.length; i++) {
           await manager.query(
@@ -126,11 +160,11 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
               documentId,
               tenantId,
               chunks[i].content,
-              `[${embeddings[i].join(',')}]`,
+              `[${embeddings[i].join(",")}]`,
               chunks[i].chunkIndex,
               chunks[i].charCount,
               JSON.stringify(chunks[i].metadata),
-            ]
+            ],
           );
         }
 
@@ -143,18 +177,21 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
               documentId,
               tenantId,
               summaryContent,
-              `[${summaryEmbedding.join(',')}]`,
+              `[${summaryEmbedding.join(",")}]`,
               summaryContent.length,
-              JSON.stringify({ type: 'document_summary' }),
-            ]
+              JSON.stringify({ type: "document_summary" }),
+            ],
           );
         }
       });
 
-      doc.status = 'indexed';
+      doc.status = "indexed";
       doc.chunkCount = chunks.length;
       doc.errorMessage = null;
-      doc.qualityReport = { ...preprocessResult.qualityReport, chunksCreated: chunks.length };
+      doc.qualityReport = {
+        ...preprocessResult.qualityReport,
+        chunksCreated: chunks.length,
+      };
       await docRepo.save(doc);
 
       kb.lastIndexedAt = new Date();
@@ -163,8 +200,8 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
       logger.info(`Document ${documentId} indexed: ${chunks.length} chunks`);
     } catch (error: any) {
       logger.error(`Failed to process document ${documentId}:`, error);
-      doc.status = 'failed';
-      doc.errorMessage = error.message || 'Unknown error';
+      doc.status = "failed";
+      doc.errorMessage = error.message || "Unknown error";
       await docRepo.save(doc);
       throw error;
     }

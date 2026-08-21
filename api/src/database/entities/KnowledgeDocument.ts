@@ -6,67 +6,74 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
-} from 'typeorm';
-import { Tenant } from './Tenant';
-import { KnowledgeBase } from './KnowledgeBase';
+} from "typeorm";
+import { Tenant } from "./Tenant";
+import { KnowledgeBase } from "./KnowledgeBase";
 
-export type DocumentType = 'text' | 'faq' | 'pdf' | 'docx';
-export type DocumentStatus = 'pending' | 'processing' | 'indexed' | 'failed';
+export type DocumentType = "text" | "faq" | "pdf" | "docx" | "url";
+export type DocumentStatus = "pending" | "processing" | "indexed" | "failed";
 
-@Entity('knowledge_documents')
+@Entity("knowledge_documents")
 export class KnowledgeDocument {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column('uuid')
+  @Column("uuid")
   knowledgeBaseId!: string;
 
-  @ManyToOne(() => KnowledgeBase, (kb) => kb.documents)
-  @JoinColumn({ name: 'knowledgeBaseId' })
+  @ManyToOne(
+    () => KnowledgeBase,
+    (kb) => kb.documents,
+  )
+  @JoinColumn({ name: "knowledgeBaseId" })
   knowledgeBase!: KnowledgeBase;
 
-  @Column('uuid')
+  @Column("uuid")
   tenantId!: string;
 
   @ManyToOne(() => Tenant)
-  @JoinColumn({ name: 'tenantId' })
+  @JoinColumn({ name: "tenantId" })
   tenant!: Tenant;
 
   @Column({
-    type: 'enum',
-    enum: ['text', 'faq', 'pdf', 'docx'],
+    type: "enum",
+    enum: ["text", "faq", "pdf", "docx", "url"],
   })
   type!: DocumentType;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: "varchar" })
   title!: string;
 
-  @Column({ type: 'text', nullable: true })
+  /** Canonical page URL for type `url`. Unique per KnowledgeBase when set. */
+  @Column({ type: "varchar", nullable: true })
+  sourceUrl!: string | null;
+
+  @Column({ type: "text", nullable: true })
   sourceContent!: string | null;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: "varchar", nullable: true })
   storagePath!: string | null;
 
   @Column({
-    type: 'enum',
-    enum: ['pending', 'processing', 'indexed', 'failed'],
-    default: 'pending',
+    type: "enum",
+    enum: ["pending", "processing", "indexed", "failed"],
+    default: "pending",
   })
   status!: DocumentStatus;
 
-  @Column({ type: 'int', default: 1 })
+  @Column({ type: "int", default: 1 })
   processingVersion!: number;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: "varchar", nullable: true })
   errorMessage!: string | null;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: "int", default: 0 })
   chunkCount!: number;
 
-  @Column({ type: 'jsonb', default: {} })
-  metadata!: Record<string, any>;
+  @Column({ type: "jsonb", default: {} })
+  metadata!: Record<string, unknown>;
 
-  @Column({ type: 'jsonb', nullable: true, default: null })
+  @Column({ type: "jsonb", nullable: true, default: null })
   qualityReport!: {
     contentType: string;
     contentSummary: string;

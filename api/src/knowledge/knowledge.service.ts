@@ -1,26 +1,36 @@
-import crypto from 'crypto';
-import { DataSource, Repository, IsNull } from 'typeorm';
-import { DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { createS3Client } from '../config/s3.config';
-import { KnowledgeBase } from '../database/entities/KnowledgeBase';
-import { KnowledgeDocument, DocumentType } from '../database/entities/KnowledgeDocument';
-import { KnowledgeChunk } from '../database/entities/KnowledgeChunk';
-import { Tenant } from '../database/entities/Tenant';
-import { config } from '../config/environment';
-import { logger } from '../utils/logger';
+import crypto from "crypto";
+import { DataSource, Repository, IsNull } from "typeorm";
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { createS3Client } from "../config/s3.config";
+import { KnowledgeBase } from "../database/entities/KnowledgeBase";
+import {
+  KnowledgeDocument,
+  DocumentType,
+} from "../database/entities/KnowledgeDocument";
+import { KnowledgeChunk } from "../database/entities/KnowledgeChunk";
+import { Tenant } from "../database/entities/Tenant";
+import { config } from "../config/environment";
+import { logger } from "../utils/logger";
 
-const uploadTokens = new Map<string, { tenantId: string; storagePath: string; expiresAt: Date }>();
+const uploadTokens = new Map<
+  string,
+  { tenantId: string; storagePath: string; expiresAt: Date }
+>();
 
 // Periodically clean expired upload tokens (every 15 minutes)
-setInterval(() => {
-  const now = new Date();
-  for (const [key, val] of uploadTokens) {
-    if (val.expiresAt < now) uploadTokens.delete(key);
-  }
-}, 15 * 60 * 1000).unref();
+setInterval(
+  () => {
+    const now = new Date();
+    for (const [key, val] of uploadTokens) {
+      if (val.expiresAt < now) uploadTokens.delete(key);
+    }
+  },
+  15 * 60 * 1000,
+).unref();
 
 const DOCUMENT_LIMITS: Record<string, number> = {
   free: 50,
+  essential: 50,
   pro: 500,
   enterprise: Infinity,
 };
@@ -53,15 +63,19 @@ export class KnowledgeService {
    * partial-unique index still protects against a concurrent double-create.
    */
   async getOrCreateKnowledgeBase(tenantId: string): Promise<KnowledgeBase> {
-    let kb = await this.kbRepo.findOne({ where: { tenantId, botId: IsNull() } });
+    let kb = await this.kbRepo.findOne({
+      where: { tenantId, botId: IsNull() },
+    });
     if (!kb) {
       try {
-        kb = this.kbRepo.create({ tenantId, botId: null, status: 'inactive' });
+        kb = this.kbRepo.create({ tenantId, botId: null, status: "inactive" });
         kb = await this.kbRepo.save(kb);
       } catch (err: any) {
         // Race condition: another request created it between our findOne and save
-        if (err?.message?.includes('duplicate key') || err?.code === '23505') {
-          kb = await this.kbRepo.findOne({ where: { tenantId, botId: IsNull() } });
+        if (err?.message?.includes("duplicate key") || err?.code === "23505") {
+          kb = await this.kbRepo.findOne({
+            where: { tenantId, botId: IsNull() },
+          });
           if (!kb) throw err; // genuinely broken
         } else {
           throw err;
@@ -73,12 +87,15 @@ export class KnowledgeService {
 
   async updateKnowledgeBase(
     tenantId: string,
-    updates: Partial<Pick<KnowledgeBase, 'chunkSize' | 'chunkOverlap' | 'status'>>
+    updates: Partial<
+      Pick<KnowledgeBase, "chunkSize" | "chunkOverlap" | "status">
+    >,
   ): Promise<{ kb: KnowledgeBase; configChanged: boolean }> {
     const kb = await this.getOrCreateKnowledgeBase(tenantId);
     const configChanged =
       (updates.chunkSize !== undefined && updates.chunkSize !== kb.chunkSize) ||
-      (updates.chunkOverlap !== undefined && updates.chunkOverlap !== kb.chunkOverlap);
+      (updates.chunkOverlap !== undefined &&
+        updates.chunkOverlap !== kb.chunkOverlap);
 
     Object.assign(kb, updates);
     const saved = await this.kbRepo.save(kb);
@@ -97,15 +114,16 @@ export class KnowledgeService {
       ? await this.kbRepo.findOneOrFail({ where: { id: kbId, tenantId } })
       : await this.getOrCreateKnowledgeBase(tenantId);
     const qb = this.docRepo
-      .createQueryBuilder('doc')
-      .where('doc.knowledgeBaseId = :kbId', { kbId: kb.id });
+      .createQueryBuilder("doc")
+      .where("doc.knowledgeBaseId = :kbId", { kbId: kb.id });
 
-    if (filters?.status) qb.andWhere('doc.status = :status', { status: filters.status });
-    if (filters?.type) qb.andWhere('doc.type = :type', { type: filters.type });
+    if (filters?.status)
+      qb.andWhere("doc.status = :status", { status: filters.status });
+    if (filters?.type) qb.andWhere("doc.type = :type", { type: filters.type });
 
     const page = filters?.page || 1;
     const limit = filters?.limit || 20;
-    qb.orderBy('doc.createdAt', 'DESC')
+    qb.orderBy("doc.createdAt", "DESC")
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -119,8 +137,9 @@ export class KnowledgeService {
       type: DocumentType;
       title: string;
       sourceContent?: string;
+      sourceUrl?: string;
       uploadToken?: string;
-      metadata?: Record<string, any>;
+      metadata?: Record<string, unknown>;
     },
     kbId?: string,
   ): Promise<KnowledgeDocument> {
@@ -131,20 +150,30 @@ export class KnowledgeService {
       : await this.getOrCreateKnowledgeBase(tenantId);
 
     // Enforce tier-based document limits
-    const tenant = await this.tenantRepo.findOneOrFail({ where: { id: tenantId } });
+    const tenant = await this.tenantRepo.findOneOrFail({
+      where: { id: tenantId },
+    });
     const limit = DOCUMENT_LIMITS[tenant.tier] ?? DOCUMENT_LIMITS.free;
     if (limit !== Infinity) {
-      const docCount = await this.docRepo.count({ where: { knowledgeBaseId: kb.id } });
+      const docCount = await this.docRepo.count({
+        where: { knowledgeBaseId: kb.id },
+      });
       if (docCount >= limit) {
-        throw new Error(`Document limit reached for ${tenant.tier} tier (${limit} documents). Upgrade to add more.`);
+        throw new Error(
+          `Document limit reached for ${tenant.tier} tier (${limit} documents). Upgrade to add more.`,
+        );
       }
     }
 
     let storagePath: string | null = null;
     if (data.uploadToken) {
       const token = uploadTokens.get(data.uploadToken);
-      if (!token || token.tenantId !== tenantId || token.expiresAt < new Date()) {
-        throw new Error('Invalid or expired upload token');
+      if (
+        !token ||
+        token.tenantId !== tenantId ||
+        token.expiresAt < new Date()
+      ) {
+        throw new Error("Invalid or expired upload token");
       }
       storagePath = token.storagePath;
       uploadTokens.delete(data.uploadToken);
@@ -156,8 +185,9 @@ export class KnowledgeService {
       type: data.type,
       title: data.title,
       sourceContent: data.sourceContent || null,
+      sourceUrl: data.sourceUrl || null,
       storagePath,
-      status: 'pending',
+      status: "pending",
       processingVersion: 1,
       metadata: data.metadata || {},
     });
@@ -165,45 +195,69 @@ export class KnowledgeService {
     return this.docRepo.save(doc);
   }
 
-  async getDocument(tenantId: string, documentId: string): Promise<KnowledgeDocument | null> {
+  async getDocument(
+    tenantId: string,
+    documentId: string,
+  ): Promise<KnowledgeDocument | null> {
     return this.docRepo.findOne({ where: { id: documentId, tenantId } });
   }
 
   async updateDocument(
     tenantId: string,
     documentId: string,
-    data: { title?: string; sourceContent?: string; metadata?: Record<string, any> }
+    data: {
+      title?: string;
+      sourceContent?: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<KnowledgeDocument> {
-    const doc = await this.docRepo.findOneOrFail({ where: { id: documentId, tenantId } });
+    const doc = await this.docRepo.findOneOrFail({
+      where: { id: documentId, tenantId },
+    });
     if (data.title) doc.title = data.title;
     if (data.sourceContent) doc.sourceContent = data.sourceContent;
     if (data.metadata) doc.metadata = { ...doc.metadata, ...data.metadata };
     doc.processingVersion += 1;
-    doc.status = 'pending';
+    doc.status = "pending";
     doc.qualityReport = null;
     return this.docRepo.save(doc);
   }
 
   async deleteDocument(tenantId: string, documentId: string): Promise<void> {
-    const doc = await this.docRepo.findOneOrFail({ where: { id: documentId, tenantId } });
+    const doc = await this.docRepo.findOneOrFail({
+      where: { id: documentId, tenantId },
+    });
 
     // Delete S3 object if file-based document
     if (doc.storagePath && config.s3?.bucket) {
       try {
-        await getS3Client().send(new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: doc.storagePath }));
+        await getS3Client().send(
+          new DeleteObjectCommand({
+            Bucket: config.s3.bucket,
+            Key: doc.storagePath,
+          }),
+        );
       } catch (err) {
-        logger.warn(`Failed to delete S3 object ${doc.storagePath}`, { error: err });
+        logger.warn(`Failed to delete S3 object ${doc.storagePath}`, {
+          error: err,
+        });
       }
     }
 
     await this.docRepo.remove(doc);
   }
 
-  async retryDocument(tenantId: string, documentId: string): Promise<KnowledgeDocument> {
-    const doc = await this.docRepo.findOneOrFail({ where: { id: documentId, tenantId } });
-    if (doc.status !== 'failed') throw new Error('Only failed documents can be retried');
+  async retryDocument(
+    tenantId: string,
+    documentId: string,
+  ): Promise<KnowledgeDocument> {
+    const doc = await this.docRepo.findOneOrFail({
+      where: { id: documentId, tenantId },
+    });
+    if (doc.status !== "failed")
+      throw new Error("Only failed documents can be retried");
     doc.processingVersion += 1;
-    doc.status = 'pending';
+    doc.status = "pending";
     doc.errorMessage = null;
     doc.qualityReport = null;
     return this.docRepo.save(doc);
@@ -223,36 +277,104 @@ export class KnowledgeService {
     const kb = await this.getOrCreateKnowledgeBase(tenantId);
 
     const docCounts = await this.docRepo
-      .createQueryBuilder('doc')
-      .select('doc.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where('doc.knowledgeBaseId = :kbId', { kbId: kb.id })
-      .groupBy('doc.status')
+      .createQueryBuilder("doc")
+      .select("doc.status", "status")
+      .addSelect("COUNT(*)", "count")
+      .where("doc.knowledgeBaseId = :kbId", { kbId: kb.id })
+      .groupBy("doc.status")
       .getRawMany();
 
     const [{ count: totalChunks }] = await this.chunkRepo
-      .createQueryBuilder('chunk')
-      .select('COUNT(*)', 'count')
-      .where('chunk.tenantId = :tenantId', { tenantId })
+      .createQueryBuilder("chunk")
+      .select("COUNT(*)", "count")
+      .where("chunk.tenantId = :tenantId", { tenantId })
       .getRawMany();
 
     return {
       knowledgeBaseId: kb.id,
       status: kb.status,
       lastIndexedAt: kb.lastIndexedAt,
-      documents: Object.fromEntries(docCounts.map((r: any) => [r.status, parseInt(r.count)])),
+      documents: Object.fromEntries(
+        docCounts.map((r: any) => [r.status, parseInt(r.count)]),
+      ),
       totalChunks: parseInt(totalChunks),
     };
   }
 
-  async reprocessAllDocuments(tenantId: string, kbId: string): Promise<KnowledgeDocument[]> {
-    const docs = await this.docRepo.find({ where: { knowledgeBaseId: kbId, tenantId } });
+  async reprocessAllDocuments(
+    tenantId: string,
+    kbId: string,
+  ): Promise<KnowledgeDocument[]> {
+    const docs = await this.docRepo.find({
+      where: { knowledgeBaseId: kbId, tenantId },
+    });
     for (const doc of docs) {
       doc.processingVersion += 1;
-      doc.status = 'pending';
+      doc.status = "pending";
     }
     const saved = await this.docRepo.save(docs);
     logger.info(`Reprocessing ${docs.length} documents for tenant ${tenantId}`);
     return saved;
+  }
+
+  async resolveKnowledgeBase(tenantId: string, kbId?: string) {
+    if (kbId)
+      return this.kbRepo.findOneOrFail({ where: { id: kbId, tenantId } });
+    return this.getOrCreateKnowledgeBase(tenantId);
+  }
+
+  async remainingDocumentSlots(
+    tenantId: string,
+    kbId: string,
+  ): Promise<number> {
+    const tenant = await this.tenantRepo.findOneOrFail({
+      where: { id: tenantId },
+    });
+    const limit = DOCUMENT_LIMITS[tenant.tier] ?? DOCUMENT_LIMITS.free;
+    if (limit === Infinity) return Number.POSITIVE_INFINITY;
+    const count = await this.docRepo.count({
+      where: { knowledgeBaseId: kbId },
+    });
+    return Math.max(0, limit - count);
+  }
+
+  async upsertUrlDocument(
+    tenantId: string,
+    kbId: string,
+    page: { sourceUrl: string; title: string; text: string },
+  ): Promise<{ id: string; processingVersion: number; created: boolean }> {
+    const existing = await this.docRepo.findOne({
+      where: { knowledgeBaseId: kbId, tenantId, sourceUrl: page.sourceUrl },
+    });
+    if (existing) {
+      existing.title = page.title;
+      existing.sourceContent = page.text;
+      existing.processingVersion += 1;
+      existing.status = "pending";
+      existing.errorMessage = null;
+      existing.qualityReport = null;
+      const saved = await this.docRepo.save(existing);
+      return {
+        id: saved.id,
+        processingVersion: saved.processingVersion,
+        created: false,
+      };
+    }
+    const created = await this.createDocument(
+      tenantId,
+      {
+        type: "url",
+        title: page.title,
+        sourceContent: page.text,
+        sourceUrl: page.sourceUrl,
+        metadata: { sourceUrl: page.sourceUrl },
+      },
+      kbId,
+    );
+    return {
+      id: created.id,
+      processingVersion: created.processingVersion,
+      created: true,
+    };
   }
 }

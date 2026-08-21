@@ -1077,13 +1077,14 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "Text",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "Website"
         },
         "searchPlaceholder": "Search documents…",
         "addDocument": "Add Document",
         "empty": {
           "title": "No documents yet",
-          "descriptionAdmin": "Upload PDFs, paste text, or add FAQs so your AI bot can answer from your business information.",
+          "descriptionAdmin": "Upload PDFs, paste text, add FAQs, or import a website so your AI bot can answer from your business information.",
           "descriptionViewer": "No documents have been added to the knowledge base yet.",
           "addFirst": "Add your first document"
         },
@@ -1113,11 +1114,16 @@
         "docx": {
           "label": "DOCX",
           "description": "Upload a Word document"
+        },
+        "url": {
+          "label": "Website",
+          "description": "Import pages from your site"
         }
       },
       "modal": {
         "add": {
-          "title": "Add Document"
+          "title": "Add Document",
+          "titleWebsite": "Add Website"
         },
         "edit": {
           "title": "Edit Document"
@@ -1145,6 +1151,11 @@
             "browse": "browse",
             "maxSize": "Up to 25 MB"
           },
+          "websiteUrl": {
+            "label": "Website URL",
+            "placeholder": "https://www.your-business.com",
+            "helper": "We import pages on this site into your knowledge base."
+          },
           "content": {
             "label": "Content",
             "placeholder": {
@@ -1155,7 +1166,8 @@
         },
         "actions": {
           "saveChanges": "Save Changes",
-          "addDocument": "Add Document"
+          "addDocument": "Add Document",
+          "addWebsite": "Add Website"
         }
       },
       "card": {
@@ -1163,7 +1175,8 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "TEXT",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "WEBSITE"
         },
         "status": {
           "indexed": "Indexed",
@@ -1181,7 +1194,8 @@
         "chunks_other": "{{count}} chunks",
         "actions": {
           "retry": "Retry",
-          "retryProcessing": "Retry processing"
+          "retryProcessing": "Retry processing",
+          "refresh": "Refresh"
         }
       }
     },

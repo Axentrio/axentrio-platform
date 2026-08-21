@@ -11,15 +11,20 @@
  * dialogs can render an inline UpgradeCTA in addition to the toast.
  */
 
-import axios from 'axios';
-import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
-import { queryKeys } from './queryKeys';
-import type { SkillReadinessResponse } from '@contracts/skill-readiness';
+import axios from "axios";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
+import { api } from "../services/apiClient";
+import { queryKeys } from "./queryKeys";
+import type { SkillReadinessResponse } from "@contracts/skill-readiness";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
-export type BotStatus = 'active' | 'paused';
+export type BotStatus = "active" | "paused";
 
 export interface BotListItem {
   id: string;
@@ -48,7 +53,14 @@ export interface BotEmbedResponse {
   publicKey?: string;
 }
 
-export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+export type WeekDay =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
 
 export interface BusinessHoursDateOverride {
   date: string;
@@ -60,7 +72,12 @@ export interface BusinessHoursDateOverride {
 export interface BusinessHours {
   enabled: boolean;
   timezone?: string;
-  schedule: Array<{ day: WeekDay; open: string; close: string; closed: boolean }>;
+  schedule: Array<{
+    day: WeekDay;
+    open: string;
+    close: string;
+    closed: boolean;
+  }>;
   dateOverrides?: BusinessHoursDateOverride[];
 }
 
@@ -96,7 +113,7 @@ export const botsOptions = {
   list: () =>
     queryOptions({
       queryKey: queryKeys.bots.list(),
-      queryFn: () => api.get<BotsListResponse>('/bots'),
+      queryFn: () => api.get<BotsListResponse>("/bots"),
       staleTime: FIVE_MINUTES_MS,
     }),
   embed: (botId: string) =>
@@ -121,14 +138,17 @@ export function useBots() {
 
 export function useBotEmbed(botId: string | null | undefined) {
   return useQuery({
-    ...botsOptions.embed(botId ?? ''),
+    ...botsOptions.embed(botId ?? ""),
     enabled: !!botId,
   });
 }
 
-export function useBotDetail(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+export function useBotDetail(
+  botId: string | null | undefined,
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
-    ...botsOptions.detail(botId ?? ''),
+    ...botsOptions.detail(botId ?? ""),
     enabled: !!botId && (opts.enabled ?? true),
   });
 }
@@ -138,7 +158,8 @@ export function useBotDetail(botId: string | null | undefined, opts: { enabled?:
 export function useCreateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string }) => api.post<BotListItem>('/bots', input),
+    mutationFn: (input: { name: string }) =>
+      api.post<BotListItem>("/bots", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
     },
@@ -148,11 +169,22 @@ export function useCreateBot() {
 export function useUpdateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: Omit<BusinessHours, 'timezone'>; quotedAddress?: QuotedAddress }) =>
-      api.patch<BotListItem>(`/bots/${id}`, patch),
+    mutationFn: ({
+      id,
+      ...patch
+    }: {
+      id: string;
+      name?: string;
+      assistantName?: string;
+      status?: BotStatus;
+      businessHours?: Omit<BusinessHours, "timezone">;
+      quotedAddress?: QuotedAddress;
+    }) => api.patch<BotListItem>(`/bots/${id}`, patch),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.bots.detail(vars.id) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.bots.detail(vars.id),
+      });
     },
   });
 }
@@ -176,7 +208,7 @@ export interface PauseAllBotsResponse {
 export function usePauseAllBots() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<PauseAllBotsResponse>('/bots/pause-all'),
+    mutationFn: () => api.post<PauseAllBotsResponse>("/bots/pause-all"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.all() });
     },
@@ -186,7 +218,7 @@ export function usePauseAllBots() {
 // --- Per-bot AI settings + test chat (multi-bot config editing) ---
 
 export interface BotTestChatMessage {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
@@ -199,9 +231,12 @@ export interface BotTestChatResponse {
 }
 
 /** GET /bots/:id/ai-settings — always returns a full editable AI shape. */
-export function useBotAiSettings(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+export function useBotAiSettings(
+  botId: string | null | undefined,
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
-    queryKey: queryKeys.bots.aiSettings(botId ?? ''),
+    queryKey: queryKeys.bots.aiSettings(botId ?? ""),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     queryFn: () => api.get<any>(`/bots/${botId}/ai-settings`),
     enabled: !!botId && (opts.enabled ?? true),
@@ -215,7 +250,9 @@ export function useUpdateBotAiSettings(botId: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mutationFn: (data: any) => api.put<any>(`/bots/${botId}/ai-settings`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.bots.aiSettings(botId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.bots.aiSettings(botId),
+      });
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
     },
   });
@@ -235,7 +272,7 @@ export interface BotTemplateOption {
   skills: string[];
 }
 
-export type TemplateMode = 'and' | 'or';
+export type TemplateMode = "and" | "or";
 
 export interface BoundTemplate {
   templateId: string;
@@ -268,12 +305,20 @@ export interface BotTemplateView {
   skillNames: Record<string, string>;
   // Back-compat (primary binding) — older callers.
   binding: { templateId: string | null; templateVersion: string };
-  resolved: { resolvedVersion: number | null; body: string; pinnedButUnavailable: boolean; templateUnavailable: boolean };
+  resolved: {
+    resolvedVersion: number | null;
+    body: string;
+    pinnedButUnavailable: boolean;
+    templateUnavailable: boolean;
+  };
   publishedVersions: number[];
 }
 
 /** GET /bots/:id/templates — picker options + current binding + resolved preview. */
-export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {}) {
+export function useBotTemplates(
+  botId: string,
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: queryKeys.bots.templates(botId),
     queryFn: () => api.get<BotTemplateView>(`/bots/${botId}/templates`),
@@ -286,10 +331,14 @@ export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {})
  * templates Phase 6). Bot-specific (includes booking-readiness), unlike the
  * template view's coarser missingModules advisory.
  */
-export function useSkillReadiness(botId: string, opts: { enabled?: boolean } = {}) {
+export function useSkillReadiness(
+  botId: string,
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
-    queryKey: [...queryKeys.bots.templates(botId), 'skill-readiness'] as const,
-    queryFn: () => api.get<SkillReadinessResponse>(`/bots/${botId}/skill-readiness`),
+    queryKey: [...queryKeys.bots.templates(botId), "skill-readiness"] as const,
+    queryFn: () =>
+      api.get<SkillReadinessResponse>(`/bots/${botId}/skill-readiness`),
     enabled: !!botId && (opts.enabled ?? true),
   });
 }
@@ -299,8 +348,10 @@ export function useBindBotTemplate(botId: string) {
   const queryClient = useQueryClient();
   const key = queryKeys.bots.templates(botId);
   return useMutation({
-    mutationFn: (input: { bindings: { templateId: string; version: string }[]; mode: TemplateMode }) =>
-      api.put<BotTemplateView>(`/bots/${botId}/template`, input),
+    mutationFn: (input: {
+      bindings: { templateId: string; version: string }[];
+      mode: TemplateMode;
+    }) => api.put<BotTemplateView>(`/bots/${botId}/template`, input),
     // Reflect the new chips + AND/OR mode immediately so the UI feels instant,
     // then reconcile with the server's authoritative view — no extra refetch.
     onMutate: async (input) => {
@@ -308,7 +359,9 @@ export function useBindBotTemplate(botId: string) {
       const prev = queryClient.getQueryData<BotTemplateView>(key);
       if (prev) {
         const bindings: BoundTemplate[] = input.bindings.map((b) => {
-          const existing = prev.bindings.find((x) => x.templateId === b.templateId);
+          const existing = prev.bindings.find(
+            (x) => x.templateId === b.templateId,
+          );
           return existing
             ? { ...existing, version: b.version }
             : {
@@ -320,7 +373,11 @@ export function useBindBotTemplate(botId: string) {
                 templateUnavailable: false,
               };
         });
-        queryClient.setQueryData<BotTemplateView>(key, { ...prev, bindings, mode: input.mode });
+        queryClient.setQueryData<BotTemplateView>(key, {
+          ...prev,
+          bindings,
+          mode: input.mode,
+        });
       }
       return { prev };
     },
@@ -336,8 +393,11 @@ export function useBindBotTemplate(botId: string) {
 /** POST /bots/:id/test-chat — preview against this bot's config + attached KBs. */
 export function useBotTestChat(botId: string) {
   return useMutation({
-    mutationFn: (data: { message: string; history: BotTestChatMessage[]; useKnowledgeBase: boolean }) =>
-      api.post<BotTestChatResponse>(`/bots/${botId}/test-chat`, data),
+    mutationFn: (data: {
+      message: string;
+      history: BotTestChatMessage[];
+      useKnowledgeBase: boolean;
+    }) => api.post<BotTestChatResponse>(`/bots/${botId}/test-chat`, data),
   });
 }
 
@@ -347,19 +407,22 @@ export interface BotKnowledgeDocument {
   id: string;
   title: string;
   type: string;
-  status: 'pending' | 'processing' | 'indexed' | 'failed';
+  status: "pending" | "processing" | "indexed" | "failed";
   createdAt: string;
 }
 
 export interface BotKnowledgeState {
-  mode: 'shared' | 'dedicated';
+  mode: "shared" | "dedicated";
   kbId: string | null;
   documents: BotKnowledgeDocument[];
 }
 
-export function useBotKnowledge(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+export function useBotKnowledge(
+  botId: string | null | undefined,
+  opts: { enabled?: boolean } = {},
+) {
   return useQuery({
-    queryKey: queryKeys.bots.knowledge(botId ?? ''),
+    queryKey: queryKeys.bots.knowledge(botId ?? ""),
     queryFn: () => api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`),
     enabled: !!botId && (opts.enabled ?? true),
   });
@@ -369,7 +432,8 @@ export function useEnableDedicatedKb(botId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post(`/bots/${botId}/knowledge/dedicated`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
   });
 }
 
@@ -377,7 +441,8 @@ export function useDisableDedicatedKb(botId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.delete(`/bots/${botId}/knowledge/dedicated`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
   });
 }
 
@@ -385,19 +450,22 @@ export function useAddBotDocument(botId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: {
-      type: 'text' | 'faq' | 'pdf' | 'docx';
+      type: "text" | "faq" | "pdf" | "docx" | "url";
       title: string;
       sourceContent?: string;
       uploadToken?: string;
     }) => api.post(`/bots/${botId}/documents`, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
   });
 }
 
 export function useDeleteBotDocument(botId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (docId: string) => api.delete(`/bots/${botId}/documents/${docId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+    mutationFn: (docId: string) =>
+      api.delete(`/bots/${botId}/documents/${docId}`),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
   });
 }

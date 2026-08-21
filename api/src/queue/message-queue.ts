@@ -3,10 +3,10 @@
  * Bull-based queue with Redis backend
  */
 
-import Bull, { Job, Queue, JobOptions } from 'bull';
-import { config } from '../config/environment';
-import { logger } from '../utils/logger';
-import { IMessageProcessJob, IWebhookJob } from '../types';
+import Bull, { Job, Queue, JobOptions } from "bull";
+import { config } from "../config/environment";
+import { logger } from "../utils/logger";
+import { IMessageProcessJob, IWebhookJob } from "../types";
 
 // Queue instances
 let messageQueue: Queue | null = null;
@@ -16,6 +16,7 @@ let fileQueue: Queue | null = null;
 let knowledgeQueue: Queue | null = null;
 let bookingReminderQueue: Queue | null = null;
 let turnCoalesceQueue: Queue | null = null;
+let websiteCrawlQueue: Queue | null = null;
 let deadLetterQueue: Queue | null = null;
 
 // Fallback flag: when true, jobs are processed synchronously (no Redis)
@@ -32,7 +33,7 @@ export function isQueueSyncFallback(): boolean {
  * Create queue options
  */
 const createQueueOptions = (_queueName: string): Bull.QueueOptions => {
-  const redisOpts: Bull.QueueOptions['redis'] = config.redis.url
+  const redisOpts: Bull.QueueOptions["redis"] = config.redis.url
     ? config.redis.url
     : {
         host: config.redis.host,
@@ -46,7 +47,7 @@ const createQueueOptions = (_queueName: string): Bull.QueueOptions => {
     defaultJobOptions: {
       attempts: config.queue.maxAttempts,
       backoff: {
-        type: 'exponential',
+        type: "exponential",
         delay: config.queue.backoffDelay,
       },
       removeOnComplete: 100,
@@ -68,79 +69,119 @@ const createQueueOptions = (_queueName: string): Bull.QueueOptions => {
 export const initializeQueues = async (): Promise<void> => {
   try {
     // Message processing queue
-    messageQueue = new Bull('message-processing', createQueueOptions('message-processing'));
-
-    // Webhook queue
-    webhookQueue = new Bull('webhook-delivery', createQueueOptions('webhook-delivery'));
-
-    // Notification queue
-    notificationQueue = new Bull('notifications', createQueueOptions('notifications'));
-
-    // File processing queue
-    fileQueue = new Bull('file-processing', createQueueOptions('file-processing'));
-
-    // Knowledge processing queue
-    knowledgeQueue = new Bull('knowledge-processing', createQueueOptions('knowledge-processing'));
-
-    bookingReminderQueue = new Bull('booking-reminders', createQueueOptions('booking-reminders'));
-
-    // Turn coalescer queue (message-burst debounce)
-    turnCoalesceQueue = new Bull('turn-coalesce', createQueueOptions('turn-coalesce'));
-
-    // Dead letter queue for failed jobs
-    deadLetterQueue = new Bull('dead-letter', createQueueOptions('dead-letter'));
-
-    // Set up event handlers for all queues
-    [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, deadLetterQueue].forEach(
-      (queue) => {
-        if (!queue) return;
-
-        queue.on('completed', (job: Job) => {
-          logger.info(`Job completed`, {
-            queue: queue.name,
-            jobId: job.id,
-            type: job.data.type,
-          });
-        });
-
-        queue.on('failed', (job: Job, err: Error) => {
-          logger.error(`Job failed`, {
-            queue: queue.name,
-            jobId: job.id,
-            type: job.data.type,
-            error: err.message,
-            attempts: job.attemptsMade,
-          });
-
-          // Move to dead letter queue after max attempts
-          if (job.attemptsMade >= (job.opts.attempts || config.queue.maxAttempts)) {
-            moveToDeadLetter(job, err);
-          }
-        });
-
-        queue.on('stalled', (job: Job) => {
-          logger.warn(`Job stalled`, {
-            queue: queue.name,
-            jobId: job.id,
-            type: job.data.type,
-          });
-        });
-
-        queue.on('progress', (job: Job, progress: number) => {
-          logger.debug(`Job progress`, {
-            queue: queue.name,
-            jobId: job.id,
-            progress,
-          });
-        });
-      }
+    messageQueue = new Bull(
+      "message-processing",
+      createQueueOptions("message-processing"),
     );
 
-    logger.info('Message queues initialized successfully');
-  } catch (error) {
-    logger.warn('Failed to initialize queues — falling back to sync processing', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+    // Webhook queue
+    webhookQueue = new Bull(
+      "webhook-delivery",
+      createQueueOptions("webhook-delivery"),
+    );
+
+    // Notification queue
+    notificationQueue = new Bull(
+      "notifications",
+      createQueueOptions("notifications"),
+    );
+
+    // File processing queue
+    fileQueue = new Bull(
+      "file-processing",
+      createQueueOptions("file-processing"),
+    );
+
+    // Knowledge processing queue
+    knowledgeQueue = new Bull(
+      "knowledge-processing",
+      createQueueOptions("knowledge-processing"),
+    );
+
+    bookingReminderQueue = new Bull(
+      "booking-reminders",
+      createQueueOptions("booking-reminders"),
+    );
+
+    // Turn coalescer queue (message-burst debounce)
+    turnCoalesceQueue = new Bull(
+      "turn-coalesce",
+      createQueueOptions("turn-coalesce"),
+    );
+
+    websiteCrawlQueue = new Bull(
+      "website-crawl",
+      createQueueOptions("website-crawl"),
+    );
+
+    // Dead letter queue for failed jobs
+    deadLetterQueue = new Bull(
+      "dead-letter",
+      createQueueOptions("dead-letter"),
+    );
+
+    // Set up event handlers for all queues
+    [
+      messageQueue,
+      webhookQueue,
+      notificationQueue,
+      fileQueue,
+      knowledgeQueue,
+      websiteCrawlQueue,
+      deadLetterQueue,
+    ].forEach((queue) => {
+      if (!queue) return;
+
+      queue.on("completed", (job: Job) => {
+        logger.info(`Job completed`, {
+          queue: queue.name,
+          jobId: job.id,
+          type: job.data.type,
+        });
+      });
+
+      queue.on("failed", (job: Job, err: Error) => {
+        logger.error(`Job failed`, {
+          queue: queue.name,
+          jobId: job.id,
+          type: job.data.type,
+          error: err.message,
+          attempts: job.attemptsMade,
+        });
+
+        // Move to dead letter queue after max attempts
+        if (
+          job.attemptsMade >= (job.opts.attempts || config.queue.maxAttempts)
+        ) {
+          moveToDeadLetter(job, err);
+        }
+      });
+
+      queue.on("stalled", (job: Job) => {
+        logger.warn(`Job stalled`, {
+          queue: queue.name,
+          jobId: job.id,
+          type: job.data.type,
+        });
+      });
+
+      queue.on("progress", (job: Job, progress: number) => {
+        logger.debug(`Job progress`, {
+          queue: queue.name,
+          jobId: job.id,
+          progress,
+        });
+      });
     });
+
+    logger.info("Message queues initialized successfully");
+  } catch (error) {
+    logger.warn(
+      "Failed to initialize queues — falling back to sync processing",
+      {
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+    );
     syncFallback = true;
     // Clean up any partially created queues
     messageQueue = null;
@@ -150,6 +191,7 @@ export const initializeQueues = async (): Promise<void> => {
     knowledgeQueue = null;
     bookingReminderQueue = null;
     turnCoalesceQueue = null;
+    websiteCrawlQueue = null;
     deadLetterQueue = null;
   }
 };
@@ -178,17 +220,17 @@ const moveToDeadLetter = async (job: Job, error: Error): Promise<void> => {
         attempts: 1,
         removeOnComplete: false,
         removeOnFail: false,
-      }
+      },
     );
 
-    logger.info('Job moved to dead letter queue', {
+    logger.info("Job moved to dead letter queue", {
       originalQueue: job.queue.name,
       jobId: job.id,
     });
   } catch (err) {
-    logger.error('Failed to move job to dead letter queue', {
+    logger.error("Failed to move job to dead letter queue", {
       jobId: job.id,
-      error: err instanceof Error ? err.message : 'Unknown error',
+      error: err instanceof Error ? err.message : "Unknown error",
     });
   }
 };
@@ -198,21 +240,21 @@ const moveToDeadLetter = async (job: Job, error: Error): Promise<void> => {
  */
 export const addMessageJob = async (
   data: IMessageProcessJob,
-  options?: JobOptions
+  options?: JobOptions,
 ): Promise<Job> => {
   if (!messageQueue) {
-    throw new Error('Message queue not initialized');
+    throw new Error("Message queue not initialized");
   }
 
   return messageQueue.add(
     {
       ...data,
-      type: 'message_process' as const,
+      type: "message_process" as const,
     },
     {
       priority: 1,
       ...options,
-    }
+    },
   );
 };
 
@@ -221,22 +263,22 @@ export const addMessageJob = async (
  */
 export const addWebhookJob = async (
   data: IWebhookJob,
-  options?: JobOptions
+  options?: JobOptions,
 ): Promise<Job> => {
   if (!webhookQueue) {
-    throw new Error('Webhook queue not initialized');
+    throw new Error("Webhook queue not initialized");
   }
 
   return webhookQueue.add(
     {
-      type: 'webhook_send',
+      type: "webhook_send",
       ...data,
     },
     {
       priority: 2,
       delay: 1000, // Slight delay for batching
       ...options,
-    }
+    },
   );
 };
 
@@ -245,21 +287,21 @@ export const addWebhookJob = async (
  */
 export const addNotificationJob = async (
   data: Record<string, unknown>,
-  options?: JobOptions
+  options?: JobOptions,
 ): Promise<Job> => {
   if (!notificationQueue) {
-    throw new Error('Notification queue not initialized');
+    throw new Error("Notification queue not initialized");
   }
 
   return notificationQueue.add(
     {
-      type: 'notification_send',
+      type: "notification_send",
       ...data,
     },
     {
       priority: 3,
       ...options,
-    }
+    },
   );
 };
 
@@ -268,21 +310,21 @@ export const addNotificationJob = async (
  */
 export const addFileJob = async (
   data: Record<string, unknown>,
-  options?: JobOptions
+  options?: JobOptions,
 ): Promise<Job> => {
   if (!fileQueue) {
-    throw new Error('File queue not initialized');
+    throw new Error("File queue not initialized");
   }
 
   return fileQueue.add(
     {
-      type: 'file_process',
+      type: "file_process",
       ...data,
     },
     {
       priority: 2,
       ...options,
-    }
+    },
   );
 };
 
@@ -292,27 +334,30 @@ export const addFileJob = async (
 export async function addJob(
   queueName: string,
   data: any,
-  options?: { jobId?: string; delay?: number; attempts?: number }
+  options?: { jobId?: string; delay?: number; attempts?: number },
 ): Promise<void> {
   const queue = getQueue(queueName);
   if (!queue) throw new Error(`Queue ${queueName} not available`);
   await queue.add(data, {
     jobId: options?.jobId,
     attempts: options?.attempts ?? 3,
-    backoff: { type: 'exponential', delay: 1000 },
+    backoff: { type: "exponential", delay: 1000 },
     ...(options?.delay != null ? { delay: options.delay } : {}),
   });
 }
 
 /** Remove a queued job by id (best-effort; no-op if missing). */
-export async function removeJob(queueName: string, jobId: string): Promise<void> {
+export async function removeJob(
+  queueName: string,
+  jobId: string,
+): Promise<void> {
   const queue = getQueue(queueName);
   if (!queue) return;
   try {
     const job = await queue.getJob(jobId);
     if (job) await job.remove();
   } catch (err) {
-    logger.warn('[Queue] removeJob failed', { queueName, jobId, error: err });
+    logger.warn("[Queue] removeJob failed", { queueName, jobId, error: err });
   }
 }
 
@@ -321,51 +366,56 @@ export async function removeJob(queueName: string, jobId: string): Promise<void>
  */
 export const registerProcessor = (
   queueName: string,
-  processor: (job: Job) => Promise<void>
+  processor: (job: Job) => Promise<void>,
 ): void => {
   jobProcessors.set(queueName, processor);
 
   let queue: Queue | null = null;
   switch (queueName) {
-    case 'message-processing':
+    case "message-processing":
       queue = messageQueue;
       break;
-    case 'webhook-delivery':
+    case "webhook-delivery":
       queue = webhookQueue;
       break;
-    case 'notifications':
+    case "notifications":
       queue = notificationQueue;
       break;
-    case 'file-processing':
+    case "file-processing":
       queue = fileQueue;
       break;
-    case 'knowledge-processing':
+    case "knowledge-processing":
       queue = knowledgeQueue;
       break;
-    case 'booking-reminders':
+    case "booking-reminders":
       queue = bookingReminderQueue;
       break;
-    case 'turn-coalesce':
+    case "turn-coalesce":
       queue = turnCoalesceQueue;
+      break;
+    case "website-crawl":
+      queue = websiteCrawlQueue;
       break;
   }
 
   if (queue) {
-    queue.process(config.queue.concurrency, async (job: Job) => {
+    const concurrency =
+      queueName === "website-crawl" ? 1 : config.queue.concurrency;
+    queue.process(concurrency, async (job: Job) => {
       const jobLogger = logger.child({
         jobId: job.id,
         queue: queueName,
         type: job.data.type,
       });
 
-      jobLogger.info('Processing job');
+      jobLogger.info("Processing job");
 
       try {
         await processor(job);
-        jobLogger.info('Job processed successfully');
+        jobLogger.info("Job processed successfully");
       } catch (error) {
-        jobLogger.error('Job processing failed', {
-          error: error instanceof Error ? error.message : 'Unknown error',
+        jobLogger.error("Job processing failed", {
+          error: error instanceof Error ? error.message : "Unknown error",
         });
         throw error;
       }
@@ -380,21 +430,23 @@ export const registerProcessor = (
  */
 export const getQueue = (queueName: string): Queue | null => {
   switch (queueName) {
-    case 'message-processing':
+    case "message-processing":
       return messageQueue;
-    case 'webhook-delivery':
+    case "webhook-delivery":
       return webhookQueue;
-    case 'notifications':
+    case "notifications":
       return notificationQueue;
-    case 'file-processing':
+    case "file-processing":
       return fileQueue;
-    case 'knowledge-processing':
+    case "knowledge-processing":
       return knowledgeQueue;
-    case 'booking-reminders':
+    case "booking-reminders":
       return bookingReminderQueue;
-    case 'turn-coalesce':
+    case "turn-coalesce":
       return turnCoalesceQueue;
-    case 'dead-letter':
+    case "website-crawl":
+      return websiteCrawlQueue;
+    case "dead-letter":
       return deadLetterQueue;
     default:
       return null;
@@ -404,7 +456,9 @@ export const getQueue = (queueName: string): Queue | null => {
 /**
  * Get queue metrics
  */
-export const getQueueMetrics = async (queueName: string): Promise<{
+export const getQueueMetrics = async (
+  queueName: string,
+): Promise<{
   waiting: number;
   active: number;
   completed: number;
@@ -438,14 +492,14 @@ export const getQueueMetrics = async (queueName: string): Promise<{
  */
 export const cleanCompletedJobs = async (
   queueName: string,
-  gracePeriodMs: number = 24 * 60 * 60 * 1000
+  gracePeriodMs: number = 24 * 60 * 60 * 1000,
 ): Promise<void> => {
   const queue = getQueue(queueName);
   if (!queue) {
     throw new Error(`Queue not found: ${queueName}`);
   }
 
-  await queue.clean(gracePeriodMs, 'completed');
+  await queue.clean(gracePeriodMs, "completed");
   logger.info(`Cleaned completed jobs from queue: ${queueName}`);
 };
 
@@ -454,7 +508,7 @@ export const cleanCompletedJobs = async (
  */
 export const retryFailedJob = async (
   queueName: string,
-  jobId: string
+  jobId: string,
 ): Promise<void> => {
   const queue = getQueue(queueName);
   if (!queue) {
@@ -500,17 +554,25 @@ export const resumeQueue = async (queueName: string): Promise<void> => {
  * Close all queues
  */
 export const closeQueues = async (): Promise<void> => {
-  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, bookingReminderQueue, turnCoalesceQueue, deadLetterQueue];
+  const queues = [
+    messageQueue,
+    webhookQueue,
+    notificationQueue,
+    fileQueue,
+    knowledgeQueue,
+    bookingReminderQueue,
+    turnCoalesceQueue,
+    websiteCrawlQueue,
+    deadLetterQueue,
+  ];
 
   await Promise.all(
-    queues.map(async (queue) => {
-      if (queue) {
-        await queue.close();
-      }
-    })
+    queues
+      .filter((queue): queue is Queue => queue !== null)
+      .map((queue) => queue.close()),
   );
 
-  logger.info('All queues closed');
+  logger.info("All queues closed");
 };
 
 export default {

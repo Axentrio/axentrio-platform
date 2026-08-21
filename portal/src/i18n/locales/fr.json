@@ -1069,13 +1069,14 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "Texte",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "Site web"
         },
         "searchPlaceholder": "Rechercher des documents…",
         "addDocument": "Ajouter un document",
         "empty": {
           "title": "Aucun document pour le moment",
-          "descriptionAdmin": "Téléversez des PDF, collez du texte ou ajoutez des FAQ pour que votre bot IA réponde à partir de vos informations.",
+          "descriptionAdmin": "Téléversez des PDF, collez du texte, ajoutez des FAQ ou importez un site web pour que votre bot IA réponde à partir de vos informations.",
           "descriptionViewer": "Aucun document n'a encore été ajouté à la base de connaissances.",
           "addFirst": "Ajouter votre premier document"
         },
@@ -1105,11 +1106,16 @@
         "docx": {
           "label": "DOCX",
           "description": "Téléverser un document Word"
+        },
+        "url": {
+          "label": "Site web",
+          "description": "Importer les pages de votre site"
         }
       },
       "modal": {
         "add": {
-          "title": "Ajouter un document"
+          "title": "Ajouter un document",
+          "titleWebsite": "Ajouter un site web"
         },
         "edit": {
           "title": "Modifier le document"
@@ -1137,6 +1143,11 @@
             "browse": "parcourir",
             "maxSize": "Jusqu'à 25 Mo"
           },
+          "websiteUrl": {
+            "label": "URL du site",
+            "placeholder": "https://www.votre-entreprise.be",
+            "helper": "Nous importons les pages de ce site dans votre base de connaissances."
+          },
           "content": {
             "label": "Contenu",
             "placeholder": {
@@ -1147,7 +1158,8 @@
         },
         "actions": {
           "saveChanges": "Enregistrer les modifications",
-          "addDocument": "Ajouter un document"
+          "addDocument": "Ajouter un document",
+          "addWebsite": "Ajouter le site web"
         }
       },
       "card": {
@@ -1155,7 +1167,8 @@
           "pdf": "PDF",
           "docx": "DOCX",
           "text": "TEXTE",
-          "faq": "FAQ"
+          "faq": "FAQ",
+          "url": "SITE WEB"
         },
         "status": {
           "indexed": "Indexé",
@@ -1173,7 +1186,8 @@
         "chunks_other": "{{count}} chunks",
         "actions": {
           "retry": "Réessayer",
-          "retryProcessing": "Relancer le traitement"
+          "retryProcessing": "Relancer le traitement",
+          "refresh": "Actualiser"
         }
       }
     },

@@ -4,6 +4,7 @@ import {
   isSubdomainOfApex,
   sameSiteHosts,
   parseCrtNameValues,
+  parseCtPayload,
   discoverExtraHosts,
   DISCOVERY_PREFIXES,
 } from "../../knowledge/website-discover";
@@ -53,6 +54,25 @@ describe("parseCrtNameValues", () => {
   });
 });
 
+describe("parseCtPayload", () => {
+  it("parses crt.name one-host-per-line text", () => {
+    const names = parseCtPayload(
+      "app.valyro.be\nkompas.valyro.be\nwww.valyro.be\n",
+    );
+    expect(names).toContain("app.valyro.be");
+    expect(names).toContain("kompas.valyro.be");
+    expect(names).toContain("www.valyro.be");
+  });
+
+  it("parses crt.name JSON sub rows", () => {
+    const names = parseCtPayload(
+      '[{"sub":"kompas.valyro.be"},{"sub":"app.valyro.be"}]',
+    );
+    expect(names).toContain("kompas.valyro.be");
+    expect(names).toContain("app.valyro.be");
+  });
+});
+
 describe("discoverExtraHosts", () => {
   it("returns live related hosts and ignores foreign CT names", async () => {
     const result = await discoverExtraHosts("https://Valyro.be/", {
@@ -70,6 +90,18 @@ describe("discoverExtraHosts", () => {
     expect(result.hosts[0].sources).toEqual(
       expect.arrayContaining(["dns", "ct"]),
     );
+  });
+
+  it("accepts crt.name newline text as CT input", async () => {
+    const result = await discoverExtraHosts("https://valyro.be/", {
+      lookup: async (host) => {
+        if (host === "kompas.valyro.be") return ["104.18.35.90"];
+        throw new Error("nxdomain");
+      },
+      fetchCt: async () => "kompas.valyro.be\nwww.valyro.be\n",
+    });
+    expect(result.hosts.map((h) => h.host)).toEqual(["kompas.valyro.be"]);
+    expect(result.hosts[0].sources).toContain("ct");
   });
 
   it("skips a host whose DNS answers include a private IP", async () => {

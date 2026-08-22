@@ -76,17 +76,42 @@ export function parseCrtNameValues(records: unknown): string[] {
   if (!Array.isArray(records)) return [];
   const names = new Set<string>();
   for (const rec of records.slice(0, 300)) {
+    if (typeof rec === "string") {
+      addCtName(names, rec);
+      continue;
+    }
     if (!rec || typeof rec !== "object") continue;
-    const raw = (rec as { name_value?: unknown }).name_value;
-    if (typeof raw !== "string") continue;
-    for (const part of raw.split(/\n/)) {
-      let n = part.trim().toLowerCase().replace(/\.$/, "");
-      if (!n) continue;
-      if (n.startsWith("*.")) n = n.slice(2);
-      if (n) names.add(n);
+    const row = rec as { name_value?: unknown; sub?: unknown; name?: unknown };
+    if (typeof row.sub === "string") addCtName(names, row.sub);
+    if (typeof row.name === "string") addCtName(names, row.name);
+    if (typeof row.name_value === "string") {
+      for (const part of row.name_value.split(/\n/)) addCtName(names, part);
     }
   }
   return [...names];
+}
+
+function addCtName(names: Set<string>, raw: string): void {
+  let n = raw.trim().toLowerCase().replace(/\.$/, "");
+  if (!n) return;
+  if (n.startsWith("*.")) n = n.slice(2);
+  if (n) names.add(n);
+}
+
+/** crt.name returns JSON `{sub}` rows or one host per line. crt.sh returns SAN records. */
+export function parseCtPayload(payload: unknown): string[] {
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+      try {
+        return parseCrtNameValues(JSON.parse(trimmed) as unknown);
+      } catch {
+        // not JSON; treat as one host per line
+      }
+    }
+    return parseCrtNameValues(trimmed.split(/\r?\n/));
+  }
+  return parseCrtNameValues(payload);
 }
 
 export type DiscoveredHost = {
@@ -111,14 +136,28 @@ export async function defaultLookup(host: string): Promise<string[]> {
 }
 
 export async function defaultFetchCt(apex: string): Promise<unknown> {
-  const res = await safeOutboundRequest({
+  try {
+    const primary = await safeOutboundRequest({
+      url: `https://crt.name/v1/search?apex=${encodeURIComponent(apex)}`,
+      method: "GET",
+      timeout: 8000,
+      responseType: "text",
+      validateStatus: (s) => s >= 200 && s < 500,
+    });
+    if (primary.status < 400 && typeof primary.data === "string" && primary.data.trim()) {
+      return primary.data;
+    }
+  } catch {
+    // fall through to crt.sh
+  }
+  const fallback = await safeOutboundRequest({
     url: `https://crt.sh/?q=${encodeURIComponent(`%.${apex}`)}&output=json`,
     method: "GET",
     timeout: 8000,
     validateStatus: (s) => s >= 200 && s < 500,
   });
-  if (res.status >= 400) return [];
-  return res.data;
+  if (fallback.status >= 400) return [];
+  return fallback.data;
 }
 
 export async function discoverExtraHosts(
@@ -163,7 +202,7 @@ export async function discoverExtraHosts(
   if (deps.fetchCt) {
     try {
       const records = await deps.fetchCt(apex);
-      for (const name of parseCrtNameValues(records)) {
+      for (const name of parseCtPayload(records)) {
         mark(name, "ct");
       }
     } catch {

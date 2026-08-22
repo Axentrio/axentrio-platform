@@ -154,9 +154,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   const extraHosts = discover.data?.hosts ?? [];
   useEffect(() => {
     const hosts = discover.data?.hosts ?? [];
-    setSelectedExtraHosts(
-      hosts.filter((h) => h.autoCrawl).map((h) => h.host),
-    );
+    setSelectedExtraHosts(hosts.filter((h) => h.autoCrawl).map((h) => h.host));
   }, [debouncedWebsiteUrl, discover.data]);
 
   const MAX_FILE_SIZE = 25 * 1024 * 1024;

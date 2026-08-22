@@ -65,6 +65,11 @@ router.post(
   requireRole("admin"),
   asyncHandler(ctrl.importWebsite),
 );
+router.get(
+  "/documents/website/discover",
+  requireRole("admin"),
+  asyncHandler(ctrl.discoverWebsiteHosts),
+);
 router.post(
   "/documents",
   requireRole("admin"),

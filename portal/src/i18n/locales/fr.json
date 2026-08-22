@@ -1148,6 +1148,11 @@
             "placeholder": "https://www.votre-entreprise.be",
             "helper": "Nous importons les pages de ce site dans votre base de connaissances."
           },
+          "extraHosts": {
+            "looking": "Recherche d'autres hotes…",
+            "label": "Aussi trouve",
+            "helper": "Meme entreprise, autre hote. Cochez pour importer. Nous n'importons pas ces hotes sans coche."
+          },
           "content": {
             "label": "Contenu",
             "placeholder": {

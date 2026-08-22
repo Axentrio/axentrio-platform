@@ -27,6 +27,10 @@ export const importWebsiteSchema = z.object({
   kbId: z.string().uuid().optional(),
 });
 
+export const discoverWebsiteSchema = z.object({
+  url: z.string().url().max(2048),
+});
+
 export const listDocumentsSchema = z.object({
   status: z.enum(["pending", "processing", "indexed", "failed"]).optional(),
   type: z.enum(["text", "faq", "pdf", "docx", "url"]).optional(),

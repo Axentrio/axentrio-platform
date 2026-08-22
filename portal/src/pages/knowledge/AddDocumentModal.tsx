@@ -1,10 +1,11 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/Modal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2,
   Upload,
@@ -22,6 +23,7 @@ import {
   useUpdateDocument,
   useUploadFile,
   useImportWebsite,
+  useDiscoverWebsiteHosts,
 } from "@/queries/useKnowledgeQueries";
 
 type DocType = "text" | "faq" | "pdf" | "docx" | "url";
@@ -94,6 +96,8 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [websiteUrl, setWebsiteUrl] = useState("");
+  const [debouncedWebsiteUrl, setDebouncedWebsiteUrl] = useState("");
+  const [selectedExtraHosts, setSelectedExtraHosts] = useState<string[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,6 +105,11 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   const updateDoc = useUpdateDocument();
   const uploadFile = useUploadFile();
   const importWebsite = useImportWebsite();
+  const isUrlType = docType === "url";
+  const discover = useDiscoverWebsiteHosts(
+    debouncedWebsiteUrl,
+    isOpen && isUrlType,
+  );
 
   const isSubmitting =
     createDoc.isPending ||
@@ -108,7 +117,6 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
     uploadFile.isPending ||
     importWebsite.isPending;
   const isFileType = docType === "pdf" || docType === "docx";
-  const isUrlType = docType === "url";
   const selectedType = docTypes.find((t) => t.value === docType)!;
 
   // Populate / reset form fields whenever the modal opens or the editing
@@ -124,14 +132,29 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
       setContent(editingDocument.sourceContent || "");
       setFile(null);
       setWebsiteUrl("");
+      setSelectedExtraHosts([]);
     } else {
       setDocType("text");
       setTitle("");
       setContent("");
       setFile(null);
       setWebsiteUrl("");
+      setSelectedExtraHosts([]);
     }
   }
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedWebsiteUrl(websiteUrl.trim());
+    }, 500);
+    return () => window.clearTimeout(handle);
+  }, [websiteUrl]);
+
+  const extraHosts = discover.data?.hosts ?? [];
+  useEffect(() => {
+    const live = (discover.data?.hosts ?? []).map((h) => h.host);
+    setSelectedExtraHosts((prev) => prev.filter((h) => live.includes(h)));
+  }, [debouncedWebsiteUrl, discover.data]);
 
   const MAX_FILE_SIZE = 25 * 1024 * 1024;
   const MAX_CONTENT_LENGTH = 500_000;
@@ -149,10 +172,20 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
     }
 
     if (!isEditing && isUrlType) {
-      importWebsite.mutate(
-        { url: websiteUrl.trim(), followLinks: true },
-        { onSuccess: onClose },
-      );
+      const urls = [
+        websiteUrl.trim(),
+        ...selectedExtraHosts.map((host) => `https://${host}/`),
+      ];
+      void (async () => {
+        try {
+          for (const url of urls) {
+            await importWebsite.mutateAsync({ url, followLinks: true });
+          }
+          onClose();
+        } catch {
+          // toast already shown by the mutation
+        }
+      })();
       return;
     }
 
@@ -295,6 +328,42 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
             <p className="text-[10px] text-text-muted mt-1.5">
               {t("ai.knowledge.modal.fields.websiteUrl.helper")}
             </p>
+            {discover.isFetching && (
+              <p className="text-[10px] text-text-muted mt-2">
+                {t("ai.knowledge.modal.fields.extraHosts.looking")}
+              </p>
+            )}
+            {!discover.isFetching && extraHosts.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-text-secondary">
+                  {t("ai.knowledge.modal.fields.extraHosts.label")}
+                </p>
+                <p className="text-[10px] text-text-muted">
+                  {t("ai.knowledge.modal.fields.extraHosts.helper")}
+                </p>
+                {extraHosts.map((host) => {
+                  const checked = selectedExtraHosts.includes(host.host);
+                  return (
+                    <label
+                      key={host.host}
+                      className="flex items-center gap-2 text-xs text-text-primary"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => {
+                          setSelectedExtraHosts((prev) =>
+                            value === true
+                              ? [...prev, host.host]
+                              : prev.filter((h) => h !== host.host),
+                          );
+                        }}
+                      />
+                      <span>{host.host}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : isFileType && isEditing ? (
           <div className="p-4 rounded-xl bg-surface-2 border border-edge">

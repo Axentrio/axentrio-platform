@@ -116,6 +116,27 @@ export function useDeleteDocument() {
   });
 }
 
+export type DiscoveredWebsiteHost = {
+  host: string;
+  url: string;
+  sources: Array<"dns" | "ct">;
+};
+
+export function useDiscoverWebsiteHosts(url: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["knowledge", "discover", url],
+    queryFn: () =>
+      api.get<{
+        origin: string;
+        apex: string;
+        hosts: DiscoveredWebsiteHost[];
+      }>("/knowledge/documents/website/discover", { params: { url } }),
+    enabled: enabled && /^https:\/\/[^\s]+$/i.test(url),
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 export function useImportWebsite() {
   const queryClient = useQueryClient();
   return useMutation({

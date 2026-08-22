@@ -15,6 +15,7 @@ import {
   updateDocumentSchema,
   listDocumentsSchema,
   importWebsiteSchema,
+  discoverWebsiteSchema,
 } from "../schemas/knowledge.schema";
 import {
   updateAiSettingsSchema,
@@ -186,6 +187,13 @@ export async function retryDocument(req: Request, res: Response) {
   sendSuccess(res, doc);
 }
 
+export async function discoverWebsiteHosts(req: Request, res: Response) {
+  const data = discoverWebsiteSchema.parse(req.query);
+  const { discoverExtraHosts } = await import("./website-discover");
+  const result = await discoverExtraHosts(data.url);
+  sendSuccess(res, result);
+}
+
 export async function importWebsite(req: Request, res: Response) {
   const tenantId = (req as { tenantId: string }).tenantId;
   const data = importWebsiteSchema.parse(req.body);
@@ -209,9 +217,13 @@ export async function refreshUrlDocument(req: Request, res: Response) {
   }
   // Refresh re-runs the crawl for the page's ORIGIN, not just this one page,
   // so new child pages are picked up and existing ones are upserted.
-  const parsed = new URL(doc.sourceUrl);
-  const origin = `${parsed.protocol}//${parsed.host}`;
-  const { startWebsiteImport } = await import("./website-crawl.service");
+  let origin: string;
+  try {
+    const parsed = new URL(doc.sourceUrl);
+    origin = `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    throw new BadRequestError("Not a website document");
+  }  const { startWebsiteImport } = await import("./website-crawl.service");
   const result = await startWebsiteImport(getService(), {
     tenantId,
     url: origin,

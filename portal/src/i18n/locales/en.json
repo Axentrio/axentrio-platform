@@ -1156,6 +1156,11 @@
             "placeholder": "https://www.your-business.com",
             "helper": "We import pages on this site into your knowledge base."
           },
+          "extraHosts": {
+            "looking": "Looking for other hosts…",
+            "label": "Also found",
+            "helper": "Same company, different host. Tick a host to import it. We do not import these unless you tick them."
+          },
           "content": {
             "label": "Content",
             "placeholder": {

@@ -1149,6 +1149,11 @@
             "placeholder": "https://www.jouw-bedrijf.be",
             "helper": "We importeren pagina's van deze site in je kennisbank."
           },
+          "extraHosts": {
+            "looking": "Andere hosts zoeken…",
+            "label": "Ook gevonden",
+            "helper": "Zelfde bedrijf, andere host. Vink aan om te importeren. We importeren deze niet tenzij je ze aanvinkt."
+          },
           "content": {
             "label": "Inhoud",
             "placeholder": {

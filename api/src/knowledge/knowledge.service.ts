@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { DataSource, Repository, IsNull } from "typeorm";
+import { DataSource, Repository, IsNull, In, LessThan, Not } from "typeorm";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { createS3Client } from "../config/s3.config";
 import { KnowledgeBase } from "../database/entities/KnowledgeBase";
@@ -376,5 +376,41 @@ export class KnowledgeService {
       processingVersion: created.processingVersion,
       created: true,
     };
+  }
+
+  async listStaleUrlOrigins(
+    olderThan: Date,
+    limit = 20,
+  ): Promise<Array<{ tenantId: string; kbId: string; origin: string }>> {
+    const docs = await this.docRepo.find({
+      where: {
+        type: "url",
+        sourceUrl: Not(IsNull()),
+        updatedAt: LessThan(olderThan),
+        status: In(["indexed", "failed"]),
+      },
+      select: ["tenantId", "knowledgeBaseId", "sourceUrl", "updatedAt"],
+      order: { updatedAt: "ASC" },
+      take: 500,
+    });
+    const { originFromSourceUrl } = await import("./website-url");
+    const seen = new Set<string>();
+    const origins: Array<{ tenantId: string; kbId: string; origin: string }> =
+      [];
+    for (const doc of docs) {
+      if (!doc.sourceUrl) continue;
+      const origin = originFromSourceUrl(doc.sourceUrl);
+      if (!origin) continue;
+      const key = `${doc.tenantId}:${doc.knowledgeBaseId}:${origin}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      origins.push({
+        tenantId: doc.tenantId,
+        kbId: doc.knowledgeBaseId,
+        origin,
+      });
+      if (origins.length >= limit) break;
+    }
+    return origins;
   }
 }

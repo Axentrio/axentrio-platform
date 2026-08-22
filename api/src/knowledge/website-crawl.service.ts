@@ -78,3 +78,39 @@ export async function startWebsiteImport(
     followLinks: input.followLinks,
   };
 }
+
+const RECRAWL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const RECRAWL_MAX_JOBS = 20;
+
+/** Re-queue website origins whose documents have not been updated in a day. */
+export async function recrawlStaleWebsiteOrigins(
+  knowledge: KnowledgeService,
+): Promise<number> {
+  const olderThan = new Date(Date.now() - RECRAWL_MAX_AGE_MS);
+  const origins = await knowledge.listStaleUrlOrigins(
+    olderThan,
+    RECRAWL_MAX_JOBS,
+  );
+  let queued = 0;
+  for (const item of origins) {
+    try {
+      await startWebsiteImport(knowledge, {
+        tenantId: item.tenantId,
+        kbId: item.kbId,
+        url: item.origin,
+        followLinks: true,
+        extraUrls: [],
+      });
+      queued += 1;
+    } catch (error) {
+      logger.warn("Stale website recrawl skipped", {
+        origin: item.origin,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (queued > 0) {
+    logger.info("Stale website recrawl queued", { queued });
+  }
+  return queued;
+}

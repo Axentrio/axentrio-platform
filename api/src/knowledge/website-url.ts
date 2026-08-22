@@ -42,3 +42,13 @@ export function isMediaUrl(raw: string): boolean {
     return true;
   }
 }
+
+export function originFromSourceUrl(sourceUrl: string): string | null {
+  try {
+    const parsed = new URL(sourceUrl);
+    if (parsed.protocol !== "https:") return null;
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { canonicalSourceUrl, isSameHost, isMediaUrl } from "../../knowledge/website-url";
+import {
+  canonicalSourceUrl,
+  isSameHost,
+  isMediaUrl,
+  originFromSourceUrl,
+} from "../../knowledge/website-url";
 import { parseRobotsTxt } from "../../knowledge/website-robots";
 import {
   crawlWebsite,
@@ -38,6 +43,14 @@ describe("isMediaUrl", () => {
       true,
     );
     expect(isMediaUrl("https://x.example/about")).toBe(false);
+  });
+});
+
+describe("originFromSourceUrl", () => {
+  it("returns scheme and host", () => {
+    expect(originFromSourceUrl("https://valyro.be/diensten")).toBe(
+      "https://valyro.be",
+    );
   });
 });
 

@@ -880,6 +880,24 @@ async function startServer(): Promise<void> {
     };
     setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
 
+    const recrawlWebsites = async () => {
+      try {
+        const { recrawlStaleWebsiteOrigins } = await import(
+          "./knowledge/website-crawl.service"
+        );
+        const { KnowledgeService } = await import(
+          "./knowledge/knowledge.service"
+        );
+        await recrawlStaleWebsiteOrigins(new KnowledgeService(AppDataSource));
+      } catch (error) {
+        logger.error("Website recrawl sweep failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+    setTimeout(recrawlWebsites, 5 * 60 * 1000);
+    setInterval(recrawlWebsites, 24 * 60 * 60 * 1000);
+
     // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
     // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps
     // taking bookings, so a lapsed card and a Google outage look identical from outside. This is

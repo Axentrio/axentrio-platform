@@ -31,6 +31,16 @@ export const DISCOVERY_PREFIXES = [
   "client",
   "my",
   "hub",
+  "chat",
+  "bot",
+  "widget",
+  "studio",
+  "copilot",
+  "ops",
+  "status",
+  "help",
+  "support",
+  "kb",
 ] as const;
 
 const MAX_EXTRA_HOSTS = 20;
@@ -43,7 +53,10 @@ function assertPublicIps(ips: string[]): void {
 }
 
 export function apexHost(hostname: string): string {
-  return hostname.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+  return hostname
+    .toLowerCase()
+    .replace(/\.$/, "")
+    .replace(/^www\./, "");
 }
 
 export function isSubdomainOfApex(host: string, apex: string): boolean {

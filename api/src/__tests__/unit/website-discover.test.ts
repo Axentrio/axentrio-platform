@@ -5,7 +5,15 @@ import {
   sameSiteHosts,
   parseCrtNameValues,
   discoverExtraHosts,
+  DISCOVERY_PREFIXES,
 } from "../../knowledge/website-discover";
+
+describe("DISCOVERY_PREFIXES", () => {
+  it("includes chat and ops", () => {
+    expect(DISCOVERY_PREFIXES).toContain("chat");
+    expect(DISCOVERY_PREFIXES).toContain("ops");
+  });
+});
 
 describe("apexHost", () => {
   it("strips www", () => {
@@ -59,7 +67,9 @@ describe("discoverExtraHosts", () => {
     });
     expect(result.apex).toBe("valyro.be");
     expect(result.hosts.map((h) => h.host)).toEqual(["app.valyro.be"]);
-    expect(result.hosts[0].sources).toEqual(expect.arrayContaining(["dns", "ct"]));
+    expect(result.hosts[0].sources).toEqual(
+      expect.arrayContaining(["dns", "ct"]),
+    );
   });
 
   it("skips a host whose DNS answers include a private IP", async () => {

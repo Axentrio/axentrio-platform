@@ -1,8 +1,8 @@
 import type { DataSource } from "typeorm";
 import { KnowledgeService } from "./knowledge.service";
 import { crawlWebsite, type PageRenderer } from "./website-crawl";
-import { canonicalSourceUrl, isSameHost } from "./website-url";
-import { parseRobotsTxt, KNOWLEDGE_BOT_UA } from "./website-robots";
+import { isSameHost } from "./website-url";
+import { KNOWLEDGE_BOT_UA } from "./website-robots";
 import {
   assertSafeOutboundUrl,
   safeOutboundRequest,
@@ -17,38 +17,6 @@ export interface WebsiteCrawlJob {
   originUrl: string;
   followLinks: boolean;
   maxPages: number;
-}
-
-async function loadRobots(
-  originUrl: string,
-): Promise<{ allows: (path: string) => boolean }> {
-  let robotsUrl: string;
-  try {
-    const origin = new URL(canonicalSourceUrl(originUrl));
-    robotsUrl = `${origin.protocol}//${origin.host}/robots.txt`;
-  } catch {
-    return parseRobotsTxt("");
-  }
-  try {
-    const res = await safeOutboundRequest({
-      url: robotsUrl,
-      method: "GET",
-      timeout: 5000,
-      headers: { "User-Agent": KNOWLEDGE_BOT_UA },
-      validateStatus: () => true,
-      responseType: "text",
-    });
-    if (res.status >= 400) return parseRobotsTxt("");
-    return parseRobotsTxt(
-      typeof res.data === "string" ? res.data : String(res.data ?? ""),
-    );
-  } catch (error) {
-    logger.warn("robots.txt fetch failed; treating as allow-all", {
-      originUrl,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return parseRobotsTxt("");
-  }
 }
 
 async function renderWithFetch(url: string) {
@@ -140,20 +108,16 @@ export function createWebsiteCrawlProcessor(
       maxPages,
     });
     const remaining = await knowledge.remainingDocumentSlots(tenantId, kbId);
-    const robots = await loadRobots(originUrl);
+    // Tenant-requested crawl of their (or a nominated) site. robots.txt is
+    // not applied: many marketing sites Disallow all bots, and the owner
+    // asked to import anyway. SSRF and same-host caps still apply.
     const result = await crawlWebsite({
       originUrl,
       followLinks,
       maxPages,
       remainingSlots: remaining,
       renderer: renderer ?? { render: defaultRenderer },
-      robotsAllows: async (url) => {
-        try {
-          return robots.allows(new URL(url).pathname);
-        } catch {
-          return false;
-        }
-      },
+      robotsAllows: async () => true,
       assertSafe: (url) => {
         assertSafeOutboundUrl(url);
       },

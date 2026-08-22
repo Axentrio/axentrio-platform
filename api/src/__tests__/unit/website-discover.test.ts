@@ -6,6 +6,7 @@ import {
   parseCrtNameValues,
   parseCtPayload,
   discoverExtraHosts,
+  shouldAutoCrawlHost,
   DISCOVERY_PREFIXES,
 } from "../../knowledge/website-discover";
 
@@ -70,6 +71,18 @@ describe("parseCtPayload", () => {
     );
     expect(names).toContain("kompas.valyro.be");
     expect(names).toContain("app.valyro.be");
+  });
+});
+
+describe("shouldAutoCrawlHost", () => {
+  it("crawls landing hosts and skips login, API, and mail", () => {
+    expect(shouldAutoCrawlHost("kompas.valyro.be")).toBe(true);
+    expect(shouldAutoCrawlHost("start.valyro.be")).toBe(true);
+    expect(shouldAutoCrawlHost("chat.axentrio.com")).toBe(true);
+    expect(shouldAutoCrawlHost("app.valyro.be")).toBe(false);
+    expect(shouldAutoCrawlHost("api.axentrio.com")).toBe(false);
+    expect(shouldAutoCrawlHost("email.mail.valyro.be")).toBe(false);
+    expect(shouldAutoCrawlHost("ops.axentrio.com")).toBe(false);
   });
 });
 

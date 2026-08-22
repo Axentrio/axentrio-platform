@@ -205,6 +205,7 @@ export async function importWebsite(req: Request, res: Response) {
     followLinks: data.followLinks,
     maxPages: data.maxPages,
     kbId: kb.id,
+    extraUrls: data.extraUrls,
   });
   sendCreated(res, result);
 }
@@ -223,7 +224,8 @@ export async function refreshUrlDocument(req: Request, res: Response) {
     origin = `${parsed.protocol}//${parsed.host}`;
   } catch {
     throw new BadRequestError("Not a website document");
-  }  const { startWebsiteImport } = await import("./website-crawl.service");
+  }
+  const { startWebsiteImport } = await import("./website-crawl.service");
   const result = await startWebsiteImport(getService(), {
     tenantId,
     url: origin,

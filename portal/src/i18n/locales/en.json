@@ -1159,7 +1159,7 @@
           "extraHosts": {
             "looking": "Looking for other hosts…",
             "label": "Also found",
-            "helper": "Same company, different host. Tick a host to import it. We do not import these unless you tick them."
+            "helper": "Public extra hosts are ticked and imported with this scan. Leave login, API, and mail hosts unticked unless you want those too."
           },
           "content": {
             "label": "Content",

@@ -120,6 +120,7 @@ export type DiscoveredWebsiteHost = {
   host: string;
   url: string;
   sources: Array<"dns" | "ct">;
+  autoCrawl?: boolean;
 };
 
 export function useDiscoverWebsiteHosts(url: string, enabled: boolean) {
@@ -145,6 +146,7 @@ export function useImportWebsite() {
       followLinks?: boolean;
       maxPages?: number;
       kbId?: string;
+      extraUrls?: string[];
     }) => api.post("/knowledge/documents/website", data),
     onSuccess: () => {
       queryClient.invalidateQueries({

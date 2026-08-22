@@ -16,6 +16,7 @@ export async function startWebsiteImport(
     followLinks: boolean;
     maxPages?: number;
     kbId?: string;
+    extraUrls?: string[];
   },
 ): Promise<{
   accepted: true;
@@ -55,6 +56,7 @@ export async function startWebsiteImport(
       originUrl: origin,
       followLinks: input.followLinks,
       maxPages,
+      extraUrls: input.extraUrls,
     });
   } catch (error) {
     logger.error("Failed to queue website crawl", {

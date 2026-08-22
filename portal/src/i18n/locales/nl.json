@@ -1152,7 +1152,7 @@
           "extraHosts": {
             "looking": "Andere hosts zoeken…",
             "label": "Ook gevonden",
-            "helper": "Zelfde bedrijf, andere host. Vink aan om te importeren. We importeren deze niet tenzij je ze aanvinkt."
+            "helper": "Publieke extra hosts staan aan en gaan mee in deze import. Laat login, API en mail uit staan tenzij je die ook wilt."
           },
           "content": {
             "label": "Inhoud",

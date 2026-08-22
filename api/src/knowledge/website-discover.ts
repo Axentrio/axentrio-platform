@@ -118,7 +118,42 @@ export type DiscoveredHost = {
   host: string;
   url: string;
   sources: Array<"dns" | "ct">;
+  autoCrawl: boolean;
 };
+
+const SKIP_AUTO_CRAWL_LABELS = new Set([
+  "app",
+  "api",
+  "mail",
+  "admin",
+  "login",
+  "auth",
+  "dashboard",
+  "crm",
+  "ops",
+  "staging",
+  "stage",
+  "test",
+  "beta",
+  "cdn",
+  "ftp",
+  "vpn",
+  "email",
+  "smtp",
+  "imap",
+  "webmail",
+  "portal",
+  "cpanel",
+  "ns1",
+  "ns2",
+  "autodiscover",
+]);
+
+/** Public landing pages yes; login, API, and mail hosts no. */
+export function shouldAutoCrawlHost(host: string): boolean {
+  const labels = host.toLowerCase().split(".");
+  return labels.every((label) => !SKIP_AUTO_CRAWL_LABELS.has(label));
+}
 
 export type DiscoverDeps = {
   lookup: (host: string) => Promise<string[]>;
@@ -144,7 +179,11 @@ export async function defaultFetchCt(apex: string): Promise<unknown> {
       responseType: "text",
       validateStatus: (s) => s >= 200 && s < 500,
     });
-    if (primary.status < 400 && typeof primary.data === "string" && primary.data.trim()) {
+    if (
+      primary.status < 400 &&
+      typeof primary.data === "string" &&
+      primary.data.trim()
+    ) {
       return primary.data;
     }
   } catch {
@@ -218,6 +257,7 @@ export async function discoverExtraHosts(
         host,
         url: `https://${host}/`,
         sources: [...src],
+        autoCrawl: shouldAutoCrawlHost(host),
       });
     } catch {
       // CT name with no public DNS

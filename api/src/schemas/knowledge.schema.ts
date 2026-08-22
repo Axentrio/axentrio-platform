@@ -25,6 +25,7 @@ export const importWebsiteSchema = z.object({
   followLinks: z.boolean().optional().default(true),
   maxPages: z.number().int().min(1).max(50).optional(),
   kbId: z.string().uuid().optional(),
+  extraUrls: z.array(z.string().url().max(2048)).max(20).optional(),
 });
 
 export const discoverWebsiteSchema = z.object({

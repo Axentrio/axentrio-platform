@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
+import type React from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@/components/Modal";
 import { Input } from "@/components/ui/input";
@@ -152,8 +153,10 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
 
   const extraHosts = discover.data?.hosts ?? [];
   useEffect(() => {
-    const live = (discover.data?.hosts ?? []).map((h) => h.host);
-    setSelectedExtraHosts((prev) => prev.filter((h) => live.includes(h)));
+    const hosts = discover.data?.hosts ?? [];
+    setSelectedExtraHosts(
+      hosts.filter((h) => h.autoCrawl).map((h) => h.host),
+    );
   }, [debouncedWebsiteUrl, discover.data]);
 
   const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -172,20 +175,17 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
     }
 
     if (!isEditing && isUrlType) {
-      const urls = [
-        websiteUrl.trim(),
-        ...selectedExtraHosts.map((host) => `https://${host}/`),
-      ];
-      void (async () => {
-        try {
-          for (const url of urls) {
-            await importWebsite.mutateAsync({ url, followLinks: true });
-          }
-          onClose();
-        } catch {
-          // toast already shown by the mutation
-        }
-      })();
+      const extraUrls = discover.isFetched
+        ? selectedExtraHosts.map((host) => `https://${host}/`)
+        : undefined;
+      importWebsite.mutate(
+        {
+          url: websiteUrl.trim(),
+          followLinks: true,
+          extraUrls,
+        },
+        { onSuccess: onClose },
+      );
       return;
     }
 

@@ -17,6 +17,7 @@ export interface WebsiteCrawlJob {
   originUrl: string;
   followLinks: boolean;
   maxPages: number;
+  extraUrls?: string[];
 }
 
 async function renderWithFetch(url: string) {
@@ -108,38 +109,64 @@ export function createWebsiteCrawlProcessor(
       maxPages,
     });
     const remaining = await knowledge.remainingDocumentSlots(tenantId, kbId);
-    // Tenant-requested crawl of their (or a nominated) site. robots.txt is
-    // not applied: many marketing sites Disallow all bots, and the owner
-    // asked to import anyway. SSRF and same-host caps still apply.
-    const result = await crawlWebsite({
-      originUrl,
-      followLinks,
-      maxPages,
-      remainingSlots: remaining,
-      renderer: renderer ?? { render: defaultRenderer },
-      robotsAllows: async () => true,
-      assertSafe: (url) => {
-        assertSafeOutboundUrl(url);
-      },
-      upsertPage: (page) => knowledge.upsertUrlDocument(tenantId, kbId, page),
-      enqueueIngest: async (doc) => {
-        const { addJob } = await import("../queue/message-queue");
-        await addJob(
-          "knowledge-processing",
-          {
-            documentId: doc.id,
-            tenantId,
-            processingVersion: doc.processingVersion,
-          },
-          { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
-        );
-      },
-    });
+    const pageRenderer = renderer ?? { render: defaultRenderer };
+    const runCrawl = async (url: string, slots: number) =>
+      crawlWebsite({
+        originUrl: url,
+        followLinks,
+        maxPages,
+        remainingSlots: slots,
+        renderer: pageRenderer,
+        robotsAllows: async () => true,
+        assertSafe: (safeUrl) => {
+          assertSafeOutboundUrl(safeUrl);
+        },
+        upsertPage: (page) => knowledge.upsertUrlDocument(tenantId, kbId, page),
+        enqueueIngest: async (doc) => {
+          const { addJob } = await import("../queue/message-queue");
+          await addJob(
+            "knowledge-processing",
+            {
+              documentId: doc.id,
+              tenantId,
+              processingVersion: doc.processingVersion,
+            },
+            { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+          );
+        },
+      });
+
+    const result = await runCrawl(originUrl, remaining);
     logger.info("Website crawl finished", {
       tenantId,
       kbId,
       originUrl,
       ...result,
     });
+
+    let extraUrls = job.data.extraUrls;
+    if (!extraUrls) {
+      const { discoverExtraHosts } = await import("./website-discover");
+      const found = await discoverExtraHosts(originUrl);
+      extraUrls = found.hosts.filter((h) => h.autoCrawl).map((h) => h.url);
+    }
+    for (const extraUrl of extraUrls) {
+      const slots = await knowledge.remainingDocumentSlots(tenantId, kbId);
+      if (slots <= 0) break;
+      try {
+        const extraResult = await runCrawl(extraUrl, slots);
+        logger.info("Website extra-host crawl finished", {
+          tenantId,
+          kbId,
+          originUrl: extraUrl,
+          ...extraResult,
+        });
+      } catch (error) {
+        logger.warn("Website extra-host crawl failed", {
+          extraUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   };
 }

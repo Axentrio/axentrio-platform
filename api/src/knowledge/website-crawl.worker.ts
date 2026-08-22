@@ -87,6 +87,15 @@ async function renderWithFetch(url: string) {
     if (status < 200 || status >= 400) {
       throw new Error(`Fetch failed with status ${status}`);
     }
+    const contentType = String(res.headers["content-type"] || "").toLowerCase();
+    if (
+      contentType &&
+      !contentType.includes("html") &&
+      !contentType.includes("xml") &&
+      !contentType.includes("text/plain")
+    ) {
+      throw new Error(`Not HTML: ${contentType}`);
+    }
     html = typeof res.data === "string" ? res.data : String(res.data ?? "");
     break;
   }

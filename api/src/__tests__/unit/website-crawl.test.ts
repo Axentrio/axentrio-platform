@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canonicalSourceUrl, isSameHost } from "../../knowledge/website-url";
+import { canonicalSourceUrl, isSameHost, isMediaUrl } from "../../knowledge/website-url";
 import { parseRobotsTxt } from "../../knowledge/website-robots";
 import {
   crawlWebsite,
@@ -29,6 +29,15 @@ describe("isSameHost", () => {
     expect(
       isSameHost("https://plumber.example/", "https://evil.example/x"),
     ).toBe(false);
+  });
+});
+
+describe("isMediaUrl", () => {
+  it("flags gallery images and documents", () => {
+    expect(isMediaUrl("https://x.example/wp-content/uploads/a.jpeg")).toBe(
+      true,
+    );
+    expect(isMediaUrl("https://x.example/about")).toBe(false);
   });
 });
 
@@ -187,5 +196,39 @@ describe("crawlWebsite", () => {
       enqueueIngest: async () => undefined,
     });
     expect(visited).toEqual([]);
+  });
+
+  it("skips JPEG gallery links so they do not fill the page cap", async () => {
+    const renderer: PageRenderer = {
+      render: async (url: string) => ({
+        url,
+        html: '<html><body><a href="/photo.jpg">pic</a><a href="/about">about</a><p>home</p></body></html>',
+        title: "home",
+        links: [
+          "https://plumber.example/photo.jpg",
+          "https://plumber.example/about",
+        ],
+        text: "home",
+      }),
+    };
+    const visited: string[] = [];
+    await crawlWebsite({
+      originUrl: "https://plumber.example/",
+      followLinks: true,
+      maxPages: 25,
+      remainingSlots: 10,
+      renderer,
+      robotsAllows: async () => true,
+      assertSafe: () => undefined,
+      upsertPage: async (page: { sourceUrl: string }) => {
+        visited.push(page.sourceUrl);
+        return { id: page.sourceUrl, processingVersion: 1, created: true };
+      },
+      enqueueIngest: async () => undefined,
+    });
+    expect(visited).toEqual([
+      "https://plumber.example/",
+      "https://plumber.example/about",
+    ]);
   });
 });

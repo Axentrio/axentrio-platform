@@ -1,5 +1,5 @@
 import { extractHtml } from "./document-extractors/html.extractor";
-import { canonicalSourceUrl, isSameHost } from "./website-url";
+import { canonicalSourceUrl, isSameHost, isMediaUrl } from "./website-url";
 
 export const DEFAULT_MAX_PAGES = 25;
 export const HARD_MAX_PAGES = 50;
@@ -73,6 +73,7 @@ export async function crawlWebsite(input: {
     }
     if (seen.has(pageUrl)) continue;
     if (!isSameHost(origin, pageUrl)) continue;
+    if (isMediaUrl(pageUrl)) continue;
     if (!(await input.robotsAllows(pageUrl))) continue;
     seen.add(pageUrl);
     visited += 1;
@@ -101,6 +102,7 @@ export async function crawlWebsite(input: {
         for (const href of extracted.links) {
           if (!isSameHost(origin, href)) continue;
           const next = canonicalSourceUrl(href);
+          if (isMediaUrl(next)) continue;
           if (!seen.has(next)) queue.push(next);
         }
       }

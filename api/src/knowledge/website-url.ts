@@ -30,3 +30,15 @@ export function isSameHost(originUrl: string, candidateUrl: string): boolean {
     return false;
   }
 }
+
+const MEDIA_PATH =
+  /\.(?:jpe?g|png|gif|webp|svg|ico|pdf|zip|mp4|mp3|webm|woff2?|ttf|css|js|map|json)$/i;
+
+/** True for gallery/media files that must not fill crawl slots. */
+export function isMediaUrl(raw: string): boolean {
+  try {
+    return MEDIA_PATH.test(new URL(raw).pathname);
+  } catch {
+    return true;
+  }
+}

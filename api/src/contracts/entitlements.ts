@@ -80,6 +80,12 @@ export interface PlanFeatures {
   customWidgetAppearance: boolean;
   handoff: boolean;
   fileUpload: boolean;
+  /**
+   * Import files from a connected Google Drive / OneDrive into a KnowledgeBase.
+   * Tier ceiling (Essential+). Forced off when fileUpload is off (taxonomy requires).
+   * NOT a ToggleableFeatureKey — not a tenant switch.
+   */
+  cloudImport: boolean;
   channelWhatsapp: boolean;
   channelMessenger: boolean;
   channelInstagram: boolean;

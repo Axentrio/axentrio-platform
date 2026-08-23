@@ -78,6 +78,8 @@ import { TenantBotTemplate } from './entities/TenantBotTemplate';
 import { SpamScamLog } from './entities/SpamScamLog';
 import { GuardrailOutputLog } from './entities/GuardrailOutputLog';
 import { ConversationCommand } from './entities/ConversationCommand';
+import { StorageConnection } from './entities/StorageConnection';
+import { StorageImportJob } from './entities/StorageImportJob';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -162,6 +164,8 @@ export const AppDataSource = new DataSource({
     SpamScamLog,
     GuardrailOutputLog,
     ConversationCommand,
+    StorageConnection,
+    StorageImportJob,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

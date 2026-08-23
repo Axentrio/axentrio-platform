@@ -62,6 +62,7 @@ const PLAN_LIMIT_COPY: Record<string, string> = {
   plan_limit_file_upload: 'File uploads aren\'t available on your current plan. Upgrade to enable them.',
   plan_limit_handoff: 'Human handoff isn\'t available on your current plan. Upgrade to enable it.',
   plan_limit_custom_branding: 'Custom branding isn\'t available on your current plan. Upgrade to enable it.',
+  plan_feature_cloud_import: 'Cloud import isn\'t available on your current plan. Upgrade to enable it.',
 };
 
 // Plan-gate codes whose 402 response should NOT fire a global toast.

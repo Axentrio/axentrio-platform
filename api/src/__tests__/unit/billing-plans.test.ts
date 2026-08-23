@@ -17,6 +17,7 @@ import {
   selfServeCheckoutablePlans,
 } from '../../billing/plans';
 import { entitlementsFor } from '../../billing/entitlements';
+import { FEATURE_TAXONOMY, enforceFeatureDependencies } from '../../billing/feature-taxonomy';
 
 describe('PLANS catalog', () => {
   it('exposes all four tiers with the documented ranks', () => {
@@ -66,6 +67,7 @@ describe('PLANS catalog', () => {
     expect(PLANS.free.features.unifiedInbox).toBe(false);
     expect(PLANS.free.features.handoff).toBe(false);
     expect(PLANS.free.features.fileUpload).toBe(false);
+    expect(PLANS.free.features.cloudImport).toBe(false);
 
     // Essential: basic feature set, watermark visible, no bookings/CRM/assistant.
     expect(PLANS.essential.features.unifiedInbox).toBe(true);
@@ -76,6 +78,7 @@ describe('PLANS catalog', () => {
     expect(PLANS.essential.features.hideWidgetAttribution).toBe(false);
     expect(PLANS.essential.features.customWidgetAppearance).toBe(true);
     expect(PLANS.essential.features.fileUpload).toBe(true);
+    expect(PLANS.essential.features.cloudImport).toBe(true);
 
     // Pro: bookings + assistant on; watermark off; CRM still off.
     expect(PLANS.pro.features.bookings).toBe(true);
@@ -163,6 +166,7 @@ describe('entitlementsFor', () => {
     expect(free.features.unifiedInbox).toBe(false);
     expect(free.features.handoff).toBe(false);
     expect(free.features.fileUpload).toBe(false);
+    expect(free.features.cloudImport).toBe(false);
   });
 
   it('ignores Enterprise override columns for non-Enterprise tiers', () => {
@@ -201,3 +205,20 @@ describe('entitlementsFor', () => {
     expect(() => entitlementsFor('mystery_tier' as never)).toThrow(/unknown tier/);
   });
 });
+
+describe('cloudImport entitlement', () => {
+  it('is off on free and on from essential up', () => {
+    expect(PLANS.free.features.cloudImport).toBe(false);
+    expect(PLANS.essential.features.cloudImport).toBe(true);
+    expect(PLANS.pro.features.cloudImport).toBe(true);
+    expect(PLANS.enterprise.features.cloudImport).toBe(true);
+  });
+
+  it('requires fileUpload in the taxonomy so a revoked upload grant kills import', () => {
+    expect(FEATURE_TAXONOMY.cloudImport.requires).toBe('fileUpload');
+    const features = { ...PLANS.essential.features, fileUpload: false, cloudImport: true };
+    enforceFeatureDependencies(features);
+    expect(features.cloudImport).toBe(false);
+  });
+});
+

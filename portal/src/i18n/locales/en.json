@@ -1118,6 +1118,10 @@
         "url": {
           "label": "Website",
           "description": "Import pages from your site"
+        },
+        "cloud": {
+          "label": "Cloud",
+          "description": "Import files from Google Drive"
         }
       },
       "modal": {
@@ -1202,6 +1206,22 @@
           "retryProcessing": "Retry processing",
           "refresh": "Refresh"
         }
+      },
+      "cloud": {
+        "blurb": "Import is a snapshot. Files you pick are copied into the knowledge base. They do not stay in sync.",
+        "connect": "Connect",
+        "connectFailed": "Could not start Google Drive connect",
+        "connected": "Connected",
+        "notConnected": "Not connected",
+        "needsReauth": "reconnect required",
+        "importFiles": "Import files",
+        "importQueued": "Import queued",
+        "importFailed": "Could not import those files",
+        "pickerNotConfigured": "Google Picker is not configured yet",
+        "onedriveLater": "OneDrive is next. Dropbox and iCloud come later.",
+        "noOnedriveFiles": "No PDF or Word files in the OneDrive root",
+        "icloudLater": "iCloud is not available. Apple has no third-party file API.",
+        "slotsUsed": "document slots used"
       }
     },
     "appearances": {

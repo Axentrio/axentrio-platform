@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head><title>OneDrive picker</title></head>
+<body>
+<script type="text/javascript">
+  // Microsoft OneDrive File Picker v8 host page.
+  // https://learn.microsoft.com/en-us/onedrive/developer/controls/file-pickers/js/v8/
+  (function () {
+    var clientId = new URLSearchParams(window.location.search).get("clientId");
+    if (!clientId) return;
+    var popup = window.open(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?" +
+        "client_id=" + encodeURIComponent(clientId) +
+        "&scope=Files.Read+offline_access&response_type=token" +
+        "&redirect_uri=" + encodeURIComponent(window.location.origin + "/onedrive-picker.html"),
+      "_blank",
+      "width=520,height=720"
+    );
+
+    window.addEventListener("message", function (event) {
+      if (event.origin !== "https://onedrive.live.com") return;
+      var data = event.data;
+      if (data.type === "challenge") {
+        if (popup) popup.postMessage({ type: "challenge", data: data }, "*");
+        return;
+      }
+      if (data.type === "fileSelected" || data.type === "filesSelected") {
+        var files = (data.files || data.data || []).map(function (f) {
+          return { id: f.id, name: f.name, mimeType: f.file ? f.file.mimeType : f.mimeType, size: f.size };
+        });
+        window.opener && window.opener.postMessage({ type: "onedrive-files", files: files }, "*");
+        window.close();
+      } else if (data.type === "cancel") {
+        window.close();
+      }
+    });
+
+    // Open the picker iframe once the access token is relayed back by the opener.
+    window.addEventListener("message", function (event) {
+      if (event.data && event.data.type === "onedrive-token" && !document.getElementById("od-frame")) {
+        var params =
+          "accessToken=" + encodeURIComponent(event.data.token) +
+          "&pickerType=personal&file=pdf,docx&multiSelect=true";
+        var frame = document.createElement("iframe");
+        frame.id = "od-frame";
+        frame.src = "https://onedrive.live.com/picker?" + params;
+        frame.style.width = "100vw";
+        frame.style.height = "100vh";
+        frame.style.border = "0";
+        document.body.appendChild(frame);
+      }
+    });
+    window.opener && window.opener.postMessage({ type: "onedrive-host-ready" }, "*");
+  })();
+</script>
+</body>
+</html>

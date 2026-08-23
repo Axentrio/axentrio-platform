@@ -17,6 +17,7 @@ let knowledgeQueue: Queue | null = null;
 let bookingReminderQueue: Queue | null = null;
 let turnCoalesceQueue: Queue | null = null;
 let websiteCrawlQueue: Queue | null = null;
+let storageImportQueue: Queue | null = null;
 let deadLetterQueue: Queue | null = null;
 
 // Fallback flag: when true, jobs are processed synchronously (no Redis)
@@ -114,6 +115,11 @@ export const initializeQueues = async (): Promise<void> => {
       createQueueOptions("website-crawl"),
     );
 
+    storageImportQueue = new Bull(
+      "storage-import",
+      createQueueOptions("storage-import"),
+    );
+
     // Dead letter queue for failed jobs
     deadLetterQueue = new Bull(
       "dead-letter",
@@ -128,6 +134,7 @@ export const initializeQueues = async (): Promise<void> => {
       fileQueue,
       knowledgeQueue,
       websiteCrawlQueue,
+      storageImportQueue,
       deadLetterQueue,
     ].forEach((queue) => {
       if (!queue) return;
@@ -192,6 +199,7 @@ export const initializeQueues = async (): Promise<void> => {
     bookingReminderQueue = null;
     turnCoalesceQueue = null;
     websiteCrawlQueue = null;
+    storageImportQueue = null;
     deadLetterQueue = null;
   }
 };
@@ -396,11 +404,18 @@ export const registerProcessor = (
     case "website-crawl":
       queue = websiteCrawlQueue;
       break;
+    case "storage-import":
+      queue = storageImportQueue;
+      break;
   }
 
   if (queue) {
     const concurrency =
-      queueName === "website-crawl" ? 1 : config.queue.concurrency;
+      queueName === "website-crawl"
+        ? 1
+        : queueName === "storage-import"
+          ? 2
+          : config.queue.concurrency;
     queue.process(concurrency, async (job: Job) => {
       const jobLogger = logger.child({
         jobId: job.id,
@@ -446,6 +461,8 @@ export const getQueue = (queueName: string): Queue | null => {
       return turnCoalesceQueue;
     case "website-crawl":
       return websiteCrawlQueue;
+    case "storage-import":
+      return storageImportQueue;
     case "dead-letter":
       return deadLetterQueue;
     default:
@@ -563,6 +580,7 @@ export const closeQueues = async (): Promise<void> => {
     bookingReminderQueue,
     turnCoalesceQueue,
     websiteCrawlQueue,
+    storageImportQueue,
     deadLetterQueue,
   ];
 

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head><title>OneDrive picker</title></head>
+<body>
+<script type="text/javascript">
+  // Microsoft OneDrive File Picker v8 host page.
+  // https://learn.microsoft.com/en-us/onedrive/developer/controls/file-pickers/
+  //
+  // This window is opened by a user click. After Microsoft sign-in it POSTs
+  // ITSELF to the picker. A second window.open here would have no gesture
+  // and browsers would block it. The opener keeps the MessageChannel.
+  (function () {
+    var ORIGIN = window.location.origin;
+    var PICKER_BASE = "https://onedrive.live.com/picker";
+    var AUTHORITY =
+      "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
+    var SCOPES = "OneDrive.ReadWrite";
+
+    var query = new URLSearchParams(window.location.search);
+    var clientId = query.get("clientId");
+    var loginHint = query.get("loginHint");
+    var hash = window.location.hash.substring(1);
+    var fragment = new URLSearchParams(hash);
+    var accessToken = fragment.get("access_token");
+
+    function fail(message) {
+      try {
+        window.opener &&
+          window.opener.postMessage({ type: "onedrive-error", message: message }, ORIGIN);
+      } catch (e) { /* opener gone */ }
+      window.close();
+    }
+
+    if (!accessToken) {
+      if (!clientId) return;
+      var state =
+        (window.crypto.randomUUID && window.crypto.randomUUID()) ||
+        String(Math.random()).slice(2);
+      try {
+        sessionStorage.setItem("od_state", state);
+      } catch (e) { /* private mode */ }
+      var authParams = new URLSearchParams({
+        client_id: clientId,
+        response_type: "token",
+        scope: SCOPES,
+        redirect_uri: ORIGIN + "/onedrive-picker.html",
+        prompt: "select_account",
+        nonce: state,
+        state: state,
+      });
+      if (loginHint) authParams.set("login_hint", loginHint);
+      window.location.assign(AUTHORITY + "?" + authParams.toString());
+      return;
+    }
+
+    try {
+      var expected = sessionStorage.getItem("od_state");
+      if (expected && fragment.get("state") !== expected) {
+        return fail("State mismatch");
+      }
+      sessionStorage.removeItem("od_state");
+    } catch (e) { /* no sessionStorage */ }
+    if (fragment.get("error")) {
+      return fail(fragment.get("error_description") || fragment.get("error"));
+    }
+
+    history.replaceState(null, "", window.location.pathname);
+
+    var channelId =
+      (window.crypto.randomUUID && window.crypto.randomUUID()) ||
+      String(Math.random()).slice(2);
+    var options = {
+      sdk: "8.0",
+      entry: { oneDrive: { files: {} } },
+      authentication: {},
+      messaging: { origin: ORIGIN, channelId: channelId },
+      typesAndSources: { mode: "files", pivots: { oneDrive: true, recent: true } },
+    };
+
+    // Hand the session token and channel to the opener before this document
+    // becomes the picker page. The opener answers authenticate/pick/close.
+    try {
+      window.opener &&
+        window.opener.postMessage(
+          { type: "onedrive-token", token: accessToken, channelId: channelId },
+          ORIGIN,
+        );
+    } catch (e) {
+      return fail("Opener gone");
+    }
+
+    var form = document.createElement("form");
+    form.setAttribute("action", PICKER_BASE + "?filePicker=" +
+      encodeURIComponent(JSON.stringify(options)));
+    form.setAttribute("method", "POST");
+    var input = document.createElement("input");
+    input.setAttribute("type", "hidden");
+    input.setAttribute("name", "access_token");
+    input.setAttribute("value", accessToken);
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  })();
+</script>
+</body>
+</html>

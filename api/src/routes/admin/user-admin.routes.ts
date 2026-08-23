@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
+import { flagConnectionsForDeactivatedOwner } from "../../integrations/storage/storage-owner";
 import { Tenant } from '../../database/entities/Tenant';
 import { User } from '../../database/entities/User';
 import { PendingInvite } from '../../database/entities/PendingInvite';
@@ -171,6 +172,9 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
   if (!user) throw new NotFoundError('User not found');
   if (!user.isActive) throw new BadRequestError('User is already inactive');
   if (req.params.id === req.userId) throw new BadRequestError('Cannot deactivate yourself');
+
+  // Cloud imports: flag connections owned by this user (fire-and-forget).
+  await flagConnectionsForDeactivatedOwner(user.id);
 
   // Wrap in transaction for atomicity
   let releaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };

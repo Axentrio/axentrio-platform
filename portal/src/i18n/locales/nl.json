@@ -1111,6 +1111,10 @@
         "url": {
           "label": "Website",
           "description": "Importeer pagina's van je site"
+        },
+        "cloud": {
+          "label": "Importeren uit de cloud",
+          "description": "Importeer bestanden uit Google Drive of OneDrive"
         }
       },
       "modal": {
@@ -1194,6 +1198,34 @@
           "retry": "Opnieuw proberen",
           "retryProcessing": "Verwerking opnieuw proberen",
           "refresh": "Vernieuwen"
+        }
+      },
+      "cloud": {
+        "blurb": "Import is een momentopname. Gekozen bestanden worden gekopieerd naar de kennisbank. Ze blijven niet gesynchroniseerd.",
+        "connect": "Verbinden",
+        "connectFailed": "Google Drive-verbinding starten mislukt",
+        "popupBlocked": "Sta popups toe om te verbinden",
+        "connected": "Verbonden",
+        "notConnected": "Niet verbonden",
+        "needsReauth": "opnieuw verbinden vereist",
+        "importFiles": "Bestanden importeren",
+        "importQueued": "Import in de wachtrij",
+        "someSkipped": "{{count}} bestand(en) overgeslagen. Die types worden niet ondersteund.",
+        "importFailed": "Die bestanden importeren is mislukt",
+        "pickerNotConfigured": "Google Picker is nog niet geconfigureerd",
+        "icloudLater": "iCloud is niet beschikbaar. Apple heeft geen API voor derden.",
+        "dropboxLater": "Dropbox komt later.",
+        "slotsLeft": "{{count}} documentplaatsen over",
+        "connectedBy": "Verbonden door {{name}}",
+        "providerGoogle": "Google Drive",
+        "providerOneDrive": "OneDrive",
+        "status": {
+          "queued": "In de wachtrij",
+          "downloading": "Downloaden",
+          "scanning": "Scannen",
+          "stored": "Opgeslagen",
+          "document_created": "Document aangemaakt",
+          "failed": "Mislukt"
         }
       }
     },

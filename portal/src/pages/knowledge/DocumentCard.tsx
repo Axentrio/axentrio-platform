@@ -29,6 +29,11 @@ interface DocumentCardProps {
         chunkCount: number;
         errorMessage?: string | null;
         updatedAt: string;
+        metadata?: {
+            source?: string;
+            provider?: string;
+            fileOwner?: string | null;
+        };
         qualityReport?: {
             contentType: string;
             contentSummary: string;
@@ -123,6 +128,9 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
     onRefresh,
 }) => {
     const { t } = useTranslation();
+    const cloudMeta = document.metadata?.source === "cloud"
+        ? { provider: document.metadata.provider, owner: document.metadata.fileOwner }
+        : null;
     const { isRole } = useAppAuth();
     const isAdmin = isRole("admin");
     const type = typeConfig[document.type] || typeConfig.text;
@@ -145,6 +153,12 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
                         />
                         {t(status.labelKey)}
                     </span>
+                    {cloudMeta && (
+                        <span className="text-[10px] text-text-muted">
+                            {cloudMeta.provider}
+                            {cloudMeta.owner ? ` · ${cloudMeta.owner}` : ""}
+                        </span>
+                    )}
                     {isAdmin && (
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>

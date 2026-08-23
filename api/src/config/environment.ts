@@ -174,10 +174,21 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
 
+  // Google Drive knowledge import — SEPARATE OAuth client from calendar.
+  GOOGLE_STORAGE_CLIENT_ID: z.string().optional(),
+  GOOGLE_STORAGE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_STORAGE_REDIRECT_URI: z.string().optional(),
+  STORAGE_OAUTH_STATE_SECRET: z.string().optional(),
+  GOOGLE_PICKER_API_KEY: z.string().optional(),
+
   // Microsoft / Outlook Calendar (internal scheduler, P6)
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_REDIRECT_URI: z.string().optional(),
+
+  MICROSOFT_STORAGE_CLIENT_ID: z.string().optional(),
+  MICROSOFT_STORAGE_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_STORAGE_REDIRECT_URI: z.string().optional(),
 
   // WhatsApp Cloud API. App secret falls back to META_APP_SECRET (same Meta app);
   // verify token falls back to META_VERIFY_TOKEN. Override only if WhatsApp lives
@@ -484,6 +495,20 @@ export const config = {
     stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
   },
 
+  // Provider-neutral OAuth state signing for cloud-storage connects. The
+  // secret signs the cookie nonce for Google AND OneDrive alike, so it lives
+  // outside either provider's client block.
+  storageOAuth: {
+    stateSecret: env.STORAGE_OAUTH_STATE_SECRET || '',
+  },
+
+  googleStorage: {
+    clientId: env.GOOGLE_STORAGE_CLIENT_ID || '',
+    clientSecret: env.GOOGLE_STORAGE_CLIENT_SECRET || '',
+    redirectUri: env.GOOGLE_STORAGE_REDIRECT_URI || '',
+    pickerApiKey: env.GOOGLE_PICKER_API_KEY || '',
+  },
+
   microsoft: {
     clientId: env.MICROSOFT_CLIENT_ID || '',
     clientSecret: env.MICROSOFT_CLIENT_SECRET || '',
@@ -492,6 +517,12 @@ export const config = {
     // a per-callback `provider` claim keeps Google/Microsoft states from being
     // replayed against the other callback.
     stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
+  },
+
+  microsoftStorage: {
+    clientId: env.MICROSOFT_STORAGE_CLIENT_ID || '',
+    clientSecret: env.MICROSOFT_STORAGE_CLIENT_SECRET || '',
+    redirectUri: env.MICROSOFT_STORAGE_REDIRECT_URI || '',
   },
 
   whatsapp: {

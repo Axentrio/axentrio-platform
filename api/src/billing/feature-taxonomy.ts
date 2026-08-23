@@ -100,6 +100,11 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   hideWidgetAttribution: { label: 'Hide widget attribution', group: 'plan-traits' },
   customWidgetAppearance: { label: 'Custom widget appearance', group: 'plan-traits' },
   fileUpload: { label: 'File upload', group: 'plan-traits' },
+  cloudImport: {
+    label: 'Cloud storage import',
+    group: 'plan-traits',
+    requires: 'fileUpload',
+  },
 };
 
 /**

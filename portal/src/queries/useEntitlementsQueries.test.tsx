@@ -54,6 +54,7 @@ const ESSENTIAL_FEATURES = {
   customWidgetAppearance: false,
   handoff: true,
   fileUpload: true,
+  cloudImport: true,
   channelWhatsapp: false,
   channelMessenger: false,
   channelInstagram: false,

@@ -39,6 +39,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       customWidgetAppearance: false,
       handoff: false,
       fileUpload: false,
+      cloudImport: false,
       channelWhatsapp: false,
       channelMessenger: false,
       channelInstagram: false,
@@ -75,6 +76,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       customWidgetAppearance: true, // basic color/title/avatar config
       handoff: true,
       fileUpload: true,
+      cloudImport: true,
       // Channels: Essential includes the social integrations. Only `free` is widget-only.
       // Each stays tenant-toggleable, so the tier is a ceiling and not a switch.
       channelWhatsapp: true,
@@ -120,6 +122,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       customWidgetAppearance: true,
       handoff: true,
       fileUpload: true,
+      cloudImport: true,
       channelWhatsapp: true,
       channelMessenger: true,
       channelInstagram: true,
@@ -158,6 +161,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       customWidgetAppearance: true,
       handoff: true,
       fileUpload: true,
+      cloudImport: true,
       channelWhatsapp: true,
       channelMessenger: true,
       channelInstagram: true,

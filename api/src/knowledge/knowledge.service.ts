@@ -298,6 +298,10 @@ export class KnowledgeService {
         docCounts.map((r: any) => [r.status, parseInt(r.count)]),
       ),
       totalChunks: parseInt(totalChunks),
+      remainingDocumentSlots: await this.remainingDocumentSlots(
+        tenantId,
+        kb.id,
+      ).then((n) => (Number.isFinite(n) ? n : null)),
     };
   }
 

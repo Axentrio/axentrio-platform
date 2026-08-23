@@ -251,3 +251,123 @@ export function useTestChat() {
     }) => api.post<TestChatResponse>("/tenants/me/ai-settings/test-chat", data),
   });
 }
+
+
+export interface StorageConnection {
+  id: string;
+  provider: string;
+  accountEmail: string | null;
+  reauthRequired: boolean;
+  connectedByUserId: string;
+  connectedByName: string | null;
+  createdAt: string;
+}
+
+export interface StorageImportJobRow {
+  id: string;
+  fileId: string;
+  provider: string;
+  status: string;
+  error: string | null;
+  documentId: string | null;
+  createdAt: string;
+}
+
+export function useStorageConnections() {
+  return useQuery({
+    queryKey: queryKeys.knowledge.storageConnections(),
+    queryFn: async () => {
+      const res = await api.get<{ connections: StorageConnection[] }>(
+        "/knowledge/storage/connections",
+      );
+      return res.connections;
+    },
+  });
+}
+
+export function useStoragePickerConfig() {
+  return useQuery({
+    queryKey: queryKeys.knowledge.storagePicker(),
+    queryFn: () =>
+      api.get<{ clientId: string | null; pickerApiKey: string | null }>(
+        "/knowledge/storage/google/picker-config",
+      ),
+  });
+}
+
+export function useStorageConnectUrl() {
+  return useMutation({
+    mutationFn: () =>
+      api.get<{ startUrl: string }>("/knowledge/storage/google/connect-url"),
+  });
+}
+
+export function useDisconnectStorage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/knowledge/storage/connections/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledge.storageConnections(),
+      });
+    },
+  });
+}
+
+export function useStartCloudImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      storageConnectionId: string;
+      files: Array<{
+        id: string;
+        name?: string;
+        mimeType?: string;
+        size?: number;
+        driveId?: string;
+      }>;
+      googleAccessToken?: string;
+      oneDriveAccessToken?: string;
+      kbId?: string;
+    }) => api.post<{
+    jobs: StorageImportJobRow[];
+    skipped?: Array<{ id: string; reason: string }>;
+  }>("/knowledge/storage/import", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.storageJobs() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.stats() });
+    },
+  });
+}
+
+export function useStorageImportJobs(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.knowledge.storageJobs(),
+    queryFn: async () => {
+      const res = await api.get<{ jobs: StorageImportJobRow[] }>(
+        "/knowledge/storage/jobs",
+      );
+      return res.jobs;
+    },
+    enabled,
+    refetchInterval: (query) => {
+      const rows = query.state.data;
+      const busy =
+        Array.isArray(rows) &&
+        rows.some(
+          (j) => j.status !== "document_created" && j.status !== "failed",
+        );
+      return busy ? 3000 : false;
+    },
+  });
+}
+
+
+export function useOneDriveConnectUrl() {
+  return useMutation({
+    mutationFn: () =>
+      api.get<{ startUrl: string }>("/knowledge/storage/onedrive/connect-url"),
+  });
+}
+

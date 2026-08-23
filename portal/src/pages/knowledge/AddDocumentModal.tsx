@@ -16,6 +16,7 @@ import {
   X,
   CheckCircle2,
   Globe,
+  Cloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -26,8 +27,11 @@ import {
   useImportWebsite,
   useDiscoverWebsiteHosts,
 } from "@/queries/useKnowledgeQueries";
+import { useHasFeature } from "@/queries/useEntitlementsQueries";
+import CloudImportPanel from "./CloudImportPanel";
 
 type DocType = "text" | "faq" | "pdf" | "docx" | "url";
+type ModalKind = DocType | "cloud";
 
 interface AddDocumentModalProps {
   isOpen: boolean;
@@ -42,7 +46,7 @@ interface AddDocumentModalProps {
 }
 
 const docTypes: {
-  value: DocType;
+  value: ModalKind;
   labelKey: string;
   descriptionKey: string;
   icon: React.ElementType;
@@ -83,6 +87,13 @@ const docTypes: {
     icon: Globe,
     accent: "border-emerald-500/40 bg-emerald-500/5 text-emerald-400",
   },
+  {
+    value: "cloud",
+    labelKey: "ai.knowledge.docTypes.cloud.label",
+    descriptionKey: "ai.knowledge.docTypes.cloud.description",
+    icon: Cloud,
+    accent: "border-sky-500/40 bg-sky-500/5 text-sky-400",
+  },
 ];
 
 const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
@@ -91,8 +102,9 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   editingDocument,
 }) => {
   const { t } = useTranslation();
+  const canCloudImport = useHasFeature("cloudImport");
   const isEditing = !!editingDocument;
-  const [docType, setDocType] = useState<DocType>("text");
+  const [docType, setDocType] = useState<ModalKind>("text");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -107,6 +119,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   const uploadFile = useUploadFile();
   const importWebsite = useImportWebsite();
   const isUrlType = docType === "url";
+  const isCloudType = docType === "cloud";
   const discover = useDiscoverWebsiteHosts(
     debouncedWebsiteUrl,
     isOpen && isUrlType,
@@ -154,9 +167,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   const extraHosts = discover.data?.hosts ?? [];
   useEffect(() => {
     const hosts = discover.data?.hosts ?? [];
-    setSelectedExtraHosts(
-      hosts.filter((h) => h.autoCrawl).map((h) => h.host),
-    );
+    setSelectedExtraHosts(hosts.filter((h) => h.autoCrawl).map((h) => h.host));
   }, [debouncedWebsiteUrl, discover.data]);
 
   const MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -256,8 +267,10 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
             <Label className="mb-2.5 text-text-secondary text-xs">
               {t("ai.knowledge.modal.fields.docType.label")}
             </Label>
-            <div className="grid grid-cols-5 gap-2">
-              {docTypes.map((type) => {
+            <div className="grid grid-cols-3 gap-2">
+              {docTypes
+              .filter((type) => type.value !== "cloud" || canCloudImport)
+              .map((type) => {
                 const Icon = type.icon;
                 const isSelected = docType === type.value;
                 return (
@@ -289,8 +302,12 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
           </div>
         )}
 
+        {isCloudType && !isEditing && (
+          <CloudImportPanel onImported={onClose} />
+        )}
+
         {/* Title */}
-        {!isUrlType && (
+        {!isUrlType && !isCloudType && (
           <div>
             <Label className="mb-1.5 text-text-secondary text-xs">
               {t("ai.knowledge.modal.fields.title.label")}
@@ -311,7 +328,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
         )}
 
         {/* Content Area */}
-        {isUrlType ? (
+        {isCloudType ? null : isUrlType ? (
           <div>
             <Label className="mb-1.5 text-text-secondary text-xs">
               {t("ai.knowledge.modal.fields.websiteUrl.label")}
@@ -487,6 +504,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
         )}
 
         {/* Actions */}
+        {!isCloudType && (
         <div className="flex justify-end gap-2 pt-1">
           <Button
             type="button"
@@ -515,6 +533,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
                 : t("ai.knowledge.modal.actions.addDocument")}
           </Button>
         </div>
+        )}
       </form>
     </Modal>
   );

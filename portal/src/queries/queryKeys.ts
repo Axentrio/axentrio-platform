@@ -62,6 +62,9 @@ export const queryKeys = {
     all: () => ['knowledge'] as const,
     documents: () => [...queryKeys.knowledge.all(), 'documents'] as const,
     stats: () => [...queryKeys.knowledge.all(), 'stats'] as const,
+    storageConnections: () => [...queryKeys.knowledge.all(), 'storage-connections'] as const,
+    storageJobs: () => [...queryKeys.knowledge.all(), 'storage-jobs'] as const,
+    storagePicker: () => [...queryKeys.knowledge.all(), 'storage-picker'] as const,
   },
   cannedResponses: {
     all: () => ['cannedResponses'] as const,

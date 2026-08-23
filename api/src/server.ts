@@ -57,6 +57,10 @@ import schedulerRoutes from "./scheduler/scheduler.routes";
 import googleCalendarRoutes, {
   googleCalendarCallbackRouter,
 } from "./integrations/google/google-calendar.routes";
+import googleDriveAuthRoutes, {
+  googleDrivePublicRouter,
+} from "./integrations/storage/google-drive.routes";
+import { oneDrivePublicRouter } from "./integrations/storage/onedrive.routes";
 import outlookCalendarRoutes, {
   outlookCalendarCallbackRouter,
 } from "./integrations/microsoft/outlook-calendar.routes";
@@ -358,6 +362,9 @@ app.use(rateLimitByIp);
 app.use("/api/v1/channels/meta/oauth", metaOAuthCallbackRouter);
 // Public Google OAuth callback (Google redirects the browser here, no auth header).
 app.use("/api/v1/integrations/google", googleCalendarCallbackRouter);
+// Public Google Drive storage start + callback (browser navigation, no auth header).
+app.use("/api/v1/knowledge/storage/google", googleDrivePublicRouter);
+app.use("/api/v1/knowledge/storage/onedrive", oneDrivePublicRouter);
 // Public Microsoft/Outlook OAuth callback (MS redirects the browser here, no auth header).
 app.use("/api/v1/integrations/outlook", outlookCalendarCallbackRouter);
 // Public self-service booking pages (reached from email links; signed-token auth).
@@ -400,6 +407,7 @@ apiRouter.use(
 );
 apiRouter.use("/admin", adminRoutes);
 apiRouter.use("/billing", billingRoutes);
+apiRouter.use("/knowledge/storage", googleDriveAuthRoutes);
 apiRouter.use("/knowledge", knowledgeRoutes);
 apiRouter.use("/scheduler", schedulerRoutes);
 apiRouter.use("/integrations/google", googleCalendarRoutes);
@@ -510,6 +518,18 @@ async function startServer(): Promise<void> {
         createWebsiteCrawlProcessor(AppDataSource),
       );
       logger.info("Website crawl processor registered");
+
+      // Interim path: the API also consumes storage-import jobs until a
+      // dedicated worker service runs against the same Redis. Matches the
+      // website-crawl interim above; the processor concurrency is 2.
+      const { createStorageImportProcessor, STORAGE_IMPORT_QUEUE } = await import(
+        "./integrations/storage/import.worker"
+      );
+      registerProcessor(
+        STORAGE_IMPORT_QUEUE,
+        createStorageImportProcessor(AppDataSource),
+      );
+      logger.info("Storage import processor registered");
 
       const { createNotificationProcessor } = await import(
         "./notifications/notification.worker"
@@ -897,6 +917,22 @@ async function startServer(): Promise<void> {
     };
     setTimeout(recrawlWebsites, 5 * 60 * 1000);
     setInterval(recrawlWebsites, 24 * 60 * 60 * 1000);
+
+    // Cloud-import reaper: stuck/failed S3 objects + stale staging/ prefix.
+    const storageReaper = async () => {
+      try {
+        const { reapStaleStorageImports } = await import(
+          "./integrations/storage/reaper"
+        );
+        await reapStaleStorageImports();
+      } catch (error) {
+        logger.error("Storage import reaper failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+    setTimeout(storageReaper, 10 * 60 * 1000);
+    setInterval(storageReaper, 24 * 60 * 60 * 1000);
 
     // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
     // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps

@@ -1110,6 +1110,10 @@
         "url": {
           "label": "Site web",
           "description": "Importer les pages de votre site"
+        },
+        "cloud": {
+          "label": "Importer depuis le cloud",
+          "description": "Importer des fichiers depuis Google Drive ou OneDrive"
         }
       },
       "modal": {
@@ -1193,6 +1197,34 @@
           "retry": "Réessayer",
           "retryProcessing": "Relancer le traitement",
           "refresh": "Actualiser"
+        }
+      },
+      "cloud": {
+        "blurb": "L'import est une copie. Les fichiers choisis sont copies dans la base de connaissances. Ils ne restent pas synchronises.",
+        "connect": "Connecter",
+        "connectFailed": "Impossible de demarrer la connexion Google Drive",
+        "popupBlocked": "Autorisez les popups pour connecter",
+        "connected": "Connecte",
+        "notConnected": "Non connecte",
+        "needsReauth": "reconnexion requise",
+        "importFiles": "Importer des fichiers",
+        "importQueued": "Import en file",
+        "someSkipped": "{{count}} fichier(s) ignore(s). Ces types ne sont pas pris en charge.",
+        "importFailed": "Impossible d'importer ces fichiers",
+        "pickerNotConfigured": "Le selecteur Google n'est pas encore configure",
+        "icloudLater": "iCloud n'est pas disponible. Apple n'a pas d'API fichier pour les tiers.",
+        "dropboxLater": "Dropbox viendra plus tard.",
+        "slotsLeft": "{{count}} emplacements de documents restants",
+        "connectedBy": "Connecte par {{name}}",
+        "providerGoogle": "Google Drive",
+        "providerOneDrive": "OneDrive",
+        "status": {
+          "queued": "En file",
+          "downloading": "Telechargement",
+          "scanning": "Analyse",
+          "stored": "Stocke",
+          "document_created": "Document cree",
+          "failed": "Echec"
         }
       }
     },

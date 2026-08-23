@@ -132,6 +132,7 @@ describe('wire contract — /entitlements', () => {
       'channelTiktok',
       'channelWhatsapp',
       'channelX',
+      'cloudImport',
       'crm',
       'customWidgetAppearance',
       'fileUpload',

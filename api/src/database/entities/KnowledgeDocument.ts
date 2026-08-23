@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from "typeorm";
 import { Tenant } from "./Tenant";
 import { KnowledgeBase } from "./KnowledgeBase";
@@ -14,6 +15,10 @@ export type DocumentType = "text" | "faq" | "pdf" | "docx" | "url";
 export type DocumentStatus = "pending" | "processing" | "indexed" | "failed";
 
 @Entity("knowledge_documents")
+@Index(["knowledgeBaseId", "storageProvider", "storageFileId"], {
+  unique: true,
+  where: '"storageProvider" IS NOT NULL AND "storageFileId" IS NOT NULL',
+})
 export class KnowledgeDocument {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
@@ -53,6 +58,13 @@ export class KnowledgeDocument {
 
   @Column({ type: "varchar", nullable: true })
   storagePath!: string | null;
+
+  /** Cloud-import provenance. Unique with storageFileId per KnowledgeBase when set. */
+  @Column({ type: "varchar", nullable: true })
+  storageProvider!: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  storageFileId!: string | null;
 
   @Column({
     type: "enum",

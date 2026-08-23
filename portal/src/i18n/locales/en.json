@@ -1120,8 +1120,8 @@
           "description": "Import pages from your site"
         },
         "cloud": {
-          "label": "Cloud",
-          "description": "Import files from Google Drive"
+          "label": "Import from Cloud",
+          "description": "Import files from Google Drive or OneDrive"
         }
       },
       "modal": {
@@ -1217,13 +1217,22 @@
         "needsReauth": "reconnect required",
         "importFiles": "Import files",
         "importQueued": "Import queued",
-        "someSkipped": "{count} file(s) were skipped — unsupported type",
+        "someSkipped": "{{count}} file(s) were skipped. Those types are not supported.",
         "importFailed": "Could not import those files",
         "pickerNotConfigured": "Google Picker is not configured yet",
-        "onedriveLater": "OneDrive is next. Dropbox and iCloud come later.",
-        "noOnedriveFiles": "No PDF or Word files in the OneDrive root",
         "icloudLater": "iCloud is not available. Apple has no third-party file API.",
-        "slotsUsed": "document slots used"
+        "slotsLeft": "{{count}} document slots left",
+        "connectedBy": "Connected by {{name}}",
+        "providerGoogle": "Google Drive",
+        "providerOneDrive": "OneDrive",
+        "status": {
+          "queued": "Queued",
+          "downloading": "Downloading",
+          "scanning": "Scanning",
+          "stored": "Stored",
+          "document_created": "Document created",
+          "failed": "Failed"
+        }
       }
     },
     "appearances": {

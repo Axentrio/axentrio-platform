@@ -28,3 +28,35 @@ export function redirectToKnowledge(
  res.setHeader("Location", `${origin}/ai?tab=knowledge&storage=${flag}`);
  res.end();
 }
+
+/**
+ * 302 to an OAuth consent screen. The URL must carry the allowlisted
+ * provider host; the Location header is rebuilt from a literal origin so no
+ * request data can turn this into an open redirect.
+ */
+export function redirectToProviderConsent(
+ res: Response,
+ url: string,
+ consentHost: "accounts.google.com" | "login.microsoftonline.com",
+): void {
+ let parsed: URL;
+ try {
+   parsed = new URL(url);
+ } catch {
+   redirectToKnowledge(res, "error");
+   return;
+ }
+ if (parsed.protocol !== "https:" || parsed.hostname !== consentHost) {
+   redirectToKnowledge(res, "error");
+   return;
+ }
+ // Host allowlisted above. Origin is a string literal.
+ // pi-lens-ignore: ast-grep:no-open-redirect-js
+ // pi-lens-ignore: ts-open-redirect
+ res.statusCode = 302;
+ res.setHeader(
+   "Location",
+   `https://${consentHost}${parsed.pathname}${parsed.search}`,
+ );
+ res.end();
+}

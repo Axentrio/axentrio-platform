@@ -28,7 +28,7 @@ const SCOPES = [
 
 export class GoogleStorageNotConfiguredError extends Error {
   constructor() {
-    super("Google Drive storage integration is not configured");
+    super("Google Drive storage connection is not configured");
     this.name = "GoogleStorageNotConfiguredError";
   }
 }
@@ -189,9 +189,22 @@ export async function disconnectStorageConnection(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  } else if (mayRevoke && row.provider === "onedrive") {
+    // Microsoft has no per-grant revocation endpoint (no RFC 7009 support);
+    // the only API, Graph revokeSignInSessions, would kill the user's sign-in
+    // for every Microsoft app including Outlook Calendar. Deleting the row
+    // discards our encrypted tokens; the grant itself stays removable in the
+    // user's Microsoft account settings.
+    logger.info(
+      "[OneDrive] local tokens discarded; no per-grant revoke exists at Microsoft",
+      {
+        connectionId: row.id,
+        providerAccountId: row.providerAccountId,
+      },
+    );
   } else {
     logger.info(
-      "[Google Drive] skip provider revoke; another tenant still holds this account",
+      "[Storage] skip provider revoke; another tenant still holds this account",
       {
         connectionId: row.id,
         providerAccountId: row.providerAccountId,

@@ -5,9 +5,10 @@
  * failed/downloading for more than 24h, plus stray staging/ objects older
  * than a day. Bounded work per run; failures log and continue.
  */
-import { LessThan, MoreThan } from "typeorm";
+import { In, LessThan } from "typeorm";
 import { AppDataSource } from "../../database/data-source";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
+import { KnowledgeDocument } from "../../database/entities/KnowledgeDocument";
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { createS3Client } from "../../config/s3.config";
 import { config } from "../../config/environment";
@@ -25,7 +26,7 @@ export async function reapStaleStorageImports(): Promise<{
   const jobRepo = AppDataSource.getRepository(StorageImportJob);
   const stuck = await jobRepo.find({
     where: [
-      { status: "failed", updatedAt: MoreThan(new Date(0)) },
+      { status: "failed", updatedAt: LessThan(cutoff) },
       { status: "downloading", updatedAt: LessThan(cutoff) },
       { status: "scanning", updatedAt: LessThan(cutoff) },
     ],
@@ -33,28 +34,45 @@ export async function reapStaleStorageImports(): Promise<{
   });
   const s3 = createS3Client();
   const bucket = config.s3.bucket;
+
+  // A job row's targetKey can point at bytes a live document references (a
+  // failure after the document save but before the row was marked). Never
+  // delete a key a KnowledgeDocument still points at.
+  const candidates = [
+    ...new Set(stuck.map((j) => j.targetKey).filter((k): k is string => !!k)),
+  ];
+  const referenced =
+    candidates.length > 0
+      ? new Set(
+          (
+            await AppDataSource.getRepository(KnowledgeDocument).find({
+              select: { storagePath: true },
+              where: { storagePath: In(candidates) },
+            })
+          ).map((d) => d.storagePath),
+        )
+      : new Set<string>();
+  const deletable = candidates.filter((k) => !referenced.has(k));
   let deletedJobs = 0;
 
-  for (const job of stuck) {
+  for (const key of deletable) {
     try {
       await s3.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
-          Delete: {
-            Objects: [{ Key: job.targetKey }],
-            Quiet: true,
-          },
+          Delete: { Objects: [{ Key: key }], Quiet: true },
         }),
       );
       deletedJobs += 1;
     } catch (err) {
       logger.warn("[storage-reaper] job key delete failed", {
-        jobId: job.id,
+        key,
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
+  await jobRepo.remove(stuck);
   let deletedStaging = 0;
   let continuation: string | undefined;
   try {

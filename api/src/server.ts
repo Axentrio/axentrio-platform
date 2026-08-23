@@ -59,8 +59,8 @@ import googleCalendarRoutes, {
 } from "./integrations/google/google-calendar.routes";
 import googleDriveAuthRoutes, {
   googleDrivePublicRouter,
-  oneDrivePublicRouter,
 } from "./integrations/storage/google-drive.routes";
+import { oneDrivePublicRouter } from "./integrations/storage/onedrive.routes";
 import outlookCalendarRoutes, {
   outlookCalendarCallbackRouter,
 } from "./integrations/microsoft/outlook-calendar.routes";
@@ -519,6 +519,9 @@ async function startServer(): Promise<void> {
       );
       logger.info("Website crawl processor registered");
 
+      // Interim path: the API also consumes storage-import jobs until a
+      // dedicated worker service runs against the same Redis. Matches the
+      // website-crawl interim above; the processor concurrency is 2.
       const { createStorageImportProcessor, STORAGE_IMPORT_QUEUE } = await import(
         "./integrations/storage/import.worker"
       );

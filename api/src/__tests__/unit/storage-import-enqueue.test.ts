@@ -14,6 +14,16 @@ vi.mock("../../integrations/storage/import.worker", () => ({
 
 vi.mock("../../queue/message-queue", () => ({
   addJob: vi.fn(async () => undefined),
+  removeJob: vi.fn(async () => undefined),
+}));
+
+vi.mock("../../integrations/storage/token", () => ({
+  getValidAccessToken: vi.fn(async () => "od-token"),
+  refresherFor: vi.fn(() => async () => ({
+    accessToken: "od-token",
+    refreshToken: null,
+    expiry: null,
+  })),
 }));
 
 vi.mock("../../knowledge/knowledge.service", () => ({
@@ -42,7 +52,7 @@ vi.mock("axios", () => ({
 }));
 import axios from "axios";
 
-import { addJob } from "../../queue/message-queue";
+import { addJob, removeJob } from "../../queue/message-queue";
 import { enqueueStorageImport } from "../../integrations/storage/import.service";
 
 describe("enqueueStorageImport", () => {
@@ -113,10 +123,78 @@ describe("enqueueStorageImport", () => {
       expect.objectContaining({ fileId: "file-1", provider: "google_drive" }),
       { jobId: "import-kb1-google_drive-file-1" },
     );
+    expect(removeJob).toHaveBeenCalledWith(
+      "storage-import",
+      "import-kb1-google_drive-file-1",
+    );
+  });
+
+  it("rejects when the tenant already has 3 jobs in flight", async () => {
+    count.mockResolvedValue(3);
+    await expect(
+      enqueueStorageImport({
+        tenantId: "t1",
+        userId: "u1",
+        storageConnectionId: "conn-1",
+        googleAccessToken: "tok",
+        files: [{ id: "file-1", mimeType: "application/pdf" }],
+      }),
+    ).rejects.toMatchObject({ code: "RATE_LIMIT_EXCEEDED", statusCode: 429 });
+  });
+
+  it("rejects OneDrive imports when Graph /me does not match the connection", async () => {
+    findOne.mockImplementation(
+      async (opts: { where?: { id?: string } }) => {
+        if (opts?.where && "id" in (opts.where as object)) {
+          return {
+            id: "conn-1",
+            tenantId: "t1",
+            provider: "onedrive",
+            providerAccountId: "od-sub",
+            status: "active",
+            reauthRequired: false,
+          };
+        }
+        return null;
+      },
+    );
+    (axios.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { id: "other-od" },
+    });
+    await expect(
+      enqueueStorageImport({
+        tenantId: "t1",
+        userId: "u1",
+        storageConnectionId: "conn-1",
+        files: [{ id: "file-1", mimeType: "application/pdf" }],
+      }),
+    ).rejects.toMatchObject({ code: "storage_account_mismatch" });
   });
 });
 
-describe('unsupported file handling', () => {
+describe("unsupported file handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    count.mockResolvedValue(0);
+    findOne.mockImplementation(
+      async (opts: { where?: { id?: string } }) => {
+        if (opts?.where && "id" in (opts.where as object)) {
+          return {
+            id: "conn-1",
+            tenantId: "t1",
+            provider: "google_drive",
+            providerAccountId: "sub-9",
+            status: "active",
+            reauthRequired: false,
+          };
+        }
+        return null;
+      },
+    );
+    (axios.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { sub: "sub-9" },
+    });
+  });
   it('skips unsupported files instead of failing the batch', async () => {
     const result = await enqueueStorageImport({
       tenantId: 't1',

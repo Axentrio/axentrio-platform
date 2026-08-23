@@ -6,7 +6,8 @@ import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
 import { KnowledgeService } from "../../knowledge/knowledge.service";
-import { addJob } from "../../queue/message-queue";
+import { addJob, removeJob } from "../../queue/message-queue";
+import { getValidAccessToken, refresherFor } from "./token";
 import { config } from "../../config/environment";
 import { ApiError, BadRequestError } from "../../middleware/error-handler";
 import { ERROR_CODES } from "../../middleware/error-codes";
@@ -14,6 +15,7 @@ import { logger } from "../../utils/logger";
 import axios from "axios";
 import {
   MAX_IMPORT_FILES,
+  MAX_RUNNING_JOBS_PER_TENANT,
   planForMime,
 } from "./import-mime";
 import { STORAGE_IMPORT_QUEUE } from "./import.worker";
@@ -23,6 +25,8 @@ export interface ImportFileInput {
   name?: string;
   mimeType?: string;
   size?: number;
+  /** OneDrive picker v8: drive holding the item (Graph /drives/{driveId}). */
+  driveId?: string;
 }
 
 export async function enqueueStorageImport(opts: {
@@ -77,12 +81,13 @@ export async function enqueueStorageImport(opts: {
       "STORAGE_REAUTH_REQUIRED",
     );
   }
-
   if (connection.provider === "google_drive") {
     await assertGoogleAccountMatch(
       connection.providerAccountId,
       opts.googleAccessToken,
     );
+  } else {
+    await assertOneDriveAccountMatch(connection);
   }
 
   const knowledge = new KnowledgeService(AppDataSource);
@@ -98,18 +103,22 @@ export async function enqueueStorageImport(opts: {
       ERROR_CODES.QUOTA_EXCEEDED,
     );
   }
-
   const jobRepo = AppDataSource.getRepository(StorageImportJob);
-  // Per-tenant cap: count every job that occupies a worker or is waiting.
-  // One number, one guard — no dead second clause.
+  // Spec volume gate: at most MAX_RUNNING_JOBS_PER_TENANT jobs in flight per
+  // tenant. A fresh selection may queue beyond the cap — the storage-import
+  // processor runs at low global concurrency, so queued rows drain bounded.
   const running = await jobRepo.count({
     where: {
       tenantId: opts.tenantId,
-      status: In(['queued', 'downloading', 'scanning']),
+      status: In(["queued", "downloading", "scanning"]),
     },
   });
-  if (running + opts.files.length > 50) {
-    throw new ApiError('Too many imports in progress', 429, 'RATE_LIMIT_EXCEEDED');
+  if (running >= MAX_RUNNING_JOBS_PER_TENANT) {
+    throw new ApiError(
+      "Too many imports in progress. Wait for the current ones to finish.",
+      429,
+      "RATE_LIMIT_EXCEEDED",
+    );
   }
 
   const created: Array<{ id: string; fileId: string; status: string }> = [];
@@ -156,6 +165,11 @@ export async function enqueueStorageImport(opts: {
       continue;
     }
     const jobId = `import-${kb.id}-${connection.provider}-${file.id}`;
+    // The deterministic jobId stays stable across re-imports (spec), but Bull
+    // keeps completed/failed job hashes (removeOnComplete: 100) and silently
+    // ignores a duplicate jobId. Drop any stale job with this id first, or the
+    // fresh row would sit "queued" forever.
+    await removeJob(STORAGE_IMPORT_QUEUE, jobId);
     try {
       await addJob(
         STORAGE_IMPORT_QUEUE,
@@ -166,6 +180,7 @@ export async function enqueueStorageImport(opts: {
           storageConnectionId: connection.id,
           provider: connection.provider,
           fileId: file.id,
+          driveId: file.driveId ?? null,
           importedBy: opts.userId,
           claimedName: file.name ?? null,
           claimedMime: file.mimeType ?? null,
@@ -222,6 +237,41 @@ async function assertGoogleAccountMatch(
   if (!sub || sub !== providerAccountId) {
     throw new ApiError(
       "Google account does not match the connected Drive",
+      400,
+      "storage_account_mismatch",
+    );
+  }
+}
+
+/**
+ * Bind the picker selection to the stored connection: the Graph identity of
+ * the connection's own token must equal the stored providerAccountId, so a
+ * picker pointed at a different account cannot import into this tenant.
+ */
+async function assertOneDriveAccountMatch(
+  connection: StorageConnection,
+): Promise<void> {
+  const accessToken = await getValidAccessToken(
+    connection,
+    refresherFor(connection.provider),
+  );
+  let id: string | undefined;
+  try {
+    const me = await axios.get("https://graph.microsoft.com/v1.0/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 8000,
+    });
+    id = me.data?.id;
+  } catch {
+    throw new ApiError(
+      "OneDrive account proof failed",
+      400,
+      "storage_account_mismatch",
+    );
+  }
+  if (!id || id !== connection.providerAccountId) {
+    throw new ApiError(
+      "OneDrive account does not match the connected drive",
       400,
       "storage_account_mismatch",
     );

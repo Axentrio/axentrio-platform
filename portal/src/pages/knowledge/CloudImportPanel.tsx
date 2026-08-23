@@ -217,7 +217,9 @@ export default function CloudImportPanel({
         googleAccessToken: token,
       });
       if (res.skipped?.length) {
-        toast.message(t("ai.knowledge.cloud.someSkipped"), { description: `${res.skipped.length}` });
+        toast.message(
+          t("ai.knowledge.cloud.someSkipped", { count: res.skipped.length }),
+        );
       } else {
         toast.success(t("ai.knowledge.cloud.importQueued"));
       }
@@ -246,22 +248,47 @@ export default function CloudImportPanel({
         return;
       }
       const files = await new Promise<
-        Array<{ id: string; name?: string; mimeType?: string; size?: number }>
-      >((resolve) => {
+        Array<{
+          id: string;
+          name?: string;
+          mimeType?: string;
+          size?: number;
+          driveId?: string;
+        }>
+      >((resolve, reject) => {
+        const params = new URLSearchParams({ clientId: msClientId });
+        if (conn.accountEmail) params.set("loginHint", conn.accountEmail);
         const popup = window.open(
-          `/onedrive-picker.html?clientId=${encodeURIComponent(msClientId)}`,
+          `/onedrive-picker.html?${params.toString()}`,
           "onedrive-picker",
           "width=900,height=700",
         );
+        if (!popup) {
+          reject(new Error("popup-blocked"));
+          return;
+        }
         function handler(event: MessageEvent) {
           if (event.origin !== window.location.origin) return;
           if (event.data?.type === "onedrive-files") {
             window.removeEventListener("message", handler);
+            window.clearInterval(timer);
             resolve(event.data.files ?? []);
+            popup?.close();
+          } else if (event.data?.type === "onedrive-error") {
+            window.removeEventListener("message", handler);
+            window.clearInterval(timer);
+            reject(new Error(event.data.message || "picker-failed"));
             popup?.close();
           }
         }
         window.addEventListener("message", handler);
+        const timer = window.setInterval(() => {
+          if (!popup || popup.closed) {
+            window.clearInterval(timer);
+            window.removeEventListener("message", handler);
+            resolve([]);
+          }
+        }, 800);
       });
       if (files.length === 0) return;
       await startImport.mutateAsync({
@@ -271,8 +298,12 @@ export default function CloudImportPanel({
       toast.success(t("ai.knowledge.cloud.importQueued"));
       jobs.refetch();
       onImported();
-    } catch {
-      toast.error(t("ai.knowledge.cloud.importFailed"));
+    } catch (err) {
+      if (err instanceof Error && err.message === "popup-blocked") {
+        toast.error(t("ai.knowledge.cloud.popupBlocked"));
+      } else {
+        toast.error(t("ai.knowledge.cloud.importFailed"));
+      }
     } finally {
       setBusy(false);
     }
@@ -283,9 +314,11 @@ export default function CloudImportPanel({
       <p className="text-sm text-text-secondary">
         {t("ai.knowledge.cloud.blurb")}
       </p>
-      {typeof stats.data?.totalDocuments === "number" && (
+      {typeof stats.data?.remainingDocumentSlots === "number" && (
         <p className="text-xs text-text-muted">
-          {stats.data.totalDocuments} {t("ai.knowledge.cloud.slotsUsed")}
+          {t("ai.knowledge.cloud.slotsLeft", {
+            count: stats.data.remainingDocumentSlots,
+          })}
         </p>
       )}
       <div className="rounded-xl border border-border p-4 space-y-3">
@@ -293,15 +326,24 @@ export default function CloudImportPanel({
           <div className="flex items-center gap-2">
             <Cloud className="w-4 h-4 text-text-muted" />
             <div>
-              <p className="text-sm font-medium">Google Drive</p>
+              <p className="text-sm font-medium">
+                {t("ai.knowledge.cloud.providerGoogle")}
+              </p>
               <p className="text-xs text-text-muted">
                 {googleConn
                   ? googleConn.accountEmail || t("ai.knowledge.cloud.connected")
                   : t("ai.knowledge.cloud.notConnected")}
                 {googleConn?.reauthRequired
-                  ? ` — ${t("ai.knowledge.cloud.needsReauth")}`
+                  ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
                   : ""}
               </p>
+              {googleConn?.connectedByName ? (
+                <p className="text-xs text-text-muted">
+                  {t("ai.knowledge.cloud.connectedBy", {
+                    name: googleConn.connectedByName,
+                  })}
+                </p>
+              ) : null}
             </div>
           </div>
           {googleConn ? (
@@ -345,12 +387,21 @@ export default function CloudImportPanel({
       <div className="rounded-xl border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium">OneDrive</p>
+            <p className="text-sm font-medium">
+              {t("ai.knowledge.cloud.providerOneDrive")}
+            </p>
             <p className="text-xs text-text-muted">
               {oneDriveConn
                 ? oneDriveConn.accountEmail || t("ai.knowledge.cloud.connected")
                 : t("ai.knowledge.cloud.notConnected")}
             </p>
+            {oneDriveConn?.connectedByName ? (
+              <p className="text-xs text-text-muted">
+                {t("ai.knowledge.cloud.connectedBy", {
+                  name: oneDriveConn.connectedByName,
+                })}
+              </p>
+            ) : null}
           </div>
           {oneDriveConn ? (
             <div className="flex gap-2">
@@ -401,8 +452,11 @@ export default function CloudImportPanel({
         <ul className="text-xs text-text-muted space-y-1">
           {pendingJobs.slice(0, 8).map((j) => (
             <li key={j.id}>
-              {j.fileId}: {j.status}
-              {j.error ? ` — ${j.error}` : ""}
+              {j.fileId}:{" "}
+              {t(`ai.knowledge.cloud.status.${j.status}`, {
+                defaultValue: j.status,
+              })}
+              {j.error ? ` - ${j.error}` : ""}
             </li>
           ))}
         </ul>

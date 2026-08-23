@@ -319,7 +319,13 @@ export function useStartCloudImport() {
   return useMutation({
     mutationFn: (data: {
       storageConnectionId: string;
-      files: Array<{ id: string; name?: string; mimeType?: string; size?: number }>;
+      files: Array<{
+        id: string;
+        name?: string;
+        mimeType?: string;
+        size?: number;
+        driveId?: string;
+      }>;
       googleAccessToken?: string;
       kbId?: string;
     }) => api.post<{

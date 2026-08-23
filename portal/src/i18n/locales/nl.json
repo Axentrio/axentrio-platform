@@ -1113,8 +1113,8 @@
           "description": "Importeer pagina's van je site"
         },
         "cloud": {
-          "label": "Cloud",
-          "description": "Import files from Google Drive"
+          "label": "Importeren uit de cloud",
+          "description": "Importeer bestanden uit Google Drive of OneDrive"
         }
       },
       "modal": {
@@ -1201,22 +1201,31 @@
         }
       },
       "cloud": {
-        "blurb": "Import is a snapshot. Files you pick are copied into the knowledge base. They do not stay in sync.",
-        "connect": "Connect",
-        "connectFailed": "Could not start Google Drive connect",
+        "blurb": "Import is een momentopname. Gekozen bestanden worden gekopieerd naar de kennisbank. Ze blijven niet gesynchroniseerd.",
+        "connect": "Verbinden",
+        "connectFailed": "Google Drive-verbinding starten mislukt",
         "popupBlocked": "Sta popups toe om te verbinden",
-        "connected": "Connected",
-        "notConnected": "Not connected",
-        "needsReauth": "reconnect required",
-        "importFiles": "Import files",
-        "importQueued": "Import queued",
-        "someSkipped": "{count} bestand(en) overgeslagen — type niet ondersteund",
-        "importFailed": "Could not import those files",
-        "pickerNotConfigured": "Google Picker is not configured yet",
-        "onedriveLater": "OneDrive is next. Dropbox and iCloud come later.",
-        "noOnedriveFiles": "No PDF or Word files in the OneDrive root",
-        "icloudLater": "iCloud is not available. Apple has no third-party file API.",
-        "slotsUsed": "documentplaatsen gebruikt"
+        "connected": "Verbonden",
+        "notConnected": "Niet verbonden",
+        "needsReauth": "opnieuw verbinden vereist",
+        "importFiles": "Bestanden importeren",
+        "importQueued": "Import in de wachtrij",
+        "someSkipped": "{{count}} bestand(en) overgeslagen. Die types worden niet ondersteund.",
+        "importFailed": "Die bestanden importeren is mislukt",
+        "pickerNotConfigured": "Google Picker is nog niet geconfigureerd",
+        "icloudLater": "iCloud is niet beschikbaar. Apple heeft geen API voor derden.",
+        "slotsLeft": "{{count}} documentplaatsen over",
+        "connectedBy": "Verbonden door {{name}}",
+        "providerGoogle": "Google Drive",
+        "providerOneDrive": "OneDrive",
+        "status": {
+          "queued": "In de wachtrij",
+          "downloading": "Downloaden",
+          "scanning": "Scannen",
+          "stored": "Opgeslagen",
+          "document_created": "Document aangemaakt",
+          "failed": "Mislukt"
+        }
       }
     },
     "appearances": {

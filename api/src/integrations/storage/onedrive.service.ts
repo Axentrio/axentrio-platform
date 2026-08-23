@@ -9,6 +9,7 @@ import { StorageConnection } from "../../database/entities/StorageConnection";
 import { applyTokens, type RefreshResult } from "./token";
 import { pkceChallenge } from "./oauth-state";
 import { KB_DOCX, KB_PDF, MAX_IMPORT_BYTES } from "./import-mime";
+import { readCappedStream } from "./capped-stream";
 
 const AUTHORIZE_URL =
   "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
@@ -19,7 +20,7 @@ const SCOPE_PARAM = SCOPES.join(" ");
 
 export class OneDriveNotConfiguredError extends Error {
   constructor() {
-    super("OneDrive storage integration is not configured");
+    super("OneDrive storage connection is not configured");
     this.name = "OneDriveNotConfiguredError";
   }
 }
@@ -184,28 +185,38 @@ export async function listOneDriveFiles(
 export async function fetchOneDriveMeta(
   accessToken: string,
   fileId: string,
+  driveId?: string | null,
 ): Promise<{ name: string; mimeType: string }> {
-  const meta = await axios.get(
-    `${GRAPH}/me/drive/items/${encodeURIComponent(fileId)}`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { $select: "id,name,size,file" },
-      timeout: 15000,
-    },
-  );
+  const meta = await axios.get(driveItemUrl(fileId, driveId), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: { $select: "id,name,size,file" },
+    timeout: 15000,
+  });
   return {
     name: String(meta.data.name || "file"),
     mimeType: String(meta.data.file?.mimeType || ""),
   };
 }
 
+/**
+ * Picker v8 items are addressed per drive ({@link driveId} from the pick
+ * command); plain connection listings address the user's default drive.
+ */
+function driveItemUrl(fileId: string, driveId?: string | null): string {
+  const id = encodeURIComponent(fileId);
+  return driveId
+    ? `${GRAPH}/drives/${encodeURIComponent(driveId)}/items/${id}`
+    : `${GRAPH}/me/drive/items/${id}`;
+}
+
 /** Stream the content endpoint through a byte-capped reader — never buffer first. */
 export async function downloadOneDriveContent(
   accessToken: string,
   fileId: string,
+  driveId?: string | null,
 ): Promise<Buffer> {
   const res = await axios.get(
-    `${GRAPH}/me/drive/items/${encodeURIComponent(fileId)}/content`,
+    `${driveItemUrl(fileId, driveId)}/content`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       responseType: "stream",
@@ -214,19 +225,4 @@ export async function downloadOneDriveContent(
     },
   );
   return readCappedStream(res.data, MAX_IMPORT_BYTES);
-}
-
-async function readCappedStream(
-  stream: AsyncIterable<Buffer>,
-  maxBytes: number,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let n = 0;
-  for await (const chunk of stream) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    n += buf.length;
-    if (n > maxBytes) throw new Error("File exceeds the size limit");
-    chunks.push(buf);
-  }
-  return Buffer.concat(chunks);
 }

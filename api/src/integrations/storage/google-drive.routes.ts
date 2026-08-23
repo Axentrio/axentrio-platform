@@ -70,6 +70,3 @@ router.get(
 
 export default router;
 
-export const oneDrivePublicRouter = Router();
-oneDrivePublicRouter.get("/start", asyncHandler(od.oneDriveStart));
-oneDrivePublicRouter.get("/callback", asyncHandler(od.oneDriveCallback));

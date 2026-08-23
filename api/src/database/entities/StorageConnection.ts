@@ -1,9 +1,9 @@
 /**
-* StorageConnection — a tenant's connected cloud drive (Google Drive / OneDrive).
-*
-* Tenant-scoped, not per-KB. knowledgeBaseId is chosen at import time.
-* Tokens are encrypted at rest. Unique per (tenant, provider, providerAccountId).
-*/
+ * StorageConnection — a tenant's connected cloud drive (Google Drive / OneDrive).
+ *
+ * Tenant-scoped, not per-KB. knowledgeBaseId is chosen at import time.
+ * Tokens are encrypted at rest. Unique per (tenant, provider, providerAccountId).
+ */
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -32,35 +32,34 @@ export class StorageConnection {
   providerAccountId!: string;
 
   @Column({
-  type: "varchar",
-  length: 320,
-  name: "account_email",
-  nullable: true,
-})
-accountEmail!: string | null;
+    type: "varchar",
+    length: 320,
+    name: "account_email",
+    nullable: true,
+  })
+  accountEmail!: string | null;
 
-@Column({ type: "varchar", length: 16, default: "active" })
-status!: StorageConnectionStatus;
+  @Column({ type: "varchar", length: 16, default: "active" })
+  status!: StorageConnectionStatus;
 
-@Column({ type: "boolean", name: "reauth_required", default: false })
-reauthRequired!: boolean;
+  @Column({ type: "boolean", name: "reauth_required", default: false })
+  reauthRequired!: boolean;
 
-@Column({ type: "text", name: "access_token_enc" })
-accessTokenEnc!: string;
+  @Column({ type: "text", name: "access_token_enc" })
+  accessTokenEnc!: string;
 
-@Column({ type: "text", name: "refresh_token_enc", nullable: true })
-refreshTokenEnc!: string | null;
+  @Column({ type: "text", name: "refresh_token_enc", nullable: true })
+  refreshTokenEnc!: string | null;
 
-@Column({ type: "timestamptz", name: "token_expiry", nullable: true })
-tokenExpiry!: Date | null;
+  @Column({ type: "timestamptz", name: "token_expiry", nullable: true })
+  tokenExpiry!: Date | null;
 
-@Column({ type: "uuid", name: "connected_by_user_id" })
-connectedByUserId!: string;
+  @Column({ type: "uuid", name: "connected_by_user_id" })
+  connectedByUserId!: string;
 
-@CreateDateColumn({ name: "created_at" })
-createdAt!: Date;
+  @CreateDateColumn({ name: "created_at" })
+  createdAt!: Date;
 
-@UpdateDateColumn({ name: "updated_at" })
-updatedAt!: Date;
+  @UpdateDateColumn({ name: "updated_at" })
+  updatedAt!: Date;
 }
-

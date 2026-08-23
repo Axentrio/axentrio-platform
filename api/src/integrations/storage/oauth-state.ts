@@ -41,7 +41,7 @@ export function pkceChallenge(verifier: string): string {
 }
 
 function requireSecret(): string {
-  const secret = config.googleStorage.stateSecret;
+  const secret = config.storageOAuth.stateSecret;
   if (!secret) {
     throw new ApiError(
       "OAuth state store unavailable",

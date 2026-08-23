@@ -8,7 +8,7 @@ const redis = {
 
 vi.mock("../../config/environment", () => ({
   config: {
-    googleStorage: { stateSecret: "unit-state-secret-at-least-32-chars!!" },
+    storageOAuth: { stateSecret: "unit-state-secret-at-least-32-chars!!" },
     server: { isProduction: false },
     encryption: { key: "test-key-test-key-test-key-test!", ivLength: 16 },
   },

@@ -9,16 +9,11 @@
  */
 import type { Request, Response } from "express";
 import { config } from "../../config/environment";
-import {
-  redirectToKnowledge,
-  storageApiBase as apiBase,
-} from "./portal-redirects";
 import { AppDataSource } from "../../database/data-source";
 import { User } from "../../database/entities/User";
 import { requireFeature } from "../../billing/enforce";
 import { ApiError } from "../../middleware/error-handler";
 import { sendSuccess } from "../../utils/response";
-import { logger } from "../../utils/logger";
 import { logAudit } from "../../utils/audit";
 import { In } from "typeorm";
 import {
@@ -28,145 +23,28 @@ import {
   listTenantConnections,
   probeConnection,
 } from "./google-drive.service";
-import {
-  clearOAuthCookie,
-  newNonce,
-  nonceFromCookie,
-  peekOAuthState,
-  pkceVerifier,
-  putOAuthState,
-  readOAuthCookie,
-  setOAuthCookie,
-  takeOAuthState,
-} from "./oauth-state";
 import { enqueueStorageImport } from "./import.service";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
+import {
+  assertCanConnectStorage,
+  CLOUD_IMPORT_ERROR,
+  makeStorageOAuthFlow,
+} from "./oauth-flow";
 
-const CLOUD_IMPORT_ERROR = "plan_feature_cloud_import";
+export { assertCanConnectStorage };
 
-export function assertCanConnectStorage(req: Request): void {
-  const user = req.user;
-  if (!user || !req.userId) {
-    throw new ApiError("Unauthorized", 401, "UNAUTHORIZED");
-  }
-  if (user.role === "super_admin" && req.tenantId !== user.tenantId) {
-    throw new ApiError(
-      "Cannot connect cloud storage while impersonating a tenant",
-      403,
-      "impersonated_connect_forbidden",
-    );
-  }
-}
+const googleFlow = makeStorageOAuthFlow({
+  provider: "google_drive",
+  logTag: "Google Drive",
+  urlPath: "google",
+  consentHost: "accounts.google.com",
+  buildAuthUrl: buildGoogleAuthUrl,
+  exchangeAndStore,
+});
 
-function redirectToGoogleConsent(res: Response, url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    redirectToKnowledge(res, "error");
-    return;
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.hostname !== "accounts.google.com"
-  ) {
-    logger.error("[Google Drive] blocked unexpected consent host", {
-      host: parsed.hostname,
-    });
-    redirectToKnowledge(res, "error");
-    return;
-  }
-  // Host allowlisted to accounts.google.com. Origin is a string literal.
-  // pi-lens-ignore: ast-grep:no-open-redirect-js
-  // pi-lens-ignore: ts-open-redirect
-  res.statusCode = 302;
-  res.setHeader(
-    "Location",
-    `https://accounts.google.com${parsed.pathname}${parsed.search}`,
-  );
-  res.end();
-}
-
-export async function getGoogleDriveConnectUrl(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  assertCanConnectStorage(req);
-  const tenantId = req.tenantId!;
-  await requireFeature(tenantId, "cloudImport", CLOUD_IMPORT_ERROR);
-
-  const nonce = newNonce();
-  const codeVerifier = pkceVerifier();
-  await putOAuthState(nonce, {
-    tenantId,
-    userId: req.userId!,
-    provider: "google_drive",
-    codeVerifier,
-    purpose: "storage-connect",
-  });
-
-  sendSuccess(res, {
-    startUrl: `${apiBase()}/api/v1/knowledge/storage/google/start?n=${encodeURIComponent(nonce)}`,
-  });
-}
-
-/** Public: browser navigates here so Set-Cookie is same-site, then 302 to Google. */
-export async function googleDriveStart(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const nonce = typeof req.query.n === "string" ? req.query.n : "";
-  if (!nonce) {
-    return void redirectToKnowledge(res, "error");
-  }
-  try {
-    const state = await peekOAuthState(nonce);
-    const url = buildGoogleAuthUrl(nonce, state.codeVerifier);
-    setOAuthCookie(res, nonce);
-    return void redirectToGoogleConsent(res, url);
-  } catch (err) {
-    logger.warn("[Google Drive] start failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return void redirectToKnowledge(res, "error");
-  }
-}
-
-export async function googleDriveCallback(
-  req: Request,
-  res: Response,
-): Promise<void> {
-  const { code, state, error } = req.query as Record<
-    string,
-    string | undefined
-  >;
-  if (error || !code || !state) {
-    clearOAuthCookie(res);
-    return void redirectToKnowledge(res, "error");
-  }
-  try {
-    const cookieNonce = nonceFromCookie(readOAuthCookie(req));
-    if (!cookieNonce || cookieNonce !== state) {
-      throw new ApiError("OAuth state mismatch", 400, "oauth_state_invalid");
-    }
-    const stored = await takeOAuthState(state);
-    await requireFeature(stored.tenantId, "cloudImport", CLOUD_IMPORT_ERROR);
-    await exchangeAndStore({
-      tenantId: stored.tenantId,
-      userId: stored.userId,
-      code,
-      codeVerifier: stored.codeVerifier,
-    });
-    clearOAuthCookie(res);
-    return void redirectToKnowledge(res, "connected");
-  } catch (err) {
-    logger.error("[Google Drive] OAuth callback failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    clearOAuthCookie(res);
-    return void redirectToKnowledge(res, "error");
-  }
-}
+export const getGoogleDriveConnectUrl = googleFlow.getConnectUrl;
+export const googleDriveStart = googleFlow.start;
+export const googleDriveCallback = googleFlow.callback;
 
 export async function listStorageConnections(
   req: Request,
@@ -232,7 +110,13 @@ export async function startCloudImport(req: Request, res: Response): Promise<voi
   await requireFeature(tenantId, "cloudImport", CLOUD_IMPORT_ERROR);
   const body = req.body as {
     storageConnectionId?: string;
-    files?: Array<{ id: string; name?: string; mimeType?: string; size?: number }>;
+    files?: Array<{
+      id: string;
+      name?: string;
+      mimeType?: string;
+      size?: number;
+      driveId?: string;
+    }>;
     googleAccessToken?: string;
     kbId?: string;
   };

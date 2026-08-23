@@ -8,17 +8,17 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
  * ADD VALUE inside a transaction if the new value is unused in it.
  */
 export class AddUrlToKnowledgeDocumentType1793000000000
- implements MigrationInterface
+  implements MigrationInterface
 {
- name = "AddUrlToKnowledgeDocumentType1793000000000";
+  name = "AddUrlToKnowledgeDocumentType1793000000000";
 
- public async up(queryRunner: QueryRunner): Promise<void> {
-  await queryRunner.query(
-   `ALTER TYPE knowledge_documents_type_enum ADD VALUE IF NOT EXISTS 'url'`,
-  );
- }
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TYPE knowledge_documents_type_enum ADD VALUE IF NOT EXISTS 'url'`,
+    );
+  }
 
- public async down(): Promise<void> {
-  // PG cannot drop a single enum value safely.
- }
+  public async down(): Promise<void> {
+    // PG cannot drop a single enum value safely.
+  }
 }

@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { createS3Client } from "../../config/s3.config";
 import { config } from "../../config/environment";
+import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
 import { KnowledgeDocument } from "../../database/entities/KnowledgeDocument";
@@ -28,28 +29,37 @@ import {
   planForMime,
   sanitizeFileName,
 } from "./import-mime";
+import { readCappedStream } from "./capped-stream";
 
 export const STORAGE_IMPORT_QUEUE = "storage-import";
 
 export interface StorageImportJobData {
-  jobRowId: string;
+  /** Set for delayed self-cleanup jobs that delete a superseded S3 key. */
+  kind?: "cleanup-key";
+  cleanupKey?: string | null;
+  jobRowId?: string;
   tenantId: string;
-  kbId: string;
-  storageConnectionId: string;
+  kbId?: string;
+  storageConnectionId?: string;
   provider: string;
   fileId: string;
-  importedBy: string;
-  claimedName: string | null;
-  claimedMime: string | null;
-  claimedSize: number | null;
+  /** OneDrive picker v8: drive holding the item (Graph /drives/{driveId}). */
+  driveId?: string | null;
+  importedBy?: string;
+  claimedName?: string | null;
+  claimedMime?: string | null;
+  claimedSize?: number | null;
 }
 
 export function createStorageImportProcessor(dataSource: DataSource) {
   const jobRepo = dataSource.getRepository(StorageImportJob);
   const connRepo = dataSource.getRepository(StorageConnection);
-  const docRepo = dataSource.getRepository(KnowledgeDocument);
 
   return async (job: { data: StorageImportJobData }) => {
+    if (job.data.kind === "cleanup-key") {
+      await deleteSupersededKey(job.data.tenantId, job.data.cleanupKey);
+      return;
+    }
     const row = await jobRepo.findOne({ where: { id: job.data.jobRowId } });
     if (!row) return;
     const connection = await connRepo.findOne({
@@ -77,7 +87,11 @@ export function createStorageImportProcessor(dataSource: DataSource) {
       );
       const downloaded =
         connection.provider === "onedrive"
-          ? await downloadOneDriveAsImport(accessToken, job.data.fileId)
+          ? await downloadOneDriveAsImport(
+              accessToken,
+              job.data.fileId,
+              job.data.driveId,
+            )
           : await downloadGoogleFile(accessToken, job.data.fileId);
       const safeName = sanitizeFileName(downloaded.name);
       const stagingKey = `staging/${job.data.tenantId}/${row.id}/${safeName}`;
@@ -132,74 +146,89 @@ export function createStorageImportProcessor(dataSource: DataSource) {
         return;
       }
 
-      // Lock the row so concurrent re-imports cannot race to one version.
-      const existing = await dataSource.transaction(async (manager) =>
-        manager.getRepository(KnowledgeDocument).findOne({
-          where: {
-            knowledgeBaseId: job.data.kbId,
-            storageProvider: job.data.provider,
-            storageFileId: job.data.fileId,
-          },
-          lock: { mode: "pessimistic_write" },
-        }),
-      );
-      const nextVersion = existing ? existing.processingVersion + 1 : 1;
-      const finalKey = `knowledge/${job.data.tenantId}/${job.data.kbId}/${job.data.provider}/${job.data.fileId}/v${nextVersion}`;
-      await s3.send(
-        new CopyObjectCommand({
-          Bucket: bucket,
-          CopySource: `${bucket}/${stagingKey}`,
-          Key: finalKey,
-          ContentType: validation.detectedMimeType,
-        }),
-      );
-      await s3.send(
-        new DeleteObjectCommand({ Bucket: bucket, Key: stagingKey }),
-      );
-      row.targetKey = finalKey;
-      row.status = "stored";
-      await jobRepo.save(row);
+      // Spec: "bump processingVersion + status pending in ONE transaction".
+      // The pessimistic lock, the version reservation, the S3 copy of the new
+      // bytes, and the document write all share this transaction, so two
+      // concurrent re-imports can never race to the same version or key.
+      const { document, previousKey } = await dataSource.transaction(
+        async (manager) => {
+          const lockedDocRepo = manager.getRepository(KnowledgeDocument);
+          const existing = await lockedDocRepo.findOne({
+            where: {
+              knowledgeBaseId: job.data.kbId,
+              storageProvider: job.data.provider,
+              storageFileId: job.data.fileId,
+            },
+            lock: { mode: "pessimistic_write" },
+          });
+          const nextVersion = existing ? existing.processingVersion + 1 : 1;
+          const finalKey = `knowledge/${job.data.tenantId}/${job.data.kbId}/${job.data.provider}/${job.data.fileId}/v${nextVersion}`;
 
-      const provenance = {
-        source: "cloud",
-        provider: job.data.provider,
-        storageConnectionId: connection.id,
-        providerAccountId: connection.providerAccountId,
-        fileId: job.data.fileId,
-        fileOwner: downloaded.owner,
-        importedBy: job.data.importedBy,
-        importedAt: new Date().toISOString(),
-      };
-      const title = downloaded.name.replace(/\.[^.]+$/, "") || safeName;
-      const docType = downloaded.docType;
+          // Bytes land before the row commits: a crash here rolls both back
+          // and leaves only an orphan object the next attempt overwrites.
+          await s3.send(
+            new CopyObjectCommand({
+              Bucket: bucket,
+              CopySource: `${bucket}/${stagingKey}`,
+              Key: finalKey,
+              ContentType: validation.detectedMimeType,
+            }),
+          );
+          await s3.send(
+            new DeleteObjectCommand({ Bucket: bucket, Key: stagingKey }),
+          );
 
-      let document: KnowledgeDocument;
-      if (existing) {
-        existing.processingVersion = nextVersion;
-        existing.status = "pending";
-        existing.storagePath = finalKey;
-        existing.title = title;
-        existing.type = docType;
-        existing.metadata = { ...existing.metadata, ...provenance };
-        existing.errorMessage = null;
-        document = await docRepo.save(existing);
-      } else {
-        document = docRepo.create({
-          knowledgeBaseId: job.data.kbId,
-          tenantId: job.data.tenantId,
-          type: docType,
-          title,
-          sourceContent: null,
-          sourceUrl: null,
-          storagePath: finalKey,
-          storageProvider: job.data.provider,
-          storageFileId: job.data.fileId,
-          status: "pending",
-          processingVersion: 1,
-          metadata: provenance,
-        });
-        document = await docRepo.save(document);
-      }
+          const provenance = {
+            source: "cloud",
+            provider: job.data.provider,
+            storageConnectionId: connection.id,
+            providerAccountId: connection.providerAccountId,
+            fileId: job.data.fileId,
+            fileOwner: downloaded.owner,
+            importedBy: job.data.importedBy,
+            importedAt: new Date().toISOString(),
+          };
+          const title = downloaded.name.replace(/\.[^.]+$/, "") || safeName;
+
+          const previousKey = existing?.storagePath ?? null;
+          let doc: KnowledgeDocument;
+          if (existing) {
+            existing.processingVersion = nextVersion;
+            existing.status = "pending";
+            existing.storagePath = finalKey;
+            existing.title = title;
+            existing.type = downloaded.docType;
+            existing.metadata = { ...existing.metadata, ...provenance };
+            existing.errorMessage = null;
+            doc = await lockedDocRepo.save(existing);
+          } else {
+            doc = await lockedDocRepo.save(
+              lockedDocRepo.create({
+                knowledgeBaseId: job.data.kbId,
+                tenantId: job.data.tenantId,
+                type: downloaded.docType,
+                title,
+                sourceContent: null,
+                sourceUrl: null,
+                storagePath: finalKey,
+                storageProvider: job.data.provider,
+                storageFileId: job.data.fileId,
+                status: "pending",
+                processingVersion: 1,
+                metadata: provenance,
+              }),
+            );
+          }
+
+          row.targetKey = finalKey;
+          row.status = "stored";
+          await manager.getRepository(StorageImportJob).save(row);
+          return {
+            document: doc,
+            previousKey,
+          };
+        },
+      );
 
       await addJob(
         "knowledge-processing",
@@ -210,6 +239,37 @@ export function createStorageImportProcessor(dataSource: DataSource) {
         },
         { jobId: `kb-${document.id}-v${document.processingVersion}` },
       );
+
+      if (previousKey && previousKey !== document.storagePath) {
+        // Spec: delete the superseded key only after indexing. Indexing is
+        // async and ingestion.worker must stay untouched, so schedule the
+        // deletion a day out — safely after any index run — and let the
+        // handler skip keys a document references again in the meantime.
+        try {
+          await addJob(
+            STORAGE_IMPORT_QUEUE,
+            {
+              kind: "cleanup-key",
+              tenantId: job.data.tenantId,
+              provider: job.data.provider,
+              fileId: job.data.fileId,
+              cleanupKey: previousKey,
+            },
+            {
+              jobId: `storage-cleanup-${document.id}-v${document.processingVersion}`,
+              delay: 24 * 60 * 60 * 1000,
+            },
+          );
+        } catch (cleanupErr) {
+          logger.warn("[storage-import] cleanup scheduling failed", {
+            cleanupKey: previousKey,
+            error:
+              cleanupErr instanceof Error
+                ? cleanupErr.message
+                : String(cleanupErr),
+          });
+        }
+      }
       row.status = "document_created";
       row.documentId = document.id;
       row.error = null;
@@ -230,6 +290,7 @@ export function createStorageImportProcessor(dataSource: DataSource) {
 async function downloadOneDriveAsImport(
   accessToken: string,
   fileId: string,
+  driveId?: string | null,
 ): Promise<{
   buffer: Buffer;
   name: string;
@@ -237,12 +298,12 @@ async function downloadOneDriveAsImport(
   docType: 'pdf' | 'docx';
   owner: string | null;
 }> {
-  const meta = await fetchOneDriveMeta(accessToken, fileId);
+  const meta = await fetchOneDriveMeta(accessToken, fileId, driveId);
   const plan = planForMime(meta.mimeType);
   if (!plan || plan.kind !== 'media') {
     throw new Error('File type is not supported');
   }
-  const buffer = await downloadOneDriveContent(accessToken, fileId);
+  const buffer = await downloadOneDriveContent(accessToken, fileId, driveId);
   return {
     buffer,
     name: meta.name,
@@ -250,6 +311,33 @@ async function downloadOneDriveAsImport(
     docType: plan.docType,
     owner: null,
   };
+}
+
+/**
+ * Delete a superseded version key unless a document references it again (a
+ * re-import between scheduling and firing may have revived the same bytes).
+ */
+async function deleteSupersededKey(
+  tenantId: string | undefined,
+  key: string | null | undefined,
+): Promise<void> {
+  if (!key || !config.s3?.bucket) return;
+  const referenced = await AppDataSource.getRepository(
+    KnowledgeDocument,
+  ).findOne({ where: { storagePath: key } });
+  if (referenced) {
+    logger.info("[storage-import] cleanup skipped, key referenced again", {
+      cleanupKey: key,
+    });
+    return;
+  }
+  await createS3Client().send(
+    new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: key }),
+  );
+  logger.info("[storage-import] superseded key deleted", {
+    tenantId,
+    cleanupKey: key,
+  });
 }
 
 async function downloadGoogleFile(
@@ -320,19 +408,3 @@ async function downloadGoogleFile(
   };
 }
 
-async function readCappedStream(
-  stream: AsyncIterable<Buffer>,
-  maxBytes: number,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let n = 0;
-  for await (const chunk of stream) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    n += buf.length;
-    if (n > maxBytes) {
-      throw new Error("File exceeds the size limit");
-    }
-    chunks.push(buf);
-  }
-  return Buffer.concat(chunks);
-}

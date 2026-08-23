@@ -1112,8 +1112,8 @@
           "description": "Importer les pages de votre site"
         },
         "cloud": {
-          "label": "Cloud",
-          "description": "Import files from Google Drive"
+          "label": "Importer depuis le cloud",
+          "description": "Importer des fichiers depuis Google Drive ou OneDrive"
         }
       },
       "modal": {
@@ -1200,22 +1200,31 @@
         }
       },
       "cloud": {
-        "blurb": "Import is a snapshot. Files you pick are copied into the knowledge base. They do not stay in sync.",
-        "connect": "Connect",
-        "connectFailed": "Could not start Google Drive connect",
+        "blurb": "L'import est une copie. Les fichiers choisis sont copies dans la base de connaissances. Ils ne restent pas synchronises.",
+        "connect": "Connecter",
+        "connectFailed": "Impossible de demarrer la connexion Google Drive",
         "popupBlocked": "Autorisez les popups pour connecter",
-        "connected": "Connected",
-        "notConnected": "Not connected",
-        "needsReauth": "reconnect required",
-        "importFiles": "Import files",
-        "importQueued": "Import queued",
-        "someSkipped": "{count} fichier(s) ignoré(s) — type non pris en charge",
-        "importFailed": "Could not import those files",
-        "pickerNotConfigured": "Google Picker is not configured yet",
-        "onedriveLater": "OneDrive is next. Dropbox and iCloud come later.",
-        "noOnedriveFiles": "No PDF or Word files in the OneDrive root",
-        "icloudLater": "iCloud is not available. Apple has no third-party file API.",
-        "slotsUsed": "emplaces de documents utilises"
+        "connected": "Connecte",
+        "notConnected": "Non connecte",
+        "needsReauth": "reconnexion requise",
+        "importFiles": "Importer des fichiers",
+        "importQueued": "Import en file",
+        "someSkipped": "{{count}} fichier(s) ignore(s). Ces types ne sont pas pris en charge.",
+        "importFailed": "Impossible d'importer ces fichiers",
+        "pickerNotConfigured": "Le selecteur Google n'est pas encore configure",
+        "icloudLater": "iCloud n'est pas disponible. Apple n'a pas d'API fichier pour les tiers.",
+        "slotsLeft": "{{count}} emplacements de documents restants",
+        "connectedBy": "Connecte par {{name}}",
+        "providerGoogle": "Google Drive",
+        "providerOneDrive": "OneDrive",
+        "status": {
+          "queued": "En file",
+          "downloading": "Telechargement",
+          "scanning": "Analyse",
+          "stored": "Stocke",
+          "document_created": "Document cree",
+          "failed": "Echec"
+        }
       }
     },
     "appearances": {

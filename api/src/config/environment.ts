@@ -495,11 +495,17 @@ export const config = {
     stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
   },
 
+  // Provider-neutral OAuth state signing for cloud-storage connects. The
+  // secret signs the cookie nonce for Google AND OneDrive alike, so it lives
+  // outside either provider's client block.
+  storageOAuth: {
+    stateSecret: env.STORAGE_OAUTH_STATE_SECRET || '',
+  },
+
   googleStorage: {
     clientId: env.GOOGLE_STORAGE_CLIENT_ID || '',
     clientSecret: env.GOOGLE_STORAGE_CLIENT_SECRET || '',
     redirectUri: env.GOOGLE_STORAGE_REDIRECT_URI || '',
-    stateSecret: env.STORAGE_OAUTH_STATE_SECRET || '',
     pickerApiKey: env.GOOGLE_PICKER_API_KEY || '',
   },
 

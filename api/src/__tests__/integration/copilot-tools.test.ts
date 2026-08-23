@@ -356,6 +356,7 @@ describe('getEntitlements', () => {
         'channelTiktok',
         'channelWhatsapp',
         'channelX',
+        'cloudImport',
         'crm',
         'customWidgetAppearance',
         'fileUpload',

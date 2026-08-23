@@ -1214,6 +1214,7 @@
         "importFailed": "Die bestanden importeren is mislukt",
         "pickerNotConfigured": "Google Picker is nog niet geconfigureerd",
         "icloudLater": "iCloud is niet beschikbaar. Apple heeft geen API voor derden.",
+        "dropboxLater": "Dropbox komt later.",
         "slotsLeft": "{{count}} documentplaatsen over",
         "connectedBy": "Verbonden door {{name}}",
         "providerGoogle": "Google Drive",

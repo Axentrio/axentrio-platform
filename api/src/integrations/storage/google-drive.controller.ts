@@ -118,6 +118,7 @@ export async function startCloudImport(req: Request, res: Response): Promise<voi
       driveId?: string;
     }>;
     googleAccessToken?: string;
+    oneDriveAccessToken?: string;
     kbId?: string;
   };
   if (!body.storageConnectionId) {
@@ -130,6 +131,7 @@ export async function startCloudImport(req: Request, res: Response): Promise<voi
     storageConnectionId: body.storageConnectionId,
     files: body.files ?? [],
     googleAccessToken: body.googleAccessToken,
+    oneDriveAccessToken: body.oneDriveAccessToken,
   });
   await logAudit(req.userId!, "knowledge.storage.import", "storage_connection", body.storageConnectionId, tenantId, {
     provider: "google_drive",

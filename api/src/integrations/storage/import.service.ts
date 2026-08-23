@@ -7,7 +7,6 @@ import { StorageConnection } from "../../database/entities/StorageConnection";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
 import { KnowledgeService } from "../../knowledge/knowledge.service";
 import { addJob, removeJob } from "../../queue/message-queue";
-import { getValidAccessToken, refresherFor } from "./token";
 import { config } from "../../config/environment";
 import { ApiError, BadRequestError } from "../../middleware/error-handler";
 import { ERROR_CODES } from "../../middleware/error-codes";
@@ -36,6 +35,7 @@ export async function enqueueStorageImport(opts: {
   storageConnectionId: string;
   files: ImportFileInput[];
   googleAccessToken?: string;
+  oneDriveAccessToken?: string;
 }): Promise<{
   jobs: Array<{ id: string; fileId: string; status: string }>;
   skipped: Array<{ id: string; reason: string }>;
@@ -87,7 +87,10 @@ export async function enqueueStorageImport(opts: {
       opts.googleAccessToken,
     );
   } else {
-    await assertOneDriveAccountMatch(connection);
+    await assertOneDriveAccountMatch(
+      connection.providerAccountId,
+      opts.oneDriveAccessToken,
+    );
   }
 
   const knowledge = new KnowledgeService(AppDataSource);
@@ -244,21 +247,25 @@ async function assertGoogleAccountMatch(
 }
 
 /**
- * Bind the picker selection to the stored connection: the Graph identity of
- * the connection's own token must equal the stored providerAccountId, so a
- * picker pointed at a different account cannot import into this tenant.
+ * Bind the picker selection to the stored connection. The picker token's
+ * Graph /me id must equal providerAccountId. The connection token cannot
+ * prove this: it always matches the stored row.
  */
 async function assertOneDriveAccountMatch(
-  connection: StorageConnection,
+  providerAccountId: string,
+  oneDriveAccessToken: string | undefined,
 ): Promise<void> {
-  const accessToken = await getValidAccessToken(
-    connection,
-    refresherFor(connection.provider),
-  );
+  if (!oneDriveAccessToken) {
+    throw new ApiError(
+      "OneDrive account proof is required",
+      400,
+      "storage_account_mismatch",
+    );
+  }
   let id: string | undefined;
   try {
     const me = await axios.get("https://graph.microsoft.com/v1.0/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${oneDriveAccessToken}` },
       timeout: 8000,
     });
     id = me.data?.id;
@@ -269,7 +276,7 @@ async function assertOneDriveAccountMatch(
       "storage_account_mismatch",
     );
   }
-  if (!id || id !== connection.providerAccountId) {
+  if (!id || id !== providerAccountId) {
     throw new ApiError(
       "OneDrive account does not match the connected drive",
       400,

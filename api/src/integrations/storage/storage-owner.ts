@@ -1,31 +1,25 @@
 /**
  * Owner-deactivation guard: when the admin who connected a cloud drive is
- * deactivated, flag those connections so imports stop until someone reconnects.
+ * deactivated, disconnect those rows (imported documents stay).
  */
-import { In } from "typeorm";
 import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
-import { logAudit } from "../../utils/audit";
 import { logger } from "../../utils/logger";
+import { disconnectStorageConnection } from "./google-drive.service";
 
-export async function flagConnectionsForDeactivatedOwner(userId: string): Promise<void> {
+export async function flagConnectionsForDeactivatedOwner(
+  userId: string,
+): Promise<void> {
   try {
-    const repo = AppDataSource.getRepository(StorageConnection);
-    const owned = await repo.find({
-      where: { connectedByUserId: userId, status: "active", reauthRequired: false },
+    const owned = await AppDataSource.getRepository(StorageConnection).find({
+      where: { connectedByUserId: userId, status: "active" },
     });
-    if (owned.length === 0) return;
-    await repo.update(
-      { id: In(owned.map((c) => c.id)) },
-      { reauthRequired: true },
-    );
-    await logAudit(userId, "knowledge.storage.owner_deactivated", "storage_connection", owned[0].id, owned[0].tenantId, {
-      connectionIds: owned.map((c) => c.id),
-      provider: owned[0].provider,
-    });
+    for (const row of owned) {
+      await disconnectStorageConnection(row.tenantId, row.id);
+    }
   } catch (err) {
     // Never block deactivation on this bookkeeping.
-    logger.warn("[storage-owner] flagging connections failed", {
+    logger.warn("[storage-owner] revoke on deactivation failed", {
       userId,
       error: err instanceof Error ? err.message : String(err),
     });

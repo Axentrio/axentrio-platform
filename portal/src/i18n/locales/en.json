@@ -1221,6 +1221,7 @@
         "importFailed": "Could not import those files",
         "pickerNotConfigured": "Google Picker is not configured yet",
         "icloudLater": "iCloud is not available. Apple has no third-party file API.",
+        "dropboxLater": "Dropbox comes later.",
         "slotsLeft": "{{count}} document slots left",
         "connectedBy": "Connected by {{name}}",
         "providerGoogle": "Google Drive",

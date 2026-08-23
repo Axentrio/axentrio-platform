@@ -8,7 +8,7 @@ import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
 import { applyTokens, type RefreshResult } from "./token";
 import { pkceChallenge } from "./oauth-state";
-import { KB_DOCX, KB_PDF, MAX_IMPORT_BYTES } from "./import-mime";
+import { MAX_IMPORT_BYTES } from "./import-mime";
 import { readCappedStream } from "./capped-stream";
 
 const AUTHORIZE_URL =
@@ -17,6 +17,22 @@ const TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["offline_access", "openid", "email", "User.Read", "Files.Read"];
 const SCOPE_PARAM = SCOPES.join(" ");
+/** Well-known tenant id for personal Microsoft accounts. */
+const MSA_CONSUMER_TID = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
+function tenantIdFromIdToken(idToken: string | undefined): string | null {
+  if (!idToken) return null;
+  const parts = idToken.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    ) as { tid?: string };
+    return typeof payload.tid === "string" ? payload.tid : null;
+  } catch {
+    return null;
+  }
+}
 
 export class OneDriveNotConfiguredError extends Error {
   constructor() {
@@ -54,6 +70,7 @@ export function buildOneDriveAuthUrl(
 interface MsTokenResponse {
   access_token: string;
   refresh_token?: string;
+  id_token?: string;
   expires_in?: number;
 }
 
@@ -88,6 +105,14 @@ export async function exchangeAndStoreOneDrive(opts: {
   });
   if (!tokens.access_token)
     throw new Error("Microsoft did not return an access token");
+  const tid = tenantIdFromIdToken(tokens.id_token);
+  // Picker v8 in this slice is the consumer host (onedrive.live.com).
+  // A work account can complete /common connect, then cannot pick.
+  if (tid && tid !== MSA_CONSUMER_TID) {
+    throw new Error(
+      "OneDrive import supports personal Microsoft accounts only",
+    );
+  }
   const me = await axios.get(`${GRAPH}/me`, {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
     timeout: 8000,
@@ -149,38 +174,6 @@ export async function refreshOneDriveAccessToken(
   };
 }
 
-export async function listOneDriveFiles(
-  accessToken: string,
-): Promise<
-  Array<{ id: string; name: string; mimeType: string; size: number }>
-> {
-  const resp = await axios.get(`${GRAPH}/me/drive/root/children`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    params: {
-      $select: "id,name,file,size,folder",
-      $top: 50,
-    },
-    timeout: 15000,
-  });
-  const items = (resp.data.value || []) as Array<{
-    id: string;
-    name: string;
-    size?: number;
-    folder?: unknown;
-    file?: { mimeType?: string };
-  }>;
-  const allowed = new Set([KB_PDF, KB_DOCX]);
-  return items
-    .filter(
-      (it) => !it.folder && it.file?.mimeType && allowed.has(it.file.mimeType),
-    )
-    .map((it) => ({
-      id: it.id,
-      name: it.name,
-      mimeType: it.file!.mimeType!,
-      size: it.size ?? 0,
-    }));
-}
 
 export async function fetchOneDriveMeta(
   accessToken: string,

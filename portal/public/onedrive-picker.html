@@ -6,23 +6,15 @@
   // Microsoft OneDrive File Picker v8 host page.
   // https://learn.microsoft.com/en-us/onedrive/developer/controls/file-pickers/
   //
-  // Flow (all inside this single popup window):
-  //   1. No token in the URL fragment -> redirect through Microsoft sign-in
-  //      (implicit flow, consumers authority, scope OneDrive.ReadWrite) and
-  //      land back on this same page.
-  //   2. Token present -> POST the picker config plus the token to
-  //      https://onedrive.live.com/picker, speak the MessageChannel command
-  //      protocol, and forward picked files to the opener.
-  //
-  // The session token lives only in this window; imports are downloaded by the
-  // API with the tenant's stored connection token, so this token never reaches
-  // our backend or any other surface.
+  // This window is opened by a user click. After Microsoft sign-in it POSTs
+  // ITSELF to the picker. A second window.open here would have no gesture
+  // and browsers would block it. The opener keeps the MessageChannel.
   (function () {
     var ORIGIN = window.location.origin;
     var PICKER_BASE = "https://onedrive.live.com/picker";
     var AUTHORITY =
       "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
-    var SCOPES = "OneDrive.ReadWrite offline_access";
+    var SCOPES = "OneDrive.ReadWrite";
 
     var query = new URLSearchParams(window.location.search);
     var clientId = query.get("clientId");
@@ -46,7 +38,7 @@
         String(Math.random()).slice(2);
       try {
         sessionStorage.setItem("od_state", state);
-      } catch (e) { /* private mode: proceed without local state check */ }
+      } catch (e) { /* private mode */ }
       var authParams = new URLSearchParams({
         client_id: clientId,
         response_type: "token",
@@ -61,7 +53,6 @@
       return;
     }
 
-    // Back from sign-in: verify state where sessionStorage survived the trip.
     try {
       var expected = sessionStorage.getItem("od_state");
       if (expected && fragment.get("state") !== expected) {
@@ -73,7 +64,6 @@
       return fail(fragment.get("error_description") || fragment.get("error"));
     }
 
-    // Clean the address bar so a reload does not reuse the fragment.
     history.replaceState(null, "", window.location.pathname);
 
     var channelId =
@@ -87,100 +77,29 @@
       typesAndSources: { mode: "files", pivots: { oneDrive: true, recent: true } },
     };
 
-    var win = window.open("", "Picker", "width=1080,height=680");
-    if (!win) return fail("Popup blocked");
+    // Hand the session token and channel to the opener before this document
+    // becomes the picker page. The opener answers authenticate/pick/close.
+    try {
+      window.opener &&
+        window.opener.postMessage(
+          { type: "onedrive-token", token: accessToken, channelId: channelId },
+          ORIGIN,
+        );
+    } catch (e) {
+      return fail("Opener gone");
+    }
 
-    // v8 handshake: form-POST the config and the session token to the picker.
-    var form = win.document.createElement("form");
+    var form = document.createElement("form");
     form.setAttribute("action", PICKER_BASE + "?filePicker=" +
       encodeURIComponent(JSON.stringify(options)));
     form.setAttribute("method", "POST");
-    var input = win.document.createElement("input");
+    var input = document.createElement("input");
     input.setAttribute("type", "hidden");
     input.setAttribute("name", "access_token");
     input.setAttribute("value", accessToken);
     form.appendChild(input);
-    win.document.body.appendChild(form);
+    document.body.appendChild(form);
     form.submit();
-
-    var port = null;
-
-    window.addEventListener("message", function (event) {
-      if (!event.source || event.source !== win) return;
-      var message = event.data;
-      if (message.type === "initialize" && message.channelId === channelId) {
-        port = event.ports[0];
-        port.addEventListener("message", onPortMessage);
-        port.start();
-        port.postMessage({ type: "activate" });
-      }
-    });
-
-    function acknowledge(id) {
-      port.postMessage({ type: "acknowledge", id: id });
-    }
-
-    function reply(id, data) {
-      port.postMessage({ type: "result", id: id, data: data });
-    }
-
-    function onPortMessage(messageEvent) {
-      var payload = messageEvent.data || {};
-      if (payload.type === "notification") return;
-      if (payload.type !== "command") return;
-
-      acknowledge(payload.id);
-      var command = payload.data || {};
-
-      if (command.command === "authenticate") {
-        // Session token requested again (re-render). Serve what we hold; a
-        // stale token ends the session and the user simply re-picks.
-        if (accessToken) {
-          reply(payload.id, { result: "token", token: accessToken });
-        } else {
-          reply(payload.id, {
-            result: "error",
-            error: { code: "unableToObtainToken", message: "Session expired" },
-          });
-        }
-        return;
-      }
-
-      if (command.command === "close") {
-        win.close();
-        return;
-      }
-
-      if (command.command === "pick") {
-        var items = (command.items || []).map(function (item) {
-          return {
-            id: item.id,
-            driveId:
-              (item.parentReference && item.parentReference.driveId) || null,
-            name: item.name || null,
-            mimeType:
-              item.file && item.file.mimeType ? item.file.mimeType : null,
-            size: typeof item.size === "number" ? item.size : null,
-          };
-        });
-        window.opener &&
-          window.opener.postMessage(
-            { type: "onedrive-files", files: items },
-            ORIGIN,
-          );
-        reply(payload.id, { result: "success" });
-        win.close();
-        return;
-      }
-
-      reply(payload.id, {
-        result: "error",
-        error: {
-          code: "unsupportedCommand",
-          message: command.command || "unknown",
-        },
-      });
-    }
   })();
 </script>
 </body>

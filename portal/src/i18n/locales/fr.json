@@ -1213,6 +1213,7 @@
         "importFailed": "Impossible d'importer ces fichiers",
         "pickerNotConfigured": "Le selecteur Google n'est pas encore configure",
         "icloudLater": "iCloud n'est pas disponible. Apple n'a pas d'API fichier pour les tiers.",
+        "dropboxLater": "Dropbox viendra plus tard.",
         "slotsLeft": "{{count}} emplacements de documents restants",
         "connectedBy": "Connecte par {{name}}",
         "providerGoogle": "Google Drive",

@@ -327,6 +327,7 @@ export function useStartCloudImport() {
         driveId?: string;
       }>;
       googleAccessToken?: string;
+      oneDriveAccessToken?: string;
       kbId?: string;
     }) => api.post<{
     jobs: StorageImportJobRow[];
@@ -370,15 +371,3 @@ export function useOneDriveConnectUrl() {
   });
 }
 
-export function useOneDriveFiles(connectionId: string | undefined) {
-  return useQuery({
-    queryKey: [...queryKeys.knowledge.storageConnections(), "onedrive-files", connectionId],
-    queryFn: async () => {
-      const res = await api.get<{
-        files: Array<{ id: string; name: string; mimeType: string; size: number }>;
-      }>("/knowledge/storage/onedrive/files", { params: { connectionId } });
-      return res.files;
-    },
-    enabled: Boolean(connectionId),
-  });
-}

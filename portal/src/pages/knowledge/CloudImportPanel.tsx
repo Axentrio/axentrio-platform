@@ -92,10 +92,10 @@ export default function CloudImportPanel({
   const [busy, setBusy] = useState(false);
   const stats = useKnowledgeStats();
 
-  const googleConn = (connections.data ?? []).find(
+  const googleConns = (connections.data ?? []).filter(
     (c) => c.provider === "google_drive",
   );
-  const oneDriveConn = (connections.data ?? []).find(
+  const oneDriveConns = (connections.data ?? []).filter(
     (c) => c.provider === "onedrive",
   );
   const oneDriveConnect = useOneDriveConnectUrl();
@@ -247,53 +247,154 @@ export default function CloudImportPanel({
         toast.error(t("ai.knowledge.cloud.pickerNotConfigured"));
         return;
       }
-      const files = await new Promise<
-        Array<{
+      const picked = await new Promise<{
+        files: Array<{
           id: string;
           name?: string;
           mimeType?: string;
           size?: number;
           driveId?: string;
-        }>
-      >((resolve, reject) => {
+        }>;
+        pickerToken: string;
+      }>((resolve, reject) => {
         const params = new URLSearchParams({ clientId: msClientId });
         if (conn.accountEmail) params.set("loginHint", conn.accountEmail);
         const popup = window.open(
           `/onedrive-picker.html?${params.toString()}`,
           "onedrive-picker",
-          "width=900,height=700",
+          "width=1080,height=680",
         );
         if (!popup) {
           reject(new Error("popup-blocked"));
           return;
         }
+        const pickerWin = popup;
+        let pickerToken = "";
+        let channelId = "";
+        let port: MessagePort | null = null;
+        function finish(
+          err: Error | null,
+          files: Array<{
+            id: string;
+            name?: string;
+            mimeType?: string;
+            size?: number;
+            driveId?: string;
+          }> = [],
+        ) {
+          window.removeEventListener("message", handler);
+          window.clearInterval(timer);
+          if (err) reject(err);
+          else resolve({ files, pickerToken });
+        }
+        function onPortMessage(messageEvent: MessageEvent) {
+          const payload = messageEvent.data || {};
+          if (payload.type !== "command" || !port) return;
+          port.postMessage({ type: "acknowledge", id: payload.id });
+          const command = payload.data || {};
+          if (command.command === "authenticate") {
+            if (pickerToken) {
+              port.postMessage({
+                type: "result",
+                id: payload.id,
+                data: { result: "token", token: pickerToken },
+              });
+            } else {
+              port.postMessage({
+                type: "result",
+                id: payload.id,
+                data: {
+                  result: "error",
+                  error: {
+                    code: "unableToObtainToken",
+                    message: "Session expired",
+                  },
+                },
+              });
+            }
+            return;
+          }
+          if (command.command === "close") {
+            finish(null, []);
+            pickerWin.close();
+            return;
+          }
+          if (command.command === "pick") {
+            const files = (command.items || []).map(
+              (item: {
+                id: string;
+                name?: string;
+                size?: number;
+                file?: { mimeType?: string };
+                parentReference?: { driveId?: string };
+              }) => ({
+                id: item.id,
+                driveId: item.parentReference?.driveId,
+                name: item.name,
+                mimeType: item.file?.mimeType,
+                size: item.size,
+              }),
+            );
+            port.postMessage({
+              type: "result",
+              id: payload.id,
+              data: { result: "success" },
+            });
+            finish(null, files);
+            pickerWin.close();
+            return;
+          }
+          port.postMessage({
+            type: "result",
+            id: payload.id,
+            data: {
+              result: "error",
+              error: {
+                code: "unsupportedCommand",
+                message: command.command || "unknown",
+              },
+            },
+          });
+        }
         function handler(event: MessageEvent) {
-          if (event.origin !== window.location.origin) return;
-          if (event.data?.type === "onedrive-files") {
-            window.removeEventListener("message", handler);
-            window.clearInterval(timer);
-            resolve(event.data.files ?? []);
-            popup?.close();
-          } else if (event.data?.type === "onedrive-error") {
-            window.removeEventListener("message", handler);
-            window.clearInterval(timer);
-            reject(new Error(event.data.message || "picker-failed"));
-            popup?.close();
+          if (
+            event.origin === window.location.origin &&
+            event.data?.type === "onedrive-token"
+          ) {
+            pickerToken = String(event.data.token || "");
+            channelId = String(event.data.channelId || "");
+            return;
+          }
+          if (
+            event.origin === window.location.origin &&
+            event.data?.type === "onedrive-error"
+          ) {
+            finish(new Error(event.data.message || "picker-failed"));
+            pickerWin.close();
+            return;
+          }
+          if (
+            event.source === pickerWin &&
+            event.data?.type === "initialize" &&
+            event.data.channelId === channelId
+          ) {
+            port = event.ports[0];
+            if (!port) return;
+            port.addEventListener("message", onPortMessage);
+            port.start();
+            port.postMessage({ type: "activate" });
           }
         }
         window.addEventListener("message", handler);
         const timer = window.setInterval(() => {
-          if (!popup || popup.closed) {
-            window.clearInterval(timer);
-            window.removeEventListener("message", handler);
-            resolve([]);
-          }
+          if (pickerWin.closed) finish(null, []);
         }, 800);
       });
-      if (files.length === 0) return;
+      if (picked.files.length === 0) return;
       await startImport.mutateAsync({
         storageConnectionId: conn.id,
-        files,
+        files: picked.files,
+        oneDriveAccessToken: picked.pickerToken,
       });
       toast.success(t("ai.knowledge.cloud.importQueued"));
       jobs.refetch();
@@ -325,125 +426,149 @@ export default function CloudImportPanel({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Cloud className="w-4 h-4 text-text-muted" />
-            <div>
-              <p className="text-sm font-medium">
-                {t("ai.knowledge.cloud.providerGoogle")}
-              </p>
-              <p className="text-xs text-text-muted">
-                {googleConn
-                  ? googleConn.accountEmail || t("ai.knowledge.cloud.connected")
-                  : t("ai.knowledge.cloud.notConnected")}
-                {googleConn?.reauthRequired
-                  ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
-                  : ""}
-              </p>
-              {googleConn?.connectedByName ? (
-                <p className="text-xs text-text-muted">
-                  {t("ai.knowledge.cloud.connectedBy", {
-                    name: googleConn.connectedByName,
-                  })}
-                </p>
-              ) : null}
-            </div>
+            <p className="text-sm font-medium">
+              {t("ai.knowledge.cloud.providerGoogle")}
+            </p>
           </div>
-          {googleConn ? (
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => pickGoogleFiles(googleConn)}
-                disabled={busy || startImport.isPending}
-              >
-                {(busy || startImport.isPending) && (
-                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                )}
-                {t("ai.knowledge.cloud.importFiles")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => disconnect.mutate(googleConn.id)}
-              >
-                <Unplug className="w-4 h-4" />
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              onClick={connectGoogle}
-              disabled={connectUrl.isPending}
-            >
-              {connectUrl.isPending && (
-                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-              )}
-              {t("ai.knowledge.cloud.connect")}
-            </Button>
-          )}
+          <Button
+            type="button"
+            size="sm"
+            onClick={connectGoogle}
+            disabled={connectUrl.isPending}
+          >
+            {connectUrl.isPending && (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            )}
+            {t("ai.knowledge.cloud.connect")}
+          </Button>
         </div>
+        {googleConns.length === 0 ? (
+          <p className="text-xs text-text-muted">
+            {t("ai.knowledge.cloud.notConnected")}
+          </p>
+        ) : (
+          googleConns.map((conn) => (
+            <div
+              key={conn.id}
+              className="flex items-center justify-between gap-3"
+            >
+              <div>
+                <p className="text-xs text-text-muted">
+                  {conn.accountEmail || t("ai.knowledge.cloud.connected")}
+                  {conn.reauthRequired
+                    ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
+                    : ""}
+                </p>
+                {conn.connectedByName ? (
+                  <p className="text-xs text-text-muted">
+                    {t("ai.knowledge.cloud.connectedBy", {
+                      name: conn.connectedByName,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => pickGoogleFiles(conn)}
+                  disabled={busy || startImport.isPending || conn.reauthRequired}
+                >
+                  {(busy || startImport.isPending) && (
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                  )}
+                  {t("ai.knowledge.cloud.importFiles")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => disconnect.mutate(conn.id)}
+                >
+                  <Unplug className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       <div className="rounded-xl border border-border p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">
-              {t("ai.knowledge.cloud.providerOneDrive")}
-            </p>
-            <p className="text-xs text-text-muted">
-              {oneDriveConn
-                ? oneDriveConn.accountEmail || t("ai.knowledge.cloud.connected")
-                : t("ai.knowledge.cloud.notConnected")}
-            </p>
-            {oneDriveConn?.connectedByName ? (
-              <p className="text-xs text-text-muted">
-                {t("ai.knowledge.cloud.connectedBy", {
-                  name: oneDriveConn.connectedByName,
-                })}
-              </p>
-            ) : null}
-          </div>
-          {oneDriveConn ? (
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                disabled={startImport.isPending || busy}
-                onClick={() => pickOneDriveFiles(oneDriveConn)}
-              >
-                {(startImport.isPending || busy) && (
-                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                )}
-                {t("ai.knowledge.cloud.importFiles")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => disconnect.mutate(oneDriveConn.id)}
-              >
-                <Unplug className="w-4 h-4" />
-              </Button>
-            </div>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              onClick={async () => {
-                const { startUrl } = await oneDriveConnect.mutateAsync();
-                window.open(
-                  startUrl,
-                  "onedrive-connect",
-                  "width=520,height=720",
-                );
-              }}
-              disabled={oneDriveConnect.isPending}
-            >
-              {t("ai.knowledge.cloud.connect")}
-            </Button>
-          )}
+          <p className="text-sm font-medium">
+            {t("ai.knowledge.cloud.providerOneDrive")}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            onClick={async () => {
+              const { startUrl } = await oneDriveConnect.mutateAsync();
+              window.open(
+                startUrl,
+                "onedrive-connect",
+                "width=520,height=720",
+              );
+            }}
+            disabled={oneDriveConnect.isPending}
+          >
+            {t("ai.knowledge.cloud.connect")}
+          </Button>
         </div>
+        {oneDriveConns.length === 0 ? (
+          <p className="text-xs text-text-muted">
+            {t("ai.knowledge.cloud.notConnected")}
+          </p>
+        ) : (
+          oneDriveConns.map((conn) => (
+            <div
+              key={conn.id}
+              className="flex items-center justify-between gap-3"
+            >
+              <div>
+                <p className="text-xs text-text-muted">
+                  {conn.accountEmail || t("ai.knowledge.cloud.connected")}
+                  {conn.reauthRequired
+                    ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
+                    : ""}
+                </p>
+                {conn.connectedByName ? (
+                  <p className="text-xs text-text-muted">
+                    {t("ai.knowledge.cloud.connectedBy", {
+                      name: conn.connectedByName,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={
+                    startImport.isPending || busy || conn.reauthRequired
+                  }
+                  onClick={() => pickOneDriveFiles(conn)}
+                >
+                  {(startImport.isPending || busy) && (
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                  )}
+                  {t("ai.knowledge.cloud.importFiles")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => disconnect.mutate(conn.id)}
+                >
+                  <Unplug className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ))
+        )}
 
+        <p className="text-xs text-text-muted">
+          {t("ai.knowledge.cloud.dropboxLater")}
+        </p>
         <p className="text-xs text-text-muted">
           {t("ai.knowledge.cloud.icloudLater")}
         </p>

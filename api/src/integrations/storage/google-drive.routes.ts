@@ -58,11 +58,6 @@ router.get(
   asyncHandler(od.getOneDriveConnectUrl),
 );
 router.get(
-  "/onedrive/files",
-  requireRole("admin"),
-  asyncHandler(od.listOneDriveRootFiles),
-);
-router.get(
   "/onedrive/picker-config",
   requireRole("admin"),
   asyncHandler(od.getOneDrivePickerConfig),

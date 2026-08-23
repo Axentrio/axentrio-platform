@@ -142,7 +142,33 @@ describe("enqueueStorageImport", () => {
     ).rejects.toMatchObject({ code: "RATE_LIMIT_EXCEEDED", statusCode: 429 });
   });
 
-  it("rejects OneDrive imports when Graph /me does not match the connection", async () => {
+  it("rejects OneDrive imports without picker proof", async () => {
+    findOne.mockImplementation(
+      async (opts: { where?: { id?: string } }) => {
+        if (opts?.where && "id" in (opts.where as object)) {
+          return {
+            id: "conn-1",
+            tenantId: "t1",
+            provider: "onedrive",
+            providerAccountId: "od-sub",
+            status: "active",
+            reauthRequired: false,
+          };
+        }
+        return null;
+      },
+    );
+    await expect(
+      enqueueStorageImport({
+        tenantId: "t1",
+        userId: "u1",
+        storageConnectionId: "conn-1",
+        files: [{ id: "file-1", mimeType: "application/pdf" }],
+      }),
+    ).rejects.toMatchObject({ code: "storage_account_mismatch" });
+  });
+
+  it("rejects OneDrive imports when the picker account does not match", async () => {
     findOne.mockImplementation(
       async (opts: { where?: { id?: string } }) => {
         if (opts?.where && "id" in (opts.where as object)) {
@@ -166,6 +192,7 @@ describe("enqueueStorageImport", () => {
         tenantId: "t1",
         userId: "u1",
         storageConnectionId: "conn-1",
+        oneDriveAccessToken: "picker-tok",
         files: [{ id: "file-1", mimeType: "application/pdf" }],
       }),
     ).rejects.toMatchObject({ code: "storage_account_mismatch" });

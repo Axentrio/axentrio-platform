@@ -322,7 +322,10 @@ export function useStartCloudImport() {
       files: Array<{ id: string; name?: string; mimeType?: string; size?: number }>;
       googleAccessToken?: string;
       kbId?: string;
-    }) => api.post<{ jobs: StorageImportJobRow[] }>("/knowledge/storage/import", data),
+    }) => api.post<{
+    jobs: StorageImportJobRow[];
+    skipped?: Array<{ id: string; reason: string }>;
+  }>("/knowledge/storage/import", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.storageJobs() });
       queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.documents() });

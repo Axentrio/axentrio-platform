@@ -32,7 +32,10 @@ export async function enqueueStorageImport(opts: {
   storageConnectionId: string;
   files: ImportFileInput[];
   googleAccessToken?: string;
-}): Promise<{ jobs: Array<{ id: string; fileId: string; status: string }> }> {
+}): Promise<{
+  jobs: Array<{ id: string; fileId: string; status: string }>;
+  skipped: Array<{ id: string; reason: string }>;
+}> {
   if (!config.clamav.enabled) {
     throw new ApiError(
       "Virus scanning is unavailable",
@@ -110,14 +113,16 @@ export async function enqueueStorageImport(opts: {
   }
 
   const created: Array<{ id: string; fileId: string; status: string }> = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
   for (const file of opts.files) {
     if (!file.id || typeof file.id !== "string") {
       throw new BadRequestError("Each file needs an id");
     }
+    // Skip unsupported files (folders, images, ...) instead of failing the
+    // whole selection — users pick stray items without noticing.
     if (file.mimeType && !planForMime(file.mimeType)) {
-      throw new BadRequestError(
-        `${file.name || file.id} is not a PDF, Word, or Google Docs/Sheets/Slides file`,
-      );
+      skipped.push({ id: file.id, reason: "unsupported_type" });
+      continue;
     }
     const targetKey = `knowledge/${opts.tenantId}/${kb.id}/${connection.provider}/${file.id}/v1`;
     let job = await jobRepo.findOne({
@@ -180,7 +185,10 @@ export async function enqueueStorageImport(opts: {
     }
     created.push({ id: job.id, fileId: file.id, status: job.status });
   }
-  return { jobs: created };
+  if (created.length === 0) {
+    throw new BadRequestError("No importable files in that selection");
+  }
+  return { jobs: created, skipped };
 }
 
 async function assertGoogleAccountMatch(

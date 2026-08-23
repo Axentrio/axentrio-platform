@@ -121,6 +121,10 @@ export default function CloudImportPanel({
         "google-drive-connect",
         "width=520,height=720",
       );
+      if (!popup) {
+        toast.error(t("ai.knowledge.cloud.popupBlocked"));
+        return;
+      }
       const timer = window.setInterval(() => {
         if (!popup || popup.closed) {
           window.clearInterval(timer);
@@ -207,12 +211,16 @@ export default function CloudImportPanel({
         builder.build().setVisible(true);
       });
       if (files.length === 0) return;
-      await startImport.mutateAsync({
+      const res = await startImport.mutateAsync({
         storageConnectionId: conn.id,
         files,
         googleAccessToken: token,
       });
-      toast.success(t("ai.knowledge.cloud.importQueued"));
+      if (res.skipped?.length) {
+        toast.message(t("ai.knowledge.cloud.someSkipped"), { description: `${res.skipped.length}` });
+      } else {
+        toast.success(t("ai.knowledge.cloud.importQueued"));
+      }
       jobs.refetch();
       onImported();
     } catch {

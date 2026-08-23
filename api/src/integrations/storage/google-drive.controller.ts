@@ -252,7 +252,10 @@ export async function startCloudImport(req: Request, res: Response): Promise<voi
     fileCount: (body.files ?? []).length,
     fileIds: (body.files ?? []).map((f) => f.id),
   });
-  sendSuccess(res, result);
+    sendSuccess(res, {
+    jobs: result.jobs,
+    skipped: result.skipped,
+  });
 }
 
 export async function listImportJobs(req: Request, res: Response): Promise<void> {

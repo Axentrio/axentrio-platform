@@ -115,3 +115,32 @@ describe("enqueueStorageImport", () => {
     );
   });
 });
+
+describe('unsupported file handling', () => {
+  it('skips unsupported files instead of failing the batch', async () => {
+    const result = await enqueueStorageImport({
+      tenantId: 't1',
+      userId: 'u1',
+      storageConnectionId: 'conn-1',
+      googleAccessToken: 'tok',
+      files: [
+        { id: 'folder-1', mimeType: 'application/vnd.google-apps.folder' },
+        { id: 'file-2', name: 'b.pdf', mimeType: 'application/pdf' },
+      ],
+    });
+    expect(result.skipped).toEqual([{ id: 'folder-1', reason: 'unsupported_type' }]);
+    expect(result.jobs.some((j) => j.fileId === 'file-2')).toBe(true);
+  });
+
+  it('throws when nothing in the selection is importable', async () => {
+    await expect(
+      enqueueStorageImport({
+        tenantId: 't1',
+        userId: 'u1',
+        storageConnectionId: 'conn-1',
+        googleAccessToken: 'tok',
+        files: [{ id: 'img-1', mimeType: 'image/png' }],
+      }),
+    ).rejects.toThrow(/No importable files/);
+  });
+});

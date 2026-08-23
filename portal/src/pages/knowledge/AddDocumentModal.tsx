@@ -27,6 +27,7 @@ import {
   useImportWebsite,
   useDiscoverWebsiteHosts,
 } from "@/queries/useKnowledgeQueries";
+import { useHasFeature } from "@/queries/useEntitlementsQueries";
 import CloudImportPanel from "./CloudImportPanel";
 
 type DocType = "text" | "faq" | "pdf" | "docx" | "url";
@@ -101,6 +102,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
   editingDocument,
 }) => {
   const { t } = useTranslation();
+  const canCloudImport = useHasFeature("cloudImport");
   const isEditing = !!editingDocument;
   const [docType, setDocType] = useState<ModalKind>("text");
   const [title, setTitle] = useState("");
@@ -266,7 +268,9 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
               {t("ai.knowledge.modal.fields.docType.label")}
             </Label>
             <div className="grid grid-cols-3 gap-2">
-              {docTypes.map((type) => {
+              {docTypes
+              .filter((type) => type.value !== "cloud" || canCloudImport)
+              .map((type) => {
                 const Icon = type.icon;
                 const isSelected = docType === type.value;
                 return (

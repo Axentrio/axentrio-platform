@@ -19,7 +19,14 @@ const SCOPES = ["offline_access", "openid", "email", "User.Read", "Files.Read"];
 const SCOPE_PARAM = SCOPES.join(" ");
 /** Well-known tenant id for personal Microsoft accounts. */
 const MSA_CONSUMER_TID = "9188040d-6c67-4c5b-b112-36a304b66dad";
-
+/**
+ * Decode (not verify) the tenant id from Microsoft's id_token.
+ *
+ * Skipping JWT signature verification is deliberate: this token comes
+ * directly from Microsoft's token endpoint over TLS in exchange for our
+ * client secret — never through the browser — so forgery is not in scope.
+ * Verifying would mean fetching Microsoft's JWKS for no added safety.
+ */
 function tenantIdFromIdToken(idToken: string | undefined): string | null {
   if (!idToken) return null;
   const parts = idToken.split(".");

@@ -5,7 +5,7 @@
 import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
 import { logger } from "../../utils/logger";
-import { disconnectStorageConnection } from "./google-drive.service";
+import { disconnectStorageConnection } from "./connections";
 
 export async function flagConnectionsForDeactivatedOwner(
   userId: string,

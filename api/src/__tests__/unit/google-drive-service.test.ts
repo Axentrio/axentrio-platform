@@ -84,9 +84,9 @@ vi.mock("../../integrations/storage/token", async () => {
 import { CodeChallengeMethod } from "google-auth-library";
 import {
   buildGoogleAuthUrl,
-  disconnectStorageConnection,
   exchangeAndStore,
 } from "../../integrations/storage/google-drive.service";
+import { disconnectStorageConnection } from "../../integrations/storage/connections";
 import { shouldRevokeProviderGrant } from "../../integrations/storage/token";
 import { pkceChallenge } from "../../integrations/storage/oauth-state";
 

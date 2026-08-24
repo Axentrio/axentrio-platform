@@ -37,6 +37,7 @@ export async function enqueueStorageImport(opts: {
   googleAccessToken?: string;
   oneDriveAccessToken?: string;
 }): Promise<{
+  provider: string;
   jobs: Array<{ id: string; fileId: string; status: string }>;
   skipped: Array<{ id: string; reason: string }>;
 }> {
@@ -203,7 +204,7 @@ export async function enqueueStorageImport(opts: {
   if (created.length === 0) {
     throw new BadRequestError("No importable files in that selection");
   }
-  return { jobs: created, skipped };
+  return { provider: connection.provider, jobs: created, skipped };
 }
 
 async function assertGoogleAccountMatch(

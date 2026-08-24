@@ -18,11 +18,13 @@ import { logAudit } from "../../utils/audit";
 import { In } from "typeorm";
 import {
   buildGoogleAuthUrl,
-  disconnectStorageConnection,
   exchangeAndStore,
+} from "./google-drive.service";
+import {
+  disconnectStorageConnection,
   listTenantConnections,
   probeConnection,
-} from "./google-drive.service";
+} from "./connections";
 import { enqueueStorageImport } from "./import.service";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
 import {
@@ -134,7 +136,7 @@ export async function startCloudImport(req: Request, res: Response): Promise<voi
     oneDriveAccessToken: body.oneDriveAccessToken,
   });
   await logAudit(req.userId!, "knowledge.storage.import", "storage_connection", body.storageConnectionId, tenantId, {
-    provider: "google_drive",
+    provider: result.provider,
     fileCount: (body.files ?? []).length,
     fileIds: (body.files ?? []).map((f) => f.id),
   });

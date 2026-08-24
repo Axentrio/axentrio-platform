@@ -31,7 +31,6 @@ export {
   rateLimitByTenant,
   rateLimitWidget,
   checkSocketRateLimit,
-  getRateLimitStatus,
 } from './rate-limit.middleware';
 
 export {
@@ -41,11 +40,6 @@ export {
   ProvisionedRequest,
 } from './clerk.middleware';
 
-// Aliases for compatibility
-export { authenticateAgent as authenticateJwt } from './auth.middleware';
-
-// Rate limiter alias
-export { rateLimitByIp as loginRateLimiter } from './rate-limit.middleware';
 
 // Alias for admin role check
 export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {

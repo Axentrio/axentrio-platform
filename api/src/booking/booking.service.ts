@@ -24,7 +24,7 @@ import {
   getOwnedBot,
   getOwnedBotConfig,
 } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingProvider, BookingExtras } from './booking-providers/types';
+import { BookingError, BookingContext, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
@@ -44,7 +44,9 @@ import {
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
 // keep working unchanged.
 export { BookingError } from './booking-providers/types';
-
+// The booking backend. Cal.com is shelved — the in-house scheduler is the only
+// active provider, so we ignore any stored `integrations.provider` value. To
+// bring Cal.com back, restore the per-bot switch on `botSettings` here.
 const internalProvider = new InternalProvider();
 
 /**
@@ -83,15 +85,6 @@ async function enforceBookingsFeature(
   }
   // Same envelope as every other feature gate: HTTP 402, plan_limit_bookings.
   await requireFeature(tenantId, 'bookings', 'plan_limit_bookings');
-}
-
-/**
- * The booking backend. Cal.com is shelved — the in-house scheduler is the only
- * active provider, so we ignore any stored `integrations.provider` value. To
- * bring Cal.com back, restore the per-bot switch on `botSettings` here.
- */
-function selectProvider(): BookingProvider {
-  return internalProvider;
 }
 
 /** Resolve session, tenant, and bot settings — provider-agnostic. */
@@ -144,7 +137,7 @@ function attributeToOffer(
 export async function listBookings(caller: BookingCaller, sessionId: string, attendeeEmail: string) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  return selectProvider().listBookings(ctx, attendeeEmail);
+  return internalProvider.listBookings(ctx, attendeeEmail);
 }
 
 export async function checkAvailability(
@@ -166,7 +159,7 @@ export async function checkAvailability(
   await enforceBookingsFeature(ctx.tenant.id, caller);
   // `excludeBookingId` stays undefined here: this entry point is a NEW booking. The reschedule
   // picker has its own function below, which passes both it and the address on the row.
-  return selectProvider().checkAvailability(
+  return internalProvider.checkAvailability(
     ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress, locationChoice,
   );
 }
@@ -184,7 +177,7 @@ export async function createBooking(
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  const result = await selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
+  const result = await internalProvider.createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
   attributeToOffer(ctx, result.booking?.id, startTime, serviceId, 'booking');
   return result;
@@ -275,13 +268,13 @@ function captureLeadFromBooking(
 export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
-  return selectProvider().rescheduleBooking(ctx, bookingId, newStartTime);
+  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
 export async function cancelBooking(caller: BookingCaller, sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
-  return selectProvider().cancelBooking(ctx, bookingId, reason);
+  return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
 
 // ---------------------------------------------------------------------------

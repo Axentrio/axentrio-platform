@@ -4,9 +4,9 @@
  */
 import axios from "axios";
 import { config } from "../../config/environment";
-import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
-import { applyTokens, type RefreshResult } from "./token";
+import { type RefreshResult } from "./token";
+import { upsertConnection } from "./connections";
 import { pkceChallenge } from "./oauth-state";
 import { MAX_IMPORT_BYTES } from "./import-mime";
 import { readCappedStream } from "./capped-stream";
@@ -122,38 +122,20 @@ export async function exchangeAndStoreOneDrive(opts: {
   const email = (me.data.mail || me.data.userPrincipalName || null) as
     | string
     | null;
-  const repo = AppDataSource.getRepository(StorageConnection);
-  let row = await repo.findOne({
-    where: {
-      tenantId: opts.tenantId,
-      provider: "onedrive",
-      providerAccountId: sub,
+  return upsertConnection({
+    tenantId: opts.tenantId,
+    userId: opts.userId,
+    provider: "onedrive",
+    providerAccountId: sub,
+    accountEmail: email,
+    tokens: {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? null,
+      expiry: tokens.expires_in
+        ? new Date(Date.now() + tokens.expires_in * 1000)
+        : null,
     },
   });
-  if (!row) {
-    row = repo.create({
-      tenantId: opts.tenantId,
-      provider: "onedrive",
-      providerAccountId: sub,
-      accountEmail: email,
-      status: "active",
-      reauthRequired: false,
-      connectedByUserId: opts.userId,
-      accessTokenEnc: "pending",
-      refreshTokenEnc: null,
-    });
-  }
-  row.status = "active";
-  row.accountEmail = email ?? row.accountEmail;
-  row.connectedByUserId = opts.userId;
-  applyTokens(row, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token ?? null,
-    expiry: tokens.expires_in
-      ? new Date(Date.now() + tokens.expires_in * 1000)
-      : null,
-  });
-  return repo.save(row);
 }
 
 export async function refreshOneDriveAccessToken(

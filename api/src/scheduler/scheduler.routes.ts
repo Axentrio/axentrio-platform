@@ -3,7 +3,7 @@ import { asyncHandler } from '../middleware/error-handler';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
-import { placesRateLimiter } from '../middleware/rate-limit';
+import { placesRateLimiter } from '../middleware/rate-limit.middleware';
 import * as ctrl from './scheduler.controller';
 
 const router = Router();

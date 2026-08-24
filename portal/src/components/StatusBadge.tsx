@@ -5,14 +5,14 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { CHAT_STATUS_COLORS, USER_STATUS_COLORS, PRIORITY_COLORS } from '@config/api.config';
+import { CHAT_STATUS_COLORS, PRIORITY_COLORS } from '@config/api.config';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import type { ChatStatus, UserStatus, HandoffPriority } from '@app-types/index';
+import type { ChatStatus, HandoffPriority } from '@app-types/index';
 
 interface StatusBadgeProps {
-  status: ChatStatus | UserStatus | HandoffPriority;
-  type: 'chat' | 'user' | 'priority';
+  status: ChatStatus | HandoffPriority;
+  type: 'chat' | 'priority';
   size?: 'sm' | 'md' | 'lg';
   showLabel?: boolean;
   className?: string;
@@ -25,11 +25,6 @@ const statusLabelKeys: Record<string, string> = {
   handsoff: 'inbox.statusBadge.handsoff',
   closed: 'inbox.statusBadge.closed',
   pending: 'inbox.statusBadge.pending',
-  // User statuses
-  online: 'inbox.userStatusBadge.online',
-  away: 'inbox.userStatusBadge.away',
-  offline: 'inbox.userStatusBadge.offline',
-  busy: 'inbox.userStatusBadge.busy',
   // Priorities
   low: 'inbox.priorityBadge.low',
   medium: 'inbox.priorityBadge.medium',
@@ -53,8 +48,6 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
     switch (type) {
       case 'chat':
         return CHAT_STATUS_COLORS[status as ChatStatus] || 'bg-text-muted';
-      case 'user':
-        return USER_STATUS_COLORS[status as UserStatus] || 'bg-text-muted';
       case 'priority':
         return PRIORITY_COLORS[status as HandoffPriority] || 'bg-surface-3 text-text-secondary';
       default:

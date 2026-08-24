@@ -14,7 +14,9 @@ import {
 } from "typeorm";
 
 export type StorageProvider = "google_drive" | "onedrive";
-export type StorageConnectionStatus = "active" | "revoked";
+/** Only "active" exists in code: disconnect deletes the row rather than
+ *  flipping a status, so there is no revoked state to represent. */
+export type StorageConnectionStatus = "active";
 
 @Index(["tenantId", "provider", "providerAccountId"], { unique: true })
 @Entity("knowledge_storage_connections")

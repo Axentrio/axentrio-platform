@@ -2818,14 +2818,15 @@ export class InternalProvider implements BookingProvider {
       // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
       // event: Google mints a fresh one from `conferencing` and we store what comes back.
       {
-      location: resolveEventLocation({
-        locationType: service.locationType,
-        customerAddressRequired: service.customerAddressRequired,
-        meetUrl: null,
-        customerAddress: booking.customerAddress,
-        venue,
-      }),
-      },
+        location: resolveEventLocation({
+          locationType: service.locationType,
+          customerAddressRequired: service.customerAddressRequired,
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        conferencing: service.locationType === 'google_meet',
+      }
     ).catch(() => undefined);
 
     return {

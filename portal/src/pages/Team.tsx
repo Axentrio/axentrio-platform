@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Edit2, Trash2, MessageSquare, Calendar, Users } from 'lucide-react';
+import { Plus, Edit2, Trash2, MessageSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -152,9 +152,7 @@ function AgentsEmptyState({
 const Team: React.FC = () => {
   const { t } = useTranslation();
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
-  const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [, setSelectedAgentForShifts] = useState<Agent | null>(null);
 
   // Fetch agents from API
   const { data: agentsData, isLoading: agentsLoading } = useAgentList();
@@ -216,10 +214,6 @@ const Team: React.FC = () => {
     setIsAgentModalOpen(false);
   };
 
-  const handleManageShifts = (agent: Agent) => {
-    setSelectedAgentForShifts(agent);
-    setIsShiftModalOpen(true);
-  };
 
   const handleUpdateStatus = (agentId: string, status: UserStatus) => {
     updateStatusMutation.mutate({ id: agentId, status });
@@ -364,14 +358,6 @@ const Team: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleManageShifts(agent)}
-                          title={t('team.agents.actions.manageShifts')}
-                        >
-                          <Calendar className="w-4 h-4" />
-                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"

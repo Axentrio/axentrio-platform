@@ -16,4 +16,3 @@ export function useAppAuth(): AppAuthContextValue {
 
 // Re-exports for convenience
 export { useUser, useAuth } from '@clerk/clerk-react';
-export { useAppAuth as useAuthStore } from './useAppAuth';

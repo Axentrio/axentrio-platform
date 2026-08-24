@@ -6,12 +6,9 @@
  */
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
 import { config } from "../../config/environment";
-import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
-import {
-  applyTokens,
-  type RefreshResult,
-} from "./token";
+import { type RefreshResult } from "./token";
+import { upsertConnection } from "./connections";
 import { pkceChallenge } from "./oauth-state";
 
 const SCOPES = [
@@ -86,36 +83,18 @@ export async function exchangeAndStore(opts: {
     throw new Error("Google did not return an access token");
   }
   const { sub, email } = await verifiedIdentityFromIdToken(tokens.id_token);
-  const repo = AppDataSource.getRepository(StorageConnection);
-  let row = await repo.findOne({
-    where: {
-      tenantId: opts.tenantId,
-      provider: "google_drive",
-      providerAccountId: sub,
+  return upsertConnection({
+    tenantId: opts.tenantId,
+    userId: opts.userId,
+    provider: "google_drive",
+    providerAccountId: sub,
+    accountEmail: email,
+    tokens: {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? null,
+      expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
     },
   });
-  if (!row) {
-    row = repo.create({
-      tenantId: opts.tenantId,
-      provider: "google_drive",
-      providerAccountId: sub,
-      accountEmail: email,
-      status: "active",
-      reauthRequired: false,
-      connectedByUserId: opts.userId,
-      accessTokenEnc: "pending",
-      refreshTokenEnc: null,
-    });
-  }
-  row.status = "active";
-  row.accountEmail = email ?? row.accountEmail;
-  row.connectedByUserId = opts.userId;
-  applyTokens(row, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token ?? null,
-    expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-  });
-  return repo.save(row);
 }
 
 export async function refreshGoogleAccessToken(

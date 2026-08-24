@@ -49,9 +49,9 @@ import ProfileSettings from '@pages/settings/ProfileSettings';
 import AccountInformationSettings from '@pages/settings/AccountInformationSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
-import IntegrationSettings from '@pages/settings/IntegrationSettings';
+import { IntegrationTab } from '@components/settings/IntegrationTab';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
-import ChannelsSettings from '@pages/settings/ChannelsSettings';
+import { SocialChannelsContent } from '@components/channels/SocialChannelsContent';
 import CapabilitiesSettings from '@pages/settings/CapabilitiesSettings';
 import FeaturesSettings from '@pages/settings/FeaturesSettings';
 import BillingSettings from '@pages/settings/BillingSettings';
@@ -336,8 +336,8 @@ function AppRoutes() {
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />
                         <Route path="widget" element={<WidgetBrandSettings />} />
-                        <Route path="integrations" element={<IntegrationSettings />} />
-                        <Route path="channels" element={<ChannelsSettings />} />
+                        <Route path="integrations" element={<IntegrationTab />} />
+                        <Route path="channels" element={<SocialChannelsContent />} />
                         <Route path="capabilities" element={<CapabilitiesSettings />} />
                         <Route path="features" element={<FeaturesSettings />} />
                         <Route path="billing" element={<BillingSettings />} />

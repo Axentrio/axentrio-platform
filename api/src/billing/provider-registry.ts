@@ -8,7 +8,6 @@
  * Plan: .scratch/plan-billing.md § Implementation outline step 3.
  */
 
-import { ManualBillingProvider } from './providers/manual';
 import type { BillingProvider } from './types';
 
 /**
@@ -44,10 +43,6 @@ export function isWebhookProvider(name: string): boolean {
   return provider !== undefined && provider.supportsWebhooks;
 }
 
-export function listBillingProviders(): readonly BillingProvider[] {
-  return Array.from(providers.values());
-}
 
-// Register built-in providers. Stripe is registered later (step 6) once its
-// adapter exists; Manual is always available.
-registerBillingProvider(new ManualBillingProvider());
+// Stripe is registered at module load by billing/service.ts once its
+// credentials resolve.

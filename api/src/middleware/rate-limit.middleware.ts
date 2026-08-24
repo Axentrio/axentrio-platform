@@ -422,3 +422,111 @@ export async function getRateLimitStatus(
     return null;
   }
 }
+
+// --- Named per-route Redis limiters (folded from rate-limit.ts) ---
+
+interface NamedLimiterConfig {
+  windowMs: number;
+  maxRequests: number;
+  keyPrefix: string;
+}
+
+const createRateLimitKey = (req: Request, prefix: string): string => {
+  const identifier = req.user?.id || req.widget?.visitorId || req.ip || 'unknown';
+  const tenantId = req.tenant?.id || req.user?.tenantId || req.widget?.tenantId || 'global';
+  return `rl:${prefix}:${tenantId}:${identifier}`;
+};
+
+const createRedisRateLimiter = (limiterConfig: NamedLimiterConfig) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const redis = getRedisClient();
+      if (!redis) {
+        // No Redis — fail open
+        return next();
+      }
+      const key = createRateLimitKey(req, limiterConfig.keyPrefix);
+      const windowSeconds = Math.floor(limiterConfig.windowMs / 1000);
+
+      // Get current count
+      const current = await redis.get(key);
+      const count = current ? parseInt(current, 10) : 0;
+
+      if (count >= limiterConfig.maxRequests) {
+        // Rate limit exceeded
+        const ttl = await redis.ttl(key);
+        res.setHeader('Retry-After', ttl.toString());
+        res.setHeader('X-RateLimit-Limit', limiterConfig.maxRequests.toString());
+        res.setHeader('X-RateLimit-Remaining', '0');
+        res.setHeader('X-RateLimit-Reset', (Date.now() + ttl * 1000).toString());
+
+        logger.warn('Rate limit exceeded', {
+          requestId: req.requestId,
+          key: key.split(':').pop(),
+          count,
+        });
+
+        if (shouldUseLegacyEnvelope(req)) {
+          // OOS carve-out: preserve legacy 429 body for provider-integration endpoints.
+          res.status(429).json({ // envelope-allow: OOS legacy 429 (plan §10)
+            error: 'Too Many Requests',
+            retryAfter: ttl,
+            message: 'Rate limit exceeded. Please try again later.',
+          });
+          return;
+        }
+        return next(
+          new RateLimitError('Rate limit exceeded. Please try again later.', {
+            retryAfter: ttl,
+          }),
+        );
+      }
+
+      // Increment counter
+      const pipeline = redis.pipeline();
+      pipeline.incr(key);
+      pipeline.expire(key, windowSeconds);
+      await pipeline.exec();
+
+      // Set headers
+      const remaining = limiterConfig.maxRequests - count - 1;
+      res.setHeader('X-RateLimit-Limit', limiterConfig.maxRequests.toString());
+      res.setHeader('X-RateLimit-Remaining', Math.max(0, remaining).toString());
+
+      next();
+    } catch (error) {
+      logger.error('Rate limiting error', {
+        requestId: req.requestId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      // Fail open - allow request if rate limiter fails
+      next();
+    }
+  };
+};
+
+/**
+ * Widget route limiter: 60 requests/min keyed per widget visitor.
+ */
+export const widgetRateLimiter = createRedisRateLimiter({
+  windowMs: 60000, // 1 minute
+  maxRequests: 60,
+  keyPrefix: 'widget',
+});
+
+/**
+ * Address suggestions, which fire WHILE SOMEONE TYPES and cost money per request.
+ *
+ * Sized for a human filling in one address, not for a page of them: with a three-character
+ * minimum and a debounce in the client, entering a full Belgian address costs a handful of
+ * requests. Forty a minute leaves a fast typist and a couple of corrections comfortable while
+ * bounding what a stuck client or a hostile session can spend.
+ *
+ * Redis-backed rather than in-memory, because in-memory counts per replica: two containers would
+ * silently permit twice the limit, and neither would know.
+ */
+export const placesRateLimiter = createRedisRateLimiter({
+  windowMs: 60000,
+  maxRequests: 40,
+  keyPrefix: 'places',
+});

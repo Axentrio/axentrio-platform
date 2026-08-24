@@ -3,11 +3,16 @@
  * OneDrive. Lives outside google-drive.* so a third provider reuses it as-is.
  */
 import axios from "axios";
+import { ApiError } from "../../middleware/error-handler";
 import { AppDataSource } from "../../database/data-source";
-import { StorageConnection } from "../../database/entities/StorageConnection";
+import {
+  StorageConnection,
+  type StorageProvider,
+} from "../../database/entities/StorageConnection";
 import { decrypt } from "../../utils/encryption";
 import { logger } from "../../utils/logger";
 import {
+  applyTokens,
   getValidAccessToken,
   refresherFor,
   shouldRevokeProviderGrant,
@@ -84,4 +89,79 @@ export async function disconnectStorageConnection(
   }
 
   await repo.delete({ id: row.id });
+}
+
+export interface ConnectionUpsert {
+  tenantId: string;
+  userId: string;
+  provider: StorageProvider;
+  providerAccountId: string;
+  accountEmail: string | null;
+  tokens: { accessToken: string; refreshToken: string | null; expiry: Date | null };
+}
+
+/** Find-or-create the tenant's connection for this provider account, then
+ *  apply fresh tokens. Shared by the Google and OneDrive OAuth exchanges. */
+export async function upsertConnection(opts: ConnectionUpsert): Promise<StorageConnection> {
+  const repo = AppDataSource.getRepository(StorageConnection);
+  let row = await repo.findOne({
+    where: {
+      tenantId: opts.tenantId,
+      provider: opts.provider,
+      providerAccountId: opts.providerAccountId,
+    },
+  });
+  if (!row) {
+    row = repo.create({
+      tenantId: opts.tenantId,
+      provider: opts.provider,
+      providerAccountId: opts.providerAccountId,
+      accountEmail: opts.accountEmail,
+      status: "active",
+      reauthRequired: false,
+      connectedByUserId: opts.userId,
+      accessTokenEnc: "pending",
+      refreshTokenEnc: null,
+    });
+  }
+  row.status = "active";
+  row.accountEmail = opts.accountEmail ?? row.accountEmail;
+  row.connectedByUserId = opts.userId;
+  applyTokens(row, opts.tokens);
+  return repo.save(row);
+}
+
+/**
+ * Bind a picker selection to the stored connection. The picker token's account
+ * id (from the provider's identity endpoint) must equal providerAccountId. The
+ * stored connection token cannot prove this: it always matches its own row.
+ */
+export async function assertAccountMatch(opts: {
+  providerLabel: string;
+  meUrl: string;
+  /** JSON path of the account id inside the identity response ("sub" or "id"). */
+  accountIdField: "sub" | "id";
+  providerAccountId: string;
+  pickerAccessToken: string | undefined;
+}): Promise<void> {
+  const mismatch = (message: string) =>
+    new ApiError(message, 400, "storage_account_mismatch");
+  if (!opts.pickerAccessToken) {
+    throw mismatch(`${opts.providerLabel} account proof is required`);
+  }
+  let accountId: string | undefined;
+  try {
+    const me = await axios.get(opts.meUrl, {
+      headers: { Authorization: `Bearer ${opts.pickerAccessToken}` },
+      timeout: 8000,
+    });
+    accountId = me.data?.[opts.accountIdField];
+  } catch {
+    throw mismatch(`${opts.providerLabel} account proof failed`);
+  }
+  if (!accountId || accountId !== opts.providerAccountId) {
+    throw mismatch(
+      `${opts.providerLabel} account does not match the connected drive`,
+    );
+  }
 }

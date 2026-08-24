@@ -12,6 +12,11 @@ vi.mock("../../integrations/storage/import.worker", () => ({
   STORAGE_IMPORT_QUEUE: "storage-import",
 }));
 
+vi.mock("../../utils/encryption", () => ({
+  encrypt: (value: string) => `enc(${value})`,
+  decrypt: (value: string) => value.replace(/^enc\(/, "").replace(/\)$/, ""),
+}));
+
 vi.mock("../../queue/message-queue", () => ({
   addJob: vi.fn(async () => undefined),
   removeJob: vi.fn(async () => undefined),

@@ -14,7 +14,7 @@ import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../servic
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { ApiError } from '../middleware/error-handler';
-import { widgetRateLimiter } from '../middleware/rate-limit';
+import { widgetRateLimiter } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { computeCustomerThreadId } from '../realtime/conversation-serializer';
@@ -37,7 +37,7 @@ import {
   confirmCorrection,
   rejectCorrection,
 } from '../booking/travel/address-binding';
-import { placesRateLimiter } from '../middleware/rate-limit';
+import { placesRateLimiter } from '../middleware/rate-limit.middleware';
 import { addressConfirmSchema, placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
 import { decrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';

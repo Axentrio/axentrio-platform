@@ -371,7 +371,11 @@ describe('guardrails · runInboundGate (integration)', () => {
     expect(await logRepo().count({ where: { conversationId: session.id } })).toBe(1);
   });
 
-  it('never treats a claimed message without a persisted outcome as clean', async () => {
+  // Regression: a clean message writes no outcome row on purpose, so re-gating
+  // it (runTurn re-gates its whole window, and a 'stale' turn leaves the
+  // watermark unmoved) used to fall through to a hard block and froze the
+  // conversation for good.
+  it('re-gates an already-claimed clean message from its content and proceeds', async () => {
     const { tenant, session, participant } = await setup(true);
     const msg = await createTestMessage(session.id, tenant.id, participant.id, {
       content: 'Hi, can I book tomorrow?',
@@ -380,7 +384,37 @@ describe('guardrails · runInboundGate (integration)', () => {
 
     expect(await runInboundGate({
       session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'widget',
-    })).toEqual({ proceed: false, category: 'clean' });
+    })).toEqual({ proceed: true, category: 'clean' });
+
+    // The replay must not flag the message or write a second log row.
+    expect((await msgRepo().findOneOrFail({ where: { id: msg.id } })).guardrailFlagged).toBe(false);
+    expect(await logRepo().count({ where: { conversationId: session.id } })).toBe(0);
+  });
+
+  it('ENFORCE: still blocks a claimed message without an outcome when the content is malicious', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Your account will be deleted. Verify your account here https://bit.ly/x',
+    });
+    await msgRepo().update(msg.id, { guardrailChecked: true });
+
+    const r = await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    });
+    expect(r.proceed).toBe(false);
+    expect(r.category).not.toBe('clean');
+  });
+
+  it('SHADOW: a claimed message without an outcome never blocks', async () => {
+    const { tenant, session, participant } = await setup(false);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Guaranteed returns! Double your money with our crypto investment platform',
+    });
+    await msgRepo().update(msg.id, { guardrailChecked: true });
+
+    expect(await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'widget',
+    })).toEqual({ proceed: true, category: 'clean' });
   });
 
   it.each([

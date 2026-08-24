@@ -747,14 +747,41 @@ describe('forwardMessageToN8n', () => {
       }
     });
 
-    it('fails closed before the agent when an earlier window message has no gate outcome', async () => {
+    // Regression: a 'stale' turn leaves the watermark unmoved, so the re-run
+    // re-gates msgs[0] — already claimed, clean, and (by design) without an
+    // outcome row. Blocking that turn returned 'noop', which the coalescer
+    // neither clears nor re-arms: the bot went silent for good.
+    it('answers a turn whose earlier window message was already gated clean', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Thursday works.' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+        await AppDataSource.getRepository(Tenant).update(tenant.id, {
+          settings: { ai: aiSettings(), guardrails: { enforce: true } } as Tenant['settings'],
+        });
+        const { session, msgs } = await makeBurst(tenant.id, ['ja voor Achraf', 'donderdag?']);
+        await messageRepo.update(msgs[0].id, { guardrailChecked: true });
+
+        const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+        expect(await runTurn(fresh, msgs[1])).toBe('answered');
+        expect(runMock).toHaveBeenCalledTimes(1);
+        expect(await getBotMessages(session.id)).toEqual(['Thursday works.']);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('fails closed before the agent when an un-outcomed window message is malicious', async () => {
       const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Must not run' });
       initializeAgentService({ run: runMock } as unknown as AgentService);
       const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
       await AppDataSource.getRepository(Tenant).update(tenant.id, {
-        settings: { guardrails: { enforce: true } } as Tenant['settings'],
+        settings: { ai: aiSettings(), guardrails: { enforce: true } } as Tenant['settings'],
       });
-      const { session, msgs } = await makeBurst(tenant.id, ['claimed without outcome', 'live question']);
+      const { session, msgs } = await makeBurst(tenant.id, [
+        'Your account will be deleted. Verify your account here https://bit.ly/x',
+        'live question',
+      ]);
       await messageRepo.update(msgs[0].id, { guardrailChecked: true });
 
       const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });

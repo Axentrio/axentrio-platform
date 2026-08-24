@@ -266,9 +266,31 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
     }
     if (action === 'blocked') return { proceed: false, category: 'spam' };
     if (action === 'log_only') return { proceed: true, category: 'clean' };
-    // The claim committed but its outcome has not: never let a concurrent retry
-    // enter the agent while classification is still in flight.
-    return { proceed: false, category: 'clean' };
+    // No persisted outcome. Two very different states collapse here:
+    //   (a) the gate already ran and the message was CLEAN — the clean exit
+    //       below writes no log row on purpose, so a clean message NEVER has
+    //       one. This is the normal case: runTurn re-gates its whole coalesced
+    //       window, and a 'stale' turn leaves the watermark unmoved, so an
+    //       already-gated clean message is gated again on the next turn.
+    //   (b) the claim committed but classification is still in flight.
+    // Blocking both froze conversations for good: runTurn returned 'noop',
+    // which the coalescer neither clears nor re-arms, so the bot went silent
+    // whenever a follow-up message arrived mid-run.
+    // Re-derive the verdict from the CONTENT ONLY. classifyMessage is pure, so
+    // rejected content still never reaches the agent, while the Redis loop
+    // counters stay untouched (no double-count) and nothing is logged twice.
+    if (!enforce) return { proceed: true, category: 'clean' };
+    const replayLinks = inspectLinks(content);
+    const replay = classifyMessage(content, channel, replayLinks);
+    if (replay.category === 'clean') return { proceed: true, category: 'clean' };
+    if (replay.category === 'solicitation' && !isHighSeverity(content, replayLinks)) {
+      return {
+        proceed: true,
+        category: 'solicitation',
+        replyOverride: await solicitationWarnReply(tenantId),
+      };
+    }
+    return { proceed: false, category: replay.category };
   }
 
   const linkInfo = inspectLinks(content);

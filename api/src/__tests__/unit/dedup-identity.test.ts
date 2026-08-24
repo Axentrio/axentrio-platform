@@ -7,7 +7,7 @@
  * either happened in production or was found in review of the fix for it.
  */
 import { describe, it, expect } from 'vitest';
-import { dedupIdentity } from '../../booking/booking-providers/internal.provider';
+import { dedupIdentity } from '../../booking/booking-providers/dedup';
 
 const call = (address?: string | null, placeId?: string | null, addressRequired = true) =>
   dedupIdentity({ addressRequired, address, placeId, placeIdIsPicked: true });

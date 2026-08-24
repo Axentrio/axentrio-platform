@@ -8,21 +8,17 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
-import { In, MoreThan, Raw } from 'typeorm';
+import { In, MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import type { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
-import { BookingSettings } from '../../database/entities/BookingSettings';
-import { normalizeVenue } from '../../contracts/venue-address';
 import { resolveEventLocation } from './event-location';
 import { buildCustomerEventDescription } from './booking-content';
 import { organizerAddressForTenant } from './organizer-address';
-import { describeServiceArea, isEnforceableEntry, matchServiceArea , type ServiceAreaMatch, type ServiceAreaEntry } from '../../contracts/service-area';
 import {
   resolveServiceTiming,
-  type BusinessRules,
   type ResolvedService,
 } from './service-timing';
 import { Booking } from '../../database/entities/Booking';
@@ -40,17 +36,20 @@ import {
   RescheduleResult,
   CancelResult,
 } from './types';
-import { computeSlots, BusyInterval } from './slot-engine';
+import { computeSlots } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
+import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
-import { scheduleReminders, cancelReminders } from './reminders';
 import {
-  resolveCalendarProvider,
-  providerFor,
   isCalendarSyncAllowed,
   hasHealthyCalendarConnection,
 } from '../../scheduler/calendar-provider';
-import { BookingReference } from '../../database/entities/BookingReference';
+import {
+  canonicalRef,
+  syncCalendarCreate,
+  syncCalendarReschedule,
+  syncCalendarCancel,
+} from './calendar-sync';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
@@ -63,8 +62,6 @@ import {
   placeAddressFor,
   placeExistingBooking,
   bookingPlaceColumns,
-  blocksAutoConfirm,
-  placementIsCoarse,
   requestTravelCheck,
   type BookingPlacement,
 } from '../travel/booking-place';
@@ -88,589 +85,43 @@ import { baseDepartureInstant, localDayBounds, type DayRule } from '../travel/tr
 import { recordCause, recordRoutingSuccess } from '../travel/degradation-monitor';
 import { notifyTenantCapExhausted } from '../travel/degradation-notify';
 import { driveLookupFor } from '../travel/routes.service';
-import { addressToken } from '../travel/address-for-turn';
 import {
   AddressBindingMovedError,
   consumeAddressBinding,
 } from '../travel/address-binding';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
-
-/**
- * Idempotency/dedup window (#35). The booking idempotency key is stable per
- * session+service+time, so we only treat a matching row as "the same booking" when
- * it was created within this window — collapsing a rapid re-confirm ("yes go ahead"
- * seconds later) while still allowing a genuine re-booking of the same service+time
- * later in a long-lived (Messenger/WhatsApp) session.
- */
-const BOOKING_DEDUP_WINDOW_MS = 5 * 60 * 1000;
-
-/**
- * An idempotent return has no new booking INSERT to share a transaction with: the row already
- * exists. Still consume the binding used by this retry, but never clear a newer generation that
- * arrived while the duplicate lookup was running.
- */
-async function consumeBindingAfterIdempotentReturn(
-  ctx: BookingContext,
-  extras?: BookingExtras
-): Promise<void> {
-  if (!extras?.addressBinding) return;
-  try {
-    await AppDataSource.transaction((manager) =>
-      consumeAddressBinding(manager, ctx.session.id, extras.addressBinding)
-    );
-  } catch (error) {
-    if (error instanceof AddressBindingMovedError) return;
-    logger.warn('[Booking] could not consume address binding after idempotent return', {
-      sessionId: ctx.session.id,
-      error,
-    });
-  }
-}
-
-/**
- * P3: normalize an LLM-supplied intake-answers object against a RESOLVED service's
- * questions — the single place answers are sanitized before persistence. Keeps only
- * entries whose key matches a current question id, coerces the value to a trimmed
- * non-empty string (string→trim; number/boolean→String; null/undefined/array/object
- * dropped — never `"[object Object]"`), caps at 2000 chars. Returns a flat
- * `{ id: string }` map or `null` if nothing remains. A malformed/non-array
- * `intakeQuestions` (legacy/hand-edited) degrades to "no questions" → null.
- */
-export function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<string, string> | null {
-  const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
-  if (!questions.length) return null;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const validIds = new Set(
-    questions.map((q) => q?.id).filter((id): id is string => typeof id === 'string')
-  );
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!validIds.has(key)) continue;
-    let str: string;
-    if (typeof value === 'string') str = value;
-    else if (typeof value === 'number' || typeof value === 'boolean') str = String(value);
-    else if (Array.isArray(value)) {
-      // An ARRAY is what a multi-answer looks like, and dropping it silently lost the
-      // customer's answer entirely — the owner saw a question with no reply rather than
-      // one with several. Flattened to a readable list; the scalar members are kept and
-      // anything nested is discarded rather than rendered as "[object Object]".
-      const parts = value
-        .filter((v): v is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof v))
-        .map((v) => String(v).trim())
-        .filter(Boolean);
-      if (!parts.length) continue;
-      str = parts.join(', ');
-    } else continue; // null/undefined/object → dropped
-    const trimmed = str.trim();
-    if (!trimmed) continue;
-    out[key] = trimmed.slice(0, 2000);
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-/**
- * Coerce a possibly-loose date range into a UTC [start, end) window. The LLM
- * usually passes date-only strings ("2026-06-08", sometimes start === end); a
- * date-only value is anchored to the BUSINESS timezone's calendar day — NOT UTC
- * (`new Date("2026-06-08")` is UTC midnight, which offsets the window by the
- * zone's UTC offset and makes the slot engine clip real evening slots in
- * negative-offset zones / leak next-day slots in positive-offset zones, drifting
- * with DST). A date-only end includes that whole local day; a zero/negative
- * window becomes a single day. Datetime strings with an explicit offset/Z keep
- * their instant; zoneless datetimes are read as business-local. Output is RFC3339
- * UTC (Google events.list 400s on date-only values).
- */
-/**
- * What to tell the model when the time it asked for has gone.
- *
- * THE MESSAGE CARRIES THE NEXT STEP, because a bare statement of fact does not survive contact
- * with the model. Observed in production: two customers raced for one slot, and the loser's tool
- * returned `This time slot is no longer available` - correct, safe to show, and useless. The model
- * answered an English customer with the tenant's Dutch handoff string and gave up, on a race it
- * could have recovered from in one turn by re-checking the day.
- *
- * Every booking error in this file that produces a good reply says what to do next. These did not.
- * The two forbidden moves are named explicitly because both were what it actually did.
- */
-export const SLOT_TAKEN_ON_CREATE =
-  'That time is no longer available. Tell the customer plainly that it has just gone, apologise ' +
-  'briefly, then call check_availability again for the same day and offer what is left. Do NOT ' +
-  'hand the conversation to a human and do NOT use the fallback message: a taken slot is an ' +
-  'ordinary thing that happens and you can fix it yourself.';
-
-/**
- * The time was never offerable, which is NOT the same as taken.
- *
- * `SLOT_TAKEN_*` says somebody got there first, and for a slot the engine would never have
- * offered - outside opening hours, on a closed day, sooner than the notice the owner needs,
- * further ahead than they take bookings, or past the day's cap - that is simply false. Told "no
- * longer available", a customer reads it as bad luck and asks for a Request; told "too soon",
- * they pick a later time and book themselves. Observed on a min-notice refusal, where the second
- * outcome was available and the first is what happened.
- *
- * The reason is not enumerated here because the engine does not hand one back - it returns a slot
- * list, and a time is either in it or not. Re-offering is the honest recovery: it shows what IS
- * possible rather than guessing why this was not.
- */
-export const SLOT_NOT_OFFERABLE =
-  'That time is not one this business can take. It may be outside their opening hours, on a day ' +
-  'they are closed, sooner than the notice they need, further ahead than they book, or the day ' +
-  'may already be full. Do NOT say it was just taken and do NOT say it is unavailable without ' +
-  'explanation. Call check_availability for that day and the days around it, then offer the ' +
-  'customer the times that actually exist. Do not hand the conversation to a human and do not ' +
-  'use the fallback message.';
-
-/** `SLOT_NOT_OFFERABLE` for a move: same distinction, and the appointment still stands. */
-export const SLOT_NOT_OFFERABLE_ON_RESCHEDULE =
-  'That time is not one this business can take, and the existing appointment has NOT been ' +
-  'changed. It may be outside their opening hours, on a day they are closed, sooner than the ' +
-  'notice they need, further ahead than they book, or the day may already be full. Do NOT say it ' +
-  'was just taken. Say both of those things, call check_availability for that day, and offer the ' +
-  'times that actually exist. Do not hand the conversation to a human and do not use the ' +
-  'fallback message.';
-
-/** The same, for a move. The customer keeps their existing appointment until one succeeds. */
-export const SLOT_TAKEN_ON_RESCHEDULE =
-  'That time is no longer available, and the existing appointment has NOT been changed. Say both ' +
-  'of those things, then call check_availability again for the day the customer wants and offer ' +
-  'what is left. Do NOT hand the conversation to a human and do NOT use the fallback message.';
-
-export function normalizeDateRange(
-  startDate: string,
-  endDate: string,
-  timezone: string,
-): { rangeStart: string; rangeEnd: string } {
-  const start = DateTime.fromISO(startDate, { zone: timezone });
-  if (!start.isValid) {
-    throw new BookingError('Invalid start date', 'INVALID_RANGE', 400);
-  }
-  const endDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(endDate);
-  let end = DateTime.fromISO(endDate, { zone: timezone });
-  if (endDateOnly && end.isValid) end = end.plus({ days: 1 }); // include the whole end day (local)
-  if (!end.isValid || end <= start) end = start.plus({ days: 1 });
-  return { rangeStart: start.toUTC().toISO()!, rangeEnd: end.toUTC().toISO()! };
-}
-
-/**
- * Parse an appointment time string into a UTC instant, anchored to the business
- * timezone. A string carrying an explicit offset/Z (e.g. a slot returned by
- * check_availability) keeps its instant; a ZONELESS string (e.g.
- * "2026-06-19T14:00:00" — what the model emits for the customer's "2 PM") is read
- * as business-local wall-clock. Without this, a zoneless/UTC time round-trips
- * through `new Date()` on a UTC server as UTC, landing the booking at the wrong
- * local hour in any non-UTC zone. A loose space-separated form ("2026-06-19
- * 14:00") is also anchored to the business timezone via fromSQL — NEVER the
- * server's, which `new Date()` would do (re-introducing the wrong-hour bug).
- * Returns null when unparseable. Same rule as {@link normalizeDateRange}.
- */
-export function parseBookingStart(input: string, timezone: string): Date | null {
-  const iso = DateTime.fromISO(input, { zone: timezone });
-  if (iso.isValid) return iso.toJSDate();
-  // Loose "YYYY-MM-DD HH:mm[:ss]" (space, not 'T') — still business-local.
-  const sql = DateTime.fromSQL(input, { zone: timezone });
-  if (sql.isValid) return sql.toJSDate();
-  return null;
-}
-
-/**
- * #6: server-format the booking time in the BUSINESS timezone, so the AI can quote
- * it verbatim instead of re-deriving a local time from the UTC instant (which drifts).
- * e.g. "Monday, 23 June 2026 at 12:00 PM".
- */
-export function formatBookingDisplayTime(startUtc: Date, timezone: string): string {
-  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a");
-}
-
-/** P5a — which contact fields a service requires. Single mapping for the column-name
- *  wart: customerLocationRequired maps to PHONE (a callback number), not address.
- *  #149: a choose-at-booking Service only needs an address when the customer picked theirs. */
-function requiredContactFields(
-  service: ServiceType,
-  extras?: BookingExtras,
-): { address: boolean; phone: boolean } {
-  return {
-    address: serviceNeedsCustomerAddress(service, extras),
-    phone: !!service.customerLocationRequired,
-  };
-}
-
-/** Trim + cap a contact value to its DB column width; empty/whitespace → null. */
-function cleanContact(v: string | undefined, max: number): string | null {
-  if (typeof v !== 'string') return null;
-  const t = v.trim();
-  return t ? t.slice(0, max) : null;
-}
-
-/**
- * P5a — resolve the address/phone to persist, enforcing the service's required-field
- * gates (recoverable errors the agent re-asks on). Whitespace-only counts as absent.
- */
-function resolveContactFields(
-  service: ServiceType,
-  extras?: BookingExtras,
-  session?: { channel?: string | null; visitorId?: string | null }
-): { address: string | null; phone: string | null } {
-  const req = requiredContactFields(service, extras);
-  const address = cleanContact(extras?.customerAddress, 512);
-  let phone = cleanContact(extras?.customerPhone, 64);
-  // Channel fallback: on WhatsApp the customer's own number IS the session identity
-  // (visitorId = wa_id), so capture it as the contact phone when none was provided.
-  // Other channels (Messenger/Instagram) use a PSID/IGSID here, not a phone — skip them.
-  if (!phone && session?.channel === 'whatsapp' && session.visitorId) {
-    phone = cleanContact(`+${session.visitorId.replace(/^\+/, '')}`, 64);
-  }
-  if (req.address && !address) throw new BookingError('Address is required for this service', 'ADDRESS_REQUIRED', 400);
-  if (req.phone && !phone) throw new BookingError('A contact phone number is required for this service', 'PHONE_REQUIRED', 400);
-  return { address, phone };
-}
-
-/**
- * P5a — server-side gate for REQUIRED intake questions, mirroring the
- * ADDRESS_REQUIRED / PHONE_REQUIRED contact gate. The LLM is told to ask them, but
- * a model slip must not silently persist a booking missing a required answer.
- * `normalized` is the output of normalizeIntakeAnswers (keyed by question id).
- * Recoverable (INTAKE_REQUIRED, 400): the agent re-asks and re-calls the tool.
- */
-function assertRequiredIntake(service: ServiceType, normalized: Record<string, string> | null): void {
-  const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
-  // `active !== false` is load-bearing, not defensive. A paused question is removed from the
-  // prompt, so the bot never asks it — but this gate demanded an answer anyway, which
-  // deadlocked EVERY booking for that service: the model cannot supply an answer to a
-  // question it was never shown, and the error names a label it has no other knowledge of.
-  // Pausing a required question must switch the requirement off with it.
-  const required = questions.filter(
-    (q) => q && q.required && q.active !== false && typeof q.id === 'string'
-  );
-  if (!required.length) return;
-  const answers = normalized ?? {};
-  const missing = required.filter((q) => !String(answers[q.id] ?? '').trim());
-  if (missing.length) {
-    throw new BookingError(
-      `Please provide the required intake answer(s): ${missing.map((q) => q.label).join(', ')}`,
-      'INTAKE_REQUIRED',
-      400
-    );
-  }
-}
-
-/**
- * P6 — don't AUTO-CONFIRM a job the business may not be willing to travel to.
- *
- * Scope is two explicit owner decisions, both required: an area is configured, AND the
- * service asks for the customer's address (which is what makes it a travel job at all — an
- * online consultation is never gated).
- *
- * Within that scope this is deliberately NOT fail-open. The tempting rule is "only block a
- * confident `outside`", but the two errors are nowhere near equal: a wrong `outside` costs
- * the owner one glance at a request they can accept with a click, while a wrong `inside`
- * costs them a confirmed row, a calendar event, an invite the customer is now holding,
- * reminders — and then either a drive or a cancellation on someone who has a confirmation
- * email. So an address we cannot place is captured as a request too. Nobody is turned away
- * either way; the only question is whether the owner gets to decide.
- *
- * Recoverable (400): the agent captures the job with `request_appointment`.
- */
-/**
- * What the service-area gate SAW, without acting on it.
- *
- * Split out from the assert so the REQUEST path can record the verdict while continuing not
- * to enforce it. That distinction is the whole point: refusing a captured job is the one
- * outcome the prompt forbids, but until now the only trace a job was out of area was a log
- * line — so an owner could turn work away for months and never know the area they drew was
- * costing them.
- *
- * `null` means the gate did not apply at all: the service asks for no address, or no
- * enforceable place is configured. That is different from `unknown`, which means we looked
- * and could not place it.
- */
-async function evaluateServiceArea(
-  ctx: BookingContext,
-  service: ServiceType,
-  address: string | null
-): Promise<{ match: ServiceAreaMatch | null; entries: ServiceAreaEntry[] }> {
-  if (!serviceNeedsCustomerAddress(service, { customerAddress: address })) {
-    return { match: null, entries: [] };
-  }
-  const row = await AppDataSource.getRepository(BookingSettings).findOne({
-    where: { botId: ctx.bot.id },
-  });
-  const entries = Array.isArray(row?.serviceArea) ? row.serviceArea : [];
-  if (!entries.some(isEnforceableEntry)) return { match: null, entries };
-  return { match: matchServiceArea(address, entries), entries };
-}
-
-async function assertInServiceArea(
-  ctx: BookingContext,
-  service: ServiceType,
-  address: string | null
-): Promise<void> {
-  if (!serviceNeedsCustomerAddress(service, { customerAddress: address })) return;
-  const row = await AppDataSource.getRepository(BookingSettings).findOne({
-    where: { botId: ctx.bot.id },
-  });
-  const entries = Array.isArray(row?.serviceArea) ? row.serviceArea : [];
-  // Typed notes are shown to the assistant but are not rules, so an area made only of them
-  // has nothing to enforce. Without this check it would hold back EVERY booking — the same
-  // footgun as before, wearing a different hat.
-  if (!entries.some(isEnforceableEntry)) return;
-
-  const verdict = matchServiceArea(address, entries);
-  if (verdict === 'inside') return;
-
-  // The only place this gate is observable. Without it there is no way to answer
-  // "has it ever fired in production", which is the first thing anyone will ask.
-  logger.info('[Booking] out of service area — capturing as a request', {
-    tenantId: ctx.tenant.id,
-    botId: ctx.bot.id,
-    serviceId: service.id,
-    verdict,
-    hasAddress: !!address,
-  });
-  // Two DIFFERENT failures, and conflating them cost real bookings. "Outside" is a decision
-  // the owner must make, so it becomes a request. "Could not be placed" usually just means
-  // the customer said "Kerkstraat 12" with no town — an in-area customer who would book
-  // happily if asked one more question. Distinct codes let the prompt ask instead of giving
-  // up, without ever letting it retry a genuine out-of-area address.
-  throw new BookingError(
-    verdict === 'outside'
-      ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
-      : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed. Ask for a postcode or town.`,
-    verdict === 'outside' ? 'OUT_OF_SERVICE_AREA' : 'ADDRESS_NOT_PLACEABLE',
-    400,
-    undefined,
-    // The out-of-area half is safe to show as-is - it names the area and blames nobody. The
-    // unplaceable half ends in an instruction to the bot, so it gets its own wording.
-    verdict === 'outside'
-      ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
-      : 'We could not find that address. Please contact the business directly to move this appointment.'
-  );
-}
-
-/**
- * Travel time: don't AUTO-CONFIRM a job we cannot locate well enough to plan the drive to.
- *
- * A SEPARATE GATE FROM THE SERVICE AREA, and the difference is worth stating because the two
- * throw the same code. The area asks "is this town on the owner's list", which the Belgian
- * municipality table answers for free from the address text. This asks "where is the door",
- * which only Google can answer, so a street the area gate matched to Sint-Niklaas can still
- * be unplaceable here, and a business with no area configured at all is still gated once
- * travel is on.
- *
- * Recoverable (400), and deliberately the SAME code the service area already uses: the
- * prompt's recovery, which asks for a postcode, retries once and then captures with
- * request_appointment, is exactly the right handling, and a second code would need the model
- * taught a second time. WHICH placements block is `blocksAutoConfirm`, kept beside the other
- * readings of a placement rather than restated here.
- */
-function assertPlaceableForTravel(placement: BookingPlacement): void {
-  if (!blocksAutoConfirm(placement)) return;
-  throw new BookingError(
-    'That address could not be located precisely enough to plan the journey. Ask for a postcode or town.',
-    'ADDRESS_NOT_PLACEABLE',
-    400,
-    undefined,
-    // "Ask for a postcode" is an instruction to the bot. A customer on the manage page cannot
-    // change the address on their existing booking, so they are told who can.
-    'We could not work out the journey to your address. Please contact the business directly to move this appointment.'
-  );
-}
-
-/**
- * Travel time: we could not find out where anything is, so nothing here may be confirmed.
- *
- * NOT the customer's fault and NOT recoverable by them — Google was unreachable, or the
- * tenant's element cap is spent. Asking for a postcode would be friction that could not
- * possibly help, so this reuses the code the calendar outage already raises: the prompt's
- * coaching for it is exactly right ("do not say there are no slots, capture their preferred
- * time as a request"), and inventing a second code would mean teaching the model the same
- * lesson twice. Which failure it was is in the logs, where a sustained run of it belongs.
- */
-function throwTravelUnavailable(): never {
-  throw new BookingError(
-    'The journey could not be checked right now, so times cannot be confirmed. Ask the customer for their preferred date and time and capture it with request_appointment.',
-    'BOOKING_TEMPORARILY_UNAVAILABLE',
-    503
-  );
-}
-
-/**
- * A placement turned into the point the gate reasons over, or a refusal.
- *
- * THE THREE OUTCOMES OF #62 BECOME THE THREE BRANCHES OF ADR-0015 HERE, and this is the only
- * place that mapping exists. An address we could not place at all has a recovery the customer
- * can act on. An address placed only to a town centre is a usable point that may refuse and may
- * never clear. An outage is neither, and refuses to confirm anything without pretending the
- * customer typed something wrong.
- */
-function travelCandidatePoint(placement: BookingPlacement): { point: GeoPoint; coarse: boolean } {
-  assertPlaceableForTravel(placement);
-  if (!placement.applies || placement.outcome !== 'placed') throwTravelUnavailable();
-  return {
-    point: { lat: placement.place.lat, lng: placement.place.lng },
-    coarse: placementIsCoarse(placement),
-  };
-}
-
-/**
- * P5b — enforce `maxBookingsPerDay` for a service on the slot's local calendar day.
- * Counts only HELD rows (`status IN ('pending','confirmed')`) for the same service,
- * by `start_utc` in the half-open `[dayStart, nextDay)` window of `timezone` (Luxon,
- * DST-exact). `null`/`≤0` cap = unlimited (a malformed/legacy row degrades to "no
- * limit", never "no bookings"). Runs inside the caller's advisory-lock transaction so
- * the count-then-write is atomic. `excludeBookingId` skips the row being rescheduled.
- */
-export async function enforceServiceDayCapacity(
-  manager: EntityManager,
-  service: ServiceType,
-  start: Date,
-  timezone: string,
-  excludeBookingId?: string
-): Promise<void> {
-  const max = service.maxBookingsPerDay;
-  if (!max || max <= 0) return; // unlimited
-  const local = DateTime.fromJSDate(start).setZone(timezone);
-  const dayStart = local.startOf('day').toUTC().toISO();
-  // plus THEN startOf: in a zone whose DST transition lands at midnight, adding 24h to the
-  // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
-  // clipped or double-counted an hour and the gate disagreed with the ledger.
-  const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
-  const params: unknown[] = [service.id, dayStart, nextDay];
-  let sql = `SELECT count(*)::int AS n FROM chatbot_bookings
-             WHERE event_type_id = $1 AND status IN ('pending','confirmed')
-               AND start_utc >= $2 AND start_utc < $3`;
-  if (excludeBookingId) {
-    sql += ` AND id <> $4`;
-    params.push(excludeBookingId);
-  }
-  const rows: Array<{ n: number }> = await manager.query(sql, params);
-  if ((rows[0]?.n ?? 0) >= max) {
-    throw new BookingError('No more openings for this service that day', 'CAPACITY_REACHED', 409);
-  }
-}
-
-/** Business-level ceilings, normalised so null/negative/0 all read as "unlimited". */
-/**
- * `manager` matters when this is called from INSIDE a booking transaction: without it the
- * read takes a SECOND connection from the pool while the first is mid-transaction holding
- * an advisory lock, which is a pool-exhaustion deadlock waiting for load.
- */
-export async function loadBusinessRules(botId: string, manager?: EntityManager): Promise<BusinessRules> {
-  const row = await (manager ?? AppDataSource.manager).getRepository(BookingSettings).findOne({ where: { botId } });
-  const n = (v: number | null | undefined): number => (typeof v === 'number' && v > 0 ? v : 0);
-  // Ceilings normalise 0/negative to "unlimited"; DEFAULTS must keep a real 0 (a business
-  // that genuinely wants zero notice is saying something different from "unset").
-  const d = (v: number | null | undefined): number | null => (typeof v === 'number' ? v : null);
-  return {
-    maxBookingsPerDay: n(row?.maxBookingsPerDay),
-    maxBookedMinutesPerDay: n(row?.maxBookedMinutesPerDay),
-    minGapMin: n(row?.minGapMin),
-    defaultBufferBeforeMin: d(row?.defaultBufferBeforeMin),
-    defaultBufferAfterMin: d(row?.defaultBufferAfterMin),
-    defaultMinNoticeMin: d(row?.defaultMinNoticeMin),
-    defaultMaxHorizonDays: d(row?.defaultMaxHorizonDays),
-    // Absent settings row ⇒ not paused, which is every existing bot's behaviour.
-    bookingsPaused: !!row?.bookingsPaused,
-    venue: normalizeVenue({
-      street: row?.venueStreet,
-      postalCode: row?.venuePostalCode,
-      city: row?.venueCity,
-      country: row?.venueCountry,
-    }),
-  };
-}
-
-/**
- * Business-level capacity, enforced across EVERY service rather than per service.
- *
- * Mirrors `enforceServiceDayCapacity` deliberately — same `manager` (so count-then-write is
- * atomic inside the caller's advisory lock), same half-open local-day window, same
- * `status IN ('pending','confirmed')` so a captured request never consumes capacity, same
- * `excludeBookingId` for reschedule/accept. It differs in scoping to `bot_id` rather than
- * one service, which is the entire point: five services capped at 2/day still allowed ten
- * jobs in a day.
- *
- * The gap check is the race-safe twin of the busy-inflation the slot engine sees. It has to
- * exist separately because the `EXCLUDE USING gist` constraint only understands overlap of
- * `blocked_range` — it cannot see a required gap, so two concurrent bookers would otherwise
- * both pass the pre-lock re-validation and land back to back.
- *
- * THE TWO HALVES SCOPE DIFFERENTLY, deliberately. The day ceilings ask "how much has this
- * BUSINESS sold today", a question about the bot's own catalogue, so they count by `bot_id`.
- * The gap asks "is anything parked too close to this in the DIARY", a question about one
- * person's day — so it scopes to the ITINERARY KEY (ADR-0016), and two bots pointed at one
- * real calendar share one. A bot-scoped gap query could not see the neighbour that the
- * advisory lock and `loadBusy` both already count: it passed, and the two bookings landed
- * back to back on a calendar that had room for only one of them. Scoping the gap to the key
- * also lets it use the `(calendar_key, blocked_range)` exclusion index rather than filtering
- * on `bot_id`. Travel feasibility will land on this same half, for the same reason.
- */
-export async function enforceBusinessCapacity(
-  manager: EntityManager,
-  botId: string,
-  itineraryKey: ItineraryKey,
-  rules: BusinessRules,
-  window: { start: Date; end: Date; blockedStart: Date; blockedEnd: Date },
-  timezone: string,
-  excludeBookingId?: string
-): Promise<void> {
-  const { maxBookingsPerDay, maxBookedMinutesPerDay, minGapMin } = rules;
-  if (!maxBookingsPerDay && !maxBookedMinutesPerDay && !minGapMin) return;
-
-  if (maxBookingsPerDay || maxBookedMinutesPerDay) {
-    const local = DateTime.fromJSDate(window.start).setZone(timezone);
-    const dayStart = local.startOf('day').toUTC().toISO();
-    // plus THEN startOf: in a zone whose DST transition lands at midnight, adding 24h to the
-    // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
-    // clipped or double-counted an hour and the gate disagreed with the ledger.
-    const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
-    const params: unknown[] = [botId, dayStart, nextDay];
-    // Minutes come from the stored span, not booked_duration_min — that column is null for
-    // legacy rows and for requests, and a null would silently bill the job as zero minutes.
-    let sql = `SELECT count(*)::int AS n,
-                      COALESCE(SUM(EXTRACT(EPOCH FROM (end_utc - start_utc)) / 60), 0)::int AS mins
-                 FROM chatbot_bookings
-                WHERE bot_id = $1 AND status IN ('pending','confirmed')
-                  AND start_utc >= $2 AND start_utc < $3`;
-    if (excludeBookingId) {
-      sql += ` AND id <> $4`;
-      params.push(excludeBookingId);
-    }
-    const rows: Array<{ n: number; mins: number }> = await manager.query(sql, params);
-    const used = rows[0] ?? { n: 0, mins: 0 };
-
-    if (maxBookingsPerDay && (used.n ?? 0) >= maxBookingsPerDay) {
-      throw new BookingError('This business is fully booked that day', 'CAPACITY_REACHED', 409);
-    }
-    if (maxBookedMinutesPerDay) {
-      const newMins = Math.max(0, (window.end.getTime() - window.start.getTime()) / 60_000);
-      if ((used.mins ?? 0) + newMins > maxBookedMinutesPerDay) {
-        throw new BookingError('This business has no working time left that day', 'CAPACITY_REACHED', 409);
-      }
-    }
-  }
-
-  if (minGapMin) {
-    const gapMs = minGapMin * 60_000;
-    const params: unknown[] = [
-      itineraryKey,
-      new Date(window.blockedStart.getTime() - gapMs).toISOString(),
-      new Date(window.blockedEnd.getTime() + gapMs).toISOString(),
-    ];
-    let sql = `SELECT 1 FROM chatbot_bookings
-                WHERE calendar_key = $1 AND status IN ('pending','confirmed')
-                  AND blocked_range && tstzrange($2, $3, '[)')`;
-    if (excludeBookingId) {
-      sql += ` AND id <> $4`;
-      params.push(excludeBookingId);
-    }
-    sql += ' LIMIT 1';
-    const clash: unknown[] = await manager.query(sql, params);
-    if (clash.length) {
-      throw new BookingError('That time is too close to another appointment', 'CAPACITY_REACHED', 409);
-    }
-  }
-}
+import {
+  SLOT_TAKEN_ON_CREATE,
+  SLOT_NOT_OFFERABLE,
+  SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
+  SLOT_TAKEN_ON_RESCHEDULE,
+} from './slot-messages';
+import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
+import { resolveContactFields } from './contact';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime } from './booking-dates';
+import {
+  resolveDuration,
+  durationUnresolved,
+  effectiveDurationForAvailability,
+} from './service-duration';
+import {
+  enforceServiceDayCapacity,
+  loadBusinessRules,
+  enforceBusinessCapacity,
+} from './capacity';
+import { loadAllBusy, loadDayLedger } from './busy';
+import { evaluateServiceArea, assertInServiceArea } from './service-area-gate';
+import {
+  assertPlaceableForTravel,
+  travelCandidatePoint,
+} from './travel-asserts';
+import {
+  consumeBindingAfterIdempotentReturn,
+  rowDedupIdentity,
+  callDedupIdentity,
+  createdWithinDedupWindow,
+} from './dedup';
 
 /**
  * The ICS organizer stamped on every NEW booking: a per-TENANT address on the platform's
@@ -701,67 +152,6 @@ export async function enforceBusinessCapacity(
  */
 const frozenOrganizerFor = (tenantId: string): string => organizerAddressForTenant(tenantId);
 
-/** True only when the service is configured for a variable duration with a valid range. */
-function hasValidRange(service: ServiceType): boolean {
-  if (service.durationMode !== 'range' && service.durationMode !== 'ai') return false;
-  const { minDurationMin: min, maxDurationMin: max } = service;
-  return !!min && !!max && min > 0 && max > 0 && min <= max;
-}
-
-/**
- * P5c — resolve the effective booked length (create authority, THROWS on violation).
- * 'fixed' (or an invalid range config) → service.durationMin. 'range'/'ai' → the
- * agent-supplied minutes, defaulting to minDurationMin when absent; out of
- * [min,max] → DURATION_OUT_OF_RANGE (recoverable, never silently clamped).
- */
-/**
- * True when a variable-length service's length was never established.
- *
- * The epic's rule is that the assistant must not auto-book a duration it had to guess.
- * `resolveDuration` falls back to the SHORTEST job when the model supplies nothing, which
- * is a safe number to hold but a silent guess to confirm: a two-hour repair booked as a
- * thirty-minute one is a wrong appointment, not a conservative one. The auto path treats
- * this as a reason to capture a request; the request path doesn't care, because a request
- * carries a preferred time rather than a committed length.
- */
-function durationUnresolved(service: ServiceType, requestedDurationMin?: number): boolean {
-  return hasValidRange(service) && typeof requestedDurationMin !== 'number';
-}
-
-function resolveDuration(service: ServiceType, requestedDurationMin?: number): number {
-  if (!hasValidRange(service)) {
-    if (service.durationMode === 'range' || service.durationMode === 'ai') {
-      logger.warn('[Booking] invalid duration range config — treating as fixed', {
-        serviceId: service.id,
-        min: service.minDurationMin,
-        max: service.maxDurationMin,
-      });
-    }
-    return service.durationMin;
-  }
-  const min = service.minDurationMin as number;
-  const max = service.maxDurationMin as number;
-  const effective = requestedDurationMin ?? min; // absent → conservative shortest job
-  if (effective < min || effective > max) {
-    throw new BookingError("Requested duration is outside this service's allowed range", 'DURATION_OUT_OF_RANGE', 400);
-  }
-  return effective;
-}
-
-/**
- * P5c — lenient duration for AVAILABILITY (never throws): a within-bounds requested
- * value when known, else minDurationMin (shortest plausible job). The create path is
- * the authority that rejects an out-of-range request.
- */
-function effectiveDurationForAvailability(service: ServiceType, requestedDurationMin?: number): number {
-  if (!hasValidRange(service)) return service.durationMin;
-  const min = service.minDurationMin as number;
-  const max = service.maxDurationMin as number;
-  if (typeof requestedDurationMin === 'number' && requestedDurationMin >= min && requestedDurationMin <= max) {
-    return requestedDurationMin;
-  }
-  return min;
-}
 
 /**
  * What the pre-lock travel pass measured, carried into the transaction.
@@ -781,88 +171,6 @@ type TravelSnapshot = {
   dayStart: Date;
 };
 
-/**
- * The identity two calls must share to be the same booking.
- *
- * ONE function for BOTH duplicate checks, and that is the point rather than tidiness. There are two
- * gates - the idempotency key and `(session, service, startUtc)` - and the first fix for #92 taught
- * only the key about the address. The second gate then collapsed the corrected booking anyway, so
- * the bug survived a fix that its own tests said had worked. Two gates deciding "same booking" by
- * two different rules is what allowed that, and one shared rule is what stops it recurring.
- *
- * Computed AFTER the service is resolved, because two of the three inputs depend on it.
- *
- * ## The address is excluded when the service does not have one
- *
- * A phone consult can still carry an address - inherited from an earlier turn in the session, or
- * volunteered by a customer who mentioned where they live. Letting that participate would make an
- * incidental detail decide whether two calls are the same booking, and produce duplicates for the
- * services that never had this problem. `customerAddressRequired` is the question of whether the
- * address is part of the booking at all.
- *
- * ## A geocoded place id is NOT the customer's identity for the place
- *
- * `createRequest` stores a `place_id` derived from the text whenever it can, so a row created from
- * typed words comes back carrying an identity the customer never supplied. Comparing that against a
- * later turn's raw text finds them different and inserts a SECOND request - a genuine re-confirm
- * turned into two live rows for the owner to untangle, which is the failure `#35` added the second
- * gate to prevent. So a stored `place_id` only counts as identity when `location_source = 'pin'`,
- * which is the flag that records the customer actually picked it.
- */
-export function dedupIdentity(input: {
-  addressRequired: boolean;
-  address?: string | null;
-  placeId?: string | null;
-  /** False for a `place_id` this system derived rather than the customer choosing it. */
-  placeIdIsPicked: boolean;
-}): string {
-  if (!input.addressRequired) return 'noaddr';
-  return addressToken({
-    address: input.address ?? undefined,
-    placeId: input.placeIdIsPicked ? (input.placeId ?? undefined) : undefined,
-  });
-}
-
-/** The stored row's identity, read with its own provenance. */
-function rowDedupIdentity(row: Booking, addressRequired: boolean): string {
-  return dedupIdentity({
-    addressRequired,
-    address: row.customerAddress,
-    placeId: row.customerPlaceId,
-    placeIdIsPicked: row.locationSource === 'pin',
-  });
-}
-
-/** The incoming call's identity. Anything it supplies as a place id came from a customer pick. */
-function callDedupIdentity(addressRequired: boolean, extras?: BookingExtras): string {
-  return dedupIdentity({
-    addressRequired,
-    address: extras?.customerAddress,
-    placeId: extras?.customerPlaceId,
-    placeIdIsPicked: true,
-  });
-}
-
-/**
- * "Created recently enough to count as a duplicate", asked of the DATABASE rather than of us.
- *
- * `createdAt: MoreThan(new Date(Date.now() - WINDOW))` looks equivalent and is not.
- * `chatbot_bookings.created_at` is `timestamp WITHOUT time zone` - `@CreateDateColumn` carries no
- * explicit type, unlike `start_utc` which is explicitly `timestamptz` - so comparing it against a
- * timezone-aware instant is off by the client's UTC offset. On a developer machine at UTC+8 the
- * cutoff lands eight hours in the future and a row created seventeen milliseconds ago is judged
- * too old, so the lookup finds nothing and BOTH dedup gates silently stop deduping.
- *
- * It fails OPEN, into duplicate bookings, and it is invisible: no error, just a query that never
- * matches. Anyone developing outside UTC has been running without request deduplication without
- * knowing. Production runs UTC, where the two coincide, which is why this never surfaced there.
- *
- * Letting Postgres compare its own clock to its own column removes the client's timezone from the
- * question entirely. Preferred over migrating the column to `timestamptz`, which would rewrite a
- * large table under an ACCESS EXCLUSIVE lock to fix something that only bites developers.
- */
-const createdWithinDedupWindow = () =>
-  Raw((alias) => `${alias} > now() - interval '${BOOKING_DEDUP_WINDOW_MS} milliseconds'`);
 
 export class InternalProvider implements BookingProvider {
   /**
@@ -923,16 +231,6 @@ export class InternalProvider implements BookingProvider {
       if (svc) return resolveServiceTiming(svc, await loadBusinessRules(booking.botId));
     }
     return this.resolveService(booking.botId);
-  }
-
-  /**
-   * Deterministic Google event id for a booking: the booking uuid with hyphens
-   * stripped (32 hex chars = valid Google base32hex). Makes the Google create
-   * idempotent — a reconciler retry after a partial failure re-uses this id
-   * instead of producing a duplicate event.
-   */
-  private googleEventId(bookingId: string): string {
-    return bookingId.replace(/-/g, '');
   }
 
   /** Auto-confirmation requires a live calendar the owner actually sees — without one
@@ -1029,7 +327,7 @@ export class InternalProvider implements BookingProvider {
     // availability is being computed for is a fact about the request, not something each
     // helper should re-derive. Travel filtering will scope to this same key (ADR-0016).
     const itineraryKey = await resolveItineraryKey(ctx.bot.id);
-    const busy = await this.loadAllBusy(
+    const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       rangeStart,
@@ -1046,7 +344,7 @@ export class InternalProvider implements BookingProvider {
     const business = await loadBusinessRules(ctx.bot.id);
     const dayLedger =
       business.maxBookingsPerDay || business.maxBookedMinutesPerDay
-        ? await this.loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId)
+        ? await loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId)
         : undefined;
     const slots = computeSlots({
       rule,
@@ -1701,107 +999,6 @@ export class InternalProvider implements BookingProvider {
     return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives, base, dayStart };
   }
 
-  /**
-   * Existing pending/confirmed bookings' blocked ranges overlapping [start,end).
-   * `excludeId` omits a booking from the result (used on reschedule so a booking
-   * never conflicts with its own current slot).
-   */
-  private async loadBusy(
-    itineraryKey: ItineraryKey,
-    rangeStartIso: string,
-    rangeEndIso: string,
-    excludeId?: string
-  ): Promise<BusyInterval[]> {
-    const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
-      // `calendar_key` is the stored column; the itinerary key is what it means here.
-      `SELECT lower(blocked_range) AS s, upper(blocked_range) AS e
-         FROM chatbot_bookings
-        WHERE calendar_key = $1 AND status IN ('pending','confirmed')
-          AND blocked_range && tstzrange($2, $3, '[)')
-          AND ($4::uuid IS NULL OR id <> $4::uuid)`,
-      [itineraryKey, rangeStartIso, rangeEndIso, excludeId ?? null]
-    );
-    return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
-  }
-
-  /**
-   * This bot's HELD bookings at their RAW start/end, for business day totals.
-   *
-   * Deliberately not derived from `loadAllBusy`: that merges the owner's external calendar
-   * events and returns buffer-expanded bounds, so counting it would refuse slots because of
-   * a personal appointment and would bill buffers as sold working time.
-   */
-  private async loadDayLedger(
-    botId: string,
-    rangeStartIso: string,
-    rangeEndIso: string,
-    excludeId?: string
-  ): Promise<BusyInterval[]> {
-    const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
-      `SELECT start_utc AS s, end_utc AS e
-         FROM chatbot_bookings
-        WHERE bot_id = $1 AND status IN ('pending','confirmed')
-          AND start_utc >= $2 AND start_utc < $3
-          AND ($4::uuid IS NULL OR id <> $4::uuid)`,
-      [botId, rangeStartIso, rangeEndIso, excludeId ?? null]
-    );
-    return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
-  }
-
-  /**
-   * Internal booking busy + (if the bot has Google connected) the owner's
-   * Google calendar busy. Fails closed if Google can't be reached, so we never
-   * offer a slot that might collide with a real event.
-   */
-  private async loadAllBusy(
-    ctx: BookingContext,
-    itineraryKey: ItineraryKey,
-    rangeStartIso: string,
-    rangeEndIso: string,
-    timezone?: string,
-    excludeId?: string,
-    excludeExternalInterval?: { start: Date; end: Date }
-  ): Promise<BusyInterval[]> {
-    let internal = await this.loadBusy(itineraryKey, rangeStartIso, rangeEndIso, excludeId);
-    // Business minimum gap: pad OUR bookings only. Padding the owner's personal calendar
-    // events too would quietly refuse slots around their dentist appointment, which is not
-    // what "minimum time between bookings" asks for. Applied on this side ONLY — the engine
-    // already expands the candidate by its own buffers, and doing both would double it.
-    const { minGapMin } = await loadBusinessRules(ctx.bot.id);
-    if (minGapMin > 0) {
-      const gapMs = minGapMin * 60_000;
-      internal = internal.map((iv) => ({
-        start: new Date(iv.start.getTime() - gapMs),
-        end: new Date(iv.end.getTime() + gapMs),
-      }));
-    }
-    let external: BusyInterval[] | null = null;
-    try {
-      const provider = await resolveCalendarProvider(ctx.bot.id);
-      // Pass the rule timezone so the provider anchors all-day events to the
-      // business's local day rather than UTC midnight.
-      external = provider ? await provider.getBusy(ctx.bot.id, rangeStartIso, rangeEndIso, timezone) : null;
-    } catch (err) {
-      logger.warn('[Booking] external calendar free/busy unavailable — failing closed', {
-        botId: ctx.bot.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw new BookingError(
-        'Calendar is temporarily unavailable, please try again shortly',
-        'BOOKING_TEMPORARILY_UNAVAILABLE',
-        503
-      );
-    }
-    // On reschedule the booking's OWN mirrored external event sits at its old time;
-    // drop it (exact raw start/end match — the mirror carries no buffer) so a nearby
-    // move doesn't conflict with itself. excludeId only covers the internal copy.
-    if (external && excludeExternalInterval) {
-      const xs = excludeExternalInterval.start.getTime();
-      const xe = excludeExternalInterval.end.getTime();
-      external = external.filter((iv) => !(iv.start.getTime() === xs && iv.end.getTime() === xe));
-    }
-    return external ? [...internal, ...external] : internal;
-  }
 
   private toResult(booking: Booking, idempotent: boolean, timezone?: string, serviceName?: string): CreateBookingResult {
     return {
@@ -1928,7 +1125,7 @@ export class InternalProvider implements BookingProvider {
 
     // 3. Re-validate: the requested start must be an actually-offered slot
     //    (rules, buffers, min-notice, horizon, internal + Google busy).
-    const busy = await this.loadAllBusy(
+    const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
@@ -2239,7 +1436,7 @@ export class InternalProvider implements BookingProvider {
       customerAddress: contact.address,
       venue,
     });
-    const meetUrl = await this.syncCalendarCreate(
+    const meetUrl = await syncCalendarCreate(
       ctx,
       bookingId,
       eventContent,
@@ -2294,7 +1491,7 @@ export class InternalProvider implements BookingProvider {
       preparationInstructions: service.preparationInstructions,
     });
 
-    await this.scheduleAndPersistReminders(bookingId, start, 0);
+    await scheduleAndPersistReminders(bookingId, start, 0);
 
     return {
       success: true,
@@ -2735,217 +1932,6 @@ export class InternalProvider implements BookingProvider {
     return out;
   }
 
-  /** Schedule reminders and persist their job ids; non-fatal on failure. */
-  private async scheduleAndPersistReminders(bookingId: string, start: Date, sequence: number): Promise<void> {
-    try {
-      const ids = await scheduleReminders(bookingId, start, sequence);
-      await AppDataSource.getRepository(Booking).query(
-        `UPDATE chatbot_bookings SET reminder_job_ids=$1::jsonb, updated_at=now() WHERE id=$2`,
-        [JSON.stringify(ids), bookingId]
-      );
-    } catch (err) {
-      logger.warn('[Booking] reminder scheduling failed (non-fatal)', {
-        bookingId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private async markSyncPending(bookingId: string): Promise<void> {
-    await AppDataSource.getRepository(Booking)
-      .query(
-        // Reset the retry budget: a re-flag (reschedule/cancel/create) is a NEW sync
-        // episode and must not inherit a prior episode's attempt count (else it can go
-        // terminal after only a couple of fresh failures).
-        `UPDATE chatbot_bookings SET sync_pending=true, sync_attempts=0, sync_next_attempt_at=null, updated_at=now() WHERE id=$1`,
-        [bookingId]
-      )
-      .catch(() => undefined);
-  }
-
-  /**
-   * The ref to operate on for reschedule/cancel. Normally exactly one; if a rare
-   * switch/create race left more than one, prefer the ref matching the bot's
-   * current active provider, else the earliest-created — deterministic, so the
-   * chosen provider is never arbitrary.
-   */
-  private async canonicalRef(botId: string, bookingId: string): Promise<BookingReference | null> {
-    const refs = await AppDataSource.getRepository(BookingReference).find({
-      where: { bookingId },
-      order: { createdAt: 'ASC' },
-    });
-    if (refs.length <= 1) return refs[0] ?? null;
-    const provider = await resolveCalendarProvider(botId);
-    if (provider) {
-      const match = refs.find((r) => r.providerType === provider.providerType);
-      if (match) return match;
-    }
-    return refs[0];
-  }
-
-  /** Mirror a new booking to the bot's connected calendar (best-effort). Returns
-   *  the meeting join URL if any. `content` is the P6a builder output; the join
-   *  URL rides the provider's native conference fields, not the text body. */
-  private async syncCalendarCreate(
-    ctx: BookingContext,
-    bookingId: string,
-    content: { summary: string; description: string },
-    start: Date,
-    end: Date,
-    timezone: string,
-    location?: string,
-    conferencing?: boolean
-  ): Promise<string | null> {
-    const provider = await resolveCalendarProvider(ctx.bot.id);
-    if (!provider) return null; // no calendar connection
-    try {
-      const ev = await provider.createEvent(
-        ctx.bot.id,
-        {
-          startISO: start.toISOString(),
-          endISO: end.toISOString(),
-          timezone,
-          summary: content.summary,
-          description: content.description,
-          ...(location ? { location } : {}),
-          ...(conferencing ? { conferencing } : {}),
-        },
-        { eventId: this.googleEventId(bookingId) }
-      );
-      if (!ev) return null;
-      const refRepo = AppDataSource.getRepository(BookingReference);
-      await refRepo.save(
-        refRepo.create({
-          bookingId,
-          providerType: provider.providerType,
-          externalEventId: ev.eventId,
-          externalCalendarId: ev.calendarId,
-          meetingUrl: ev.meetUrl,
-        })
-      );
-      return ev.meetUrl;
-    } catch (err) {
-      logger.warn('[Booking] calendar event create failed; booking stands (sync_pending)', {
-        bookingId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.markSyncPending(bookingId);
-      return null;
-    }
-  }
-
-  private async syncCalendarReschedule(
-    ctx: BookingContext,
-    bookingId: string,
-    /**
-     * Full event content, not a bare title. An owner who deletes the event and triggers the
-     * recreate branch below used to get a title with a COMPLETELY EMPTY body — losing the
-     * customer, the phone, the address and the manage link in one step.
-     */
-    content: { summary: string; description: string },
-    start: Date,
-    end: Date,
-    timezone: string,
-    /**
-     * What a RECREATE needs, and an update does not.
-     *
-     * Grouped rather than trailing positionally, because the difference is the whole point and
-     * a signature should not need a paragraph to say which arguments apply when. A plain update
-     * deliberately PATCHes times alone so the owner's own edits to the event survive. A recreate
-     * builds the event from nothing, so anything omitted here is gone for good: the recreate
-     * SUCCEEDS, so `markSyncPending` never fires and the reconciler - which claims
-     * `sync_pending` rows only - never revisits it. Omitting them cost the venue AND nulled the
-     * stored Meet URL, which then blanked the join link on every later reschedule and in the
-     * portal's booking list.
-     */
-    recreate?: { location?: string; conferencing?: boolean }
-  ): Promise<void> {
-    const { location, conferencing } = recreate ?? {};
-    // Plan D9: no external calendar calls when sync is entitlement-disabled.
-    // The booking itself is already updated internally; the mirror is
-    // intentionally suspended (re-enables with the entitlement).
-    if (!(await isCalendarSyncAllowed(ctx.tenant.id))) return;
-    const refRepo = AppDataSource.getRepository(BookingReference);
-    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
-    try {
-      const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
-      const recreateInput = {
-        ...input,
-        summary: content.summary,
-        description: content.description,
-        ...(location ? { location } : {}),
-        ...(conferencing ? { conferencing } : {}),
-      };
-      if (ref) {
-        // Route by the REF's provider — the event lives there. After a provider
-        // switch, rescheduling an OLD event targets its original provider, which
-        // returns no_connection (cred gone) → sync_pending for manual attention.
-        const provider = providerFor(ref.providerType as 'google' | 'microsoft');
-        const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
-        if (res === 'not_found') {
-          // Owner deleted it in the calendar → recreate (deterministic id) on its home.
-          const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
-            eventId: this.googleEventId(bookingId),
-            calendarId: ref.externalCalendarId,
-          });
-          if (ev) {
-            ref.externalEventId = ev.eventId;
-            ref.externalCalendarId = ev.calendarId;
-            ref.meetingUrl = ev.meetUrl;
-            await refRepo.save(ref);
-          }
-        } else if (res === 'no_access' || res === 'no_connection') {
-          // Event lives on a now-inaccessible / disconnected account.
-          await this.markSyncPending(bookingId);
-        }
-      } else {
-        // Calendar connected after the booking was created → create on the bot's
-        // current active provider now.
-        const provider = await resolveCalendarProvider(ctx.bot.id);
-        if (!provider) return;
-        const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
-          eventId: this.googleEventId(bookingId),
-        });
-        if (ev) {
-          await refRepo.save(
-            refRepo.create({
-              bookingId,
-              providerType: provider.providerType,
-              externalEventId: ev.eventId,
-              externalCalendarId: ev.calendarId,
-              meetingUrl: ev.meetUrl,
-            })
-          );
-        }
-      }
-    } catch (err) {
-      logger.warn('[Booking] calendar event reschedule sync failed (sync_pending)', {
-        bookingId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.markSyncPending(bookingId);
-    }
-  }
-
-  private async syncCalendarCancel(ctx: BookingContext, bookingId: string): Promise<void> {
-    // Plan D9: no external calendar calls when sync is entitlement-disabled.
-    if (!(await isCalendarSyncAllowed(ctx.tenant.id))) return;
-    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
-    if (!ref) return;
-    try {
-      await providerFor(ref.providerType as 'google' | 'microsoft').deleteEvent(
-        ctx.bot.id,
-        ref.externalEventId,
-        ref.externalCalendarId
-      );
-    } catch (err) {
-      logger.warn('[Booking] calendar event cancel sync failed', {
-        bookingId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
   /**
    * Owner accepts a `request_created` lead → confirm it. Uses the request's FROZEN
    * start/end + booked duration; refreshes the itinerary key + buffer-expanded range
@@ -2988,7 +1974,7 @@ export class InternalProvider implements BookingProvider {
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
     // Re-validate the stored slot at the frozen duration (the lead may be days old).
-    const busy = await this.loadAllBusy(
+    const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
@@ -3135,7 +2121,7 @@ export class InternalProvider implements BookingProvider {
       customerAddress: confirmed.customerAddress,
       venue,
     });
-    const meetUrl = await this.syncCalendarCreate(
+    const meetUrl = await syncCalendarCreate(
       ctx,
       bookingId,
       eventContent,
@@ -3188,7 +2174,7 @@ export class InternalProvider implements BookingProvider {
       preparationInstructions: service.preparationInstructions,
     });
 
-    await this.scheduleAndPersistReminders(bookingId, start, 0);
+    await scheduleAndPersistReminders(bookingId, start, 0);
 
     return this.toResult(confirmed, false, rule.timezone, service.name);
   }
@@ -3365,7 +2351,7 @@ export class InternalProvider implements BookingProvider {
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
     // Re-validate the new slot (excluding this booking's own current range).
-    const busy = await this.loadAllBusy(
+    const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
@@ -3756,7 +2742,7 @@ export class InternalProvider implements BookingProvider {
     // DESCRIPTION here would BLANK the join link on the attendee's calendar event.
     // The mirrored event is updated (not recreated) on reschedule, so the stored
     // meetingUrl is still valid. Mirror the create path's location/description.
-    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
+    const ref = await canonicalRef(ctx.bot.id, bookingId);
     const meetUrl = ref?.meetingUrl ?? null;
     // The venue comes off the same booking-settings row the rules do; read at the tail
     // because the transaction has already committed by here.
@@ -3801,7 +2787,7 @@ export class InternalProvider implements BookingProvider {
 
     // Replace reminders: drop the old jobs, schedule fresh ones for the new time.
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
-    await this.scheduleAndPersistReminders(bookingId, start, sequence);
+    await scheduleAndPersistReminders(bookingId, start, sequence);
 
     // Move the mirrored Google event (best-effort).
     const rescheduledContent = buildBookingEventContent(
@@ -3821,7 +2807,7 @@ export class InternalProvider implements BookingProvider {
       service,
       buildManageUrl(bookingId)
     );
-    await this.syncCalendarReschedule(
+    await syncCalendarReschedule(
       ctx,
       bookingId,
       rescheduledContent,
@@ -3832,15 +2818,14 @@ export class InternalProvider implements BookingProvider {
       // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
       // event: Google mints a fresh one from `conferencing` and we store what comes back.
       {
-        location: resolveEventLocation({
-          locationType: service.locationType,
-          customerAddressRequired: service.customerAddressRequired,
-          meetUrl: null,
-          customerAddress: booking.customerAddress,
-          venue,
-        }),
-        conferencing: service.locationType === 'google_meet',
-      }
+      location: resolveEventLocation({
+        locationType: service.locationType,
+        customerAddressRequired: service.customerAddressRequired,
+        meetUrl: null,
+        customerAddress: booking.customerAddress,
+        venue,
+      }),
+      },
     ).catch(() => undefined);
 
     return {
@@ -3905,7 +2890,7 @@ export class InternalProvider implements BookingProvider {
       .catch(() => undefined);
 
     // Delete the mirrored Google event (best-effort).
-    await this.syncCalendarCancel(ctx, bookingId).catch(() => undefined);
+    await syncCalendarCancel(ctx, bookingId).catch(() => undefined);
 
     return { success: true, cancelled: true, travelWarning: await this.cancelExposedWarning(ctx, booking) };
   }

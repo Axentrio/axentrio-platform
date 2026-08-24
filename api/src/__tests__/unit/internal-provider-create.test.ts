@@ -184,13 +184,13 @@ vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
 });
 
 import type { BookingPlacement } from '../../booking/travel/booking-place';
+import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 import {
-  InternalProvider,
   SLOT_NOT_OFFERABLE,
   SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
   SLOT_TAKEN_ON_CREATE,
   SLOT_TAKEN_ON_RESCHEDULE,
-} from '../../booking/booking-providers/internal.provider';
+} from '../../booking/booking-providers/slot-messages';
 import { BookingError } from '../../booking/booking-providers/types';
 
 const ctx: any = {

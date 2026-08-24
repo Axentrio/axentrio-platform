@@ -46,8 +46,8 @@ vi.mock('../../webhooks/webhook.emitter', () => ({ emitWebhookEvent: vi.fn(), bu
 import {
   enforceServiceDayCapacity,
   enforceBusinessCapacity,
-  normalizeIntakeAnswers,
-} from '../../booking/booking-providers/internal.provider';
+} from '../../booking/booking-providers/capacity';
+import { normalizeIntakeAnswers } from '../../booking/booking-providers/intake';
 import type { BusinessRules } from '../../booking/booking-providers/service-timing';
 import { EMPTY_VENUE } from '../../contracts/venue-address';
 

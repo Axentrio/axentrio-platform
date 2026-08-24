@@ -107,3 +107,27 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
     });
   };
 }
+
+/**
+ * Schedule the reminder pair AND persist the job ids on the booking row.
+ * Failure is non-fatal: an unscheduled reminder must never fail a confirmed
+ * booking, but it is logged so a silent reminder loss is visible.
+ */
+export async function scheduleAndPersistReminders(
+  bookingId: string,
+  start: Date,
+  sequence: number
+): Promise<void> {
+  try {
+    const ids = await scheduleReminders(bookingId, start, sequence);
+    await AppDataSource.getRepository(Booking).query(
+      `UPDATE chatbot_bookings SET reminder_job_ids=$1::jsonb, updated_at=now() WHERE id=$2`,
+      [JSON.stringify(ids), bookingId]
+    );
+  } catch (err) {
+    logger.warn('[Booking] reminder scheduling failed (non-fatal)', {
+      bookingId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}

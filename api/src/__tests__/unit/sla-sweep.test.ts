@@ -25,9 +25,10 @@ vi.mock('../../services/handoff-notification.service', () => ({
   notifyOverdueHandoff: (...a: unknown[]) => mockNotifyOverdue(...a),
 }));
 
-vi.mock('../../utils/logger', () => ({
-  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn(),
 }));
+vi.mock('../../utils/logger', () => ({ logger: mockLogger }));
 
 import { sweepOverdueHandoffsAndPauses } from '../../notifications/sla-sweep';
 
@@ -47,12 +48,18 @@ describe('sweepOverdueHandoffsAndPauses', () => {
       .mockResolvedValueOnce([
         { id: 's3', tenantId: 't1', sessionId: 's3', ageMin: '20' }, // pause, bucket 0
         { id: 's4', tenantId: 't1', sessionId: 's4', ageMin: '200' }, // pause, clamped to bucket 2 (still alerts once)
-      ]);
+      ])
+      // Source 4 returns the raw timestamp; the sweep derives the age from the
+      // app clock, so the DB session time zone cannot skew it.
+      .mockResolvedValueOnce([{
+        id: 's5', tenantId: 't2', sessionId: 's5',
+        askedAt: new Date(Date.now() - 15 * 60_000),
+      }]);
 
     const res = await sweepOverdueHandoffsAndPauses();
 
-    expect(res.alerted).toBe(4); // hr1 + s2 + s3 + s4 (backlog clamped, not skipped)
-    expect(mockCreateForTenant).toHaveBeenCalledTimes(4);
+    expect(res.alerted).toBe(5); // hr1 + s2 + s3 + s4 (clamped, not skipped) + s5
+    expect(mockCreateForTenant).toHaveBeenCalledTimes(5);
     expect(mockCreateForTenant).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'handoff.overdue', dedupeBase: 'handoff_overdue:hr1:0' }),
     );
@@ -69,6 +76,15 @@ describe('sweepOverdueHandoffsAndPauses', () => {
     );
     expect(mockCreateForTenant).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'guardrail.overdue', dedupeBase: 'guardrail_overdue:s4:2' }),
+    );
+    // Source 4: a bot that owes a reply. It also logs at error level, because a
+    // silent bot is a platform fault and must be visible outside the tenant inbox.
+    expect(mockCreateForTenant).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'bot.silent', dedupeBase: 'silent_overdue:s5:0' }),
+    );
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      '[sla-sweep] bot owes a reply and never sent one',
+      expect.objectContaining({ sessionId: 's5', ageMin: 15 }),
     );
 
     // #131: overdue HANDOFFS also escalate by email (bucketed); guardrail pauses do not.

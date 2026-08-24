@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal, Info } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -25,7 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from '@/components/ui/textarea';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
 import TagInput from '@/pages/knowledge/TagInput';
@@ -33,8 +33,7 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { SkillStateCard } from '@/components/SkillStateCard';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
-import type { SkillState, SkillRemedy } from '@contracts/skill-readiness';
-import { PLACEHOLDER_CATALOG, PLACEHOLDER_KEYS } from '@contracts/prompt-placeholders';
+import type { SkillState } from '@contracts/skill-readiness';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -45,331 +44,19 @@ import {
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
   usePreviewLedger, useAdminSkills,
-  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type TemplateTier, type TemplateVariable,
+  forceConflict, type BotTemplateVersion, type TemplateTier, type TemplateVariable,
 } from '../../queries/useBotTemplatesQueries';
 
-/** Tier options for the Identity control (mirrors the list page's ladder). */
-const TIER_OPTIONS: { id: TemplateTier; label: string }[] = [
-  { id: 'essential', label: 'Essential' },
-  { id: 'pro', label: 'Pro' },
-  { id: 'enterprise', label: 'Enterprise' },
-];
-
-// Platform defaults — seeded as REAL values in the editor (not grey placeholders)
-// so an author always sees the effective template, per the UX review.
-const DEFAULT_CONFIDENCE = '0.7';
-const DEFAULT_MAX_LENGTH = '500';
-
-// Max-response-length presets (chars) with rough word estimates shown in the UI.
-const LENGTH_PRESETS = [
-  { value: '300', words: '~45–60 words' },
-  { value: '500', words: '~75–100 words' },
-  { value: '900', words: '~130–170 words' },
-  { value: '1200', words: '~180–230 words' },
-] as const;
-// One-click safety bundle for "topics to avoid".
-const COMMON_TOPICS = ['politics', 'religion', 'adult content', 'illegal activity', 'hate or harassment', 'self-harm', 'legal advice', 'medical diagnosis', 'financial advice'];
-
-// Policy guardrails are edited as flat strings in the dialog, then assembled into
-// a BotTemplateConfig on save. Confidence/max-length carry real defaults; messages
-// + topics stay empty (opt-in via "Insert suggested"). Tone is bot-owned, not here.
-type ConfigDraft = {
-  topicsToAvoid: string;
-  greetingMessage: string;
-  fallbackMessage: string;
-  offHoursMessage: string;
-  confidenceThreshold: string;
-  maxResponseLength: string;
-};
-const EMPTY_CONFIG: ConfigDraft = {
-  topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: DEFAULT_CONFIDENCE, maxResponseLength: DEFAULT_MAX_LENGTH,
-};
-
-function configToDraft(c: BotTemplateConfig | undefined): ConfigDraft {
-  const g = c?.guardrails ?? {};
-  return {
-    topicsToAvoid: (g.topicsToAvoid ?? []).join(', '),
-    greetingMessage: g.greetingMessage ?? '',
-    fallbackMessage: g.fallbackMessage ?? '',
-    offHoursMessage: g.offHoursMessage ?? '',
-    confidenceThreshold: g.confidenceThreshold === undefined ? DEFAULT_CONFIDENCE : String(g.confidenceThreshold),
-    maxResponseLength: g.maxResponseLength === undefined ? DEFAULT_MAX_LENGTH : String(g.maxResponseLength),
-  };
-}
-
-function draftToConfig(d: ConfigDraft): BotTemplateConfig {
-  const config: BotTemplateConfig = {};
-  const g: NonNullable<BotTemplateConfig['guardrails']> = {};
-  const topics = d.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
-  if (topics.length) g.topicsToAvoid = topics;
-  if (d.greetingMessage.trim()) g.greetingMessage = d.greetingMessage;
-  if (d.fallbackMessage.trim()) g.fallbackMessage = d.fallbackMessage;
-  if (d.offHoursMessage.trim()) g.offHoursMessage = d.offHoursMessage;
-  if (d.confidenceThreshold.trim()) g.confidenceThreshold = Number(d.confidenceThreshold);
-  if (d.maxResponseLength.trim()) g.maxResponseLength = Number(d.maxResponseLength);
-  if (Object.keys(g).length) config.guardrails = g;
-  return config;
-}
-
-// Canonical {placeholder} set — derived from the ONE catalog the API composer and
-// linter also use (api/src/contracts/prompt-placeholders.ts), so the editor can
-// never flag a key the composer supports (or accept one it doesn't).
-const KNOWN_PLACEHOLDERS = PLACEHOLDER_KEYS;
-// Tap-to-insert chips, straight off the catalog (label + description → tooltip).
-const PLACEHOLDER_CHIPS = PLACEHOLDER_CATALOG.map((e) => `{${e.key}}`);
-const PLACEHOLDER_HELP = new Map(PLACEHOLDER_CATALOG.map((e) => [`{${e.key}}`, `${e.label} — ${e.description}`]));
-
-/** Append a chip to a text value with a single separating space. */
-const appendChip = (text: string, chip: string) => text + (text && !text.endsWith(' ') ? ' ' : '') + chip;
-
-/**
- * Tap-to-insert placeholder chips. In read-only mode it renders as a non-inserting
- * REFERENCE (so a viewer still sees which placeholders exist). Used under BOTH the
- * main prompt body and each module's prose editor — placeholders resolve in both.
- * `customChips` are the template's own custom variables ({placeholder}s the author
- * declared): rendered in amber (matching the Template-variables fields) to set them
- * apart from the built-ins, and clickable the same way.
- */
-function PlaceholderBar({
-  readOnly,
-  onInsert,
-  customChips = [],
-  onManage,
-}: {
-  readOnly: boolean;
-  onInsert: (chip: string) => void;
-  customChips?: string[];
-  onManage?: () => void;
-}) {
-  const { t } = useTranslation();
-  const builtinClass = readOnly
-    ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
-    : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200';
-  const customClass = readOnly
-    ? 'cursor-default rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300'
-    : 'rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:border-amber-400 hover:bg-amber-500/20';
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
-      <span className="mr-1 text-[11px] font-medium text-text-muted">
-        {t(readOnly ? 'admin.botTemplates.editor.availableLabel' : 'admin.botTemplates.editor.insertLabel')}
-      </span>
-      {PLACEHOLDER_CHIPS.map((p) => (
-        <button
-          key={p}
-          type="button"
-          disabled={readOnly}
-          title={PLACEHOLDER_HELP.get(p)}
-          className={builtinClass}
-          onClick={readOnly ? undefined : () => onInsert(p)}
-        >
-          {p}
-        </button>
-      ))}
-      {customChips.map((p) => (
-        <button
-          key={p}
-          type="button"
-          disabled={readOnly}
-          title="Custom template variable"
-          className={customClass}
-          onClick={readOnly ? undefined : () => onInsert(p)}
-        >
-          {p}
-        </button>
-      ))}
-      {!readOnly && onManage && customChips.length > 0 && (
-        <button
-          type="button"
-          onClick={onManage}
-          title="Set labels, defaults, and required for your custom variables"
-          className="ml-0.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-amber-300/90 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
-        >
-          <SlidersHorizontal className="h-3 w-3" />Manage variables
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** A human label for a variable key, e.g. 'cancellationPolicy' → 'Cancellation policy'. */
-function prettifyKey(key: string): string {
-  return key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-}
-
-// Preview pane — the author previews mostly by PLAN (which gates capabilities);
-// channel is a secondary toggle (it only tweaks reply length + proactive contact).
-// Modules are NOT a knob: the preview assumes the template's Expected modules are
-// enabled, so it reflects what THIS form declares.
-const TIER_LABELS: Record<string, string> = { free: 'Free', essential: 'Essential', pro: 'Pro', enterprise: 'Enterprise' };
-const CHANNEL_LABELS: Record<string, string> = { widget: 'Website widget', whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger', telegram: 'Telegram' };
-
-// Outcome-language capabilities, keyed off the tools the bot would actually have.
-// Absent → shown as a warning with a plain reason (no engineer jargon).
-const PREVIEW_CAPABILITIES: { tool: string; label: string; whenAbsent?: string }[] = [
-  { tool: 'kb_search', label: 'Answer questions from its knowledge base' },
-  { tool: 'capture_lead', label: 'Capture leads and take contact details', whenAbsent: 'available on paid plans' },
-  { tool: 'create_booking', label: 'Book appointments', whenAbsent: 'needs the Bookings module on' },
-  { tool: 'escalate_to_human', label: 'Hand off to a person' },
-];
-
-// Plain-English gloss for the composer's exclusion reason codes (technical view).
-const REASON_TEXT: Record<string, string> = {
-  empty: 'not set',
-  channel: 'not used on this channel',
-  toolAbsent: 'needs a capability that isn’t on',
-  tier: 'available on higher plans',
-  module: 'needs the matching module on',
-  specialty: 'specialty not selected on the bot',
-  bookingConfigured: 'booking isn’t set up yet',
-};
-
-// Composable-templates (Phase 5): the engineered skills a module can bind, with
-// the preview tools each exposes. v1 = booking only; used to (a) feed the bound
-// skills into the scenario preview and (b) derive a per-skill state badge from the
-// ledger. ponytail: booking-only by design — extend this map as skills land.
-const SKILL_PREVIEW: Record<string, { tools: string[]; label: string }> = {
-  booking: { tools: ['create_booking', 'check_availability', 'request_appointment'], label: 'Bookings' },
-};
-const stateToRemedy = (s: SkillState): SkillRemedy =>
-  s === 'unentitled' ? 'upgrade' : s === 'disabled' ? 'turn on' : s === 'unconfigured' ? 'finish setup' : null;
-
-// Blocks the author can't touch from a template — they need a bound bot, a live
-// conversation, or tenant-level config, so they can NEVER appear in a template
-// preview. Hidden entirely (they're not gaps, and not actionable here).
-const PREVIEW_HIDDEN_BLOCKS = new Set([
-  'EXTRA_INFO', 'CUSTOMER_NAME', 'AVAILABLE_SKILLS', 'KB_CONTEXT',
-]);
-
-// Actionable note for an excluded block the author CAN fix from the template here.
-const EXCLUDED_NOTE: Record<string, string> = {
-  BOOKING: 'add Bookings to Expected modules',
-};
-
-// Plain-English "what is this block" for the preview tooltips.
-const BLOCK_INFO: Record<string, string> = {
-  TEMPLATE_BODY: 'The prompt body you write above (or a generic service fallback if it’s blank).',
-  KNOWLEDGE: 'Tells the bot to search its knowledge base before answering factual questions.',
-  KB_CONTEXT: 'Knowledge-base snippets retrieved for the customer’s current question.',
-  CONTACT_DETAILS: 'Lets the bot take the customer’s contact details (lead capture).',
-  CHANNEL_LEAD_CAPTURE: 'On messaging channels, the bot proactively confirms the customer’s contact details.',
-  SOCIAL_SHORT_REPLY: 'On messaging channels, keeps replies short and chat-style.',
-  CUSTOMER_NAME: 'The customer’s name, taken from their messaging profile.',
-  EXTRA_INFO: 'Extra background the tenant adds on the bot (reference only).',
-  AVAILABLE_SKILLS: 'The skills the bound bot has enabled.',
-  ESCALATION: 'Lets the bot hand the conversation off to a human.',
-  BOOKING: 'Booking behaviour and tools — check availability and create a booking.',
-};
-function getBlockInfo(key: string): string {
-  if (BLOCK_INFO[key]) return BLOCK_INFO[key];
-  if (key.startsWith('MODULE_')) return `Instructions added by the ${key.slice(7)} module.`;
-  if (key.startsWith('SPECIALTY_')) return `Tailored handling for the ${key.slice(10).replace(/_/g, ' ')} specialty.`;
-  return 'A prompt block contributed at runtime.';
-}
-// A block key with a hover/focus tooltip explaining what it is.
-const BlockKey: React.FC<{ name: string }> = ({ name }) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <span className="cursor-help underline decoration-dotted decoration-text-tertiary/60 underline-offset-2">{name}</span>
-    </TooltipTrigger>
-    <TooltipContent className="max-w-[240px] font-sans text-xs">{getBlockInfo(name)}</TooltipContent>
-  </Tooltip>
-);
-
-// A small field caption with an info tooltip — used to explain the template-variable
-// fields (label / default / help / required), which aren't self-explanatory.
-const FieldHint: React.FC<{ label: string; tip: string }> = ({ label, tip }) => (
-  <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-muted">
-    {label}
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button type="button" tabIndex={-1} aria-label={`About ${label}`} className="cursor-help text-text-tertiary transition-colors hover:text-text-secondary">
-          <Info className="h-3 w-3" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-[240px] font-sans text-xs">{tip}</TooltipContent>
-    </Tooltip>
-  </span>
-);
-function unknownPlaceholders(body: string): string[] {
-  const out = new Set<string>();
-  for (const m of body.matchAll(/\{(\w+)\}/g)) if (!KNOWN_PLACEHOLDERS.has(m[1])) out.add(m[1]);
-  return [...out];
-}
-
-/** Count the guardrail fields a template actually sets (for the current-prompt summary). */
-function countGuardrails(c: BotTemplateConfig): number {
-  const g = c.guardrails ?? {};
-  let n = 0;
-  if (g.greetingMessage) n++;
-  if (g.fallbackMessage) n++;
-  if (g.offHoursMessage) n++;
-  if (g.topicsToAvoid?.length) n++;
-  if (g.confidenceThreshold !== undefined) n++;
-  if (g.maxResponseLength !== undefined) n++;
-  return n;
-}
-
-/** Render a prompt body with its {placeholders} highlighted as fill-in slots:
- *  known ones (resolved per business) in primary, unknown ones flagged amber. */
-function renderPromptWithVars(body: string): React.ReactNode {
-  return body.split(/(\{\w+\})/g).map((part, i) => {
-    const m = part.match(/^\{(\w+)\}$/);
-    if (!m) return <span key={i}>{part}</span>;
-    const known = KNOWN_PLACEHOLDERS.has(m[1]);
-    return (
-      <span
-        key={i}
-        title={known ? 'Filled in per business' : 'Unknown variable — will not resolve'}
-        className={`rounded px-1 font-medium ${known ? 'bg-primary-500/10 text-primary-300' : 'bg-amber-500/10 text-amber-300'}`}
-      >
-        {part}
-      </span>
-    );
-  });
-}
-
-// Section shell for the authoring canvas: a numbered icon-chip + title + optional
-// helper and trailing action, with content indented under a connecting rail. Turns
-// the long left column into legible, ordered steps instead of a flat stack of fields.
-const AuthorSection: React.FC<{
-  step: number;
-  icon: React.ElementType;
-  title: string;
-  hint?: React.ReactNode;
-  action?: React.ReactNode;
-  last?: boolean;
-  children: React.ReactNode;
-}> = ({ step, icon: Icon, title, hint, action, last, children }) => (
-  <section className="relative grid grid-cols-[2rem_1fr] gap-x-4">
-    <div className="flex flex-col items-center">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-primary-300 ring-1 ring-inset ring-edge">
-        <Icon className="h-4 w-4" />
-      </span>
-      {!last && <span aria-hidden className="mt-1 w-px flex-1 bg-edge/70" />}
-    </div>
-    <div className={last ? '' : 'pb-8'}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-[11px] tabular-nums text-text-muted">{String(step).padStart(2, '0')}</span>
-            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
-          </div>
-          {hint && <p className="mt-1 max-w-prose text-xs leading-relaxed text-text-tertiary">{hint}</p>}
-        </div>
-        {action && <div className="shrink-0">{action}</div>}
-      </div>
-      <div className="mt-3">{children}</div>
-    </div>
-  </section>
-);
-
-// A compact grouping label for the live-preview rail (uppercase eyebrow + count).
-const RailLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">{children}</div>
-);
-
-type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedSkillIds: string[]; skillProse: Record<string, string>; variables: TemplateVariable[]; config: ConfigDraft };
-const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', selectedSkillIds: [], skillProse: {}, variables: [], config: EMPTY_CONFIG };
+import {
+  TIER_OPTIONS, DEFAULT_CONFIDENCE, LENGTH_PRESETS, COMMON_TOPICS, TIER_LABELS, CHANNEL_LABELS,
+  PREVIEW_CAPABILITIES, REASON_TEXT, SKILL_PREVIEW, stateToRemedy, PREVIEW_HIDDEN_BLOCKS, EXCLUDED_NOTE,
+} from './bot-template-detail/template-constants';
+import {
+  EMPTY_CONFIG, EMPTY_DRAFT, configToDraft, draftToConfig, countGuardrails,
+  type ConfigDraft, type VersionDraft,
+} from './bot-template-detail/template-draft-types';
+import { appendChip, prettifyKey, unknownPlaceholders, renderPromptWithVars } from './bot-template-detail/template-prompt-utils';
+import { PlaceholderBar, BlockKey, FieldHint, AuthorSection, RailLabel } from './bot-template-detail/template-ui-bits';
 
 const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
@@ -1374,8 +1061,8 @@ const AdminBotTemplateDetail: React.FC = () => {
               )}
               {preview.data ? (() => {
                 const ledger = preview.data;
-                const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS.has(b));
-                const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS.has(e.key));
+                const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS[b]);
+                const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS[e.key]);
                 return (
                   <>
                     <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-3">

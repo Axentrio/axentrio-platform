@@ -105,6 +105,7 @@ describe('guardrails · detectBotLoop with a store', () => {
         mem.set(id, next);
         return next;
       },
+      peek: async (id) => mem.get(id) ?? EMPTY_LOOP_STATE,
       clear: async (id) => void mem.delete(id),
     };
 

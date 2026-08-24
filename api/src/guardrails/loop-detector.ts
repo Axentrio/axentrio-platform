@@ -73,6 +73,10 @@ export function evaluateLoopState(state: LoopState): { isLoop: boolean; reasons:
  *  the Redis impl uses a Lua script that mirrors `advanceLoopState`. */
 export interface LoopStateStore {
   advance(sessionId: string, signal: LoopSignal): Promise<LoopState>;
+  /** Read the counters WITHOUT advancing them. Used when a message is gated a
+   *  second time: its own advance already happened, so advancing again would
+   *  double-count it. */
+  peek(sessionId: string): Promise<LoopState>;
   clear(sessionId: string): Promise<void>;
 }
 

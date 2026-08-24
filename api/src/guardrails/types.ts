@@ -21,22 +21,6 @@ export type GuardrailJournalCategory =
   | 'missing_tenant'
   | 'missing_bot';
 
-/** What the inbound gate decided to do with this message.
- *  `block_neutral` is intentionally absent in Slice 1 (no_reply only). */
-export type GuardrailAction = 'proceed' | 'block_silent' | 'over_budget';
-
-export interface GuardrailDecision {
-  action: GuardrailAction;
-  category: GuardrailCategory;
-  /** 0..1 strength of the flag (0 for a clean `proceed`). */
-  score: number;
-  reasons: string[];
-  /** Raw URLs extracted from the message — never fetched/followed (R16/R51). */
-  suspiciousLinks: string[];
-  /** Whether the session's `ai_auto_reply_enabled` should be flipped off. */
-  disableAutoReply: boolean;
-}
-
 /** Result of the pure content classifier (no session state, no I/O). */
 export interface ClassifyResult {
   category: GuardrailCategory;

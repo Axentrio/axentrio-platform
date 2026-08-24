@@ -67,6 +67,23 @@ export const redisLoopStore: LoopStateStore = {
       return EMPTY_LOOP_STATE; // fail open
     }
   },
+  async peek(sessionId: string): Promise<LoopState> {
+    const redis = getRedisClient();
+    if (!redis) return EMPTY_LOOP_STATE; // fail open — same as advance
+    try {
+      const [lastHash, repeated, botLike, susp] = await redis.hmget(
+        key(sessionId), 'lastHash', 'repeated', 'botLike', 'susp',
+      );
+      return {
+        ...(lastHash ? { lastHash } : {}),
+        repeated: Number(repeated ?? 0),
+        botLike: Number(botLike ?? 0),
+        suspiciousLinkTurns: Number(susp ?? 0),
+      };
+    } catch {
+      return EMPTY_LOOP_STATE; // fail open
+    }
+  },
   async clear(sessionId: string): Promise<void> {
     const redis = getRedisClient();
     if (!redis) return;

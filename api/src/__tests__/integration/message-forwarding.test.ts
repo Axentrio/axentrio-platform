@@ -771,7 +771,7 @@ describe('forwardMessageToN8n', () => {
       }
     });
 
-    it('fails closed before the agent when an un-outcomed window message is malicious', async () => {
+    it('blocks, flags and pauses when an un-outcomed window message is malicious', async () => {
       const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Must not run' });
       initializeAgentService({ run: runMock } as unknown as AgentService);
       const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
@@ -789,6 +789,31 @@ describe('forwardMessageToN8n', () => {
       expect(runMock).not.toHaveBeenCalled();
       expect(await getBotMessages(session.id)).toEqual([]);
       expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).lastCoalescedAnswerAt).toBeNull();
+
+      // The reject runs the same epilogue as a first-pass block: the message is
+      // flagged (so it leaves the unanswered window and history) and the session
+      // is paused for review, instead of silently dropping one turn.
+      expect((await messageRepo.findOneOrFail({ where: { id: msgs[0].id } })).guardrailFlagged).toBe(true);
+      const paused = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+      expect(paused.aiAutoReplyEnabled).toBe(false);
+      expect(paused.guardrailStatus).toBe('phishing');
+
+      // Once an agent clears the session, the flagged message no longer blocks
+      // anything: the next turn is answered. That is the anti-freeze guarantee.
+      await sessionRepo.update(session.id, { aiAutoReplyEnabled: true, guardrailStatus: 'normal' });
+      runMock.mockResolvedValue({ type: 'response', content: 'Answered anyway.' });
+      const participant = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+      const later = await createTestMessage(session.id, tenant.id, participant.id, {
+        content: 'are you still there?',
+        type: 'text',
+        status: 'sent',
+      });
+      // makeBurst stamps synthetic future timestamps, so pin this one after them
+      // or finalizeReply's stale guard sees an even newer message.
+      await messageRepo.update(later.id, { createdAt: new Date(Date.now() + 60_000) });
+      const cleared = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+      expect(await runTurn(cleared, later)).toBe('answered');
+      expect(await getBotMessages(session.id)).toEqual(['Answered anyway.']);
     });
 
     it('drains a message that arrives during the agent run (second turn)', async () => {

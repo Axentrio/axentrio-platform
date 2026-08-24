@@ -53,6 +53,12 @@ const redis = vi.hoisted(() => ({
     loopStates.set(key, { lastHash: hash, repeated, botLike, suspiciousLinkTurns });
     return [repeated, botLike, suspiciousLinkTurns];
   },
+  hmget: async (key: string) => {
+    const s = loopStates.get(key);
+    return s
+      ? [s.lastHash ?? null, String(s.repeated), String(s.botLike), String(s.suspiciousLinkTurns)]
+      : [null, null, null, null];
+  },
   del: async (key: string) => Number(loopStates.delete(key)),
 }));
 
@@ -403,6 +409,46 @@ describe('guardrails · runInboundGate (integration)', () => {
     });
     expect(r.proceed).toBe(false);
     expect(r.category).not.toBe('clean');
+    // A reject MUST flag the message. An unflagged reject stays in the
+    // unanswered window and re-blocks every later turn.
+    expect((await msgRepo().findOneOrFail({ where: { id: msg.id } })).guardrailFlagged).toBe(true);
+  });
+
+  // The rollout path: 17 of 18 tenants run in shadow today. A message gated in
+  // shadow carries a `log_only` row and no flag, so when the owner turns
+  // enforcement on, the re-gate is the FIRST enforced verdict for that message.
+  // It therefore owes the whole epilogue, not a silent per-message drop.
+  it('ENFORCE: a message left over from shadow mode gets the full block on re-gate', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Your account will be deleted. Verify your account here https://bit.ly/x',
+    });
+    // Exactly what a shadow first pass leaves behind: claimed, unflagged, logged
+    // as log_only. Production stores real blocks this way too, which is why the
+    // gate must not treat `action` as a verdict.
+    await msgRepo().update(msg.id, { guardrailChecked: true });
+    await logRepo().save(logRepo().create({
+      tenantId: tenant.id,
+      conversationId: session.id,
+      sourceChannel: 'whatsapp',
+      suspiciousMessageId: msg.id,
+      detectedCategory: 'phishing',
+      enforced: false,
+      action: 'log_only',
+    }));
+
+    const r = await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'whatsapp',
+    });
+    expect(r).toEqual({ proceed: false, category: 'phishing' });
+
+    expect((await msgRepo().findOneOrFail({ where: { id: msg.id } })).guardrailFlagged).toBe(true);
+    const paused = await sessionRepo().findOneOrFail({ where: { id: session.id } });
+    expect(paused.aiAutoReplyEnabled).toBe(false);
+    expect(paused.guardrailStatus).toBe('phishing');
+    const rows = await logRepo().find({ where: { conversationId: session.id }, order: { createdAt: 'ASC' } });
+    expect(rows.map((x) => x.action)).toEqual(['log_only', 'blocked']);
+    expect(rows[1].enforced).toBe(true);
   });
 
   it('SHADOW: a claimed message without an outcome never blocks', async () => {

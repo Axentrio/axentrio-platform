@@ -10,7 +10,6 @@
 // See .scratch/plan-global-ai-guardrails.md §1/§4/§6.
 
 import { createHash } from 'crypto';
-import { In } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
@@ -21,7 +20,7 @@ import { cached } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { notificationService } from '../services/notification.service';
 import { classifyMessage, inspectLinks, isHighSeverity, isHumanSignal } from './classify';
-import { detectBotLoop } from './loop-detector';
+import { detectBotLoop, evaluateLoopState } from './loop-detector';
 import { redisLoopStore } from './loop-store';
 import { GuardrailCategory, GuardrailJournalCategory } from './types';
 
@@ -74,11 +73,16 @@ function normalizedHash(text: string): string {
   return createHash('sha1').update(text.trim().toLowerCase().replace(/\s+/g, ' ')).digest('hex');
 }
 
-async function markMessageFlagged(messageId: string): Promise<void> {
+/** Flag a message so it leaves the unanswered window and the agent's history.
+ *  Returns false when the write did not land — callers that treat a flag as
+ *  terminal MUST NOT report a block in that case. */
+async function markMessageFlagged(messageId: string): Promise<boolean> {
   try {
     await AppDataSource.getRepository(Message).update(messageId, { guardrailFlagged: true, guardrailChecked: true });
+    return true;
   } catch (err) {
-    logger.warn('[guardrails] failed to mark message flagged', { messageId, err });
+    logger.error('[guardrails] failed to mark message flagged', { messageId, err });
+    return false;
   }
 }
 
@@ -100,18 +104,6 @@ async function readFlagged(messageId: string): Promise<boolean> {
     where: { id: messageId }, select: { id: true, guardrailFlagged: true } as never,
   });
   return m?.guardrailFlagged === true;
-}
-
-async function readGuardrailAction(messageId: string): Promise<GuardrailAction | null> {
-  const log = await AppDataSource.getRepository(SpamScamLog).findOne({
-    where: {
-      suspiciousMessageId: messageId,
-      detectedCategory: In(['spam', 'scam', 'phishing', 'solicitation', 'bot_loop', 'suspicious_link']),
-    },
-    select: { id: true, action: true } as never,
-    order: { createdAt: 'DESC', id: 'DESC' },
-  });
-  return log ? log.action ?? 'log_only' : null;
 }
 
 async function solicitationWarnReply(tenantId: string): Promise<string> {
@@ -222,6 +214,55 @@ async function notifyOwner(session: ChatSession, category: GuardrailCategory, re
   }
 }
 
+/** Enforce a block: flag the message, pause the session (only the first flip
+ *  notifies the owner), then journal it.
+ *
+ *  Shared by the first pass and by a replay that reaches the same verdict. A
+ *  replay is NOT always a duplicate: a message gated while the tenant was still
+ *  in shadow mode carries no flag, so when the owner turns enforcement on, the
+ *  replay is the FIRST enforced verdict for that message and owes the whole
+ *  epilogue. Re-running it after a concurrent first pass is safe — the flag is
+ *  idempotent, `atomicDisableAutoReply` flips once, and the owner notification
+ *  dedupes per session — at the cost of at most one duplicate journal row,
+ *  which beats an enforced block that nobody can see.
+ */
+async function enforceBlock(args: {
+  session: ChatSession;
+  channel: string;
+  messageId: string;
+  category: GuardrailCategory;
+  reasons: string[];
+  score: number | null;
+  suspiciousLink: boolean;
+  repeated: boolean;
+  botLoop: boolean;
+  replay?: boolean;
+}): Promise<InboundGateResult> {
+  const { session, category, reasons } = args;
+  // The flag is what removes this message from the unanswered window and from
+  // history. If it does not land, the caller must NOT report a terminal block:
+  // the message would be re-gated forever and the bot would go silent on a
+  // session that still shows 'bot'. Throwing lets the coalescer re-arm.
+  if (!(await markMessageFlagged(args.messageId))) {
+    throw new Error(`[guardrails] could not flag message ${args.messageId} (${category})`);
+  }
+  const firstFlip = await atomicDisableAutoReply(session.id, category);
+  if (firstFlip) {
+    session.aiAutoReplyEnabled = false;
+    session.guardrailStatus = category;
+    await notifyOwner(session, category, reasons);
+  }
+  await writeSpamLog({
+    session, channel: args.channel, messageId: args.messageId, category, reasons,
+    score: args.score, suspiciousLink: args.suspiciousLink, repeated: args.repeated,
+    botLoop: args.botLoop, enforced: true, notified: firstFlip, action: 'blocked',
+  });
+  logger.info('[guardrails] blocked inbound message', {
+    sessionId: session.id, category, reasons, firstFlip, replay: args.replay === true,
+  });
+  return { proceed: false, category };
+}
+
 /**
  * Evaluate an inbound user message. Must be called under the caller's per-session
  * lock (runTurn under the coalescer lock; the legacy path is best-effort). Returns
@@ -249,48 +290,61 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
     }
   }
 
-  // Idempotency: claim the message exactly once. If it was already gated (legacy
-  // entry + coalescer window can both reach a message; a 'stale' re-run re-scans
-  // the window), return the prior outcome without re-classifying / re-logging /
-  // double-counting loop counters.
+  // Idempotency: claim the message exactly once, so the loop counters are only
+  // advanced (and the outcome only logged) by the run that wins the claim.
+  //
+  // A replay then has to reach the SAME verdict without re-running the side
+  // effects. `guardrail_flagged` is the durable block bit. Everything else is
+  // re-derived, for two reasons: a CLEAN first pass deliberately persists
+  // nothing (so "claimed, unflagged, no log row" is the normal state of healthy
+  // traffic, and blocking it froze conversations for good), and the SpamScamLog
+  // `action` column is not a reliable control plane (legacy enforced blocks are
+  // stored as 'log_only'). classifyMessage is pure, so a rejected message still
+  // never reaches the agent. The loop counters are PEEKED, never advanced: the
+  // claiming run advances them itself (a peek that lands between the claim and
+  // that advance sees the state without this message — the claiming run still
+  // blocks and pauses the session a moment later).
   if (!(await claimMessage(message.id))) {
-    const flagged = await readFlagged(message.id);
-    if (flagged) return { proceed: false, category: 'spam' };
-    const action = await readGuardrailAction(message.id);
-    if (action === 'warn_reply') {
+    if (await readFlagged(message.id)) {
+      const status = session.guardrailStatus;
       return {
-        proceed: true,
-        category: 'solicitation',
-        replyOverride: await solicitationWarnReply(tenantId),
+        proceed: false,
+        category: status && status !== 'normal' ? (status as GuardrailCategory) : 'spam',
       };
     }
-    if (action === 'blocked') return { proceed: false, category: 'spam' };
-    if (action === 'log_only') return { proceed: true, category: 'clean' };
-    // No persisted outcome. Two very different states collapse here:
-    //   (a) the gate already ran and the message was CLEAN — the clean exit
-    //       below writes no log row on purpose, so a clean message NEVER has
-    //       one. This is the normal case: runTurn re-gates its whole coalesced
-    //       window, and a 'stale' turn leaves the watermark unmoved, so an
-    //       already-gated clean message is gated again on the next turn.
-    //   (b) the claim committed but classification is still in flight.
-    // Blocking both froze conversations for good: runTurn returned 'noop',
-    // which the coalescer neither clears nor re-arms, so the bot went silent
-    // whenever a follow-up message arrived mid-run.
-    // Re-derive the verdict from the CONTENT ONLY. classifyMessage is pure, so
-    // rejected content still never reaches the agent, while the Redis loop
-    // counters stay untouched (no double-count) and nothing is logged twice.
     if (!enforce) return { proceed: true, category: 'clean' };
     const replayLinks = inspectLinks(content);
     const replay = classifyMessage(content, channel, replayLinks);
-    if (replay.category === 'clean') return { proceed: true, category: 'clean' };
-    if (replay.category === 'solicitation' && !isHighSeverity(content, replayLinks)) {
+    const warnOnly = replay.category === 'solicitation' && !isHighSeverity(content, replayLinks);
+    // A reject runs the SAME epilogue as the first pass: flag, pause, journal.
+    // An unflagged reject stays in the unanswered window, so every later turn
+    // re-blocks on it and the bot goes silent on a session that still shows
+    // 'bot' — the freeze, one layer down.
+    if (replay.category !== 'clean' && !warnOnly) {
+      return enforceBlock({
+        session, channel, messageId: message.id, category: replay.category,
+        reasons: replay.reasons, score: replay.score,
+        suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
+        repeated: false, botLoop: false, replay: true,
+      });
+    }
+    // A sustained loop outranks the solicitation warning, as in the first pass.
+    const loop = evaluateLoopState(await redisLoopStore.peek(session.id));
+    if (loop.isLoop) {
+      return enforceBlock({
+        session, channel, messageId: message.id, category: 'bot_loop',
+        reasons: loop.reasons, score: null, suspiciousLink: replayLinks.score > 0,
+        repeated: loop.reasons.some((r) => r.includes('repeated')), botLoop: true, replay: true,
+      });
+    }
+    if (warnOnly) {
       return {
         proceed: true,
         category: 'solicitation',
         replyOverride: await solicitationWarnReply(tenantId),
       };
     }
-    return { proceed: false, category: replay.category };
+    return { proceed: true, category: 'clean' };
   }
 
   const linkInfo = inspectLinks(content);
@@ -356,23 +410,10 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
     return { proceed: true, category, replyOverride: await solicitationWarnReply(tenantId) };
   }
 
-  // Enforce: mark the message, atomically disable the session (first flip notifies).
-  await markMessageFlagged(message.id);
-  const firstFlip = await atomicDisableAutoReply(session.id, category);
-  if (firstFlip) {
-    session.aiAutoReplyEnabled = false;
-    session.guardrailStatus = category;
-    await notifyOwner(session, category, reasons);
-  }
-  await writeSpamLog({
+  // Enforce: flag the message, pause the session, journal the block.
+  return enforceBlock({
     session, channel, messageId: message.id, category, reasons,
     score: flaggedByContent ? c.score : null,
-    suspiciousLink, repeated, botLoop: loopHit, enforced: true, notified: firstFlip,
-    action: 'blocked',
+    suspiciousLink, repeated, botLoop: loopHit,
   });
-
-  logger.info('[guardrails] blocked inbound message', {
-    sessionId: session.id, category, reasons, firstFlip,
-  });
-  return { proceed: false, category };
 }

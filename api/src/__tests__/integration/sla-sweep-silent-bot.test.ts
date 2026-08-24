@@ -134,6 +134,13 @@ describe('SLA sweep · silent-bot watchdog', () => {
       tenantId: tenant.id, askedMin: 30,
       session: { aiAutoReplyEnabled: false, guardrailStatus: 'bot_loop' },
     });
+    // Source 3 keys off updated_at, not off the message, and @UpdateDateColumn
+    // overwrites any value set through the repository. Age it with the same JS
+    // clock the sweep's cutoff uses, or the pause looks fresh and never alerts.
+    await AppDataSource.query('UPDATE chat_sessions SET updated_at = $1 WHERE id = $2', [
+      new Date(Date.now() - 30 * 60_000),
+      paused,
+    ]);
     const stuck = await conversation({ tenantId: tenant.id, askedMin: 30 });
 
     created.length = 0;
@@ -142,6 +149,7 @@ describe('SLA sweep · silent-bot watchdog', () => {
       (acc[c.type] ??= []).push(c.data.sessionId);
       return acc;
     }, {});
+    // Disjoint by construction: the paused one is source 3's, never source 4's.
     expect(byType['bot.silent']).toContain(stuck);
     expect(byType['bot.silent']).not.toContain(paused);
     expect(byType['guardrail.overdue']).toContain(paused);

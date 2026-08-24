@@ -4,7 +4,7 @@
  * shelved; the built-in scheduler is the only provider.)
  */
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { CalendarClock, Save, Check, Plus, Trash2, Eye, Loader2, AlertTriangle } from 'lucide-react';
+import { CalendarClock, Save, Check, Plus, Trash2, Eye, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -14,20 +14,15 @@ import { Label } from '@/components/ui/label';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
-import { TimeSelect } from '@/components/ui/time-select';
 import { cn } from '@/lib/utils';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
-  useBookingAvailability,
   type WeeklyHours,
   type Weekday,
   type TimeWindow,
-  type ServiceAreaEntry,
   type VenueAddress,
   type UpdateSchedulerPayload,
-  type BookingRules,
-  type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
 import {
   useGoogleCalendarStatus,
@@ -42,196 +37,21 @@ import {
 import { useBots } from '@/queries/useBotsQueries';
 import { ServicesSection } from './ServicesSection';
 import { ServiceAreaField } from './ServiceAreaField';
+import {
+  DAYS,
+  DEFAULT_WINDOW,
+  type DayRow,
+  overridesFromConfig,
+  rowsFromWeeklyHours,
+  createSchedulerForm,
+  schedulerFormReducer,
+  makeFieldSetter,
+} from './scheduler/scheduler-types';
+import { WindowList } from './scheduler/window-list';
+import { SlotPreview } from './scheduler/slot-preview';
+import { OptionalNumberField, NumberField } from './scheduler/number-fields';
 
-const DAYS: { key: Weekday; label: string }[] = [
-  { key: 'mon', label: 'Monday' },
-  { key: 'tue', label: 'Tuesday' },
-  { key: 'wed', label: 'Wednesday' },
-  { key: 'thu', label: 'Thursday' },
-  { key: 'fri', label: 'Friday' },
-  { key: 'sat', label: 'Saturday' },
-  { key: 'sun', label: 'Sunday' },
-];
 
-const DEFAULT_WINDOW: TimeWindow = { start: '09:00', end: '17:00' };
-
-interface DayRow {
-  enabled: boolean;
-  /** One or more open windows. A lunch break is simply two of them. */
-  windows: TimeWindow[];
-}
-
-type DayState = Record<Weekday, DayRow>;
-
-/** A single date override row (holiday closure or one-off custom hours). */
-interface OverrideRow {
-  date: string;
-  /** Inclusive last day of a multi-day closure. '' = a single day. */
-  endDate: string;
-  closed: boolean;
-  windows: TimeWindow[];
-}
-
-function overridesFromConfig(raw: unknown[] | undefined): OverrideRow[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((o) => {
-    const ov = o as { date?: string; endDate?: string | null; closed?: boolean; windows?: TimeWindow[] };
-    const windows = Array.isArray(ov.windows) && ov.windows.length ? ov.windows : [{ ...DEFAULT_WINDOW }];
-    return { date: ov.date ?? '', endDate: ov.endDate ?? '', closed: !!ov.closed, windows };
-  });
-}
-
-function rowsFromWeeklyHours(weekly: WeeklyHours | undefined): DayState {
-  const out = {} as DayState;
-  for (const { key } of DAYS) {
-    const wins = weekly?.[key];
-    out[key] = wins?.length
-      ? { enabled: true, windows: wins.map((w) => ({ ...w })) }
-      : { enabled: false, windows: [{ ...DEFAULT_WINDOW }] };
-  }
-  return out;
-}
-
-/**
- * The open windows for one day (or one date override).
- *
- * The entity, the API and the slot engine have always stored an ARRAY. This editor used to
- * render `windows[0]` and write a single-element array back, so a lunch break — or any
- * second window seeded by a preset or written through the API — was silently destroyed the
- * next time the owner pressed Save. Editing the whole array is the fix.
- */
-const WindowList: React.FC<{
-  windows: TimeWindow[];
-  disabled?: boolean;
-  onChange: (next: TimeWindow[]) => void;
-}> = ({ windows, disabled, onChange }) => (
-  <div className="flex flex-col gap-1.5">
-    {windows.map((w, i) => (
-      // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
-      <div key={i} className="flex items-center gap-2">
-        <TimeSelect
-          value={w.start}
-          disabled={disabled}
-          onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, start: v } : x)))}
-        />
-        <span className="text-text-muted">–</span>
-        <TimeSelect
-          value={w.end}
-          disabled={disabled}
-          onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, end: v } : x)))}
-        />
-        {windows.length > 1 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            disabled={disabled}
-            aria-label="Remove this time range"
-            className="text-red-400 hover:text-red-300"
-            onClick={() => onChange(windows.filter((_, j) => j !== i))}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        )}
-        {i === windows.length - 1 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            disabled={disabled}
-            aria-label="Add another time range"
-            onClick={() => onChange([...windows, { ...DEFAULT_WINDOW }])}
-          >
-            <Plus className="w-3.5 h-3.5" />
-          </Button>
-        )}
-      </div>
-    ))}
-  </div>
-);
-
-type SchedulerFormState = {
-  availabilityMode: AvailabilityMode;
-  slotGranularityMin: number;
-  days: DayState;
-  overrides: OverrideRow[];
-  serviceArea: ServiceAreaEntry[];
-  venue: VenueAddress;
-  reviewingVenue: boolean;
-  travelEnabled: boolean;
-  travelSlack: number | null;
-  travelStartFromBase: boolean;
-  travelBaseDepart: number;
-  travelGroupingPeriod: 'none' | 'half_day' | 'full_day';
-  travelRoutePriority: 'auto' | 'nearest' | 'farthest';
-  travelMaxDetourMin: string;
-  bookingsPaused: boolean;
-  rules: BookingRules;
-  showPreview: boolean;
-  hydrated: boolean;
-};
-
-function createSchedulerForm(): SchedulerFormState {
-  return {
-    availabilityMode: 'business_hours',
-    slotGranularityMin: 30,
-    days: rowsFromWeeklyHours(undefined),
-    overrides: [],
-    serviceArea: [],
-    venue: { street: null, postalCode: null, city: null, country: null, placeId: null },
-    reviewingVenue: false,
-    travelEnabled: false,
-    travelSlack: null,
-    travelStartFromBase: false,
-    travelBaseDepart: 0,
-    travelGroupingPeriod: 'none',
-    travelRoutePriority: 'auto',
-    travelMaxDetourMin: '',
-    bookingsPaused: false,
-    rules: {
-      maxBookingsPerDay: null,
-      maxBookedMinutesPerDay: null,
-      minGapMin: null,
-      defaultBufferBeforeMin: null,
-      defaultBufferAfterMin: null,
-      defaultMinNoticeMin: null,
-      defaultMaxHorizonDays: null,
-    },
-    showPreview: false,
-    hydrated: false,
-  };
-}
-
-// A single field update that replicates useState exactly: a plain value replaces,
-// a function updates from the previous value. Form fields never hold functions,
-// so the typeof check can only ever mean "updater".
-type SchedulerFormAction = { type: 'setField'; field: keyof SchedulerFormState; value: unknown };
-
-function schedulerFormReducer(
-  state: SchedulerFormState,
-  action: SchedulerFormAction,
-): SchedulerFormState {
-  switch (action.type) {
-    case 'setField': {
-      const prev = state[action.field];
-      const next =
-        typeof action.value === 'function'
-          ? (action.value as (p: unknown) => unknown)(prev)
-          : action.value;
-      return { ...state, [action.field]: next };
-    }
-    default:
-      return state;
-  }
-}
-
-/** A useState-shaped setter for one form field (a value or an updater function). */
-function makeFieldSetter<K extends keyof SchedulerFormState>(
-  dispatch: React.Dispatch<SchedulerFormAction>,
-  field: K,
-): (value: SchedulerFormState[K] | ((prev: SchedulerFormState[K]) => SchedulerFormState[K])) => void {
-  return (value) => dispatch({ type: 'setField', field, value });
-}
 
 export const SchedulerSettings: React.FC = () => {
   const { data: bots } = useBots();
@@ -1454,164 +1274,3 @@ export const SchedulerSettings: React.FC = () => {
   );
 };
 
-/** Calls the availability endpoint for the next 7 days. Reflects SAVED config. */
-const SlotPreview: React.FC<{ timezone: string }> = ({ timezone }) => {
-  const range = useMemo(() => {
-    const s = new Date();
-    const e = new Date(s.getTime() + 7 * 24 * 3600_000);
-    return { start: s.toISOString(), end: e.toISOString() };
-  }, []);
-  const { data, isLoading, isError } = useBookingAvailability(range.start, range.end, true);
-
-  const grouped = useMemo(() => {
-    const out = new Map<string, string[]>();
-    for (const s of data?.slots ?? []) {
-      const day = new Intl.DateTimeFormat('en-GB', {
-        timeZone: data?.timezone ?? timezone,
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-      }).format(new Date(s.start));
-      const time = new Intl.DateTimeFormat('en-GB', {
-        timeZone: data?.timezone ?? timezone,
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      }).format(new Date(s.start));
-      if (!out.has(day)) out.set(day, []);
-      out.get(day)!.push(time);
-    }
-    return Array.from(out.entries());
-  }, [data, timezone]);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-text-muted">
-        <Loader2 className="w-4 h-4 animate-spin" /> Computing slots…
-      </div>
-    );
-  }
-  if (isError) {
-    return <p className="text-xs text-text-muted">Save your settings first, then preview.</p>;
-  }
-  const total = data?.slots.length ?? 0;
-  return (
-    <div className="space-y-2">
-      <p className="text-xs text-text-muted">
-        {total} open slot{total === 1 ? '' : 's'} in the next 7 days · reflects saved settings · {data?.timezone ?? timezone}
-      </p>
-      {grouped.length === 0 ? (
-        <p className="text-xs text-text-muted">No open slots in this window.</p>
-      ) : (
-        <div className="space-y-1.5">
-          {grouped.map(([day, times]) => (
-            <SlotPreviewDay key={day} day={day} times={times} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-/** One day's row in the preview: label + wrapping time chips, expandable. */
-const SlotPreviewDay: React.FC<{ day: string; times: string[] }> = ({ day, times }) => {
-  const [expanded, setExpanded] = useState(false);
-  const LIMIT = 8;
-  const shown = expanded ? times : times.slice(0, LIMIT);
-  const hidden = times.length - shown.length;
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-edge bg-surface-1/40 px-3 py-2">
-      <span className="w-24 shrink-0 pt-0.5 text-xs font-medium text-text-secondary">{day}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {shown.map((t) => (
-          <span
-            key={t}
-            className="rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs tabular-nums text-text-primary"
-          >
-            {t}
-          </span>
-        ))}
-        {hidden > 0 && (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="rounded-md px-2 py-0.5 text-xs font-medium text-primary-400 hover:text-primary-300"
-          >
-            +{hidden} more
-          </button>
-        )}
-        {expanded && times.length > LIMIT && (
-          <button
-            type="button"
-            onClick={() => setExpanded(false)}
-            className="rounded-md px-2 py-0.5 text-xs text-text-muted hover:text-text-secondary"
-          >
-            show less
-          </button>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/**
- * A number input that may be EMPTY, meaning "no limit".
- *
- * Holds the raw string so clearing the box doesn't snap back to a value mid-edit, and only
- * ever emits a finite number or null — the plain NumberField below does
- * `parseInt(e.target.value, 10)` unguarded, so clearing it yields NaN, which JSON.stringify
- * writes as null and the schema then rejects with what looks to the owner like a server error.
- */
-const OptionalNumberField: React.FC<{
-  label: string;
-  hint?: string;
-  value: number | null;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number | null) => void;
-}> = ({ label, hint, value, min, max, step, onChange }) => {
-  const [draft, setDraft] = useState<string>(value === null ? '' : String(value));
-  // Re-sync when the parent value changes from outside (hydration, preset apply).
-  useEffect(() => setDraft(value === null ? '' : String(value)), [value]);
-  return (
-    <div>
-      <Label className="text-text-secondary mb-1 block">{label}</Label>
-      <Input
-        type="number"
-        inputMode="decimal"
-        value={draft}
-        min={min}
-        max={max}
-        step={step}
-        placeholder="No limit"
-        onChange={(e) => {
-          const next = e.target.value;
-          setDraft(next);
-          if (next.trim() === '') return onChange(null);
-          const n = Number(next);
-          if (Number.isFinite(n)) onChange(n);
-        }}
-      />
-      {hint && <p className="mt-1 text-xs text-text-muted">{hint}</p>}
-    </div>
-  );
-};
-
-const NumberField: React.FC<{
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-}> = ({ label, value, onChange, min }) => (
-  <div>
-    <Label className="text-text-secondary mb-1 block">{label}</Label>
-    <Input
-      type="number"
-      value={Number.isFinite(value) ? value : ''}
-      min={min}
-      onChange={(e) => onChange(parseInt(e.target.value, 10))}
-      className={cn('w-full')}
-    />
-  </div>
-);

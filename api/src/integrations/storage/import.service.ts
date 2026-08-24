@@ -185,9 +185,6 @@ export async function enqueueStorageImport(opts: {
           fileId: file.id,
           driveId: file.driveId ?? null,
           importedBy: opts.userId,
-          claimedName: file.name ?? null,
-          claimedMime: file.mimeType ?? null,
-          claimedSize: file.size ?? null,
         },
         { jobId },
       );

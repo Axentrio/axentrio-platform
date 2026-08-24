@@ -5,15 +5,12 @@ import type {
   Booking,
   BookingStatus,
   Conversation,
-  ConversationHistory,
   Lead,
   LeadsPage,
   AppNotification,
-  NotificationPreferences,
   Pagination,
   SessionStatus,
   SessionSummary,
-  UserProfile,
 } from '@axentrio/contracts';
 
 export interface ListSessionsParams {
@@ -56,23 +53,6 @@ export function createEndpoints(client: AxiosInstance) {
   return {
     // --- auth / identity ---
     authMe: () => data(client.get<ApiSuccess<AuthMe>>('/auth/me')),
-
-    // --- users ---
-    getProfile: () =>
-      client
-        .get<ApiSuccess<{ profile: UserProfile }>>('/users/profile')
-        .then((r) => r.data.data.profile),
-    updateProfile: (body: Partial<Pick<UserProfile, 'name' | 'avatarUrl' | 'timezone' | 'locale'>>) =>
-      client
-        .patch<ApiSuccess<{ profile: UserProfile }>>('/users/profile', body)
-        .then((r) => r.data.data.profile),
-    updatePreferences: (notificationPreferences: NotificationPreferences) =>
-      client
-        .patch<ApiSuccess<{ preferences: NotificationPreferences }>>('/users/preferences', {
-          notificationPreferences,
-        })
-        .then((r) => r.data.data.preferences),
-
     // --- chats / inbox ---
     listSessions: async (params?: ListSessionsParams): Promise<Paged<SessionSummary>> => {
       const res = await client.get<ApiSuccess<SessionSummary[]>>('/chats/sessions', { params });
@@ -80,18 +60,12 @@ export function createEndpoints(client: AxiosInstance) {
     },
     getConversation: (id: string) =>
       data(client.get<ApiSuccess<Conversation>>(`/chats/${id}`)),
-    getHistory: (id: string, params?: { limit?: number; offset?: number }) =>
-      data(client.get<ApiSuccess<ConversationHistory>>(`/chats/${id}/history`, { params })),
     closeConversation: (id: string) =>
       data(client.post<ApiSuccess<unknown>>(`/chats/${id}/close`, {})),
-    markConversationRead: (id: string) =>
-      data(client.post<ApiSuccess<unknown>>(`/chats/${id}/read`, {})),
 
     // --- handoffs ---
     acceptHandoff: (sessionId: string) =>
       data(client.post<ApiSuccess<unknown>>('/handoffs/accept', { sessionId })),
-    rejectHandoff: (sessionId: string) =>
-      data(client.post<ApiSuccess<unknown>>('/handoffs/reject', { sessionId })),
     returnHandoff: (sessionId: string, reason?: string) =>
       data(client.post<ApiSuccess<unknown>>('/handoffs/return', { sessionId, reason })),
 

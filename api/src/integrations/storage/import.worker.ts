@@ -46,9 +46,6 @@ export interface StorageImportJobData {
   /** OneDrive picker v8: drive holding the item (Graph /drives/{driveId}). */
   driveId?: string | null;
   importedBy?: string;
-  claimedName?: string | null;
-  claimedMime?: string | null;
-  claimedSize?: number | null;
 }
 
 export function createStorageImportProcessor(dataSource: DataSource) {

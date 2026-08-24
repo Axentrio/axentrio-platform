@@ -229,29 +229,6 @@ export function useGetAiSettings(options?: { enabled?: boolean }) {
   });
 }
 
-interface TestChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export interface TestChatResponse {
-  response: string;
-  provider: string;
-  model: string;
-  confidence?: number;
-  chunksUsed?: number;
-}
-
-export function useTestChat() {
-  return useMutation({
-    mutationFn: (data: {
-      message: string;
-      history: TestChatMessage[];
-      useKnowledgeBase: boolean;
-    }) => api.post<TestChatResponse>("/tenants/me/ai-settings/test-chat", data),
-  });
-}
-
 
 export interface StorageConnection {
   id: string;

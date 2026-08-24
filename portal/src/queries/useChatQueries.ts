@@ -100,7 +100,6 @@ interface UseChatDetailReturn {
   retryMessage: (clientMessageId: string) => Promise<SendMessageResult>;
   sendTyping: (typing: boolean) => void;
   refetch: () => void;
-  markAsRead: () => void;
 }
 
 /** POST /chats/:sessionId/messages response (after envelope unwrap). */
@@ -701,10 +700,6 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     [chatId, socketSendTyping],
   );
 
-  // Mark messages as read (placeholder — same as original)
-  const markAsRead = useCallback(() => {
-    // TODO: implement mark-as-read API call
-  }, []);
 
   return {
     chat,
@@ -718,6 +713,5 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     retryMessage,
     sendTyping,
     refetch: detailRefetch,
-    markAsRead,
   };
 }

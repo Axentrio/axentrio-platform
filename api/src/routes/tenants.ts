@@ -1,53 +1,34 @@
 /**
  * Tenant Routes
  * Tenant management and configuration
+ *
+ * This file owns the router and the route table. The member, invite,
+ * onboarding and webhook handlers live in sibling leaf modules
+ * (`tenant-*.handlers.ts`) and are registered below.
  */
 
 import crypto from "crypto";
-import {
-  safeOutboundRequest,
-  assertSafeOutboundUrl,
-} from "../security/ssrf-guard";
+import { assertSafeOutboundUrl } from "../security/ssrf-guard";
 import { Router, type Request, type Response } from "express";
-import { IsNull } from "typeorm";
-import { clerkClient } from "@clerk/express";
 import { AppDataSource } from "../database/data-source";
 import { Tenant } from "../database/entities/Tenant";
 import { ChatSession } from "../database/entities/ChatSession";
-import { User } from "../database/entities/User";
-import { Agent } from "../database/entities/Agent";
-import { PendingInvite } from "../database/entities/PendingInvite";
 import {
   requireAdmin,
   asyncHandler,
-  ValidationError,
   NotFoundError,
   BadRequestError,
   ApiError,
 } from "../middleware";
 import { ERROR_CODES } from "../middleware/error-codes";
-import { sendSuccess, sendCreated } from "../utils/response";
+import { sendSuccess } from "../utils/response";
 import {
   requireClerkAuth,
   autoProvision,
-  invalidateProvisionCache,
 } from "../middleware/clerk.middleware";
-import {
-  inviteToClerkOrganization,
-  revokeAndResendClerkInvitation,
-  revokeClerkInvitation,
-  removeFromClerkOrganization,
-  addMemberToClerkOrganization,
-  getAllOrgMemberships,
-  updateClerkOrganization,
-} from "../services/clerk-sync.service";
+import { updateClerkOrganization } from "../services/clerk-sync.service";
 import { logger } from "../utils/logger";
-import { logAudit } from "../utils/audit";
-import { parsePaginationParams, applyPagination } from "../utils/pagination";
 import { invalidate } from "../utils/cache";
-import { releaseAgentSessions } from "../utils/releaseAgentSessions";
-import { emitToSession, emitToTenantAgents } from "../websocket/socket.handler";
-import { emitConversationUpsertForSession } from "../realtime/conversation-events";
 import { requireFeature } from "../billing/enforce";
 import {
   getAnchorBotConfig,
@@ -57,13 +38,61 @@ import {
 import type { BotSettings } from "../database/entities/Bot";
 import { AvailabilityRule } from "../database/entities/AvailabilityRule";
 import { businessHoursToAvailability } from "../booking/sync-hours-from-bot";
+import { parseDefaultTakeoverHours } from "../services/inbox-prefs.service";
+import { presentTenantSettings } from "./tenant-settings-view";
 import {
-  parseDefaultTakeoverHours,
-  resolveDefaultTakeoverHours,
-} from "../services/inbox-prefs.service";
+  listTenantUsers,
+  createTenantUser,
+  updateTenantUserRole,
+  deactivateTenantUser,
+  reactivateTenantUser,
+} from "./tenant-members.handlers";
+import {
+  inviteTenantUser,
+  listPendingInvites,
+  resendPendingInvite,
+  cancelPendingInvite,
+} from "./tenant-invites.handlers";
+import {
+  getTenantOnboardingStatus,
+  getTenantAvailableTools,
+} from "./tenant-onboarding.handlers";
+import {
+  testTenantWebhook,
+  regenerateTenantWebhookSecret,
+} from "./tenant-webhooks.handlers";
+
+export { computeOnboardingStatus } from "./tenant-onboarding.handlers";
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString("hex");
+}
+
+/**
+ * One-way sync onto the slot engine (same as PATCH /bots/:id): onboarding
+ * writes businessHours to the anchor bot only; without this the spoken
+ * hours and the bookable slots would drift until a bot-form save.
+ */
+async function syncAvailabilityFromBusinessHours(
+  tenantId: string,
+): Promise<void> {
+  try {
+    const { bot: anchor } = await getAnchorBotConfig(tenantId);
+    const merged = anchor.settings?.businessHours;
+    if (merged && merged.enabled) {
+      const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
+        where: { botId: anchor.id },
+      });
+      if (rule) {
+        const mapped = businessHoursToAvailability(merged);
+        rule.weeklyHours = mapped.weeklyHours;
+        rule.dateOverrides = mapped.dateOverrides;
+        await AppDataSource.getRepository(AvailabilityRule).save(rule);
+      }
+    }
+  } catch (err) {
+    if (!(err instanceof AnchorBotMissingError)) throw err;
+  }
 }
 
 const router = Router();
@@ -105,25 +134,7 @@ router.get(
         { tenantId },
       );
     }
-    const settings: Record<string, any> = { ...botSettings };
-    settings.inbox = {
-      defaultTakeoverHours: resolveDefaultTakeoverHours(
-        tenant.settings?.inbox?.defaultTakeoverHours,
-      ),
-    };
-    if (settings.ai) {
-      const tenantApiKey = tenant.settings?.ai?.apiKey;
-      // Defensive: bot.settings.ai shouldn't carry apiKey, but strip it anyway.
-      const { apiKey: _stale, ...aiRest } = settings.ai as { apiKey?: string };
-      settings.ai = { ...aiRest, hasApiKey: !!tenantApiKey };
-    }
-    if (settings.integrations?.calcom) {
-      const { apiKey, ...calcomRest } = settings.integrations.calcom;
-      settings.integrations = {
-        ...settings.integrations,
-        calcom: { ...calcomRest, hasApiKey: !!apiKey },
-      };
-    }
+    const settings = presentTenantSettings(botSettings, tenant);
 
     // Check if tenant has any widget sessions (for onboarding status)
     const sessionRepo = AppDataSource.getRepository(ChatSession);
@@ -336,29 +347,8 @@ router.patch(
       });
     }
 
-    // One-way sync onto the slot engine (same as PATCH /bots/:id): onboarding
-    // writes businessHours to the anchor bot only; without this the spoken
-    // hours and the bookable slots would drift until a bot-form save.
     if (businessHours || settings?.businessHours !== undefined) {
-      try {
-        const { bot: anchor } = await getAnchorBotConfig(tenantId);
-        const merged = anchor.settings?.businessHours;
-        if (merged && merged.enabled) {
-          const rule = await AppDataSource.getRepository(
-            AvailabilityRule,
-          ).findOne({
-            where: { botId: anchor.id },
-          });
-          if (rule) {
-            const mapped = businessHoursToAvailability(merged);
-            rule.weeklyHours = mapped.weeklyHours;
-            rule.dateOverrides = mapped.dateOverrides;
-            await AppDataSource.getRepository(AvailabilityRule).save(rule);
-          }
-        }
-      } catch (err) {
-        if (!(err instanceof AnchorBotMissingError)) throw err;
-      }
+      await syncAvailabilityFromBusinessHours(tenantId);
     }
 
     await tenantRepository.save(tenant);
@@ -385,27 +375,7 @@ router.patch(
     } catch (err) {
       if (!(err instanceof AnchorBotMissingError)) throw err;
     }
-    const responseSettings: Record<string, any> = { ...responseBotSettings };
-    responseSettings.inbox = {
-      defaultTakeoverHours: resolveDefaultTakeoverHours(
-        tenant.settings?.inbox?.defaultTakeoverHours,
-      ),
-    };
-    if (responseSettings.ai) {
-      const tenantApiKey = tenant.settings?.ai?.apiKey;
-      const { apiKey: _stale, ...aiRest } = responseSettings.ai as {
-        apiKey?: string;
-      };
-      responseSettings.ai = { ...aiRest, hasApiKey: !!tenantApiKey };
-    }
-    if (responseSettings.integrations?.calcom) {
-      const { apiKey: _ck, ...calcomRest } =
-        responseSettings.integrations.calcom;
-      responseSettings.integrations = {
-        ...responseSettings.integrations,
-        calcom: { ...calcomRest, hasApiKey: !!_ck },
-      };
-    }
+    const responseSettings = presentTenantSettings(responseBotSettings, tenant);
 
     sendSuccess(res, {
       id: tenant.id,
@@ -418,111 +388,20 @@ router.patch(
   }),
 );
 
-/**
- * Get tenant users
- * GET /api/v1/tenants/me/users
- */
 router.get(
   "/me/users",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const params = parsePaginationParams(req.query as Record<string, unknown>);
-
-    // Reconcile against Clerk so members who joined the org but never logged into
-    // the portal still appear here (otherwise they're invisible until first login).
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (tenant?.clerkOrgId) {
-      await syncOrgMembersToDb(tenantId, tenant.clerkOrgId);
-    }
-
-    const userRepository = AppDataSource.getRepository(User);
-
-    const qb = userRepository
-      .createQueryBuilder("user")
-      .select([
-        "user.id",
-        "user.email",
-        "user.name",
-        "user.role",
-        "user.isActive",
-        "user.avatarUrl",
-        "user.lastLoginAt",
-        "user.createdAt",
-      ])
-      .where("user.tenantId = :tenantId", { tenantId })
-      .andWhere("user.deletedAt IS NULL");
-
-    if (!params.sortBy) {
-      qb.orderBy("user.createdAt", "DESC");
-    }
-
-    const result = await applyPagination(qb, params);
-
-    sendSuccess(res, result.data, { pagination: result.meta });
-  }),
+  listTenantUsers,
 );
 
-/**
- * Create tenant user
- * POST /api/v1/tenants/me/users
- */
 router.post(
   "/me/users",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const { email, name, role, password } = req.body;
-
-    if (!email || !name || !role) {
-      throw new ValidationError("Email, name, and role are required");
-    }
-
-    const userRepository = AppDataSource.getRepository(User);
-
-    // Check if email already exists
-    const existingUser = await userRepository.findOne({
-      where: { email, tenantId },
-    });
-
-    if (existingUser) {
-      throw new ValidationError("User with this email already exists");
-    }
-
-    // Create user
-    const user = userRepository.create({
-      tenantId,
-      email,
-      name,
-      role,
-      password: password || undefined, // In production, hash the password
-      isActive: true,
-    });
-
-    await userRepository.save(user);
-
-    logger.info("Tenant user created", {
-      tenantId,
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    sendCreated(res, {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      isActive: user.isActive,
-      createdAt: user.createdAt,
-    });
-  }),
+  createTenantUser,
 );
 
 /**
@@ -630,1005 +509,90 @@ router.get(
   }),
 );
 
-/**
- * Test webhook connection
- * POST /api/v1/tenants/me/webhook-test
- */
 router.post(
   "/me/webhook-test",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-
-    const tenantRepository = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepository.findOne({
-      where: { id: tenantId },
-    });
-
-    if (!tenant) {
-      throw new NotFoundError("Tenant not found");
-    }
-
-    if (!tenant.webhookUrl) {
-      sendSuccess(res, {
-        testFailed: true,
-        error: "No webhook URL configured",
-      });
-      return;
-    }
-
-    // Validate URL format
-    try {
-      new URL(tenant.webhookUrl);
-    } catch {
-      sendSuccess(res, {
-        testFailed: true,
-        error: "Invalid webhook URL format",
-      });
-      return;
-    }
-
-    const startTime = Date.now();
-    try {
-      const response = await safeOutboundRequest({
-        method: "POST",
-        url: tenant.webhookUrl,
-        data: {
-          event: "webhook.test",
-          tenantId: tenant.id,
-          timestamp: new Date().toISOString(),
-          payload: { type: "test", content: "Webhook connectivity test" },
-        },
-        timeout: 5000,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Tenant-ID": tenant.id,
-          ...(tenant.webhookSecret
-            ? {
-                "X-Webhook-Secret": tenant.webhookSecret,
-              }
-            : {}),
-        },
-        validateStatus: () => true,
-      });
-
-      const responseTimeMs = Date.now() - startTime;
-
-      if (response.status >= 200 && response.status < 300) {
-        sendSuccess(res, {
-          responseTimeMs,
-        });
-      } else {
-        sendSuccess(res, {
-          testFailed: true,
-          error: `Webhook returned status ${response.status}`,
-          responseTimeMs,
-        });
-      }
-    } catch (error: unknown) {
-      const responseTimeMs = Date.now() - startTime;
-      const err = error as { code?: string; message?: string };
-      sendSuccess(res, {
-        testFailed: true,
-        error:
-          err.code === "ECONNABORTED"
-            ? "Webhook timed out (5s limit)"
-            : err.message || "Connection failed",
-        responseTimeMs,
-      });
-    }
-  }),
+  testTenantWebhook,
 );
 
-/**
- * Regenerate webhook secret
- * POST /api/v1/tenants/me/webhook-secret/regenerate
- */
 router.post(
   "/me/webhook-secret/regenerate",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-
-    const tenantRepository = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepository.findOne({
-      where: { id: tenantId },
-    });
-
-    if (!tenant) {
-      throw new NotFoundError("Tenant not found");
-    }
-
-    tenant.webhookSecret = crypto.randomBytes(32).toString("hex");
-    await tenantRepository.save(tenant);
-
-    // Drop the cached secret (see n8n/webhook.controller verifyPerTenantSecret)
-    // so inbound webhooks validate against the new secret immediately.
-    await invalidate(`tenant:webhook-secret:${tenantId}`);
-
-    logger.info("Webhook secret regenerated", { tenantId });
-
-    sendSuccess(res, {
-      webhookSecret: tenant.webhookSecret,
-      message:
-        "Webhook secret regenerated. Update your n8n workflow with the new secret.",
-    });
-  }),
+  regenerateTenantWebhookSecret,
 );
 
-/**
- * Ensure a user who is already a member of the tenant's Clerk org is provisioned
- * in our DB. Returns true if the email belongs to a current Clerk org member
- * (provisioning them if needed, no-op if already in our DB); false if they are
- * NOT a member — i.e. an invite failure was something other than "already a member".
- */
-async function provisionExistingOrgMember(
-  tenantId: string,
-  clerkOrgId: string,
-  email: string,
-  role: "admin" | "supervisor" | "agent",
-): Promise<boolean> {
-  email = email.toLowerCase(); // emails can be stored mixed-case (e.g. POST /me/users); match consistently
-  let memberships: any[];
-  try {
-    memberships = await getAllOrgMemberships(clerkOrgId);
-  } catch (err: any) {
-    logger.warn("Could not check Clerk org membership", {
-      email,
-      error: err?.message,
-    });
-    return false;
-  }
-
-  const membership = memberships.find(
-    (m: any) =>
-      m.publicUserData?.identifier?.toLowerCase() === email.toLowerCase(),
-  );
-  if (!membership?.publicUserData?.userId) return false; // not a member — real failure
-
-  const userRepo = AppDataSource.getRepository(User);
-  const existing = await userRepo.findOne({ where: { email, tenantId } });
-  if (existing) return true; // already synced
-
-  const clerkUserId = membership.publicUserData.userId;
-  let name = email.split("@")[0];
-  try {
-    const clerkUser = await clerkClient.users.getUser(clerkUserId);
-    name =
-      [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
-      name;
-  } catch {
-    /* use fallback name */
-  }
-
-  await userRepo
-    .createQueryBuilder()
-    .insert()
-    .into(User)
-    .values({
-      tenantId,
-      clerkUserId,
-      email,
-      name,
-      role: role as any,
-      isActive: true,
-    })
-    .orIgnore()
-    .execute();
-
-  const newUser = await userRepo.findOne({ where: { clerkUserId } });
-  if (newUser) {
-    await AppDataSource.getRepository(Agent)
-      .createQueryBuilder()
-      .insert()
-      .into(Agent)
-      .values({
-        tenantId,
-        userId: newUser.id,
-        status: "offline",
-        maxConcurrentChats: 5,
-        skills: [],
-        languages: ["en"],
-      })
-      .orIgnore()
-      .execute();
-    logger.info("Provisioned already-member user", {
-      email,
-      userId: newUser.id,
-    });
-  }
-  return true;
-}
-
-/**
- * Make our User table reflect the Clerk org: provision any Clerk member missing
- * locally so "ghost members" (joined the Clerk org but never logged into the
- * portal) still appear in the members list. Role comes from a matching
- * PendingInvite if one exists (which is then consumed), else defaults to 'agent'
- * — matching what autoProvision assigns on a member's first login. Fetches the
- * full membership once (paginated). Best-effort / fail-open.
- */
-async function syncOrgMembersToDb(
-  tenantId: string,
-  clerkOrgId: string,
-): Promise<void> {
-  try {
-    const memberships = await getAllOrgMemberships(clerkOrgId);
-    if (memberships.length === 0) return;
-
-    const userRepo = AppDataSource.getRepository(User);
-    const inviteRepo = AppDataSource.getRepository(PendingInvite);
-
-    // withDeleted so a soft-deleted member is not resurrected as a new row.
-    const existing = await userRepo.find({
-      where: { tenantId },
-      withDeleted: true,
-    });
-    const existingEmails = new Set(existing.map((u) => u.email.toLowerCase()));
-
-    const invites = await inviteRepo.find({ where: { tenantId } });
-    const inviteByEmail = new Map(
-      invites.map((i) => [i.email.toLowerCase(), i]),
-    );
-
-    const consumedInviteIds: string[] = [];
-    let provisioned = 0;
-    for (const m of memberships) {
-      const email = m.publicUserData?.identifier?.toLowerCase();
-      const clerkUserId = m.publicUserData?.userId;
-      if (!email || !clerkUserId || existingEmails.has(email)) continue;
-
-      const invite = inviteByEmail.get(email);
-      const role =
-        (invite?.role as "admin" | "supervisor" | "agent") ?? "agent";
-      const name =
-        [m.publicUserData?.firstName, m.publicUserData?.lastName]
-          .filter(Boolean)
-          .join(" ") || email.split("@")[0];
-
-      await userRepo
-        .createQueryBuilder()
-        .insert()
-        .into(User)
-        .values({
-          tenantId,
-          clerkUserId,
-          email,
-          name,
-          role: role as any,
-          isActive: true,
-        })
-        .orIgnore()
-        .execute();
-
-      const newUser = await userRepo.findOne({ where: { clerkUserId } });
-      if (newUser) {
-        await AppDataSource.getRepository(Agent)
-          .createQueryBuilder()
-          .insert()
-          .into(Agent)
-          .values({
-            tenantId,
-            userId: newUser.id,
-            status: "offline",
-            maxConcurrentChats: 5,
-            skills: [],
-            languages: ["en"],
-          })
-          .orIgnore()
-          .execute();
-        provisioned++;
-      }
-      if (invite) consumedInviteIds.push(invite.id);
-    }
-
-    if (consumedInviteIds.length > 0)
-      await inviteRepo.delete(consumedInviteIds);
-    if (provisioned > 0)
-      logger.info("Synced Clerk org members to DB", {
-        tenantId,
-        provisioned,
-        invitesConsumed: consumedInviteIds.length,
-      });
-  } catch (err: any) {
-    logger.warn("syncOrgMembersToDb failed; returning members list as-is", {
-      tenantId,
-      error: err?.message,
-    });
-  }
-}
-
-/**
- * Invite user to tenant
- * POST /api/v1/tenants/me/invite
- */
 router.post(
   "/me/invite",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { email, role } = req.body;
-    if (!email || !role) {
-      throw new ValidationError("Email and role are required");
-    }
-
-    if (!["admin", "supervisor", "agent"].includes(role)) {
-      throw new ValidationError("Invalid role");
-    }
-
-    const tenantId = req.user!.tenantId;
-    const tenantRepo = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-
-    if (!tenant?.clerkOrgId) {
-      throw new ValidationError("No Clerk organization linked");
-    }
-
-    const invited = await inviteToClerkOrganization(
-      tenant.clerkOrgId,
-      email,
-      req.user!.clerkUserId,
-    );
-    if (!invited) {
-      // The most common cause is the invitee already being a member of the org
-      // (e.g. they accepted an earlier invite but never logged into the portal,
-      // so they never got provisioned into our DB). In that case, sync them into
-      // the members list instead of erroring. Only a genuine Clerk failure 502s.
-      const alreadyMember = await provisionExistingOrgMember(
-        tenant.id,
-        tenant.clerkOrgId,
-        email.toLowerCase(),
-        role,
-      );
-      if (alreadyMember) {
-        await logAudit(
-          req.userId!,
-          "invite.cleaned",
-          "invite",
-          tenant.id,
-          tenantId,
-          { email, role, reason: "already_member" },
-        );
-        sendSuccess(res, {
-          message: "User has already joined — synced to members list",
-        });
-        return;
-      }
-      throw new ApiError(
-        "Failed to send invite via Clerk",
-        502,
-        ERROR_CODES.CLERK_UPSTREAM_FAILED,
-      );
-    }
-
-    const inviteRepo = AppDataSource.getRepository(PendingInvite);
-    await inviteRepo
-      .createQueryBuilder()
-      .insert()
-      .into(PendingInvite)
-      .values({
-        tenantId: tenant.id,
-        email: email.toLowerCase(),
-        role,
-        invitedBy: req.userId!,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      })
-      .orUpdate(
-        ["role", "invited_by", "created_at", "expires_at"],
-        ["tenant_id", "email"],
-      )
-      .execute();
-
-    // Fetch the saved invite to get its ID for the audit log
-    const savedInvite = await inviteRepo.findOne({
-      where: { tenantId: tenant.id, email: email.toLowerCase() },
-    });
-    await logAudit(
-      req.userId!,
-      "invite.sent",
-      "invite",
-      savedInvite?.id ?? tenant.id,
-      tenantId,
-      { email, role },
-    );
-
-    sendSuccess(res, { message: "Invitation sent" });
-  }),
+  inviteTenantUser,
 );
 
-/**
- * Change user role within tenant
- * PATCH /api/v1/tenants/me/users/:userId
- */
 router.patch(
   "/me/users/:userId",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { role } = req.body;
-
-    if (!role || !["admin", "supervisor", "agent"].includes(role)) {
-      throw new ValidationError("Invalid role");
-    }
-
-    const tenantId = req.user!.tenantId;
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({
-      where: { id: req.params.userId, tenantId, deletedAt: IsNull() },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found in this tenant");
-    }
-
-    user.role = role;
-    await userRepo.save(user);
-
-    // Invalidate autoProvision cache so role change takes effect immediately
-    if (user.clerkUserId) {
-      const tenant = await AppDataSource.getRepository(Tenant).findOne({
-        where: { id: tenantId },
-      });
-      if (tenant?.clerkOrgId) {
-        invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
-      }
-    }
-
-    logger.info("Tenant admin changed user role", {
-      userId: user.id,
-      newRole: role,
-      changedBy: req.userId,
-    });
-    sendSuccess(res, { id: user.id, role: user.role });
-  }),
+  updateTenantUserRole,
 );
 
-/**
- * Deactivate a tenant member
- * POST /api/v1/tenants/me/users/:userId/deactivate
- */
 router.post(
   "/me/users/:userId/deactivate",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const { userId } = req.params;
-
-    // Cannot deactivate yourself
-    if (userId === req.userId) {
-      throw new BadRequestError("Cannot deactivate yourself");
-    }
-
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({
-      where: { id: userId, tenantId, deletedAt: IsNull() },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found in this tenant");
-    }
-
-    if (!user.isActive) {
-      throw new BadRequestError("User is already deactivated");
-    }
-
-    // Cannot deactivate the last active admin
-    if (user.role === "admin") {
-      const activeAdminCount = await userRepo.count({
-        where: {
-          tenantId,
-          role: "admin" as const,
-          isActive: true,
-          deletedAt: IsNull(),
-        },
-      });
-      if (activeAdminCount <= 1) {
-        throw new BadRequestError("Cannot deactivate the last active admin");
-      }
-    }
-
-    // Deactivate in DB + cleanup sessions in one transaction
-    let releaseResult = {
-      releasedSessions: 0,
-      returnedHandoffs: 0,
-      affectedSessionIds: [] as string[],
-    };
-    await AppDataSource.transaction(async (manager) => {
-      user.isActive = false;
-      await manager.save(User, user);
-      releaseResult = await releaseAgentSessions(user.id, tenantId, manager);
-    });
-
-    // Remove from Clerk org + invalidate cache
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (user.clerkUserId && tenant?.clerkOrgId) {
-      await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
-      invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
-    }
-
-    await logAudit(req.userId!, "user.deactivated", "user", user.id, tenantId, {
-      releasedSessions: releaseResult.releasedSessions,
-      returnedHandoffs: releaseResult.returnedHandoffs,
-    });
-
-    // Socket events — after transaction committed
-    for (const sessionId of releaseResult.affectedSessionIds) {
-      emitToSession(tenantId, sessionId, "agent:removed", {
-        sessionId,
-        reason: "agent_deactivated",
-      });
-      // B-PR3a: normalized ownership event (the release moved every affected
-      // conversation back to handoff_requested).
-      await emitConversationUpsertForSession(sessionId, tenantId);
-    }
-    if (
-      releaseResult.releasedSessions > 0 ||
-      releaseResult.returnedHandoffs > 0
-    ) {
-      emitToTenantAgents(tenantId, "handoff:queue_updated", {
-        reason: "agent_deactivated",
-      });
-    }
-
-    logger.info("Deactivated user", {
-      userId: user.id,
-      tenantId,
-      deactivatedBy: req.userId,
-    });
-    sendSuccess(res, { message: "User deactivated" });
-  }),
+  deactivateTenantUser,
 );
 
-/**
- * Reactivate a tenant member
- * POST /api/v1/tenants/me/users/:userId/reactivate
- */
 router.post(
   "/me/users/:userId/reactivate",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const { userId } = req.params;
-
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({
-      where: { id: userId, tenantId, deletedAt: IsNull() },
-    });
-
-    if (!user) {
-      throw new NotFoundError("User not found in this tenant");
-    }
-
-    if (user.isActive) {
-      throw new BadRequestError("User is already active");
-    }
-
-    user.isActive = true;
-    await userRepo.save(user);
-
-    // Re-add to Clerk org
-    if (user.clerkUserId) {
-      const tenant = await AppDataSource.getRepository(Tenant).findOne({
-        where: { id: tenantId },
-      });
-      if (tenant?.clerkOrgId) {
-        await addMemberToClerkOrganization(
-          tenant.clerkOrgId,
-          user.clerkUserId,
-          "org:member",
-        );
-      }
-    }
-
-    await logAudit(req.userId!, "user.reactivated", "user", user.id, tenantId);
-
-    logger.info("Reactivated user", {
-      userId: user.id,
-      tenantId,
-      reactivatedBy: req.userId,
-    });
-    sendSuccess(res, { message: "User reactivated" });
-  }),
+  reactivateTenantUser,
 );
 
-/**
- * List pending invites for current tenant
- * GET /api/v1/tenants/me/pending-invites
- */
 router.get(
   "/me/pending-invites",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-
-    const inviteRepo = AppDataSource.getRepository(PendingInvite);
-    let invites = await inviteRepo.find({
-      where: { tenantId },
-      order: { createdAt: "DESC" },
-    });
-
-    // Reconcile against Clerk: drop invites whose invitee already joined the org.
-    // The pending row otherwise only clears when the invitee logs into the portal
-    // (autoProvision), so an invite accepted via the Clerk dashboard — or before the
-    // redirectUrl fix — lingers as a stale "pending" row. One membership-list call,
-    // fail-open if Clerk is slow/down so the page still renders.
-    if (invites.length > 0) {
-      try {
-        const tenant = await AppDataSource.getRepository(Tenant).findOne({
-          where: { id: tenantId },
-        });
-        if (tenant?.clerkOrgId) {
-          const memberships = await getAllOrgMemberships(tenant.clerkOrgId);
-          const memberEmails = new Set(
-            memberships
-              .map((m: any) => m.publicUserData?.identifier?.toLowerCase())
-              .filter(Boolean),
-          );
-          const accepted = invites.filter((inv) =>
-            memberEmails.has(inv.email.toLowerCase()),
-          );
-          if (accepted.length > 0) {
-            await inviteRepo.remove(accepted);
-            invites = invites.filter(
-              (inv) => !memberEmails.has(inv.email.toLowerCase()),
-            );
-            logger.info("Cleared stale pending invites (already org members)", {
-              tenantId,
-              count: accepted.length,
-            });
-          }
-        }
-      } catch (err) {
-        logger.warn(
-          "Pending-invite reconcile against Clerk failed; returning DB list",
-          { tenantId, err },
-        );
-      }
-    }
-
-    // Resolve inviter names
-    const inviterIds = [
-      ...new Set(invites.map((i) => i.invitedBy).filter(Boolean)),
-    ] as string[];
-    const inviters =
-      inviterIds.length > 0
-        ? await AppDataSource.getRepository(User)
-            .createQueryBuilder("u")
-            .select(["u.id", "u.name", "u.email"])
-            .where("u.id IN (:...ids)", { ids: inviterIds })
-            .getMany()
-        : [];
-    const inviterMap = new Map(
-      inviters.map((u) => [u.id, { name: u.name, email: u.email }]),
-    );
-
-    const data = invites.map((inv) => ({
-      id: inv.id,
-      email: inv.email,
-      role: inv.role,
-      invitedBy: inv.invitedBy ? (inviterMap.get(inv.invitedBy) ?? null) : null,
-      createdAt: inv.createdAt,
-      expiresAt: inv.expiresAt,
-      isExpired: new Date() > inv.expiresAt,
-    }));
-
-    sendSuccess(res, data);
-  }),
+  listPendingInvites,
 );
 
-/**
- * Resend a pending invite
- * POST /api/v1/tenants/me/pending-invites/:id/resend
- */
 router.post(
   "/me/pending-invites/:id/resend",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const inviteRepo = AppDataSource.getRepository(PendingInvite);
-
-    const invite = await inviteRepo.findOne({
-      where: { id: req.params.id, tenantId },
-    });
-
-    if (!invite) {
-      throw new NotFoundError("Invite not found");
-    }
-
-    // Re-send Clerk invitation
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (!tenant?.clerkOrgId) {
-      throw new BadRequestError("Tenant has no Clerk organization linked");
-    }
-
-    const result = await revokeAndResendClerkInvitation(
-      tenant.clerkOrgId,
-      invite.email,
-      req.user?.clerkUserId,
-    );
-
-    if (!result.ok && result.code === "already_member") {
-      // Already in the Clerk org — sync them into our DB (best-effort) and drop the invite.
-      await provisionExistingOrgMember(
-        tenantId,
-        tenant.clerkOrgId,
-        invite.email,
-        invite.role as "admin" | "supervisor" | "agent",
-      );
-
-      await inviteRepo.remove(invite);
-      await logAudit(
-        req.userId!,
-        "invite.cleaned",
-        "invite",
-        invite.id,
-        tenantId,
-        { email: invite.email, reason: "already_member" },
-      );
-      sendSuccess(res, {
-        message: "User has already joined — synced to members list",
-      });
-      return;
-    }
-
-    if (!result.ok) {
-      throw new ApiError(
-        result.message,
-        502,
-        ERROR_CODES.CLERK_UPSTREAM_FAILED,
-      );
-    }
-
-    invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await inviteRepo.save(invite);
-
-    await logAudit(
-      req.userId!,
-      "invite.resent",
-      "invite",
-      invite.id,
-      tenantId,
-      { email: invite.email },
-    );
-
-    sendSuccess(res, { message: "Invite resent" });
-  }),
+  resendPendingInvite,
 );
 
-/**
- * Cancel a pending invite
- * DELETE /api/v1/tenants/me/pending-invites/:id
- */
 router.delete(
   "/me/pending-invites/:id",
   requireClerkAuth,
   autoProvision,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const inviteRepo = AppDataSource.getRepository(PendingInvite);
-
-    const invite = await inviteRepo.findOne({
-      where: { id: req.params.id, tenantId },
-    });
-
-    if (!invite) {
-      throw new NotFoundError("Invite not found");
-    }
-
-    // Revoke the Clerk-side invitation too — otherwise its email link stays live
-    // and the recipient could still accept after we delete our local row. Only
-    // report success once Clerk confirms there's no longer a live invitation.
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (tenant?.clerkOrgId) {
-      const revoked = await revokeClerkInvitation(
-        tenant.clerkOrgId,
-        invite.email,
-        req.user?.clerkUserId,
-      );
-      if (!revoked) {
-        throw new ApiError(
-          "Failed to revoke invite via Clerk",
-          502,
-          ERROR_CODES.CLERK_UPSTREAM_FAILED,
-        );
-      }
-    }
-
-    await logAudit(
-      req.userId!,
-      "invite.cancelled",
-      "invite",
-      invite.id,
-      tenantId,
-      { email: invite.email },
-    );
-
-    await inviteRepo.remove(invite);
-
-    sendSuccess(res, { message: "Invite cancelled" });
-  }),
+  cancelPendingInvite,
 );
 
-export function computeOnboardingStatus(
-  tenant: any,
-  kbDocCount: number,
-  hadConversation = false,
-  orgName?: string,
-) {
-  const settings = tenant.settings || {};
-  const ai = settings.ai || {};
-  const automations = settings.automations || {};
-  const bv = ai.brandVoice;
-
-  // A new tenant's anchor bot ships with brandVoice.name = `${orgName} Assistant`
-  // (see defaultBotAi), so the old `!== 'Organization Assistant'` sentinel marked
-  // every real tenant "configured" on day one. Treat brand voice as configured only
-  // if the user actually personalised it: custom instructions, a business name, a
-  // non-default tone, or a name that differs from the generated default (and the
-  // legacy default literal).
-  const defaultBrandName = orgName ? `${orgName} Assistant` : null;
-
-  // Cal.com is shelved, so the former `calcomConnected` onboarding step is gone.
-  const steps = {
-    aiEnabled: !!ai.enabled,
-    brandVoiceConfigured: !!(
-      bv?.customInstructions?.trim() ||
-      bv?.businessName?.trim() ||
-      (bv?.tone && bv.tone !== "friendly") ||
-      (bv?.name &&
-        bv.name !== "Organization Assistant" &&
-        bv.name !== defaultBrandName)
-    ),
-    knowledgeBaseHasDocs: kbDocCount > 0,
-    automationsConfigured: !!(
-      automations.emailNotifications?.bookingConfirmation?.enabled ||
-      automations.emailNotifications?.newLeadAlert?.enabled ||
-      automations.emailNotifications?.conversationSummary?.enabled
-    ),
-    // The point of onboarding is a *working* bot, not just a configured one — so
-    // track whether the bot has actually answered at least once (a persisted bot
-    // reply exists; see the route handler for the exact signal). This is the
-    // "time to first useful answer" metric; the banner uses it to steer new
-    // tenants to try their bot rather than stalling at setup steps.
-    firstConversation: hadConversation,
-  };
-
-  const totalCount = Object.keys(steps).length;
-  const completedCount = Object.values(steps).filter(Boolean).length;
-
-  return {
-    complete: completedCount === totalCount,
-    completedCount,
-    totalCount,
-    steps,
-  };
-}
-
-/**
- * Get onboarding status
- * GET /api/v1/tenants/me/onboarding-status
- */
 router.get(
   "/me/onboarding-status",
   requireClerkAuth,
   autoProvision,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (!tenant) throw new NotFoundError("Tenant not found");
-
-    const kbResult = await AppDataSource.query(
-      `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
-      [tenantId],
-    ).catch(() => [{ count: 0 }]);
-
-    // Multi-bot Phase 4 (#16d): onboarding steps inspect ai/integrations/
-    // automations — all on Bot.settings. Pass the anchor bot's settings into
-    // computeOnboardingStatus (the function expects `{ settings }` shape).
-    let botSettings: BotSettings = {};
-    try {
-      ({ settings: botSettings } = await getAnchorBotConfig(tenantId));
-    } catch (err) {
-      if (!(err instanceof AnchorBotMissingError)) throw err;
-    }
-
-    // "First conversation" = the bot has actually ANSWERED a prompt at least once:
-    // a persisted bot text message that FOLLOWS a user message in the same session.
-    // We can't use a bare bot-message-exists check because /widget/init persists a
-    // bot *greeting* before the visitor types anything (widget.ts), and we can't use
-    // `chat_sessions.message_count > 0` because that flips on the visitor's inbound
-    // message alone (unanswered prompt / LLM failure / AI-disabled). The ephemeral
-    // in-portal test chat does NOT persist, so only real conversations (embedded
-    // widget / connected channel / standalone /widget-test) count. Fail-safe to
-    // false so a query error never blocks the rest of onboarding status.
-    const convResult = await AppDataSource.query(
-      `SELECT EXISTS(
-         SELECT 1
-         FROM messages bm
-         JOIN participants bp ON bp.id = bm.participant_id
-         WHERE bm.tenant_id = $1
-           AND bp.type = 'bot' AND bm.type = 'text' AND bm.is_deleted = false
-           AND EXISTS (
-             SELECT 1
-             FROM messages um
-             JOIN participants up ON up.id = um.participant_id
-             WHERE um.session_id = bm.session_id
-               AND up.type = 'user' AND um.is_deleted = false
-               AND (um.created_at, um.id) < (bm.created_at, bm.id)
-           )
-       ) AS has`,
-      [tenantId],
-    ).catch(() => [{ has: false }]);
-
-    const status = computeOnboardingStatus(
-      { settings: botSettings },
-      kbResult[0]?.count || 0,
-      !!convResult[0]?.has,
-      tenant.name,
-    );
-    sendSuccess(res, status);
-  }),
+  getTenantOnboardingStatus,
 );
 
-/**
- * Get available tools for the tenant
- * GET /api/v1/tenants/me/available-tools
- */
 router.get(
   "/me/available-tools",
   requireClerkAuth,
   autoProvision,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: tenantId },
-    });
-    if (!tenant) throw new NotFoundError("Tenant not found");
-
-    // Multi-bot Phase 4 (#16d): tool registry resolves integrations from
-    // Bot.settings now. Anchor bot drives the tenant-level tool list.
-    const { settings: botSettings } = await getAnchorBotConfig(tenantId);
-
-    const { ToolRegistry } = await import("../agent/tool-registry");
-    const registry = new ToolRegistry();
-    const tools = await registry.getToolsForTenant(tenant, botSettings);
-
-    sendSuccess(res, {
-      tools: tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        hasSideEffects: t.hasSideEffects,
-        category: ["kb_search", "capture_lead", "escalate_to_human"].includes(
-          t.name,
-        )
-          ? "always"
-          : "booking",
-      })),
-    });
-  }),
+  getTenantAvailableTools,
 );
 
 export { router as tenantRouter };

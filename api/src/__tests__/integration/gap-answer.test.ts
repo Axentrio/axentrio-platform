@@ -142,6 +142,32 @@ describe('answering a gap', () => {
     expect(await AppDataSource.getRepository(KnowledgeDocument).countBy({ tenantId: tenant.id })).toBe(1);
   });
 
+  it('lets exactly one of two simultaneous publishes win', async () => {
+    // Two tabs, or one impatient retry while the first request is still indexing. The
+    // read at the top of answerGap cannot stop this - both calls pass it - so the claim
+    // is a conditional UPDATE and the loser removes its own document.
+    const results = await Promise.allSettled([
+      answerGap(tenant.id, gap.id, ANSWER),
+      answerGap(tenant.id, gap.id, 'A second answer, also long enough to pass validation.'),
+    ]);
+
+    const won = results.filter((r) => r.status === 'fulfilled');
+    const lost = results.filter((r) => r.status === 'rejected');
+    expect(won).toHaveLength(1);
+    expect(lost).toHaveLength(1);
+    expect((lost[0] as PromiseRejectedResult).reason).toMatchObject({
+      statusCode: 409,
+      code: 'GAP_ALREADY_ANSWERED',
+    });
+
+    // The loser's document must not survive: it would be unreachable from the Gap,
+    // retrievable by the bot, and one document off the tenant's allowance.
+    const docs = await AppDataSource.getRepository(KnowledgeDocument).findBy({ tenantId: tenant.id });
+    expect(docs).toHaveLength(1);
+    const after = await AppDataSource.getRepository(Gap).findOneByOrFail({ id: gap.id });
+    expect(after.answerDocumentId).toBe(docs[0].id);
+  });
+
   it('accepts a new answer once the document is gone', async () => {
     // What the owner does after publishing something wrong: delete it on the Knowledge
     // page. The FK is ON DELETE SET NULL, so the column empties and the topic is

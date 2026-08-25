@@ -49,6 +49,9 @@ export async function answerGap(
   const gapRepo = AppDataSource.getRepository(Gap);
   const gap = await gapRepo.findOne({ where: { id: gapId, tenantId } });
   if (!gap) throw new NotFoundError('Gap not found');
+  // Early exit only. The binding check is the conditional claim at the end of this
+  // function; this one just saves the caller an embedding bill for an answer we already
+  // know we will refuse.
   if (gap.answerDocumentId) {
     throw new ApiError(
       'This topic already has a published answer. Edit or delete that document to change it.',
@@ -119,9 +122,26 @@ export async function answerGap(
     );
   }
 
-  gap.answerDocumentId = document.id;
-  gap.answeredAt = new Date();
-  await gapRepo.save(gap);
+  // Claim the Gap with a CONDITIONAL update, not a read-then-save. The check at the top
+  // of this function is only an early exit: indexing takes seconds, so two tabs - or one
+  // impatient retry while the first request is still running - both pass it. The `WHERE
+  // ... IS NULL` makes the winner unambiguous, and the loser cleans up after itself
+  // instead of leaving an unreachable document behind that spends a tier slot.
+  const answeredAt = new Date();
+  const claim = await gapRepo
+    .createQueryBuilder()
+    .update(Gap)
+    .set({ answerDocumentId: document.id, answeredAt })
+    .where('id = :gapId AND tenant_id = :tenantId AND answer_document_id IS NULL', { gapId, tenantId })
+    .execute();
+  if (!claim.affected) {
+    await discard(knowledge, tenantId, document.id, gapId, 'lost the race for this gap');
+    throw new ApiError(
+      'This topic already has a published answer. Edit or delete that document to change it.',
+      409,
+      'GAP_ALREADY_ANSWERED',
+    );
+  }
   logger.info('[gap-answer] published', {
     tenantId,
     gapId,
@@ -129,7 +149,7 @@ export async function answerGap(
     chunks: indexed.chunkCount,
   });
 
-  return { id: gap.id, answerDocumentId: document.id, answeredAt: gap.answeredAt };
+  return { id: gap.id, answerDocumentId: document.id, answeredAt };
 }
 
 /** Remove a document that never became retrievable, so a retry starts clean. */

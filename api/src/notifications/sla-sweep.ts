@@ -124,18 +124,39 @@ async function doSweep(): Promise<{ alerted: number }> {
     .limit(BATCH)
     .getRawMany()) as OverdueRow[];
 
-  const pauses = (await AppDataSource.getRepository(ChatSession)
+  // Source 3 ages a pause from the BLOCK that caused it, not from the session
+  // row. `updated_at` is not the pause: `atomicDisableAutoReply` and the inbound
+  // message counter are both raw UPDATEs that never touch it, so it still holds
+  // whenever the row was last saved through the ORM — often hours earlier. That
+  // inflated the age in the alert text and, worse, sent the re-alert bucket
+  // straight to the cap, so a paused conversation was announced once and then
+  // never reminded again.
+  //
+  // The journal row that disabled auto-reply IS the pause, to the millisecond.
+  // It is `timestamptz` while `updated_at` is not, so the two are selected
+  // separately and resolved in JS: casting between them in SQL would reintroduce
+  // the very time-zone skew this file already warns about.
+  const pausedAt = `(SELECT MAX(g.created_at) FROM guardrail_spam_logs g
+      WHERE g.conversation_id = s.id AND g.ai_auto_reply_disabled = true)`;
+  const pausedRows = (await AppDataSource.getRepository(ChatSession)
     .createQueryBuilder('s')
     .select('s.id', 'id')
     .addSelect('s.tenantId', 'tenantId')
     .addSelect('s.id', 'sessionId')
-    .addSelect('s.updatedAt', 'since')
+    .addSelect(pausedAt, 'since')
+    .addSelect('s.updatedAt', 'fallback')
     .where('s.aiAutoReplyEnabled = false')
     .andWhere("s.guardrailStatus <> 'normal'")
     .andWhere("s.status <> 'closed'")
-    .andWhere('s.updatedAt < :cutoff', { cutoff })
+    // A pause with no journal row (a lost write, or a pre-journal code path) must
+    // still alert, so it keeps the old clock rather than dropping out.
+    .andWhere(`(${pausedAt} < :cutoff OR (${pausedAt} IS NULL AND s.updatedAt < :cutoff))`, { cutoff })
     .limit(BATCH)
-    .getRawMany()) as OverdueRow[];
+    .getRawMany()) as (Omit<OverdueRow, 'since'> & { since: Date | null; fallback: Date })[];
+  const pauses: OverdueRow[] = pausedRows.map(({ fallback, since, ...row }) => ({
+    ...row,
+    since: since ?? fallback,
+  }));
 
   // Source 4. The customer's newest un-flagged message, and the newest reply of
   // any kind. A reply older than that message (or none at all) means the bot owes

@@ -104,8 +104,38 @@ beforeEach(() => {
   refreshed.shouldThrow = false;
 });
 
-/** The route returns before the work finishes; let the microtask queue drain. */
-const settle = () => new Promise((r) => setTimeout(r, 20));
+/**
+ * The route answers 202 before the pass finishes, so these tests wait for a CONDITION,
+ * never for a guessed delay. A fixed 20ms sleep here made this file fail under parallel
+ * load: the claim had sometimes not cleared yet, so the next request read `running`
+ * where the test wanted `cooling_down`, and the failure pointed at an assertion instead
+ * of at the race.
+ *
+ * The poll below uses a REAL short delay on purpose. Fake timers cannot help: the state
+ * being awaited is a row written by a detached promise inside the route, so the only
+ * signal available to the test is the database itself.
+ */
+async function waitFor(label: string, ready: () => Promise<boolean> | boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    if (await ready()) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    // Executor form, not Promise.withResolvers: this package's `lib` target predates it.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** The pass has finished and released its claim. */
+const settle = () =>
+  waitFor('the analysis claim to clear', async () => {
+    const state = await AppDataSource.getRepository(InsightsRefreshState).findOne({
+      where: { tenantId },
+    });
+    return state == null || state.analysisRunningSince == null;
+  });
+
+/** The pass has STARTED and is being held open by the gate. */
+const settleStarted = () => waitFor('the analysis to start', () => refreshed.calls.length > 0);
 
 describe('GET /insights/analysis-status', () => {
   it('excludes detection journals but keeps routing-isolation journals in the eligible count', async () => {
@@ -234,7 +264,7 @@ describe('POST /insights/analyse', () => {
     refreshed.gate = () => {}; // hold the analysis open
 
     await request(app).post('/api/v1/insights/analyse');
-    await settle();
+    await settleStarted();
 
     const status = await request(app).get('/api/v1/insights/analysis-status');
     expect(status.body.data.running).toBe(true);
@@ -268,7 +298,7 @@ describe('POST /insights/analyse', () => {
     refreshed.gate = () => {};
 
     await request(app).post('/api/v1/insights/analyse');
-    await settle();
+    await settleStarted();
     refreshed.calls = [];
 
     const second = await request(app).post('/api/v1/insights/analyse');

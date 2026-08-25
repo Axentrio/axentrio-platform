@@ -451,6 +451,36 @@ describe('guardrails · runInboundGate (integration)', () => {
     expect(rows[1].enforced).toBe(true);
   });
 
+  // Item 1: a warn leaves no flag, so a replayed solicitation used to answer the
+  // customer and journal nothing. Warn volume then under-reported every stale turn.
+  it('ENFORCE: a replayed solicitation journals the warn the first pass never wrote', async () => {
+    const { tenant, session, participant } = await setup(true);
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: 'Hi, I came across your business and we offer SEO and web design to boost your sales',
+    });
+    await msgRepo().update(msg.id, { guardrailChecked: true }); // claimed, no outcome
+
+    expect(await runInboundGate({
+      session, tenantId: tenant.id, message: msg, content: msg.content, channel: 'messenger',
+    })).toEqual({
+      proceed: true,
+      category: 'solicitation',
+      replyOverride: SOLICITATION_WARN_REPLY,
+    });
+
+    const rows = await logRepo().find({ where: { conversationId: session.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      detectedCategory: 'solicitation',
+      action: 'warn_reply',
+      enforced: false,
+      aiAutoReplyDisabled: false,
+    });
+    // A warn never flags and never pauses, on either path.
+    expect((await msgRepo().findOneOrFail({ where: { id: msg.id } })).guardrailFlagged).toBe(false);
+    expect((await sessionRepo().findOneOrFail({ where: { id: session.id } })).aiAutoReplyEnabled).toBe(true);
+  });
+
   it('SHADOW: a claimed message without an outcome never blocks', async () => {
     const { tenant, session, participant } = await setup(false);
     const msg = await createTestMessage(session.id, tenant.id, participant.id, {

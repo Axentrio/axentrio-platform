@@ -178,4 +178,35 @@ describe('guardrails · first gate vs replay behaviour matrix', () => {
       expect(`${r.mode} · ${r.case} → ${r.replay}`).toBe(`${r.mode} · ${r.case} → ${r.firstGate}`);
     }
   });
+
+  // The one place the two paths are ALLOWED to disagree, pinned so nobody has to
+  // rediscover it. The bot-loop verdict is session state, not content, so a second
+  // look reads the counters as they are NOW, not as they were at the first look.
+  // The divergence is always in the strict direction: a replay can block what the
+  // first pass allowed, never the reverse.
+  it('may block on a replay when loop counters moved after the first pass', async () => {
+    const { tenantId, session, participantId } = await freshSession(true);
+    const content = 'Please confirm the order status now for account 12345';
+    const message = await createTestMessage(session.id, tenantId, participantId, { content });
+
+    expect(render(await runInboundGate({ session, tenantId, message, content, channel: 'whatsapp' })))
+      .toBe('PROCEED · clean');
+
+    // Sibling traffic trips the loop AFTER this message was gated clean.
+    for (let i = 0; i < 3; i++) {
+      await redisLoopStore.advance(session.id, {
+        hash: 'sibling-repeat', meaningful: true, humanSignal: false, hasSuspiciousLink: false,
+      });
+    }
+
+    const reloaded = await sessionRepo().findOneOrFail({ where: { id: session.id } });
+    expect(render(await runInboundGate({ session: reloaded, tenantId, message, content, channel: 'whatsapp' })))
+      .toBe('BLOCK · bot_loop');
+
+    // And it blocks the whole way: flagged, paused, journalled — never a silent drop.
+    expect((await msgRepo().findOneOrFail({ where: { id: message.id } })).guardrailFlagged).toBe(true);
+    const paused = await sessionRepo().findOneOrFail({ where: { id: session.id } });
+    expect(paused.aiAutoReplyEnabled).toBe(false);
+    expect(paused.guardrailStatus).toBe('bot_loop');
+  });
 });

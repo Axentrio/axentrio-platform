@@ -42,19 +42,18 @@ beforeEach(() => {
 
 describe('sweepOverdueHandoffsAndPauses', () => {
   it('alerts each overdue source with a bucketed dedupeBase, clamping old backlog to the final bucket', async () => {
+    // Every source returns the raw timestamp it is measured from; the sweep
+    // derives each age from the app clock, so the DB session time zone cannot
+    // skew the age, the wording, or the re-alert bucket.
+    const minAgo = (m: number) => new Date(Date.now() - m * 60_000);
     mockGetRawMany
-      .mockResolvedValueOnce([{ id: 'hr1', tenantId: 't1', sessionId: 's1', ageMin: '12' }]) // handoff_request, bucket 0
-      .mockResolvedValueOnce([{ id: 's2', tenantId: 't1', sessionId: 's2', ageMin: '45' }]) // session-only handoff, bucket 1
+      .mockResolvedValueOnce([{ id: 'hr1', tenantId: 't1', sessionId: 's1', since: minAgo(12) }]) // bucket 0
+      .mockResolvedValueOnce([{ id: 's2', tenantId: 't1', sessionId: 's2', since: minAgo(45) }]) // bucket 1
       .mockResolvedValueOnce([
-        { id: 's3', tenantId: 't1', sessionId: 's3', ageMin: '20' }, // pause, bucket 0
-        { id: 's4', tenantId: 't1', sessionId: 's4', ageMin: '200' }, // pause, clamped to bucket 2 (still alerts once)
+        { id: 's3', tenantId: 't1', sessionId: 's3', since: minAgo(20) }, // pause, bucket 0
+        { id: 's4', tenantId: 't1', sessionId: 's4', since: minAgo(200) }, // clamped to bucket 2
       ])
-      // Source 4 returns the raw timestamp; the sweep derives the age from the
-      // app clock, so the DB session time zone cannot skew it.
-      .mockResolvedValueOnce([{
-        id: 's5', tenantId: 't2', sessionId: 's5',
-        askedAt: new Date(Date.now() - 15 * 60_000),
-      }]);
+      .mockResolvedValueOnce([{ id: 's5', tenantId: 't2', sessionId: 's5', since: minAgo(15) }]);
 
     const res = await sweepOverdueHandoffsAndPauses();
 

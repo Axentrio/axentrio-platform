@@ -175,6 +175,56 @@ async function writeSpamLog(args: {
   }
 }
 
+/** Has this message already been journalled with `action`? A warn leaves no flag,
+ *  so unlike a block it has no natural dedupe: a replayed solicitation would
+ *  journal itself again on every stale turn. */
+async function alreadyJournalled(messageId: string, action: GuardrailAction): Promise<boolean> {
+  try {
+    return await AppDataSource.getRepository(SpamScamLog).existsBy({
+      suspiciousMessageId: messageId,
+      action,
+    });
+  } catch (err) {
+    // A read failure must not suppress the reply; at worst we journal twice.
+    logger.warn('[guardrails] journal lookup failed', { messageId, action, err });
+    return false;
+  }
+}
+
+/** Warn on a low-severity solicitation: journal it once, then answer with the
+ *  neutral platform reply instead of running the agent. Shared by the first pass
+ *  and by a replay, so a stale turn reports the same warn the first pass would. */
+async function warnSolicitation(args: {
+  session: ChatSession;
+  tenantId: string;
+  channel: string;
+  messageId: string;
+  reasons: string[];
+  score: number | null;
+  suspiciousLink: boolean;
+  repeated: boolean;
+  replay?: boolean;
+}): Promise<InboundGateResult> {
+  const { session, reasons } = args;
+  if (!(await alreadyJournalled(args.messageId, 'warn_reply'))) {
+    await writeSpamLog({
+      session, channel: args.channel, messageId: args.messageId,
+      category: 'solicitation', reasons, score: args.score,
+      suspiciousLink: args.suspiciousLink, repeated: args.repeated, botLoop: false,
+      enforced: false, notified: false, aiAutoReplyDisabled: false,
+      action: 'warn_reply',
+    });
+    logger.info('[guardrails] warned on inbound solicitation', {
+      sessionId: session.id, category: 'solicitation', reasons, replay: args.replay === true,
+    });
+  }
+  return {
+    proceed: true,
+    category: 'solicitation',
+    replyOverride: await solicitationWarnReply(args.tenantId),
+  };
+}
+
 /** Journal a routing-isolation drop. `enforced=true` records the block action. */
 export async function writeRoutingDropLog(
   session: ChatSession,
@@ -338,11 +388,11 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
       });
     }
     if (warnOnly) {
-      return {
-        proceed: true,
-        category: 'solicitation',
-        replyOverride: await solicitationWarnReply(tenantId),
-      };
+      return warnSolicitation({
+        session, tenantId, channel, messageId: message.id, reasons: replay.reasons,
+        score: replay.score, suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
+        repeated: false, replay: true,
+      });
     }
     return { proceed: true, category: 'clean' };
   }
@@ -398,16 +448,10 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
   }
 
   if (solicitationWarnOnly) {
-    await writeSpamLog({
-      session, channel, messageId: message.id, category, reasons,
-      score: c.score, suspiciousLink, repeated, botLoop: false,
-      enforced: false, notified: false, aiAutoReplyDisabled: false,
-      action: 'warn_reply',
+    return warnSolicitation({
+      session, tenantId, channel, messageId: message.id, reasons,
+      score: c.score, suspiciousLink, repeated,
     });
-    logger.info('[guardrails] warned on inbound solicitation', {
-      sessionId: session.id, category, reasons,
-    });
-    return { proceed: true, category, replyOverride: await solicitationWarnReply(tenantId) };
   }
 
   // Enforce: flag the message, pause the session, journal the block.

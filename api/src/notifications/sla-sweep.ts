@@ -61,11 +61,21 @@ const ALERT: Record<OverdueKind, {
   },
 };
 
+/** One overdue item. `since` is the raw timestamp the age is measured from; the
+ *  age itself is derived in `overdue()`, never with the DB clock. `created_at`
+ *  and `updated_at` are `timestamp without time zone`, so they round-trip through
+ *  the driver in the API's own zone; mixing them with `now()` (timestamptz, read
+ *  in the DB session zone) skews every age by the difference between the two.
+ *  Production runs both in UTC, local development does not. */
 interface OverdueRow {
   id: string;
   tenantId: string;
   sessionId: string;
-  ageMin: string;
+  since: Date;
+}
+
+interface Overdue extends Omit<OverdueRow, 'since'> {
+  ageMin: number;
 }
 
 export async function sweepOverdueHandoffsAndPauses(): Promise<{ alerted: number }> {
@@ -80,7 +90,7 @@ export async function sweepOverdueHandoffsAndPauses(): Promise<{ alerted: number
 
 async function doSweep(): Promise<{ alerted: number }> {
   const cutoff = new Date(Date.now() - SLA_MIN * 60_000);
-  const ageExpr = (alias: string, col: string) => `EXTRACT(EPOCH FROM (now() - ${alias}.${col})) / 60`;
+
 
   const handoffReqs = (await AppDataSource.getRepository(HandoffRequest)
     .createQueryBuilder('h')
@@ -91,7 +101,7 @@ async function doSweep(): Promise<{ alerted: number }> {
     .select('h.id', 'id')
     .addSelect('h.tenantId', 'tenantId')
     .addSelect('h.sessionId', 'sessionId')
-    .addSelect(ageExpr('h', 'requestedAt'), 'ageMin')
+    .addSelect('h.requestedAt', 'since')
     .where('h.status = :st', { st: 'requested' })
     .andWhere('h.assignedAgentId IS NULL')
     .andWhere("s.status = 'handoff'")
@@ -104,7 +114,7 @@ async function doSweep(): Promise<{ alerted: number }> {
     .select('s.id', 'id')
     .addSelect('s.tenantId', 'tenantId')
     .addSelect('s.id', 'sessionId')
-    .addSelect(ageExpr('s', 'updatedAt'), 'ageMin')
+    .addSelect('s.updatedAt', 'since')
     .where('s.status = :st', { st: 'handoff' })
     .andWhere('s.updatedAt < :cutoff', { cutoff })
     .andWhere(
@@ -119,7 +129,7 @@ async function doSweep(): Promise<{ alerted: number }> {
     .select('s.id', 'id')
     .addSelect('s.tenantId', 'tenantId')
     .addSelect('s.id', 'sessionId')
-    .addSelect(ageExpr('s', 'updatedAt'), 'ageMin')
+    .addSelect('s.updatedAt', 'since')
     .where('s.aiAutoReplyEnabled = false')
     .andWhere("s.guardrailStatus <> 'normal'")
     .andWhere("s.status <> 'closed'")
@@ -142,7 +152,7 @@ async function doSweep(): Promise<{ alerted: number }> {
     .select('s.id', 'id')
     .addSelect('s.tenantId', 'tenantId')
     .addSelect('s.id', 'sessionId')
-    .addSelect(lastAsk, 'askedAt')
+    .addSelect(lastAsk, 'since')
     // Only sessions the BOT owes an answer on: a human-owned or closed session is
     // someone else's job, and a paused one is source 3.
     .where("s.status IN ('bot', 'waiting')")
@@ -151,36 +161,33 @@ async function doSweep(): Promise<{ alerted: number }> {
     .andWhere(`${lastAsk} < :cutoff`, { cutoff })
     .andWhere(`(${lastReply} IS NULL OR ${lastReply} < ${lastAsk})`)
     .limit(BATCH)
-    .getRawMany()) as { id: string; tenantId: string; sessionId: string; askedAt: Date }[];
-
-  // Age comes from the app clock, not the DB clock. `created_at` is `timestamp
-  // without time zone`, so it round-trips through the driver in the API's own
-  // zone; mixing it with `now()` (timestamptz, read in the DB session zone) skews
-  // the age by that offset wherever the two zones differ.
-  const silent: OverdueRow[] = asked.map((r) => ({
-    id: r.id,
-    tenantId: r.tenantId,
-    sessionId: r.sessionId,
-    ageMin: String(Math.max(0, (Date.now() - new Date(r.askedAt).getTime()) / 60_000)),
-  }));
+    .getRawMany()) as OverdueRow[];
 
   let alerted = 0;
-  alerted += await alertAll('handoff', true, handoffReqs); // r.id IS a handoff id
-  alerted += await alertAll('handoff', false, sessionHandoffs); // r.id is a session id
-  alerted += await alertAll('guardrail', false, pauses);
-  alerted += await alertAll('silent', false, silent);
+  alerted += await alertAll('handoff', overdue(handoffReqs), true); // r.id IS a handoff id
+  alerted += await alertAll('handoff', overdue(sessionHandoffs), false); // r.id is a session id
+  alerted += await alertAll('guardrail', overdue(pauses), false);
+  alerted += await alertAll('silent', overdue(asked), false);
   return { alerted };
+}
+
+/** Derive the waiting time from the app clock. See `OverdueRow.since`. */
+function overdue(rows: OverdueRow[]): Overdue[] {
+  return rows.map(({ since, ...row }) => ({
+    ...row,
+    ageMin: Math.max(0, (Date.now() - new Date(since).getTime()) / 60_000),
+  }));
 }
 
 async function alertAll(
   kind: OverdueKind,
+  rows: Overdue[],
   hasHandoffId: boolean,
-  rows: OverdueRow[],
 ): Promise<number> {
   const copy = ALERT[kind];
   let n = 0;
   for (const r of rows) {
-    const ageMin = Math.floor(Number(r.ageMin) || 0);
+    const ageMin = Math.floor(r.ageMin);
     // Clamp (don't skip) so even backlog older than the cap alerts once on first
     // sight; createForTenant's per-bucket dedupe then bounds it to MAX_REALERTS.
     const bucket = Math.min(Math.floor(ageMin / REALERT_MIN), MAX_REALERTS - 1);

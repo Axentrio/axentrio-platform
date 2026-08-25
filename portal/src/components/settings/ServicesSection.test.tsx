@@ -7,17 +7,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { apiGet, apiPost, apiPut } = vi.hoisted(() => ({
+const { apiGet, apiPost, apiPut, apiDelete, toastSuccess, toastWarning } = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
+  apiDelete: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock('../../services/apiClient', () => ({
-  api: { get: apiGet, post: apiPost, put: apiPut, patch: vi.fn(), delete: vi.fn() },
+  api: { get: apiGet, post: apiPost, put: apiPut, patch: vi.fn(), delete: apiDelete },
   extractApiErrorMessage: () => undefined,
 }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccess, error: vi.fn(), info: vi.fn(), warning: toastWarning },
+}));
 
 import { ServicesSection } from './ServicesSection';
 
@@ -584,5 +589,75 @@ describe('ServicesSection — deleting an intake question', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /delete question 1/i }));
     expect(screen.queryByText(/delete this question\?/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByDisplayValue('Temp')).not.toBeInTheDocument());
+  });
+});
+
+/**
+ * Deleting the LAST bookable service turns appointment booking off for the whole bot,
+ * and it used to happen in silence: no warning in the confirm dialog, and a plain
+ * "Service deleted" afterwards. The owner found out when a customer could not book.
+ *
+ * Two guards, because they answer different questions. The dialog warns BEFORE, from the
+ * catalog the portal already holds (an empty gate set is off whatever the availability
+ * rule says). The toast warns AFTER, from the server's own recomputed flag, which also
+ * covers the rule-dependent cases the portal cannot see.
+ */
+describe('ServicesSection — deleting the last bookable service', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const service = (over: Record<string, unknown> = {}) => ({
+    id: 's1', name: 'Cut', bookingMode: 'auto', durationMin: 30, priceDisplayType: 'none',
+    isActive: true, sortOrder: 0, onlineBookable: true, durationMode: 'fixed',
+    bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0, maxHorizonDays: 60,
+    locationType: 'custom', ...over,
+  });
+
+  /** Render the catalog and open the delete confirmation for "Cut". */
+  const openDelete = async (services: unknown[]) => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /delete cut/i }));
+    return screen.getByRole('alertdialog');
+  };
+
+  it('warns in the confirm dialog that booking goes off', async () => {
+    const alert = await openDelete([service()]);
+    expect(within(alert).getByText(/last bookable service/i)).toBeInTheDocument();
+    expect(within(alert).getByText(/turns OFF appointment booking/i)).toBeInTheDocument();
+  });
+
+  it('stays quiet when another bookable service survives', async () => {
+    const alert = await openDelete([service(), service({ id: 's2', name: 'Beard', sortOrder: 1 })]);
+    expect(within(alert).queryByText(/last bookable service/i)).not.toBeInTheDocument();
+  });
+
+  it('does not count an inactive or phone-only service as a survivor', async () => {
+    // Neither is bookable through the chat, so deleting "Cut" still empties the gate set.
+    const alert = await openDelete([
+      service(),
+      service({ id: 's2', name: 'Retired', isActive: false, sortOrder: 1 }),
+      service({ id: 's3', name: 'Phone only', onlineBookable: false, sortOrder: 2 }),
+    ]);
+    expect(within(alert).getByText(/last bookable service/i)).toBeInTheDocument();
+  });
+
+  it('warns again after the delete when the server says booking is off', async () => {
+    apiDelete.mockResolvedValue({ id: 's1', deleted: true, bookingConfigured: false });
+    const alert = await openDelete([service()]);
+    fireEvent.click(within(alert).getByRole('button', { name: /^delete$/i }));
+    await waitFor(() =>
+      expect(toastWarning).toHaveBeenCalledWith(expect.stringMatching(/booking is now OFF/i)),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('confirms normally when booking survived the delete', async () => {
+    apiDelete.mockResolvedValue({ id: 's1', deleted: true, bookingConfigured: true });
+    const alert = await openDelete([service(), service({ id: 's2', name: 'Beard', sortOrder: 1 })]);
+    fireEvent.click(within(alert).getByRole('button', { name: /^delete$/i }));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Service deleted'));
+    expect(toastWarning).not.toHaveBeenCalled();
   });
 });

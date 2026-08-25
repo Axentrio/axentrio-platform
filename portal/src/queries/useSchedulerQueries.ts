@@ -294,13 +294,29 @@ export function useReorderServices(botId?: string) {
   });
 }
 
+/**
+ * Delete one service.
+ *
+ * The server answers whether booking SURVIVED the delete: removing the last bookable
+ * service turns appointment booking off for the bot, and that used to happen in
+ * silence. `bookingConfigured === false` therefore warns instead of confirming.
+ */
 export function useDeleteService(botId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete(withBot(`/scheduler/services/${id}`, botId)),
-    onSuccess: () => {
+    mutationFn: (id: string) =>
+      api.delete<{ id: string; deleted: boolean; bookingConfigured?: boolean }>(
+        withBot(`/scheduler/services/${id}`, botId),
+      ),
+    onSuccess: (data) => {
       invalidateServices(queryClient, botId);
-      toast.success('Service deleted');
+      if (data?.bookingConfigured === false) {
+        toast.warning(
+          'Service deleted. Booking is now OFF for this bot: the assistant cannot offer appointments until you add a bookable service.',
+        );
+      } else {
+        toast.success('Service deleted');
+      }
     },
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to delete service'),
   });

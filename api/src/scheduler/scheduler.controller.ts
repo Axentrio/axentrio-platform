@@ -55,6 +55,8 @@ import { BookingError } from '../booking/booking-providers/types';
 import { ApiError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
+import { isBookingConfigured } from './booking-readiness';
 
 /** Surface a BookingError through the global handler with its real status/code. */
 function asApiError(err: unknown): never {
@@ -767,6 +769,18 @@ export async function reorderServices(req: Request, res: Response): Promise<void
   sendSuccess(res, await readConfig(tenantId, bot));
 }
 
+/**
+ * Delete one service, then report whether booking SURVIVED the delete.
+ *
+ * A portal user deleting the last bookable service silently turned booking off: the
+ * runtime gate went unconfigured, and nothing told the owner. So this route now
+ * recomputes the runtime gate inputs (agent.service.ts: active + online-bookable
+ * services, plus availability-rule existence), writes an audit row, and returns
+ * `bookingConfigured` so the portal can warn.
+ *
+ * No transaction around remove + recompute: the flag is informational, so a
+ * concurrent create racing the recompute at worst shows one stale warning.
+ */
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
@@ -774,9 +788,29 @@ export async function deleteService(req: Request, res: Response): Promise<void> 
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
+  const name = svc.name;
   await repo.remove(svc);
+
+  // The runtime gate set, recomputed exactly as the agent computes it.
+  const remaining = await repo.find({ where: { botId: bot.id, isActive: true, onlineBookable: true } });
+  const hasRule = await AppDataSource.getRepository(AvailabilityRule).existsBy({ botId: bot.id });
+  const bookingConfigured = isBookingConfigured(remaining, hasRule);
+
+  await logAudit(
+    (req as { userId?: string }).userId ?? 'unknown',
+    'scheduler.service_deleted',
+    'service_type',
+    req.params.id,
+    tenantId,
+    { botId: bot.id, name, bookingConfiguredAfter: bookingConfigured },
+  );
   logger.info('[Scheduler] service deleted', { tenantId, botId: bot.id, serviceId: req.params.id });
-  sendSuccess(res, { id: req.params.id, deleted: true });
+  if (!bookingConfigured) {
+    logger.warn('[Scheduler] service delete took booking offline', {
+      tenantId, botId: bot.id, serviceId: req.params.id, name,
+    });
+  }
+  sendSuccess(res, { id: req.params.id, deleted: true, bookingConfigured });
 }
 
 // --- Business-type presets (P4) ---

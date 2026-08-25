@@ -293,6 +293,15 @@ export const ServicesSection: React.FC<{
   const services = data?.services ?? [];
   const saving = create.isPending || update.isPending;
 
+  /**
+   * Deleting this one leaves no service the assistant can book: an empty gate set means
+   * booking is off whatever the availability rule says, so the dialog can warn BEFORE
+   * the delete. The rule-dependent cases are covered by the server's own flag afterwards.
+   */
+  const deletingLastBookable =
+    !!pendingDelete &&
+    !services.some((x) => x.id !== pendingDelete.id && x.isActive && x.onlineBookable);
+
   const openNew = () => {
     setForm(BLANK);
     setEditing('new');
@@ -481,7 +490,11 @@ export const ServicesSection: React.FC<{
             <AlertDialogTitle>Delete service?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
-                ? `"${pendingDelete.name}" will be permanently deleted. Existing bookings are kept but lose their link to this service. To hide it from customers without deleting, use the toggle instead. This can't be undone.`
+                ? `"${pendingDelete.name}" will be permanently deleted. Existing bookings are kept but lose their link to this service. To hide it from customers without deleting, use the toggle instead. This can't be undone.${
+                    deletingLastBookable
+                      ? ' This is the last bookable service: deleting it turns OFF appointment booking for this bot until you add another.'
+                      : ''
+                  }`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -6,7 +6,10 @@
  * Lifecycle states:
  *  - open            — Qualifying Pain in the current 7-day window
  *  - dormant         — previously open, pain subsided without a KB fix
- *  - resolved_data   — a KnowledgeDocument now satisfies the topic (a "Win")
+ *  - resolved_data   - the judgments show the topic is now answered: >=3 distinct
+ *                      askers with <=1 unsatisfied in the window (a "Win"). Set from
+ *                      statistics alone (gap-aggregation.service.ts) - nothing checks
+ *                      that a KnowledgeDocument exists.
  *  - resolved_manual — tenant marked it handled outside the KB (a "Win")
  *  - archived        — tenant dismissed it
  */

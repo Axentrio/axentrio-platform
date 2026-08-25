@@ -51,6 +51,7 @@ import { app } from '../../server';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { computeSlots } from '../../booking/booking-providers/slot-engine';
 import { createTestTenant, createTestAnchorBot, createTestUser } from '../helpers/factories';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 
 const fullAiBody = (over: Record<string, unknown> = {}) => ({
   enabled: true,
@@ -158,8 +159,11 @@ describe('Per-bot AI settings', () => {
       const res = await request(app).get(`/api/v1/bots/${b.id}/ai-settings`);
       expect(res.status).toBe(200);
       expect(res.body.data.enabled).toBe(true);
-      expect(res.body.data.provider).toBe('openai');
-      expect(res.body.data.model).toBe('gpt-5.6-luna');
+      // The contract is "the API reports the platform default", not a specific
+      // model name. A literal here drifts on every model swap: that is what
+      // turned the gpt-5.6-luna change red in CI.
+      expect(res.body.data.provider).toBe(DEFAULT_PROVIDER);
+      expect(res.body.data.model).toBe(DEFAULT_MODEL);
       expect(res.body.data.brandVoice.templateId).toBeNull();
       expect(res.body.data.guardrails.confidenceThreshold).toBe(0.7);
       expect(res.body.data.hasApiKey).toBe(false);

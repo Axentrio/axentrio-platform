@@ -105,9 +105,11 @@ export async function updateBotAiSettings(req: Request, res: Response) {
   const existing = (bot.settings?.ai ?? {}) as Partial<BotAi>;
 
   const updatedBotAi: BotAi = {
-    // Out of scope for this slice — preserve existing, defaulting if absent.
-    provider: existing.provider ?? 'openai',
-    model: existing.model ?? 'gpt-5.6-luna',
+    // Out of scope for this slice — preserve existing, else the PLATFORM default
+    // (DEFAULT_PROVIDER/DEFAULT_MODEL, honouring PLATFORM_LLM_MODEL) rather than
+    // a literal that would drift from the model the agent actually runs.
+    provider: existing.provider ?? DEFAULT_PROVIDER,
+    model: existing.model ?? DEFAULT_MODEL,
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,

@@ -10,6 +10,7 @@
  */
 import type { BotSettings } from '../database/entities/Bot';
 import { DEFAULT_SKILLS } from './default-skills';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import {
   DEFAULT_GREETING_BY_LANGUAGE,
   GREETING_QUICK_REPLIES_BY_LANGUAGE,
@@ -37,8 +38,12 @@ export const WIDGET_GREETING_QUICK_REPLIES = GREETING_QUICK_REPLIES_BY_LANGUAGE.
 export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
   return {
     enabled: true,
-    provider: 'openai',
-    model: 'gpt-5.6-luna',
+    // Not literals. The platform standardises provider and model in llm/defaults,
+    // and PLATFORM_LLM_MODEL can override it at runtime, so a literal here would
+    // report one model while the agent ran another — which is exactly the drift
+    // that shipped a red CI on the gpt-5.6-luna switch.
+    provider: DEFAULT_PROVIDER,
+    model: DEFAULT_MODEL,
     language: 'en',
     brandVoice: { name: `${name} Assistant`, tone: 'friendly', templateId: null },
     guardrails: {

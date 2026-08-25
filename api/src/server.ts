@@ -868,19 +868,15 @@ async function startServer(): Promise<void> {
       logger.info("[lead-enrich] sweep enabled (5m tick)");
     }
 
-    // Cleanup old agent traces (30-day retention)
-    const cleanupAgentTraces = async () => {
-      try {
-        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        await AppDataSource.query(
-          `DELETE FROM agent_traces WHERE created_at < $1`,
-          [cutoff],
-        );
-      } catch (error) {
-        logger.error("Agent trace cleanup failed", { error });
-      }
-    };
-    setInterval(cleanupAgentTraces, 24 * 60 * 60 * 1000); // Daily
+    // Agent-trace retention (30 days). The schedule lives in the service - see
+    // startAgentTraceRetentionSweep for why it must also run at boot.
+    //
+    // Imported here, not at the top of the file, to match every other sweep wired in
+    // this boot block.
+    const { startAgentTraceRetentionSweep } = await import(
+      "./agent/trace-retention.service"
+    );
+    startAgentTraceRetentionSweep();
 
     // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
     // env flag, because it is a NO-OP for every tenant that has not chosen a period,

@@ -46,6 +46,8 @@ import { generateGapRecommendations } from "./gap-recommendation.service";
 import { notifyHighPriorityGaps } from "./high-priority-notification.service";
 import {
   claimInsightsLease,
+  claimAnalysisRun,
+  getAnalysisStatus,
   releaseAnalysisRun,
 } from "./analysis-eligibility.service";
 import { logger } from "../utils/logger";
@@ -420,23 +422,47 @@ async function runAutomaticInsightsPass(
       const digestDue =
         entitlements.features.gapEvidence && (await weeklyDigestMissing(id));
       const digestAt = digestDue ? now : undefined;
-      // Only tiers whose analysis is AUTOMATIC. Essential and Pro analyse on demand
-      // (`POST /insights/analyse`) behind a minimum-conversations gate and a cooldown,
-      // so including them here would spend their LLM budget on a schedule they did not
-      // ask for and reset the watermark their own button reads. Read from the policy,
-      // never a tier name, so an override moves a tenant between the two models with
-      // one source of truth (ADR-0013).
+      // Enterprise analyses continuously. Essential and Pro have a button instead, and
+      // that button is the only thing that ever ran for them - so on production every
+      // one of those tenants sat months out of date with a hundred unjudged
+      // conversations, and the feature they pay for was silently switched off. A control
+      // nobody remembers to press is not a control.
+      //
+      // So the schedule now runs their analysis too, but ONLY when their OWN button
+      // would be allowed to right now: the same minimum-conversations gate and the same
+      // cooldown (analysis-policy.ts). That spends exactly what a diligent owner
+      // pressing it would spend and never more - at most one run a day on Pro, one in
+      // three days on Essential, and nothing at all for a tenant with no new chats.
+      // `claimAnalysisRun` stamps the same clock the button reads, so the two share one
+      // cooldown instead of racing each other.
       if (!automatic) {
-        if (!digestAt) {
+        const scheduled = (await getAnalysisStatus(id, now)).eligible;
+        if (!scheduled) {
+          // Not due. Fall through to the digest-only path, which reads existing
+          // aggregates and spends no LLM budget.
+          if (!digestAt) {
+            continue;
+          }
+          if (!(await claimInsightsLease(id, now))) {
+            if (nightly) deferredNightly.push({ id, digestAt, automatic: false });
+            continue;
+          }
+          try {
+            await generateDigest(id, digestAt);
+          } finally {
+            await releaseAnalysisRun(id);
+          }
           continue;
         }
-        if (!(await claimInsightsLease(id, now))) {
-          if (nightly) deferredNightly.push({ id, digestAt, automatic: false });
+        if (!(await claimAnalysisRun(id, now))) {
+          if (nightly && digestAt) deferredNightly.push({ id, digestAt, automatic: false });
           continue;
         }
         try {
-          // Pro analysis stays manual; the leased snapshot reads existing aggregates only.
-          await generateDigest(id, digestAt);
+          await refreshTenantInsights(id, now, {
+            generateDigest: digestAt !== undefined,
+            digestAt,
+          });
         } finally {
           await releaseAnalysisRun(id);
         }

@@ -117,8 +117,19 @@ const claimLeaseMock = vi.hoisted(() =>
 const releaseLeaseMock = vi.hoisted(() =>
   vi.fn(async (_tenantId: string) => {}),
 );
+const claimRunMock = vi.hoisted(() => vi.fn(async (_tenantId: string) => true));
+/** Per-tenant answer to "would this tenant's own Analyse button be allowed right now?" */
+const scheduledEligible = vi.hoisted(() => ({ byTenant: {} as Record<string, boolean> }));
+const analysisStatusMock = vi.hoisted(() =>
+  vi.fn(async (tenantId: string) => ({
+    eligible: scheduledEligible.byTenant[tenantId] ?? false,
+    reason: scheduledEligible.byTenant[tenantId] ? null : ('not_enough_chats' as const),
+  })),
+);
 vi.mock("../../insights/analysis-eligibility.service", () => ({
   claimInsightsLease: claimLeaseMock,
+  claimAnalysisRun: claimRunMock,
+  getAnalysisStatus: analysisStatusMock,
   releaseAnalysisRun: releaseLeaseMock,
 }));
 
@@ -266,6 +277,10 @@ beforeEach(() => {
   claimLeaseMock.mockReset();
   claimLeaseMock.mockResolvedValue(true);
   releaseLeaseMock.mockReset();
+  claimRunMock.mockClear();
+  claimRunMock.mockResolvedValue(true);
+  analysisStatusMock.mockClear();
+  scheduledEligible.byTenant = {};
   judgeMock.mockResolvedValue({
     hadQuestion: false,
     satisfied: null,
@@ -577,7 +592,7 @@ describe("refreshTenantInsights — transcript decryption", () => {
   });
 });
 
-describe("runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, never tiers)", () => {
+describe("runRefreshInsightsOnce — who the schedule analyses (ADR-0013: flags, never tiers)", () => {
   /** Monday 00:00 UTC of the week containing `d` — mirrors weekStartFor in digest.service. */
   function weekStartOf(d: Date): string {
     const x = new Date(d.getTime());
@@ -586,11 +601,10 @@ describe("runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, n
     return x.toISOString().slice(0, 10);
   }
 
-  it("refreshes Enterprise and leaves Essential and Pro to their own button", async () => {
-    // Essential and Pro analyse on demand behind a minimum-conversations gate and a
-    // cooldown. Refreshing them here would spend their LLM budget on a schedule they
-    // never asked for AND move the watermark their own button counts against, so the
-    // button would report zero new conversations every morning.
+  it("analyses Enterprise always, and leaves an on-demand tier alone until its own gate opens", async () => {
+    // Essential and Pro carry a minimum-conversations gate and a cooldown. The schedule
+    // now runs their analysis too, but only when their own button would be allowed - so
+    // with nobody due, this pass must still touch Enterprise only.
     st.tenants = [
       { id: "ent-1" },
       { id: "ess-1" },
@@ -631,6 +645,52 @@ describe("runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, n
       "ent-2",
     ]);
     expect(generateDigestMock).toHaveBeenCalledWith("pro-1", expect.any(Date));
+  });
+
+  it("analyses a Pro tenant on the schedule once its own gate would let the button run", async () => {
+    // The bug this fixes: below Enterprise nothing ever ran unless a human pressed
+    // Analyse, and on production nobody had since 2026-08-13 while 131 conversations
+    // waited. Being due is the tenant's own rule, not a new one.
+    st.tenants = [{ id: "pro-1" }, { id: "ess-1" }];
+    st.entitled = { "pro-1": true, "ess-1": true };
+    st.band = { "pro-1": "pro", "ess-1": "essential" };
+    scheduledEligible.byTenant = { "pro-1": true };
+
+    await runIntradayInsightsOnce(NOW);
+
+    expect(aggregateMock.mock.calls.map((c) => c[0])).toEqual(["pro-1"]);
+    // Through claimAnalysisRun, NOT the plain lease: that stamps the same clock the
+    // button reads, so a scheduled run puts the button into its cooldown instead of the
+    // two firing back to back.
+    expect(claimRunMock.mock.calls.map((c) => c[0])).toEqual(["pro-1"]);
+    expect(claimLeaseMock).not.toHaveBeenCalledWith("pro-1", expect.anything());
+    expect(releaseLeaseMock.mock.calls.map((c) => c[0])).toEqual(["pro-1"]);
+  });
+
+  it("does not analyse when a manual run already holds the claim", async () => {
+    st.tenants = [{ id: "pro-1" }];
+    st.entitled = { "pro-1": true };
+    st.band = { "pro-1": "pro" };
+    scheduledEligible.byTenant = { "pro-1": true };
+    claimRunMock.mockResolvedValueOnce(false);
+
+    await runIntradayInsightsOnce(NOW);
+
+    expect(aggregateMock).not.toHaveBeenCalled();
+  });
+
+  it("does one run for a due Pro tenant that also owes a Monday snapshot", async () => {
+    const monday = new Date("2026-06-15T02:00:00Z");
+    st.tenants = [{ id: "pro-1" }];
+    st.entitled = { "pro-1": true };
+    st.band = { "pro-1": "pro" };
+    scheduledEligible.byTenant = { "pro-1": true };
+
+    await runRefreshInsightsOnce(monday);
+
+    expect(aggregateMock.mock.calls.map((c) => c[0])).toEqual(["pro-1"]);
+    expect(generateDigestMock).toHaveBeenCalledTimes(1);
+    expect(claimRunMock).toHaveBeenCalledTimes(1);
   });
 
   it("still refreshes nobody when no tenant has insights at all", async () => {

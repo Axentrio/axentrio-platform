@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { LLMProvider, ChatMessage, ContentPart, contentToText, LLMOptions, LLMResponse, ToolCall } from './llm.types';
+import { sdkLogger, SDK_LOG_LEVEL } from './sdk-logger';
 
 type UserContentPart = OpenAI.Chat.ChatCompletionContentPart;
 
@@ -43,7 +44,14 @@ export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
 
   constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey, timeout: 30000 });
+    // logger/logLevel: the SDK retries twice on its own, and that was invisible.
+    // See llm/sdk-logger. Behaviour is unchanged.
+    this.client = new OpenAI({
+      apiKey,
+      timeout: 30000,
+      logger: sdkLogger('openai'),
+      logLevel: SDK_LOG_LEVEL,
+    });
   }
 
   async chat(messages: ChatMessage[], options: LLMOptions): Promise<LLMResponse> {

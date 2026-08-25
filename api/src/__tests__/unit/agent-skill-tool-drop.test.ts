@@ -3,11 +3,12 @@ import { AgentService } from '../../agent/agent.service';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
 
-// Composable-templates Phase 3b — when SKILL_STATE_ENABLED is on, an entitled-but-
-// UNCONFIGURED booking skill has its tools physically dropped before the model
-// sees them (no phantom bookings). When off, behaviour is unchanged. The drop keys
-// off the resolved skill STATE, which keys off the active modules — so booking must
-// be entitlement-active here (mocked) AND unconfigured (no availability rule/service).
+// Skill-state tool drop - ON by default. An entitled-but-UNCONFIGURED booking skill
+// has its tools physically dropped before the model sees them (no phantom bookings).
+// SKILL_STATE_ENABLED=false is the break-glass that restores the old prompt-only
+// behaviour. The drop keys off the resolved skill STATE, which keys off the active
+// modules - so booking must be entitlement-active here (mocked) AND unconfigured
+// (no availability rule/service).
 
 const mockProvider: LLMProvider = { chat: vi.fn() };
 vi.mock('../../llm/provider-factory', () => ({ getProvider: () => mockProvider }));
@@ -71,7 +72,7 @@ const run = (agent: AgentService) =>
 const buildToolNames = () =>
   (mockPromptBuilder.build.mock.calls[0][2] as ToolAdapter[]).map((t) => t.name);
 
-describe('AgentService — Phase 3b skill-state tool-drop', () => {
+describe('AgentService — skill-state tool-drop', () => {
   let agent: AgentService;
 
   beforeEach(() => {
@@ -82,16 +83,16 @@ describe('AgentService — Phase 3b skill-state tool-drop', () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it('flag OFF (default): unconfigured booking keeps its tools (unchanged behaviour)', async () => {
-    await run(agent);
-    expect(buildToolNames()).toContain('create_booking');
-  });
-
-  it('flag ON: unconfigured booking has its tools dropped, other tools kept', async () => {
-    vi.stubEnv('SKILL_STATE_ENABLED', 'true');
+  it('default (flag unset): unconfigured booking has its tools dropped, other tools kept', async () => {
     await run(agent);
     const names = buildToolNames();
     expect(names).not.toContain('create_booking');
     expect(names).toContain('kb_search');
+  });
+
+  it('kill switch (SKILL_STATE_ENABLED=false): tools are kept, prompt-only behaviour', async () => {
+    vi.stubEnv('SKILL_STATE_ENABLED', 'false');
+    await run(agent);
+    expect(buildToolNames()).toContain('create_booking');
   });
 });

@@ -706,8 +706,8 @@ export class AgentService {
       const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
       // composableEnabled / boundSkillIds / expectedModuleIds / selectedSkillIds are
       // hoisted above (so the module prompt sections are gated in lockstep with tools).
-      // Resolve each selected/active skill's STATE for the trace; Phase 3b (behind
-      // SKILL_STATE_ENABLED) then drops a non-ready skill's tools (no phantom bookings).
+      // Resolve each selected/active skill's STATE for the trace; the tool drop below
+      // then removes a non-ready skill's tools (no phantom bookings).
       const skillStates = resolveSkillStates({
         selected: selectedSkillIds,
         active: activeModuleIds,
@@ -740,12 +740,21 @@ export class AgentService {
         const av = aiSettings as { templateVariables?: Record<string, string> };
         av.templateVariables = { ...varDefaults, ...(av.templateVariables ?? {}) };
       }
-      // Phase 3b (behind SKILL_STATE_ENABLED, default OFF). ON → drop a non-ready
-      // skill's tools before the model sees them, so an entitled-but-unconfigured
-      // booking bot physically cannot call create_booking (no phantom bookings);
-      // the existing tool-driven composer then renders "BOOKING (NOT AVAILABLE)".
-      // OFF → unchanged (the prompt drives off bookingConfigured, as before).
-      if (process.env.SKILL_STATE_ENABLED === 'true') {
+      // Skill-state tool drop - ON by default. A non-ready (entitled but
+      // UNCONFIGURED) skill's tools are removed before the model sees them, so an
+      // unconfigured booking bot physically cannot call create_booking (no phantom
+      // bookings). The tool-driven composer then renders "BOOKING (NOT AVAILABLE)"
+      // (compose-system-prompt.ts:613, which records `toolAbsent` at :618).
+      //
+      // SKILL_STATE_ENABLED=false is the break-glass that restores the old
+      // prompt-only gating (same pattern as GUARDRAILS_KILL_SWITCH): no deploy
+      // needed, the prompt keeps driving off bookingConfigured.
+      //
+      // The drop only fires for skills PRESENT in `skillStates`, i.e. when the
+      // module is entitlement-active. A legacy tenant with no active modules gets
+      // an empty state map and dropUnreadySkillTools returns the same array
+      // (pinned by skill-state.test.ts "drops nothing for an empty state map").
+      if (process.env.SKILL_STATE_ENABLED !== 'false') {
         tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
       }
       const proactiveAsk = await this.mayAskForContact(session, tools);

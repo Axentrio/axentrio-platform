@@ -26,10 +26,23 @@ const RULE = {
     tue: [{ start: '09:00', end: '17:00' }],
   },
 };
+// ...and one genuinely bookable service, so booking resolves CONFIGURED. Without it
+// the skill-state drop removes the booking tools before the model sees them.
+const SERVICE = {
+  id: 'svc-1',
+  name: 'Consult',
+  bookingMode: 'auto',
+  durationMin: 30,
+  isActive: true,
+  onlineBookable: true,
+  priceDisplayType: 'none',
+  customerAddressRequired: false,
+};
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
-    getRepository: (entity: any) => {
+    getRepository: (entity: { name?: string }) => {
       if (entity?.name === 'AvailabilityRule') return { findOne: async () => RULE };
+      if (entity?.name === 'ServiceType') return { find: async () => [SERVICE], findOne: async () => SERVICE };
       return { find: async () => [], findOne: async () => null };
     },
   },
@@ -152,7 +165,7 @@ describe('AgentService — which source feeds {openingHours}', () => {
     const { openingHours } = liveFields();
     expect(openingHours).toContain('03:03'); // operational hours win when both stores exist
     expect(openingHours).not.toContain('09:00');
-    // Empty catalog ⇒ no travel services; the flag still reaches the composer.
+    // No travel service in the catalog ⇒ false; the flag still reaches the composer.
     expect(liveFields()).toMatchObject({ hasTravelServices: false });
   });
 });

@@ -6,7 +6,7 @@
  * Mocks the booking service to return realistic Cal.com responses.
  * Verifies: tool chaining, precondition enforcement, off-topic handling, trace logging.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { AgentService } from '../../agent/agent.service';
 import { ToolRegistry } from '../../agent/tool-registry';
 import { PromptBuilder } from '../../agent/prompt-builder';
@@ -15,6 +15,14 @@ import { TraceLogger } from '../../agent/trace-logger';
 import type { LLMResponse } from '../../llm/llm.types';
 import type { Tenant } from '../../database/entities/Tenant';
 import type { ChatSession } from '../../database/entities/ChatSession';
+
+/** The slice of a TypeORM repository the agent loop touches in this test. */
+interface MockRepo {
+  save: Mock;
+  create: Mock;
+  find: Mock;
+  findOne: Mock;
+}
 
 // ── Mock LLM provider ──────────────────────────────────────────────
 const mockChat = vi.fn();
@@ -50,16 +58,42 @@ vi.mock('../../llm/rag.service', () => ({
 }));
 
 // ── Mock AppDataSource (for trace logger + tool context) ────────────
-vi.mock('../../database/data-source', () => ({
-  AppDataSource: {
-    getRepository: vi.fn().mockReturnValue({
-      save: vi.fn().mockResolvedValue({ id: 'trace-1' }),
-      create: vi.fn().mockImplementation((data: any) => data),
-      find: vi.fn().mockResolvedValue([]),
-      findOne: vi.fn().mockResolvedValue(null),
-    }),
-  },
-}));
+// Booking must resolve CONFIGURED here (one active, online-bookable service AND an
+// availability rule), otherwise the skill-state drop removes the booking tools
+// before the model sees them and the flow under test never runs.
+const SERVICE = {
+  id: 'svc-1',
+  name: 'Consult',
+  bookingMode: 'auto',
+  durationMin: 30,
+  isActive: true,
+  onlineBookable: true,
+  priceDisplayType: 'none',
+  customerAddressRequired: false,
+};
+const RULE = { timezone: 'Europe/Brussels', availabilityMode: 'business_hours', weeklyHours: {} };
+vi.mock('../../database/data-source', () => {
+  // One repo instance per entity: the trace assertions read back the very spy the
+  // TraceLogger used, so getRepository must be stable per entity, not per call.
+  const repos = new Map<string, MockRepo>();
+  return {
+    AppDataSource: {
+      getRepository: vi.fn((entity?: { name?: string }) => {
+        const name = entity?.name ?? 'AgentTrace';
+        const cached = repos.get(name);
+        if (cached) return cached;
+        const repo: MockRepo = {
+          save: vi.fn().mockResolvedValue({ id: 'trace-1' }),
+          create: vi.fn().mockImplementation((data: unknown) => data),
+          find: vi.fn().mockResolvedValue(name === 'ServiceType' ? [SERVICE] : []),
+          findOne: vi.fn().mockResolvedValue(name === 'AvailabilityRule' ? RULE : null),
+        };
+        repos.set(name, repo);
+        return repo;
+      }),
+    },
+  };
+});
 
 // Multi-bot Phase 4 (#16d): AgentService now resolves bot config via the
 // bot-config service. Stub it to surface the test's `tenant.settings.ai`

@@ -82,6 +82,36 @@ function getClient(): OpenAI {
 }
 
 /**
+ * The result for text that must reach the index exactly as written.
+ *
+ * Two callers: documents too short to be worth an LLM call, and documents marked
+ * `metadata.verbatim` (a Gap answer typed by the business owner - see
+ * `insights/gap-answer.service.ts`). For the second one this is a correctness
+ * requirement, not a saving: `transform()` below rewrites a price list and REPLACES
+ * low-value text with the model's own summary, so a promise the owner made to a
+ * customer would reach that customer as a paraphrase.
+ */
+export function passthrough(rawText: string, qualityReason: string): PreprocessResult {
+  const originalCharCount = rawText.length;
+  return {
+    transformedText: rawText,
+    qualityReport: {
+      contentType: 'prose',
+      contentSummary: '',
+      originalCharCount,
+      processedCharCount: originalCharCount,
+      strippedCharCount: 0,
+      transformedSections: 0,
+      passthroughSections: 1,
+      strippedSections: 0,
+      qualityScore: 'excellent',
+      qualityReason,
+      estimatedTokenCost: 0,
+    },
+  };
+}
+
+/**
  * Preprocess extracted document text.
  * Classifies content type and transforms non-prose sections into searchable prose.
  * Returns transformed text and a quality report (minus chunksCreated, which is set later).
@@ -92,22 +122,7 @@ export async function preprocess(rawText: string): Promise<PreprocessResult> {
   // Skip preprocessing for very short documents — not worth the LLM call
   if (originalCharCount < MIN_CHARS_FOR_PREPROCESSING) {
     logger.info(`[Preprocessor] Document too short (${originalCharCount} chars), skipping`);
-    return {
-      transformedText: rawText,
-      qualityReport: {
-        contentType: 'prose',
-        contentSummary: '',
-        originalCharCount,
-        processedCharCount: originalCharCount,
-        strippedCharCount: 0,
-        transformedSections: 0,
-        passthroughSections: 1,
-        strippedSections: 0,
-        qualityScore: 'excellent',
-        qualityReason: 'Short document, passed through without preprocessing.',
-        estimatedTokenCost: 0,
-      },
-    };
+    return passthrough(rawText, 'Short document, passed through without preprocessing.');
   }
 
   try {

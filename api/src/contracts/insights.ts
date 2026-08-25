@@ -22,6 +22,14 @@ export interface GapDto {
   lastSeenAt: string;
   resolvedAt: string | null;
   archivedAt: string | null;
+  /**
+   * The knowledge document that answers this Gap, or null when nobody has answered it.
+   * Drives the "Answer this" affordance: the FK is ON DELETE SET NULL, so deleting the
+   * document makes the Gap answerable again - which is the truth, the topic is unanswered.
+   */
+  answerDocumentId: string | null;
+  /** When the answer was published. Audit only; never gate on this (see answerDocumentId). */
+  answeredAt: string | null;
 }
 
 export interface InsightsMeta {

@@ -6,7 +6,7 @@ import { extractPdf } from "./document-extractors/pdf.extractor";
 import { extractDocx } from "./document-extractors/docx.extractor";
 import { chunkText } from "./chunking.service";
 import { embed, embedBatch } from "./embedding.service";
-import { preprocess } from "./content-preprocessor.service";
+import { preprocess, passthrough } from "./content-preprocessor.service";
 import { config } from "../config/environment";
 import { logger } from "../utils/logger";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
@@ -75,11 +75,18 @@ export function createIngestionProcessor(
         );
       }
 
-      // Preprocess: classify and transform content
-      const preprocessResult = await preprocess(text);
+      // Preprocess: classify and transform content. A document marked
+      // `metadata.verbatim` skips it entirely, because the preprocessor REWRITES a
+      // price list and REPLACES low-value text with the model's own summary. That is
+      // right for a scraped page and wrong for text a business owner typed as their
+      // own answer to a customer (see insights/gap-answer.service.ts).
+      const verbatim = doc.metadata?.verbatim === true;
+      const preprocessResult = verbatim
+        ? passthrough(text, 'Verbatim document, published exactly as written.')
+        : await preprocess(text);
       const processedText = preprocessResult.transformedText;
       logger.info(
-        `[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})`,
+        `[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})${verbatim ? ' [verbatim]' : ''}`,
       );
 
       // Re-check for stale job after LLM preprocessing

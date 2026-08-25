@@ -37,6 +37,11 @@ import type {
   SentimentTrendResponse,
 } from '../contracts/insights';
 import { decrypt } from '../utils/encryption';
+import { requireRole } from '../middleware/auth.middleware';
+import { validate } from '../middleware/validate';
+import { answerGapSchema } from '../schemas/insights.schema';
+import { answerGap } from '../insights/gap-answer.service';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
@@ -241,6 +246,10 @@ router.get(
         lastSeenAt: g.last_seen_at as string,
         resolvedAt: (g.resolved_at ?? null) as string | null,
         archivedAt: (g.archived_at ?? null) as string | null,
+        // `g.*` is a raw row, so these read snake_case. The portal hides the "Answer
+        // this" button while answerDocumentId is set; answeredAt is display only.
+        answerDocumentId: (g.answer_document_id ?? null) as string | null,
+        answeredAt: (g.answered_at ?? null) as string | null,
       };
     });
     if (priorityEnabled) gapDtos.sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0));
@@ -365,6 +374,38 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const gap = await transitionGap(insightsTenantId(req) as string, req.params.gapId, 'archived');
     sendSuccess(res, { id: gap.id, status: gap.status });
+  }),
+);
+
+/**
+ * POST /insights/:gapId/answer
+ * The owner writes the answer to an unanswered topic; it becomes tenant knowledge the
+ * bot serves on the next turn.
+ *
+ * `requireRole('admin')` is not decoration. This router had no role gate, and the text
+ * posted here is repeated to customers verbatim - so it needs the same authority as
+ * `POST /knowledge/documents` (knowledge.routes.ts), which is admin-only. A billing gate
+ * is not an authorization gate.
+ *
+ * The Gap status is left alone on purpose: only the judgments close a topic.
+ */
+router.post(
+  '/:gapId/answer',
+  requireRole('admin'),
+  requireInsightsFeature('gapInsights'),
+  validate(answerGapSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = insightsTenantId(req) as string;
+    const result = await answerGap(tenantId, req.params.gapId, req.body.answer);
+    await logAudit(
+      (req as ProvisionedRequest).userId!,
+      'insights.gap_answered',
+      'chatbot_gap',
+      result.id,
+      tenantId,
+      { documentId: result.answerDocumentId },
+    );
+    sendSuccess(res, result);
   }),
 );
 

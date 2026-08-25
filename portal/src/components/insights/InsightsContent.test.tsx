@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { insightsRef, experimentsRef, sentimentRef, demandRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
+const { insightsRef, experimentsRef, sentimentRef, demandRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate, answerMutateAsync } = vi.hoisted(() => ({
   insightsRef: { current: null as Record<string, unknown> | null },
   experimentsRef: { current: { experiments: [] } as Record<string, unknown> },
   sentimentRef: { current: { windowDays: 30, timeseries: [] } as Record<string, unknown> },
@@ -13,6 +13,7 @@ const { insightsRef, experimentsRef, sentimentRef, demandRef, digestRef, hasFeat
   archiveMutate: vi.fn(),
   dismissMutate: vi.fn(),
   setEmailMutate: vi.fn(),
+  answerMutateAsync: vi.fn(),
 }));
 
 vi.mock('../../queries/useInsightsQueries', () => ({
@@ -20,6 +21,7 @@ vi.mock('../../queries/useInsightsQueries', () => ({
   useGapEvidence: () => ({ data: undefined, isLoading: false }),
   useResolveGap: () => ({ mutate: resolveMutate, isPending: false }),
   useArchiveGap: () => ({ mutate: archiveMutate, isPending: false }),
+  useAnswerGap: () => ({ mutateAsync: answerMutateAsync, isPending: false }),
   useExperiments: () => ({ data: experimentsRef.current, isLoading: false }),
   useSentimentTrend: () => ({ data: sentimentRef.current, isLoading: false }),
   useLeadDemand: () => ({ data: demandRef.current, isLoading: false }),
@@ -31,6 +33,8 @@ vi.mock('../../queries/useInsightsQueries', () => ({
 vi.mock('../../queries/useEntitlementsQueries', () => ({
   useHasFeature: (key: string) => hasFeatureRef.current[key] ?? true,
 }));
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { InsightsContent } from './InsightsContent';
 
@@ -48,6 +52,8 @@ function gap(over: Partial<Record<string, unknown>> = {}) {
     lastSeenAt: '2026-06-11T00:00:00Z',
     resolvedAt: null,
     archivedAt: null,
+    answerDocumentId: null,
+    answeredAt: null,
     ...over,
   };
 }
@@ -75,6 +81,8 @@ beforeEach(() => {
   archiveMutate.mockReset();
   dismissMutate.mockReset();
   setEmailMutate.mockReset();
+  answerMutateAsync.mockReset();
+  answerMutateAsync.mockResolvedValue({ id: 'g1', answerDocumentId: 'd1', answeredAt: '2026-06-12T00:00:00Z' });
 });
 
 function digest(over: Partial<Record<string, unknown>> = {}) {
@@ -178,6 +186,48 @@ describe('InsightsContent — gap surface', () => {
     render(<InsightsContent />);
     expect(screen.getByText(/runs automatically throughout the day/i)).toBeInTheDocument();
     expect(screen.queryByText(/press analyse to update/i)).not.toBeInTheDocument();
+  });
+
+  it('offers "Answer this" on an unanswered gap', () => {
+    render(<InsightsContent />);
+    expect(screen.getByRole('button', { name: /answer this/i })).toBeInTheDocument();
+  });
+
+  it('replaces the button with the answered line once a document answers the gap', () => {
+    insightsRef.current = data([
+      gap({ answerDocumentId: 'd1', answeredAt: '2026-06-12T00:00:00Z' }),
+    ]);
+    render(<InsightsContent />);
+    expect(screen.queryByRole('button', { name: /answer this/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/answer added/i)).toBeInTheDocument();
+  });
+
+  it('offers "Answer this" again when the document was deleted but answeredAt remains', () => {
+    // The FK is ON DELETE SET NULL and the timestamp survives, so answeredAt alone
+    // must never hide the button - the topic really is unanswered again.
+    insightsRef.current = data([gap({ answerDocumentId: null, answeredAt: '2026-06-12T00:00:00Z' })]);
+    render(<InsightsContent />);
+    expect(screen.getByRole('button', { name: /answer this/i })).toBeInTheDocument();
+    expect(screen.queryByText(/answer added/i)).not.toBeInTheDocument();
+  });
+
+  it('publishes the typed answer for the gap', async () => {
+    const answer = 'We replace a faulty unit within 30 days of purchase.';
+    const user = userEvent.setup();
+    render(<InsightsContent />);
+    await user.click(screen.getByRole('button', { name: /answer this/i }));
+    await user.type(screen.getByLabelText(/your answer/i), answer);
+    await user.click(screen.getByRole('button', { name: /^publish$/i }));
+    expect(answerMutateAsync).toHaveBeenCalledWith({ gapId: 'g1', answer });
+  });
+
+  it('keeps Publish disabled until the answer is long enough', async () => {
+    const user = userEvent.setup();
+    render(<InsightsContent />);
+    await user.click(screen.getByRole('button', { name: /answer this/i }));
+    await user.type(screen.getByLabelText(/your answer/i), 'hello');
+    expect(screen.getByRole('button', { name: /^publish$/i })).toBeDisabled();
+    expect(answerMutateAsync).not.toHaveBeenCalled();
   });
 });
 

@@ -13,6 +13,7 @@ import {
   useInsights,
   useGapEvidence,
   useResolveGap,
+  useAnswerGap,
   useDigest,
   useSetDigestEmail,
   useSentimentTrend,
@@ -58,6 +59,19 @@ describe('useInsightsQueries', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(apiPost).toHaveBeenCalledWith('/insights/g1/resolve');
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['insights'] });
+  });
+
+  it('useAnswerGap posts the answer and invalidates the insights AND knowledge caches', async () => {
+    const answer = 'We replace a faulty unit within 30 days of purchase.';
+    apiPost.mockResolvedValue({ id: 'g1', answerDocumentId: 'd1', answeredAt: '2026-06-12T00:00:00Z' });
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useAnswerGap(), { wrapper });
+    result.current.mutate({ gapId: 'g1', answer });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiPost).toHaveBeenCalledWith('/insights/g1/answer', { answer });
+    // The answer becomes a knowledge document, so the Knowledge page is stale too.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['insights'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['knowledge'] });
   });
 
   it('useDigest fetches GET /insights/digest when enabled', async () => {

@@ -5,22 +5,39 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const { state } = vi.hoisted(() => ({
   state: {
     tenantId: 'tenant-1' as string | undefined,
+    role: 'admin' as string,
     features: { gapInsights: true, gapEvidence: true, aiBusinessInsights: false },
     gapRows: [] as Array<Record<string, unknown>>,
     experimentRows: [] as Array<Record<string, unknown>>,
     queryRows: [] as Array<Record<string, unknown>>,
     gapEntity: null as Record<string, unknown> | null,
     savedGap: null as Record<string, unknown> | null,
+    answerCalls: [] as Array<[string, string, string]>,
+    answerError: null as Error | null,
   },
 }));
 
 vi.mock('../../middleware/clerk.middleware', () => ({
   requireClerkAuth: (req: any, _res: any, next: any) => {
-    req.user = state.tenantId ? { tenantId: state.tenantId } : {};
+    req.user = state.tenantId ? { tenantId: state.tenantId, role: state.role } : {};
+    req.userId = 'user-1';
     next();
   },
   autoProvision: (_req: any, _res: any, next: any) => next(),
 }));
+
+// The answer service owns the publish; these tests own the wiring around it (role gate,
+// feature gate, body validation, audit). Its behaviour is proved against real Postgres
+// in integration/gap-answer.test.ts.
+vi.mock('../../insights/gap-answer.service', () => ({
+  answerGap: async (tenantId: string, gapId: string, answer: string) => {
+    state.answerCalls.push([tenantId, gapId, answer]);
+    if (state.answerError) throw state.answerError;
+    return { id: gapId, answerDocumentId: 'doc-1', answeredAt: new Date('2026-08-26T00:00:00Z') };
+  },
+}));
+
+vi.mock('../../utils/audit', () => ({ logAudit: vi.fn(async () => undefined) }));
 
 vi.mock('../../middleware/super-admin.middleware', () => ({
   resolveTenantContext: (_req: any, _res: any, next: any) => next(),
@@ -85,7 +102,7 @@ vi.mock('../../database/data-source', () => ({
 import express from 'express';
 import request from 'supertest';
 import insightsRoutes from '../../routes/insights.routes';
-import { errorHandler } from '../../middleware/error-handler';
+import { errorHandler, ApiError } from '../../middleware/error-handler';
 
 function createApp() {
   const app = express();
@@ -103,6 +120,9 @@ beforeEach(() => {
   state.queryRows = [];
   state.gapEntity = null;
   state.savedGap = null;
+  state.role = 'admin';
+  state.answerCalls = [];
+  state.answerError = null;
 });
 
 describe('insights routes — feature gating (ADR-0013)', () => {
@@ -246,5 +266,51 @@ describe('insights routes — tenant lifecycle actions (ADR-0005)', () => {
     state.gapEntity = null;
     const res = await request(createApp()).post('/insights/g1/resolve');
     expect(res.status).toBe(404);
+  });
+});
+
+describe('insights routes — publishing an answer', () => {
+  const body = { answer: 'Our call-out fee is 65 euro during office hours.' };
+
+  it('publishes for an admin and passes the tenant, gap and text through', async () => {
+    const res = await request(createApp()).post('/insights/g1/answer').send(body);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ id: 'g1', answerDocumentId: 'doc-1' });
+    expect(state.answerCalls).toEqual([['tenant-1', 'g1', body.answer]]);
+  });
+
+  it('403s a non-admin member: this text is repeated to customers', async () => {
+    // The rest of the router has no role gate, so without the one on this route an
+    // `agent` seat could publish tenant knowledge.
+    state.role = 'agent';
+    const res = await request(createApp()).post('/insights/g1/answer').send(body);
+    expect(res.status).toBe(403);
+    expect(state.answerCalls).toEqual([]);
+  });
+
+  it('403s without gapInsights', async () => {
+    state.features = { gapInsights: false, gapEvidence: false, aiBusinessInsights: false };
+    const res = await request(createApp()).post('/insights/g1/answer').send(body);
+    expect(res.status).toBe(403);
+    expect(state.answerCalls).toEqual([]);
+  });
+
+  it('422s an answer that is too short, and never reaches the service', async () => {
+    const res = await request(createApp()).post('/insights/g1/answer').send({ answer: 'yes' });
+    expect(res.status).toBe(422);
+    expect(state.answerCalls).toEqual([]);
+  });
+
+  it('422s a missing body', async () => {
+    const res = await request(createApp()).post('/insights/g1/answer').send({});
+    expect(res.status).toBe(422);
+  });
+
+  it('passes the service status code through instead of a 500', async () => {
+    const conflict = new ApiError('already answered', 409, 'GAP_ALREADY_ANSWERED');
+    state.answerError = conflict;
+    const res = await request(createApp()).post('/insights/g1/answer').send(body);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('GAP_ALREADY_ANSWERED');
   });
 });

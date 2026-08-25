@@ -378,7 +378,10 @@ app.use(clerkMiddleware());
 // API routes under /api/v1
 const apiRouter = express.Router();
 apiRouter.use("/analytics", timeoutMiddleware(60000), analyticsRoutes);
-apiRouter.use("/insights", insightsRoutes);
+// Mounted BEFORE the blanket 30s below, so it needs its own deadline or it has none at
+// all. 60s because POST /insights/:gapId/answer indexes the answer inline (embedding
+// round trips) before it replies, and analysis kicks off a judge run.
+apiRouter.use("/insights", timeoutMiddleware(60000), insightsRoutes);
 apiRouter.use("/onboarding", onboardingRoutes);
 // Copilot SSE stream can run up to 60s (agent loop hard timeout) plus a
 // few hundred ms for the final UPDATE + trace INSERT + clean SSE close.

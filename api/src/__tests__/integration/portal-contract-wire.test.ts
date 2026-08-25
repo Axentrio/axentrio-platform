@@ -195,6 +195,8 @@ describe('wire contract — /insights', () => {
       'retentionDays',
     ]);
     expect(keysOf(data.gaps[0])).toEqual([
+      'answerDocumentId',
+      'answeredAt',
       'archivedAt',
       'distinctVisitors',
       'firstDetectedAt',
@@ -212,6 +214,8 @@ describe('wire contract — /insights', () => {
     expect(data.meta.evidenceEnabled).toBe(true);
     expect(data.meta.retentionDays).toBe(90);
     expect(data.gaps[0].recommendation).toBe('Publish clear pricing in the knowledge base.');
+    // Unanswered by default, and the portal gates its button on this, not on answeredAt.
+    expect(data.gaps[0].answerDocumentId).toBeNull();
   });
 });
 

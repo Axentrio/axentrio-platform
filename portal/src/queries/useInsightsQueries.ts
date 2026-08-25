@@ -120,6 +120,29 @@ export function useArchiveGap(successMessage: string) {
   return useGapAction('archive', successMessage);
 }
 
+/**
+ * Answer a Gap in the admin's own words. The server publishes the text as a knowledge
+ * document, so the knowledge cache is stale too - both trees are invalidated.
+ *
+ * No toast and no onError here on purpose: the failures that matter carry a server
+ * message worth reading (document cap reached, gap already answered, indexing down),
+ * and the caller keeps the dialog open to show it. See GapCard in InsightsContent.
+ */
+export function useAnswerGap() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gapId, answer }: { gapId: string; answer: string }) =>
+      api.post<{ id: string; answerDocumentId: string; answeredAt: string }>(
+        `/insights/${gapId}/answer`,
+        { answer },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.insights.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledge.all() });
+    },
+  });
+}
+
 export function useExperiments(enabled = true) {
   return useQuery({ ...insightsOptions.experiments(), enabled });
 }

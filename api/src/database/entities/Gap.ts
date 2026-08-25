@@ -60,6 +60,20 @@ export class Gap {
   @Column({ type: 'timestamptz', name: 'recommendation_updated_at', nullable: true })
   recommendationUpdatedAt?: Date | null;
 
+  /**
+   * The knowledge document that answers this Gap (FK, ON DELETE SET NULL).
+   *
+   * THIS is the answered flag - not `answeredAt`. Deleting the document nulls this
+   * column, and the Gap becomes answerable again, because the topic is unanswered
+   * once the published text is gone.
+   */
+  @Column({ type: 'uuid', name: 'answer_document_id', nullable: true })
+  answerDocumentId?: string | null;
+
+  /** When the answer was published. Audit and before/after measurement only. */
+  @Column({ type: 'timestamptz', name: 'answered_at', nullable: true })
+  answeredAt?: Date | null;
+
   @Column({ type: 'timestamptz', name: 'first_detected_at' })
   firstDetectedAt!: Date;
 

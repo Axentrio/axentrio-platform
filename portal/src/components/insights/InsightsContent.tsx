@@ -1,8 +1,9 @@
 /**
  * InsightsContent — the Gaps surface (ADR-0007): Open/Wins tabs, severity,
  * evidence drill-down (Pro+ via `gapEvidence`, locked affordance otherwise),
- * freshness + completeness banners (ADR-0006), and the two tenant lifecycle
- * actions ("I fixed this" → resolved_manual, "Not relevant" → archived).
+ * freshness + completeness banners (ADR-0006), the two tenant lifecycle actions
+ * ("I fixed this" → resolved_manual, "Not relevant" → archived), and "Answer this",
+ * which publishes the owner's own words as a knowledge document the bot can serve.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,8 +11,9 @@ import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } fro
 import {
   Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
   FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
-  Lightbulb,
+  Lightbulb, PenLine, Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,10 +23,20 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import {
   useInsights,
   useGapEvidence,
   useResolveGap,
   useArchiveGap,
+  useAnswerGap,
   useExperiments,
   useSentimentTrend,
   useLeadDemand,
@@ -32,18 +44,170 @@ import {
   useDigest,
   useSetDigestEmail,
   type DemandSlice,
+  type EvidenceEntry,
   GapRow,
   ExperimentDto,
   DigestMetrics,
 } from '../../queries/useInsightsQueries';
 import { useHasFeature } from '../../queries/useEntitlementsQueries';
 import { timeAgo } from '@/utils/timeAgo';
+import { extractApiErrorMessage } from '@/services/apiClient';
 
 const SEVERITY_DOT: Record<string, string> = {
   red: 'bg-red-400',
   orange: 'bg-amber-400',
   green: 'bg-emerald-400',
 };
+
+/**
+ * Mirrors the server's bounds for POST /insights/:gapId/answer. Duplicated on purpose:
+ * a Publish button that fires a request the API will reject with 422 is worse than a
+ * disabled one. The server still validates - this only spares the round trip.
+ */
+const ANSWER_MIN = 20;
+const ANSWER_MAX = 5000;
+
+/**
+ * Answer a Gap in the owner's own words. The text is published verbatim as a knowledge
+ * document, so the dialog puts the real customer questions next to the box: the answer
+ * has to fit what people actually asked, not the topic label the analysis gave it.
+ */
+function AnswerGapDialog({
+  gap,
+  onClose,
+  recommendation,
+  evidence,
+  loadingEvidence,
+  isPending,
+  onSubmit,
+}: {
+  gap: GapRow;
+  onClose: () => void;
+  /** Advice for the owner, already tier-gated by the card; null when there is none. */
+  recommendation: string | null;
+  /** Customer questions behind the Gap; null when this tenant cannot see evidence. */
+  evidence: EvidenceEntry[] | null;
+  loadingEvidence: boolean;
+  isPending: boolean;
+  onSubmit: (answer: string) => Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const [answer, setAnswer] = useState('');
+  const trimmed = answer.trim();
+  const outOfRange = trimmed.length < ANSWER_MIN || trimmed.length > ANSWER_MAX;
+  const questions = (evidence ?? []).flatMap((e) => e.messages.filter((m) => m.sender === 'user'));
+
+  const publish = async () => {
+    try {
+      await onSubmit(trimmed);
+      toast.success(
+        t('insights.answer.published', { defaultValue: 'Answer published. Your bot can use it now.' }),
+      );
+      onClose();
+    } catch (err) {
+      // Stays open with the text intact. Every failure here either needs a decision
+      // (the document limit is full) or is safe to retry (indexing was down), so the
+      // owner must not have to type the answer again for the server's problem.
+      toast.error(
+        extractApiErrorMessage(err) ??
+          t('insights.answer.failed', { defaultValue: 'The answer could not be published' }),
+      );
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>{t('insights.answer.title', { defaultValue: 'Answer this question' })}</DialogTitle>
+          <DialogDescription className="capitalize">{gap.topic}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {recommendation && (
+            <div className="rounded-lg border border-amber-400/30 bg-amber-400/5 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
+                <Lightbulb className="h-3.5 w-3.5 shrink-0" />
+                {t('insights.answer.suggestionLabel', {
+                  defaultValue: 'A suggestion for you, not the answer text',
+                })}
+              </p>
+              <p className="mt-1 text-sm text-zinc-300">{recommendation}</p>
+            </div>
+          )}
+
+          {evidence !== null && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-zinc-400">
+                {t('insights.answer.questionsLabel', { defaultValue: 'What customers asked' })}
+              </p>
+              {loadingEvidence ? (
+                <Skeleton className="h-16 w-full rounded-lg" />
+              ) : questions.length > 0 ? (
+                <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                  {questions.map((m) => (
+                    <li key={m.id} className="text-sm text-zinc-300">
+                      {m.content}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  {t('insights.answer.noQuestions', {
+                    defaultValue: 'No customer questions to show for this topic.',
+                  })}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor={`gap-answer-${gap.id}`}>
+              {t('insights.answer.fieldLabel', { defaultValue: 'Your answer' })}
+            </Label>
+            <Textarea
+              id={`gap-answer-${gap.id}`}
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              rows={6}
+              autoFocus
+              disabled={isPending}
+              placeholder={t('insights.answer.placeholder', {
+                defaultValue: 'Write the answer the way you would say it to a customer.',
+              })}
+            />
+            <p className="text-xs text-zinc-500">
+              {t('insights.answer.hint', {
+                defaultValue:
+                  'Customers get this text word for word. You can edit it later on the Knowledge page.',
+              })}
+            </p>
+            <p className="text-xs text-zinc-500">
+              {t('insights.answer.count', {
+                defaultValue: '{{chars}} characters. Use {{min}} to {{max}}.',
+                chars: trimmed.length,
+                min: ANSWER_MIN,
+                max: ANSWER_MAX,
+              })}
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button type="button" onClick={publish} disabled={outOfRange || isPending}>
+            {isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {isPending
+              ? t('insights.answer.publishing', { defaultValue: 'Publishing…' })
+              : t('insights.answer.publish', { defaultValue: 'Publish' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function GapCard({
   gap,
@@ -56,14 +220,21 @@ function GapCard({
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [answerOpen, setAnswerOpen] = useState(false);
+  // The answer dialog reads the same evidence as the drill-down, and neither fetches
+  // until something asks for it - a list of 40 cards must not fire 40 requests.
   const { data: evidenceRes, isLoading: loadingEvidence } = useGapEvidence(
     gap.id,
-    expanded && evidenceEnabled,
+    (expanded || answerOpen) && evidenceEnabled,
   );
   const resolveGap = useResolveGap(t('insights.actions.resolvedToast', { defaultValue: 'Marked as fixed' }));
   const archiveGap = useArchiveGap(t('insights.actions.archivedToast', { defaultValue: 'Archived' }));
+  const answerGap = useAnswerGap();
 
   const actionable = gap.status === 'open' || gap.status === 'dormant';
+  // Gated on the document, NEVER on answeredAt: deleting the document nulls the FK and
+  // leaves the timestamp behind, and the topic is then genuinely unanswered again.
+  const answered = gap.answerDocumentId != null;
 
   return (
     <Card variant="glass">
@@ -95,6 +266,17 @@ function GapCard({
           </div>
           {actionable && (
             <div className="flex gap-2 shrink-0">
+              {!answered && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={answerGap.isPending}
+                  onClick={() => setAnswerOpen(true)}
+                >
+                  <PenLine className="h-3.5 w-3.5 mr-1" />
+                  {t('insights.actions.answer', { defaultValue: 'Answer this' })}
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -125,6 +307,18 @@ function GapCard({
             ago: timeAgo(gap.lastSeenAt),
           })}
         </p>
+
+        {answered && (
+          <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            {gap.answeredAt
+              ? t('insights.answer.added', {
+                  defaultValue: 'Answer added {{date}}',
+                  date: new Date(gap.answeredAt).toLocaleString(),
+                })
+              : t('insights.answer.addedPlain', { defaultValue: 'Answer added' })}
+          </p>
+        )}
 
         {recommendationsEnabled && gap.status === 'open' && gap.recommendation && (
           <p className="flex items-start gap-2 text-sm text-zinc-300">
@@ -176,6 +370,18 @@ function GapCard({
               ))
             )}
           </div>
+        )}
+
+        {answerOpen && (
+          <AnswerGapDialog
+            gap={gap}
+            onClose={() => setAnswerOpen(false)}
+            recommendation={recommendationsEnabled ? gap.recommendation : null}
+            evidence={evidenceEnabled ? (evidenceRes?.evidence ?? []) : null}
+            loadingEvidence={loadingEvidence}
+            isPending={answerGap.isPending}
+            onSubmit={(answer) => answerGap.mutateAsync({ gapId: gap.id, answer })}
+          />
         )}
       </CardContent>
     </Card>

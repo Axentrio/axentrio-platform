@@ -49,7 +49,12 @@ export async function probeProviderHealth(): Promise<ProviderHealth> {
     const provider = getProvider(DEFAULT_PROVIDER);
     await provider.chat([{ role: 'user', content: 'ping' }], {
       model: DEFAULT_MODEL,
-      maxTokens: 1,
+      // Not 1. A gpt-5 model rejects a 1-token ceiling outright ("Could not
+      // finish the message because max_tokens or model output limit was
+      // reached"), which this function would classify as `unreachable` and
+      // alert on — a false outage every five minutes. Small enough to stay
+      // cheap, large enough for any model to say something.
+      maxTokens: 16,
       temperature: 0,
       jsonMode: false,
     });

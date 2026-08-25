@@ -159,7 +159,7 @@ describe('Per-bot AI settings', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.enabled).toBe(true);
       expect(res.body.data.provider).toBe('openai');
-      expect(res.body.data.model).toBe('gpt-4o-mini');
+      expect(res.body.data.model).toBe('gpt-5.6-luna');
       expect(res.body.data.brandVoice.templateId).toBeNull();
       expect(res.body.data.guardrails.confidenceThreshold).toBe(0.7);
       expect(res.body.data.hasApiKey).toBe(false);

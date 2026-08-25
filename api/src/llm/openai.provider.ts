@@ -63,11 +63,23 @@ export class OpenAIProvider implements LLMProvider {
           }))
         : undefined;
 
+    // gpt-5 family (gpt-5.6-*): max_tokens and temperature are rejected, and
+    // reasoning defaults to medium — send reasoning_effort explicitly so the
+    // platform runs without reasoning unless PLATFORM_LLM_REASONING says else.
+    const isGpt5 = /^gpt-5/.test(options.model);
     const response = await this.client.chat.completions.create({
       model: options.model,
       messages: messages.map(mapMessage),
-      max_tokens: options.maxTokens,
-      temperature: options.temperature,
+      ...(isGpt5
+        ? {
+            max_completion_tokens: options.maxTokens,
+            reasoning_effort: (process.env.PLATFORM_LLM_REASONING || 'none') as
+              'none' | 'low' | 'medium' | 'high',
+          }
+        : {
+            max_tokens: options.maxTokens,
+            temperature: options.temperature,
+          }),
       response_format: options.jsonMode ? { type: 'json_object' as const } : undefined,
       tools,
     });

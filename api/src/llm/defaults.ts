@@ -10,4 +10,4 @@ const envProvider = (process.env.PLATFORM_LLM_PROVIDER || '').toLowerCase();
 export const DEFAULT_PROVIDER: 'openai' | 'anthropic' =
   envProvider === 'anthropic' || envProvider === 'openai' ? envProvider : 'openai';
 
-export const DEFAULT_MODEL = process.env.PLATFORM_LLM_MODEL || 'gpt-4o-mini';
+export const DEFAULT_MODEL = process.env.PLATFORM_LLM_MODEL || 'gpt-5.6-luna';

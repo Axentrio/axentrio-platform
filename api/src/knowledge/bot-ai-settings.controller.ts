@@ -107,7 +107,7 @@ export async function updateBotAiSettings(req: Request, res: Response) {
   const updatedBotAi: BotAi = {
     // Out of scope for this slice — preserve existing, defaulting if absent.
     provider: existing.provider ?? 'openai',
-    model: existing.model ?? 'gpt-4o-mini',
+    model: existing.model ?? 'gpt-5.6-luna',
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,

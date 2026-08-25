@@ -38,7 +38,7 @@ export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
   return {
     enabled: true,
     provider: 'openai',
-    model: 'gpt-4o-mini',
+    model: 'gpt-5.6-luna',
     language: 'en',
     brandVoice: { name: `${name} Assistant`, tone: 'friendly', templateId: null },
     guardrails: {

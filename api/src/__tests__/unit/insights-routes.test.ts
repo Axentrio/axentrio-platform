@@ -10,6 +10,7 @@ const { state } = vi.hoisted(() => ({
     gapRows: [] as Array<Record<string, unknown>>,
     experimentRows: [] as Array<Record<string, unknown>>,
     queryRows: [] as Array<Record<string, unknown>>,
+    askRows: [] as Array<Record<string, unknown>>,
     gapEntity: null as Record<string, unknown> | null,
     savedGap: null as Record<string, unknown> | null,
     answerCalls: [] as Array<[string, string, string]>,
@@ -93,7 +94,10 @@ vi.mock('../../database/data-source', () => ({
       }
       return {};
     },
-    query: async () => state.queryRows,
+    // The list route runs two raw queries (trend, before/after asks), so the mock has to
+    // tell them apart instead of handing both the same rows.
+    query: async (sql: string) =>
+      sql.includes('"asksBefore"') ? state.askRows : state.queryRows,
   },
 }));
 
@@ -118,6 +122,7 @@ beforeEach(() => {
   state.gapRows = [];
   state.experimentRows = [];
   state.queryRows = [];
+  state.askRows = [];
   state.gapEntity = null;
   state.savedGap = null;
   state.role = 'admin';
@@ -163,6 +168,53 @@ describe('insights routes — feature gating (ADR-0013)', () => {
       evidenceEnabled: true,
       completeness: 1,
     });
+  });
+
+  it('leaves the before/after counts null while the Gap has no answer document', async () => {
+    state.gapRows = [{
+      id: 'g1', canonical_topic_id: 't1', topic: 'pricing', status: 'open', severity: 'red',
+      occurrences: 7, distinct_visitors: 5,
+      first_detected_at: '2026-06-08', last_seen_at: '2026-06-10',
+      resolved_at: null, archived_at: null,
+      answer_document_id: null, answered_at: null,
+    }];
+    // Rows exist for the topic; the null answer document, not the absence of evidence,
+    // is what keeps the counts null.
+    state.askRows = [{ canonicalTopicId: 't1', asksBefore: 4, asksSince: 2 }];
+
+    const res = await request(createApp()).get('/insights');
+    expect(res.status).toBe(200);
+    expect(res.body.data.gaps[0].asksBeforeAnswer).toBeNull();
+    expect(res.body.data.gaps[0].asksSinceAnswer).toBeNull();
+  });
+
+  it('reports the before/after counts for an answered Gap, and 0 since is a real number', async () => {
+    state.gapRows = [
+      {
+        id: 'g1', canonical_topic_id: 't1', topic: 'pricing', status: 'open', severity: 'red',
+        occurrences: 7, distinct_visitors: 5,
+        first_detected_at: '2026-06-08', last_seen_at: '2026-06-10',
+        resolved_at: null, archived_at: null,
+        answer_document_id: 'doc-1', answered_at: '2026-06-09',
+      },
+      {
+        id: 'g2', canonical_topic_id: 't2', topic: 'delivery', status: 'open', severity: 'orange',
+        occurrences: 1, distinct_visitors: 1,
+        first_detected_at: '2026-06-08', last_seen_at: '2026-06-09',
+        resolved_at: null, archived_at: null,
+        answer_document_id: 'doc-2', answered_at: '2026-06-09',
+      },
+    ];
+    // t2 has no row at all: an answered topic nobody ever asked still counts as 0/0.
+    state.askRows = [{ canonicalTopicId: 't1', asksBefore: 4, asksSince: 0 }];
+
+    const res = await request(createApp()).get('/insights');
+    expect(res.status).toBe(200);
+    const byId = new Map(
+      (res.body.data.gaps as Array<{ id: string }>).map((gap) => [gap.id, gap]),
+    );
+    expect(byId.get('g1')).toMatchObject({ asksBeforeAnswer: 4, asksSinceAnswer: 0 });
+    expect(byId.get('g2')).toMatchObject({ asksBeforeAnswer: 0, asksSinceAnswer: 0 });
   });
 
   it('hides optimization suggestions from Essential and from closed Gaps', async () => {

@@ -30,6 +30,10 @@ export interface GapDto {
   answerDocumentId: string | null;
   /** When the answer was published. Audit only; never gate on this (see answerDocumentId). */
   answeredAt: string | null;
+  /** Unsatisfied asks for this topic BEFORE the answer was published. Null when unanswered. */
+  asksBeforeAnswer: number | null;
+  /** Unsatisfied asks SINCE the answer was published. Null when unanswered. */
+  asksSinceAnswer: number | null;
 }
 
 export interface InsightsMeta {

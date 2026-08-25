@@ -198,6 +198,8 @@ describe('wire contract — /insights', () => {
       'answerDocumentId',
       'answeredAt',
       'archivedAt',
+      'asksBeforeAnswer',
+      'asksSinceAnswer',
       'distinctVisitors',
       'firstDetectedAt',
       'id',
@@ -216,6 +218,9 @@ describe('wire contract — /insights', () => {
     expect(data.gaps[0].recommendation).toBe('Publish clear pricing in the knowledge base.');
     // Unanswered by default, and the portal gates its button on this, not on answeredAt.
     expect(data.gaps[0].answerDocumentId).toBeNull();
+    // Both counts stay null until an answer exists, so the portal renders no before/after.
+    expect(data.gaps[0].asksBeforeAnswer).toBeNull();
+    expect(data.gaps[0].asksSinceAnswer).toBeNull();
   });
 });
 

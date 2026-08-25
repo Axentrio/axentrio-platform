@@ -216,6 +216,39 @@ router.get(
           )
         : [];
     const trends = new Map(trendRows.map((row) => [row.canonicalTopicId, row]));
+
+    // Before/after evidence for answered Gaps only: one grouped query for the whole
+    // list, skipped entirely when nothing is answered (the common case). chatbot_gaps
+    // is joined in so each topic splits on its OWN answered_at. No retention window -
+    // "before" means all of history for the topic, which is the whole point of the card.
+    // The topic equality in the join also drops judgments with no canonical topic.
+    const answeredGapIds = gaps
+      .filter((g) => g.answer_document_id != null)
+      .map((g) => g.id as string);
+    const askRows: Array<{ canonicalTopicId: string; asksBefore: number; asksSince: number }> =
+      answeredGapIds.length > 0
+        ? await AppDataSource.query(
+            `SELECT g.canonical_topic_id AS "canonicalTopicId",
+                    COUNT(*) FILTER (
+                      WHERE j.session_started_at < g.answered_at
+                    )::int AS "asksBefore",
+                    COUNT(*) FILTER (
+                      WHERE j.session_started_at >= g.answered_at
+                    )::int AS "asksSince"
+               FROM chatbot_gaps g
+               LEFT JOIN chatbot_judgments j
+                 ON j.tenant_id = g.tenant_id
+                AND j.canonical_topic_id = g.canonical_topic_id
+                AND j.satisfied = false
+              WHERE g.tenant_id = $1
+                AND g.id = ANY($2::uuid[])
+                AND g.answered_at IS NOT NULL
+              GROUP BY g.canonical_topic_id`,
+            [tenantId, answeredGapIds],
+          )
+        : [];
+    const asks = new Map(askRows.map((row) => [row.canonicalTopicId, row]));
+
     const state = await AppDataSource.getRepository(InsightsRefreshState).findOne({ where: { tenantId } });
 
     // Typed against the shared wire contract (src/contracts/insights.ts).
@@ -223,6 +256,11 @@ router.get(
       const occurrences = Number(g.occurrences);
       const distinctVisitors = Number(g.distinct_visitors);
       const trend = trends.get(g.canonical_topic_id as string);
+      // Gated on the document, never on answeredAt: deleting the document nulls the FK
+      // and the card goes back to unanswered. Zero is a real value - zero asks since the
+      // answer is the good news - so a missing row means 0, not null.
+      const answered = g.answer_document_id != null;
+      const ask = asks.get(g.canonical_topic_id as string);
       return {
         id: g.id as string,
         topic: g.topic as string,
@@ -250,6 +288,8 @@ router.get(
         // this" button while answerDocumentId is set; answeredAt is display only.
         answerDocumentId: (g.answer_document_id ?? null) as string | null,
         answeredAt: (g.answered_at ?? null) as string | null,
+        asksBeforeAnswer: answered ? Number(ask?.asksBefore ?? 0) : null,
+        asksSinceAnswer: answered ? Number(ask?.asksSince ?? 0) : null,
       };
     });
     if (priorityEnabled) gapDtos.sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0));

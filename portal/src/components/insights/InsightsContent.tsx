@@ -309,15 +309,40 @@ function GapCard({
         </p>
 
         {answered && (
-          <p className="flex items-center gap-1.5 text-xs text-emerald-400">
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-            {gap.answeredAt
-              ? t('insights.answer.added', {
-                  defaultValue: 'Answer added {{date}}',
-                  date: new Date(gap.answeredAt).toLocaleString(),
-                })
-              : t('insights.answer.addedPlain', { defaultValue: 'Answer added' })}
-          </p>
+          <div className="space-y-1.5">
+            <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {gap.answeredAt
+                ? t('insights.answer.added', {
+                    defaultValue: 'Answer added {{date}}',
+                    date: new Date(gap.answeredAt).toLocaleString(),
+                  })
+                : t('insights.answer.addedPlain', { defaultValue: 'Answer added' })}
+            </p>
+            {/* Explicit null checks, never a falsy test: zero asks since the answer is the
+                whole point of this line, so it has to render. */}
+            {gap.asksBeforeAnswer != null && gap.asksSinceAnswer != null && (
+              <p
+                className={cn(
+                  'text-xs',
+                  gap.asksSinceAnswer === 0 ? 'text-emerald-400' : 'text-zinc-400',
+                )}
+              >
+                {gap.asksSinceAnswer === 0
+                  ? t('insights.answer.outcomeWin', {
+                      defaultValue:
+                        '{{before}} people asked before your answer. Nobody has asked since.',
+                      before: gap.asksBeforeAnswer,
+                    })
+                  : t('insights.answer.outcome', {
+                      defaultValue:
+                        '{{before}} people asked before your answer. {{since}} have asked since.',
+                      before: gap.asksBeforeAnswer,
+                      since: gap.asksSinceAnswer,
+                    })}
+              </p>
+            )}
+          </div>
         )}
 
         {recommendationsEnabled && gap.status === 'open' && gap.recommendation && (

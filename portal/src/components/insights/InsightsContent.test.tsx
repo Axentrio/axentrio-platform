@@ -54,6 +54,8 @@ function gap(over: Partial<Record<string, unknown>> = {}) {
     archivedAt: null,
     answerDocumentId: null,
     answeredAt: null,
+    asksBeforeAnswer: null,
+    asksSinceAnswer: null,
     ...over,
   };
 }
@@ -209,6 +211,60 @@ describe('InsightsContent — gap surface', () => {
     render(<InsightsContent />);
     expect(screen.getByRole('button', { name: /answer this/i })).toBeInTheDocument();
     expect(screen.queryByText(/answer added/i)).not.toBeInTheDocument();
+  });
+
+  it('reads as good news when nobody asked again since the answer', () => {
+    insightsRef.current = data([
+      gap({
+        answerDocumentId: 'd1',
+        answeredAt: '2026-06-12T00:00:00Z',
+        asksBeforeAnswer: 4,
+        asksSinceAnswer: 0,
+      }),
+    ]);
+    render(<InsightsContent />);
+    expect(
+      screen.getByText(/4 people asked before your answer\. Nobody has asked since\./i),
+    ).toBeInTheDocument();
+  });
+
+  it('states both counts when people still ask after the answer', () => {
+    insightsRef.current = data([
+      gap({
+        answerDocumentId: 'd1',
+        answeredAt: '2026-06-12T00:00:00Z',
+        asksBeforeAnswer: 4,
+        asksSinceAnswer: 2,
+      }),
+    ]);
+    render(<InsightsContent />);
+    expect(
+      screen.getByText(/4 people asked before your answer\. 2 have asked since\./i),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no outcome line when the counts are unknown', () => {
+    insightsRef.current = data([
+      gap({ answerDocumentId: 'd1', answeredAt: '2026-06-12T00:00:00Z' }),
+    ]);
+    render(<InsightsContent />);
+    expect(screen.getByText(/answer added/i)).toBeInTheDocument();
+    expect(screen.queryByText(/asked before your answer/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
+  });
+
+  it('shows no outcome line on an unanswered gap even with counts and a timestamp', () => {
+    // The document is what makes a gap answered. Without it there is no "since".
+    insightsRef.current = data([
+      gap({
+        answerDocumentId: null,
+        answeredAt: '2026-06-12T00:00:00Z',
+        asksBeforeAnswer: 4,
+        asksSinceAnswer: 0,
+      }),
+    ]);
+    render(<InsightsContent />);
+    expect(screen.queryByText(/asked before your answer/i)).not.toBeInTheDocument();
   });
 
   it('publishes the typed answer for the gap', async () => {

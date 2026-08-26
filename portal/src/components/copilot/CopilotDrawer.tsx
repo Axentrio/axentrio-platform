@@ -2,8 +2,9 @@
  * The right-side slide-in panel for the Copilot.
  *
  * ~400px wide on desktop, full-screen on mobile. Persists across
- * route navigation (rendered once at App.tsx). Body-scroll lock +
- * Escape close are handled by the provider.
+ * route navigation (rendered once at App.tsx). Escape close is handled
+ * by the provider. The drawer is non-modal: no backdrop and no scroll
+ * lock, so the page behind stays interactive.
  *
  * Three states inside the drawer body:
  *   - LockedPreview (Essential tenant, or 402 mid-session)
@@ -19,7 +20,6 @@
  *
  * z-index reservation (documented at the file top for future modal
  * additions):
- *   drawer overlay  z-50
  *   drawer panel    z-50
  *   modal-over-drawer (e.g. upgrade confirmation) should use z-60
  *   toasts          z-70 (sonner default)
@@ -78,16 +78,8 @@ export function CopilotDrawer() {
   const [composerValue, setComposerValue] = useState('');
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  // Body-scroll lock when open. Standard pattern; resilient to fast
-  // open/close cycles.
-  useEffect(() => {
-    if (!isOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [isOpen]);
+  // No body-scroll lock: the drawer is non-modal, so the platform behind
+  // stays scrollable and interactive while the assistant is open.
 
   // Autoscroll to the latest token as it streams in.
   useEffect(() => {
@@ -131,17 +123,9 @@ export function CopilotDrawer() {
 
   return (
     <>
-      {/* Overlay */}
-      <button
-        type="button"
-        disabled={!isOpen}
-        aria-label="Close"
-        onClick={close}
-        className={cn(
-          'fixed inset-0 z-50 bg-surface-0/40 backdrop-blur-sm transition-opacity',
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
-        )}
-      />
+      {/* No overlay. The drawer is non-modal so the platform behind stays
+          interactive (users change settings while chatting). Close via the
+          header X or Escape (handled by the provider). */}
       {/* Panel */}
       <aside
         aria-hidden={!isOpen}

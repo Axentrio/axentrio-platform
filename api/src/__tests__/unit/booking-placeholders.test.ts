@@ -109,6 +109,61 @@ describe('formatBusinessHoursForPlaceholder (non-booking bots)', () => {
   });
 });
 
+describe('{bookingHours} substitution in the composed prompt', () => {
+  const ai = { enabled: true } as any;
+  const base = { mode: 'agent' as const, ai, tenantName: 'Acme' };
+  const body = 'Book during {bookingHours}.';
+
+  it('substitutes live booking hours when the bot CAN book', () => {
+    const { prompt } = composeSystemPrompt({
+      ...base,
+      tools: [tool('create_booking')],
+      bookingConfigured: true,
+      templateBody: body,
+      bookingHours: 'Mon 09:00–17:00',
+    } as any);
+    expect(prompt).toContain('Book during Mon 09:00–17:00.');
+    expect(prompt).not.toContain('{bookingHours}');
+  });
+
+  it('a bot with no booking tools resolves {bookingHours} to empty and never leaks a literal placeholder', () => {
+    const { prompt } = composeSystemPrompt({
+      ...base,
+      tools: [],
+      templateBody: body,
+      bookingHours: 'Mon 09:00–17:00',
+    } as any);
+    expect(prompt).not.toContain('Mon 09:00–17:00');
+    expect(prompt).not.toContain('{bookingHours}');
+    expect(prompt).toContain('Book during .');
+  });
+});
+
+describe('{language} substitution in the composed prompt', () => {
+  it('substitutes the bot default language', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent',
+      ai: { enabled: true, language: 'nl' },
+      tenantName: 'Acme',
+      tools: [],
+      templateBody: 'Default language: {language}.',
+    } as any);
+    expect(prompt).toContain('Default language: nl.');
+    expect(prompt).not.toContain('{language}');
+  });
+
+  it('fails closed to en when language is missing', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent',
+      ai: { enabled: true },
+      tenantName: 'Acme',
+      tools: [],
+      templateBody: 'Default language: {language}.',
+    } as any);
+    expect(prompt).toContain('Default language: en.');
+  });
+});
+
 describe('{services} / {openingHours} substitution in the composed prompt', () => {
   const ai = { enabled: true } as any;
   const base = { mode: 'agent' as const, ai, tenantName: 'Acme' };

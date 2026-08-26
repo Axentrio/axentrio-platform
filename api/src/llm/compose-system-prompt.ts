@@ -218,6 +218,10 @@ interface AgentCtx {
    *  when configured, else the booking AvailabilityRule. A business FACT, not a
    *  capability, so every bot may state it (unlike {services}). */
   openingHours?: string;
+  /** Live booking availability hours for {bookingHours}. Substituted ONLY when the
+   *  bot can actually book — a gated/unconfigured bot must never quote slots it
+   *  cannot offer. */
+  bookingHours?: string;
   /** The places this business travels to, for {serviceArea}. Like {openingHours} this is
    *  a business FACT rather than a booking capability, so every bot may state it. */
   serviceArea?: string;
@@ -397,6 +401,9 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
     // Opening hours are a business FACT, not a capability — every bot may state
     // them (operational hours when set, else the booking availability rule).
     openingHours: ctx.openingHours ?? '',
+    // Booking hours are a booking CAPABILITY: only a bot that can book may quote
+    // the hours when a customer can book.
+    bookingHours: canBook ? (ctx.bookingHours ?? '') : '',
     // Where the business works — a fact, like opening hours, not a capability.
     serviceArea: ctx.serviceArea ?? '',
   };

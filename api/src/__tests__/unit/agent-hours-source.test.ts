@@ -107,7 +107,8 @@ const run = (agent: AgentService) =>
     { id: 't1', settings: { ai: { enabled: true } } } as any, []);
 
 /** promptBuilder.build(…, specialties, skillProse, liveFields) — liveFields is arg 12. */
-const liveFields = () => mockPromptBuilder.build.mock.calls[0][12] as { services?: string; openingHours?: string };
+const liveFields = () =>
+  mockPromptBuilder.build.mock.calls[0][12] as { services?: string; openingHours?: string; bookingHours?: string };
 const toolNames = () => (mockPromptBuilder.build.mock.calls[0][2] as ToolAdapter[]).map((t) => t.name);
 
 describe('AgentService — which source feeds {openingHours}', () => {
@@ -130,9 +131,10 @@ describe('AgentService — which source feeds {openingHours}', () => {
 
   it("a bot without the booking skill uses the tenant's businessHours, not the leftover availability rule", async () => {
     await run(agent);
-    const { openingHours } = liveFields();
+    const { openingHours, bookingHours } = liveFields();
     expect(openingHours).toContain('03:03');   // the businessHours the tenant actually set
     expect(openingHours).not.toContain('09:00'); // …not the booking rule it cannot use
+    expect(bookingHours).toBe('');             // leftover rule must not feed {bookingHours}
   });
 
   it('a bot without the booking skill never advertises bookable services', async () => {
@@ -162,9 +164,11 @@ describe('AgentService — which source feeds {openingHours}', () => {
     ] as any);
     await run(agent);
     expect(toolNames()).toContain('create_booking');
-    const { openingHours } = liveFields();
+    const { openingHours, bookingHours } = liveFields();
     expect(openingHours).toContain('03:03'); // operational hours win when both stores exist
     expect(openingHours).not.toContain('09:00');
+    expect(bookingHours).toContain('09:00'); // {bookingHours} still uses the availability rule
+    expect(bookingHours).not.toContain('03:03');
     // No travel service in the catalog ⇒ false; the flag still reaches the composer.
     expect(liveFields()).toMatchObject({ hasTravelServices: false });
   });

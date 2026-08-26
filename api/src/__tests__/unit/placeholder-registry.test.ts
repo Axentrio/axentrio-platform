@@ -20,6 +20,20 @@ describe('placeholder registry — single source of truth', () => {
     const ai = { brandVoice: { name: 'Real' }, templateVariables: { botName: 'HIJACKED' } } as any;
     expect(buildVariableMap(ai).botName).toBe('Real');
   });
+
+  it('language resolves from the bot ai slice and fails closed to en', () => {
+    expect(buildVariableMap({ language: 'nl' } as any).language).toBe('nl');
+    expect(buildVariableMap({ language: 'fr' } as any).language).toBe('fr');
+    expect(buildVariableMap({} as any).language).toBe('en');
+    expect(buildVariableMap({ language: 'de' } as any).language).toBe('en');
+  });
+
+  it('bookingHours comes from extras and fails closed to empty', () => {
+    expect(buildVariableMap({} as any).bookingHours).toBe('');
+    expect(buildVariableMap({} as any, { bookingHours: 'Mon 09:00–17:00' }).bookingHours).toBe(
+      'Mon 09:00–17:00',
+    );
+  });
 });
 
 describe('placeholder registry — SECURITY: no secret can ever reach the prompt', () => {

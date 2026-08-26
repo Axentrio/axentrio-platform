@@ -8,10 +8,10 @@ import {
 /**
  * Renders `Bot.settings.businessHours` for the `{openingHours}` placeholder.
  *
- * Operational hours are the authoritative source for spoken hours whenever they
- * are configured/enabled. The booking AvailabilityRule is only a fallback for the
- * placeholder, and still the sole source for slot computation. Keeping ONE
- * placeholder fed by one source per bot means the two can never contradict.
+ * Operational hours are the authoritative source for `{openingHours}` whenever they
+ * are configured/enabled. The booking AvailabilityRule is only a fallback for that
+ * placeholder, and still the sole source for slot computation. `{bookingHours}` is
+ * a separate placeholder and always uses the AvailabilityRule.
  *
  * Pure. Disabled / empty / all-closed → '' (fail-closed, never a literal {key}).
  */

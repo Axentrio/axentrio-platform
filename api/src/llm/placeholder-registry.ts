@@ -17,17 +17,19 @@
  */
 import type { Tenant } from '../database/entities/Tenant';
 import { PLACEHOLDER_CATALOG, type PlaceholderKey } from '../contracts/prompt-placeholders';
+import { resolveBotLanguage } from '../config/bot-language';
 
 type AiSettings = NonNullable<NonNullable<Tenant['settings']>['ai']>;
 
 /** Values injected into the placeholder map beyond the bot's own `ai` slice. */
 export type PromptExtras = {
   businessName?: string;
-  /** Live booking config for {services} / {openingHours}. The composer passes these
-   *  ONLY when the bot can actually book — a gated bot must never advertise
-   *  services it cannot book (see assembleAgent). */
+  /** Live booking config for {services} / {openingHours} / {bookingHours}. The
+   *  composer passes `services` and `bookingHours` ONLY when the bot can actually
+   *  book — a gated bot must never advertise slots it cannot book (see assembleAgent). */
   services?: string;
   openingHours?: string;
+  bookingHours?: string;
   /** Rendered service area for {serviceArea}; '' when the bot has none. */
   serviceArea?: string;
 };
@@ -37,6 +39,7 @@ export type PlaceholderContext = { ai: AiSettings; extras?: PromptExtras };
 /** Exhaustive by construction — a missing/extra key is a compile error. */
 export const RESOLVERS: Record<PlaceholderKey, (c: PlaceholderContext) => string> = {
   botName: ({ ai }) => ai.brandVoice?.name || 'AI Assistant',
+  language: ({ ai }) => resolveBotLanguage((ai as { language?: string | null }).language),
   tone: ({ ai }) => ai.brandVoice?.tone || 'friendly',
   supportEmail: ({ ai }) => ai.supportEmail || '',
   // Per-bot override wins; otherwise the tenant business name passed by the
@@ -49,6 +52,7 @@ export const RESOLVERS: Record<PlaceholderKey, (c: PlaceholderContext) => string
   topicsToAvoid: ({ ai }) => (ai.guardrails?.topicsToAvoid ?? []).join(', ') || 'N/A',
   services: ({ extras }) => extras?.services || '',
   openingHours: ({ extras }) => extras?.openingHours || '',
+  bookingHours: ({ extras }) => extras?.bookingHours || '',
   serviceArea: ({ extras }) => extras?.serviceArea || '',
 };
 

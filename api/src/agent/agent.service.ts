@@ -543,9 +543,10 @@ export class AgentService {
       // dates and could answer "were you open yesterday?" against the wrong weekday.
       let bookingTimezone: string | undefined = bot.businessTimezone;
       let bookingConfigured = false;
-      // Rendered values for the {services} / {openingHours} placeholders. Built from
-      // the SAME rows this block already loads (no extra queries).
+      // Rendered values for the {services} / {openingHours} / {bookingHours} placeholders.
+      // Built from the SAME rows this block already loads (no extra queries).
       let bookingServices = '';
+      let bookingHours = '';
       // Any bookable service carried out at the customer's address → travel-caveat
       // wording on ## OUR ADDRESS (and no come-in-person invite).
       let hasTravelServices = false;
@@ -576,6 +577,9 @@ export class AgentService {
           // Operational hours stay authoritative even when the formatted string is
           // empty (enabled but all-closed). Only fall back when they are not set.
           if (!operationalHoursConfigured) openingHours = formatHoursForPlaceholder(rule);
+          // {bookingHours} always uses the AvailabilityRule. Empty when there is no
+          // rule. Gated later: a bot that cannot book must not quote these hours.
+          bookingHours = formatHoursForPlaceholder(rule);
           // ponytail: rule existence is treated as "hours set up". A rule with empty
           // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
           // case we target (no rule at all); tighten later if empty-hours configs appear.
@@ -709,7 +713,7 @@ export class AgentService {
       // Currently outside opening hours: the composer adds the AVAILABILITY fact so
       // the bot keeps helping and never announces "closed" as a reason to disengage.
       const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea, venueLine, hasTravelServices }, { proactiveAsk, outsideBusinessHours });
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, bookingHours, serviceArea, venueLine, hasTravelServices }, { proactiveAsk, outsideBusinessHours });
       let priceContextLoaded = containsCurrencyAmount(
         [systemPrompt, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
       );

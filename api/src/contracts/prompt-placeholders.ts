@@ -59,6 +59,14 @@ export const PLACEHOLDER_CATALOG = [
     failClosed: '',
   },
   {
+    key: 'language',
+    label: 'Language',
+    description: 'The default language of the bot (en, nl, or fr). Later replies follow the visitor.',
+    category: 'identity',
+    safeToExpose: true,
+    failClosed: 'en',
+  },
+  {
     key: 'tone',
     label: 'Tone',
     description: "The bot's configured voice tone (per-channel override applies on social).",
@@ -125,7 +133,15 @@ export const PLACEHOLDER_CATALOG = [
   {
     key: 'openingHours',
     label: 'Opening hours',
-    description: "The business's opening hours. Booking availability if set, else the operational business hours.",
+    description: 'The opening hours of the business. Uses the hours set on the bot, or the booking hours when those are not set.',
+    category: 'booking',
+    safeToExpose: true,
+    failClosed: '',
+  },
+  {
+    key: 'bookingHours',
+    label: 'Booking hours',
+    description: 'The hours when a customer can book. Empty when this bot cannot book.',
     category: 'booking',
     safeToExpose: true,
     failClosed: '',

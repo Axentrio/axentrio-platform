@@ -118,9 +118,13 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     // estimate IS the number, and no closed/unavailable claim is allowed without a real check.
     const p = buildServicesSection([svc({ ...RANGE, durationMode: 'ai' })])!;
     expect(p).toMatch(/your own estimate is the number/i);
-    expect(p).toMatch(/always call check_availability before you tell the customer/i);
+    expect(p).toMatch(/always call check_availability.*before you tell the customer/i);
     expect(p).toMatch(/never state that a day or time is unavailable, closed/i);
     expect(p).toMatch(/unless a check_availability result says so/i);
+    // ...but the guard must NOT push a "choose length" service to check without a length
+    // (that would offer 30-min slots, then SLOT_UNAVAILABLE at 90 - an SRV-05 regression).
+    expect(p).toMatch(/do not call check_availability without a length/i);
+    expect(p).toMatch(/ask for the length instead of answering/i);
   });
 
   it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {

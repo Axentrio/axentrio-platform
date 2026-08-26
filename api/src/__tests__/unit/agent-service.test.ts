@@ -19,6 +19,13 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: { getRepository: () => ({ find: async () => [] }) },
 }));
 
+// A guard replacement is said in the CUSTOMER's language. Identity here, and spied on, so the
+// chained `mockProvider.chat` responses each test sets up are not consumed by the localizer.
+const mockLocalize = vi.fn(async (message: string, _customerText: string, _session: unknown) => message);
+vi.mock('../../llm/localize', () => ({
+  localizeMessage: (...args: [string, string, unknown]) => mockLocalize(...args),
+}));
+
 // Multi-bot Phase 4 (#16d): AgentService.run resolves bot config via the
 // bot-config service (hits the DB). Stub the resolvers so each test's
 // in-memory tenant.settings.ai is what reaches the LLM call.
@@ -495,6 +502,122 @@ describe('AgentService', () => {
       // The chips were never wrong, and they are the customer's way out of this turn.
       expect(result.quickReplies).toHaveLength(3);
       expect(result.quickReplies![0].title).toContain('10:30');
+    }
+  });
+
+  it("answers the customer's own unbookable hour, in their language", async () => {
+    // FOUND LIVE ON PRODUCTION, 2026-08-26, driving the real widget. A half-hour diary was asked
+    // for 09:15. The reply named 09:15 plus real alternatives, the enumeration guard replaced it -
+    // correctly, since a reply naming three hours could just as easily have been "09:15 is vrij,
+    // net als 09:00 en 09:30", and no allowlist can tell a refusal from a confirmation - but what
+    // shipped was an English sentence into a Dutch conversation, pointing at a list as if the
+    // question had never been asked. Their own hour picks the sharper sentence, and the
+    // replacement goes through the localizer.
+    const slots = [
+      { start: '2026-09-02T07:00:00.000Z', end: '2026-09-02T07:30:00.000Z' },
+      { start: '2026-09-02T07:30:00.000Z', end: '2026-09-02T08:00:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: '09:15 kan helaas niet, wel 09:00 of 09:30. Wat past het beste?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan het om 09:15 op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      // Replaced, because the guard cannot read intent from three named hours.
+      expect(result.content).not.toContain('09:15 kan helaas niet');
+      // Their hour is the subject, so it is answered rather than pointed past.
+      expect(result.content).toMatch(/^That time is not available/);
+      expect(result.quickReplies).toHaveLength(2);
+      // Said in the customer's language: the canned English text goes through the localizer with
+      // the customer's own message as the sample.
+      expect(mockLocalize).toHaveBeenCalledWith(
+        expect.stringMatching(/^That time is not available/),
+        'Kan het om 09:15 op woensdag 2 september 2026?',
+        expect.objectContaining({ id: 's1' }),
+      );
+    }
+  });
+
+  it('points at the list when the invented hour was nobody\'s idea but the model\'s', async () => {
+    // The control for the wording choice above. The customer named no time at all, so "that time
+    // is not available" would answer a question they never asked; the list is the whole answer.
+    // Same guard, same replacement machinery, different true sentence.
+    const slots = [
+      { start: '2026-09-02T07:00:00.000Z', end: '2026-09-02T07:30:00.000Z' },
+      { start: '2026-09-02T07:30:00.000Z', end: '2026-09-02T08:00:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik heb 08:00 en 09:00 vrij. Wat past?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Welke tijden zijn vrij op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toContain('08:00');
+      expect(result.content).toMatch(/^Here are the times I have available/);
     }
   });
 

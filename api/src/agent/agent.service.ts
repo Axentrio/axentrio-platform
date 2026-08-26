@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
-import { collapseAppointmentSpans, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { collapseAppointmentSpans, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -10,6 +10,7 @@ import { TraceLogger, AgentTrace, terminalErrorFrom, type TerminalErrorKind } fr
 import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
 import { buildPromptTrace } from '../llm/block-ledger';
+import { localizeMessage } from '../llm/localize';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvider, type LLMOptions, type LLMResponse } from '../llm/llm.types';
@@ -908,6 +909,12 @@ export class AgentService {
             : [];
           // What the CHANNEL delivered, plus the prose-only times: the enumeration guard's set.
           const deliverableLocal = offeredLocal ? [...offeredLocal, ...requestableLocal] : null;
+          // THE HOUR THE CUSTOMER THEMSELVES NAMED. Never an allowance - a reply may not confirm
+          // it just because they asked ("09:15 is vrij, net als 09:00 en 09:30" is three times, so
+          // the single-time guard stands down and the enumeration guard is the only thing left).
+          // It only decides WHICH replacement is true: their own hour being unavailable is a
+          // sharper sentence than a bare pointer at the list.
+          const customerNamedLocal = parseClockTimes(message).map((t) => t.key);
           // EVERY time the customer may take, delivered or not. Only the single-time guard uses
           // it: a slot further down the list is one create_booking accepts, so a reply confirming
           // it is right, while a time nobody offered is an invention whatever the channel showed.
@@ -964,22 +971,31 @@ export class AgentService {
             const invented = bogus.length
               ? null
               : unofferedSingleTimeIn(judged, everyOfferableLocal ?? deliverableLocal);
-            if (bogus.length) {
-              logger.warn('[agent] reply named times that were never offered; replacing it', {
+            const flagged = bogus.length ? bogus : invented ? [invented] : [];
+            if (flagged.length) {
+              // WHICH SENTENCE IS TRUE. When one of the flagged hours is the one the CUSTOMER
+              // named, "that time is not available" answers them; a bare pointer at the list reads
+              // as if their question was never heard. Their hour never buys the reply a pass - it
+              // only chooses the wording.
+              const named = new Set(customerNamedLocal);
+              const theirs = flagged.some((w) => parseClockTimes(w).some((t) => named.has(t.key)));
+              const replacement = !onScreen
+                ? NO_SLOTS_ON_SCREEN_FALLBACK
+                : theirs || invented
+                  ? UNBOOKABLE_TIME_FALLBACK
+                  : AVAILABILITY_SAFE_FALLBACK;
+              logger.warn('[agent] reply named a time nobody offered; replacing it', {
                 sessionId: session.id,
-                named: bogus.slice(0, 6),
-                offered: deliverableLocal,
-                chips: onScreen,
-              });
-              safeContent = onScreen ? AVAILABILITY_SAFE_FALLBACK : NO_SLOTS_ON_SCREEN_FALLBACK;
-            } else if (invented) {
-              logger.warn('[agent] reply recommended a time nobody offered; replacing it', {
-                sessionId: session.id,
-                named: invented,
+                named: flagged.slice(0, 6),
                 offered: everyOfferableLocal ?? deliverableLocal,
                 chips: onScreen,
+                customerNamed: theirs,
               });
-              safeContent = onScreen ? UNBOOKABLE_TIME_FALLBACK : NO_SLOTS_ON_SCREEN_FALLBACK;
+              // IN THE CUSTOMER'S LANGUAGE. These three are authored in English and they replace a
+              // reply the model wrote in the customer's, so shipping them raw answers a Dutch
+              // question in English - seen on production on 2026-08-26, driving the real widget.
+              // `localizeMessage` fails open: anything it cannot do returns the original.
+              safeContent = await localizeMessage(replacement, message, session);
             }
           }
 

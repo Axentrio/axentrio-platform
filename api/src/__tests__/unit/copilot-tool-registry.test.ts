@@ -251,4 +251,8 @@ describe('buildV1CopilotToolRegistry — v1 lock-in', () => {
       expect(tool.description.length).toBeGreaterThan(10);
     }
   });
+
+  it('registers getOpeningHours so Copilot can answer hours from live config', () => {
+    expect(buildV1CopilotToolRegistry().getCopilotToolNames()).toContain('getOpeningHours');
+  });
 });

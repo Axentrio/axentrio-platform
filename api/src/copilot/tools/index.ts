@@ -1,5 +1,5 @@
 /**
- * Build the v1 `CopilotToolRegistry` with the 8 read-only tools.
+ * Build the v1 `CopilotToolRegistry` with the read-only tools.
  *
  * Single source of truth for "what tools does the Copilot have." The
  * registry asserts at registration time that:
@@ -20,6 +20,7 @@ import { getRecentChatSessionStats } from './getRecentChatSessionStats';
 import { getKnownGapTopics } from './getKnownGapTopics';
 import { getSetupProgress } from './getSetupProgress';
 import { listBots } from './listBots';
+import { getOpeningHours } from './getOpeningHours';
 
 export function buildV1CopilotToolRegistry(): CopilotToolRegistry {
   const r = new CopilotToolRegistry();
@@ -32,6 +33,7 @@ export function buildV1CopilotToolRegistry(): CopilotToolRegistry {
   r.registerTool(getKnownGapTopics);
   r.registerTool(getSetupProgress);
   r.registerTool(listBots);
+  r.registerTool(getOpeningHours);
   return r;
 }
 
@@ -45,4 +47,5 @@ export {
   getKnownGapTopics,
   getSetupProgress,
   listBots,
+  getOpeningHours,
 };

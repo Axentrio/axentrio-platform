@@ -62,11 +62,6 @@ export interface CopilotConversationResponse {
   nextCursor: number | null;
 }
 
-interface ApiEnvelope<T> {
-  success: true;
-  data: T;
-}
-
 const THIRTY_SECONDS_MS = 30 * 1000;
 
 /**
@@ -82,12 +77,7 @@ const THIRTY_SECONDS_MS = 30 * 1000;
 export function useCopilotConversation(opts: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.copilot.conversation(),
-    queryFn: async () => {
-      const env = await api.get<ApiEnvelope<CopilotConversationResponse>>(
-        '/copilot/conversation',
-      );
-      return env.data;
-    },
+    queryFn: () => api.get<CopilotConversationResponse>('/copilot/conversation'),
     staleTime: THIRTY_SECONDS_MS,
     enabled: opts.enabled ?? true,
   });
@@ -96,12 +86,7 @@ export function useCopilotConversation(opts: { enabled?: boolean } = {}) {
 export function useClearCopilotConversation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const env = await api.post<ApiEnvelope<{ cleared: true }>>(
-        '/copilot/conversation/clear',
-      );
-      return env.data;
-    },
+    mutationFn: () => api.post<{ cleared: true }>('/copilot/conversation/clear'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.copilot.conversation() });
     },

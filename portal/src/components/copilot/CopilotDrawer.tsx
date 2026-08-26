@@ -2,8 +2,9 @@
  * The right-side slide-in panel for the Copilot.
  *
  * ~400px wide on desktop, full-screen on mobile. Persists across
- * route navigation (rendered once at App.tsx). Body-scroll lock +
- * Escape close are handled by the provider.
+ * route navigation (rendered once at App.tsx). The portal stays
+ * usable on desktop so the admin can change settings while chatting.
+ * Escape close is handled by the provider.
  *
  * Three states inside the drawer body:
  *   - LockedPreview (Essential tenant, or 402 mid-session)
@@ -19,8 +20,8 @@
  *
  * z-index reservation (documented at the file top for future modal
  * additions):
- *   drawer overlay  z-50
  *   drawer panel    z-50
+ *   mobile overlay  z-50 (full-screen only)
  *   modal-over-drawer (e.g. upgrade confirmation) should use z-60
  *   toasts          z-70 (sonner default)
  */
@@ -78,17 +79,6 @@ export function CopilotDrawer() {
   const [composerValue, setComposerValue] = useState('');
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  // Body-scroll lock when open. Standard pattern; resilient to fast
-  // open/close cycles.
-  useEffect(() => {
-    if (!isOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [isOpen]);
-
   // Autoscroll to the latest token as it streams in.
   useEffect(() => {
     if (!isOpen) return;
@@ -104,6 +94,15 @@ export function CopilotDrawer() {
   }, [isOpen, hasFeature, forcedToLockedPreview]);
 
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    if (!isOpen || !isMobile) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen, isMobile]);
 
   const handleSend = useCallback(
     (e?: FormEvent) => {
@@ -131,22 +130,18 @@ export function CopilotDrawer() {
 
   return (
     <>
-      {/* Overlay */}
-      <button
-        type="button"
-        disabled={!isOpen}
-        aria-label="Close"
-        onClick={close}
-        className={cn(
-          'fixed inset-0 z-50 bg-surface-0/40 backdrop-blur-sm transition-opacity',
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none',
-        )}
-      />
-      {/* Panel */}
+      {isOpen && isMobile && (
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={close}
+          className="fixed inset-0 z-50 bg-surface-0/40 backdrop-blur-sm"
+        />
+      )}
       <aside
         aria-hidden={!isOpen}
         aria-labelledby="copilot-drawer-title"
-        role="dialog"
+        role={isMobile ? 'dialog' : 'complementary'}
         className={cn(
           'fixed top-0 right-0 z-50 h-full bg-surface-0 border-l border-edge shadow-xl',
           'transition-transform duration-200 ease-out',

@@ -23,6 +23,7 @@ import { Bot } from '../../database/entities/Bot';
 import { Tenant } from '../../database/entities/Tenant';
 import { Lead, type LeadSource } from '../../database/entities/Lead';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
+import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { ChatSession } from '../../database/entities/ChatSession';
 import {
   createTestTenant,
@@ -64,7 +65,10 @@ type SentinelRecord = Readonly<Record<keyof typeof TENANT_A_SENTINELS, string>>;
 
 async function seedTenantWithSentinels(
   sentinels: SentinelRecord,
-  options: { tier?: 'essential' | 'pro' | 'enterprise'; calcom?: boolean } = {},
+  options: {
+    tier?: 'essential' | 'pro' | 'enterprise';
+    calendar?: { provider: 'google' | 'microsoft'; reauthRequired?: boolean };
+  } = {},
 ): Promise<SeededTenant> {
   const tenant = await createTestTenant({
     name: sentinels.tenantName,
@@ -94,17 +98,26 @@ async function seedTenantWithSentinels(
       },
     } as BotSettings['ai'],
   } as BotSettings;
-  if (options.calcom) {
-    botSettings.integrations = {
-      calcom: { apiKey: 'cal_key_' + sentinels.botName, eventTypeId: 12345 },
-    } as BotSettings['integrations'];
-  }
-
   const bot = await createTestAnchorBot(tenant, {
     name: sentinels.botName,
     publicKey: sentinels.publicKey,
     settings: botSettings,
   });
+
+  if (options.calendar) {
+    const calRepo = AppDataSource.getRepository(CalendarCredential);
+    await calRepo.save(
+      calRepo.create({
+        tenantId: tenant.id,
+        botId: bot.id,
+        provider: options.calendar.provider,
+        status: 'active',
+        reauthRequired: options.calendar.reauthRequired ?? false,
+        accessTokenEnc: 'enc-token',
+        calendarId: 'primary',
+      }),
+    );
+  }
 
   const user = await createTestUser(tenant.id, {
     email: 'user@' + sentinels.tenantSlug + '.test',
@@ -266,20 +279,21 @@ describe('getBotReadinessStatus', () => {
 describe('getIntegrationsStatus', () => {
   let a: SeededTenant;
   beforeEach(async () => {
-    a = await seedTenantWithSentinels(TENANT_A_SENTINELS, { calcom: true });
-    const b = await seedTenantWithSentinels(TENANT_B_SENTINELS, { calcom: true });
+    a = await seedTenantWithSentinels(TENANT_A_SENTINELS, { calendar: { provider: 'google' } });
+    const b = await seedTenantWithSentinels(TENANT_B_SENTINELS, { calendar: { provider: 'microsoft' } });
     await seedChannel(a.tenantId, 'messenger', 'active', TENANT_A_SENTINELS.channelLabel, TENANT_A_SENTINELS.platformAccountId);
     await seedChannel(a.tenantId, 'whatsapp', 'pending_setup', TENANT_A_SENTINELS.channelLabel, TENANT_A_SENTINELS.platformAccountId);
     await seedChannel(b.tenantId, 'instagram', 'active', TENANT_B_SENTINELS.channelLabel, TENANT_B_SENTINELS.platformAccountId);
   });
 
-  it('reports calcom connected when API key + event type are present', async () => {
+  it('reports the connected calendar with its provider, and never Cal.com', async () => {
     const result = await getIntegrationsStatus.execute({}, {
       tenantId: a.tenantId,
       userId: a.userId,
       manager: a.manager,
     });
-    expect(result.calcom).toBe('connected');
+    expect(result.calendar).toEqual({ provider: 'google', status: 'connected' });
+    expect(result).not.toHaveProperty('calcom');
   });
 
   it('maps messenger to facebook in the output', async () => {

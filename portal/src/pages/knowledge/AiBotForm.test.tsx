@@ -323,17 +323,34 @@ describe('AiBotForm', () => {
     expect(country).toHaveValue('BE');
   });
 
-  it('saves disabled quoted-address settings as no address', async () => {
+  it('deactivates the quoted address at once when toggled off, with no save step', async () => {
     botDetailState.quotedAddress = { enabled: true, street: 'Saved Street' };
     const { user } = renderForm();
     await user.click(screen.getByRole('button', { name: /operational/i }));
     await user.click(await screen.findByRole('switch', { name: /address the bot quotes/i }));
-    await user.click(screen.getByRole('button', { name: /save bot address/i }));
 
     await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
     expect(mockUpdateBot.mock.calls[0][0]).toMatchObject({
       quotedAddress: { enabled: false, street: 'Saved Street' },
     });
+    // The Save button only shows while the address is on.
+    expect(screen.queryByRole('button', { name: /save bot address/i })).not.toBeInTheDocument();
+  });
+
+  it('snaps the quoted-address switch back on when the toggle-off save fails', async () => {
+    botDetailState.quotedAddress = { enabled: true, street: 'Saved Street' };
+    mockUpdateBot.mockReset().mockRejectedValue(new Error('save failed'));
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+    const toggle = await screen.findByRole('switch', { name: /address the bot quotes/i });
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(mockUpdateBot).toHaveBeenCalled());
+    // The backend still quotes the address, so the switch must return to on.
+    // The failure message itself comes from the global mutation-cache onError.
+    await waitFor(() => expect(toggle).toBeChecked());
   });
 
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {

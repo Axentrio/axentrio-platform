@@ -999,7 +999,7 @@
         },
         "quotedAddress": {
           "label": "Address the bot quotes",
-          "helper": "On by default — quotes the account address, editable per bot. Turn off to quote no address (for example, an online-only business).",
+          "helper": "On by default - quotes the account address, editable per bot. Turn off to quote no address (for example, an online-only business).",
           "street": "Street",
           "streetNumber": "Street number",
           "boxNumber": "Box number",

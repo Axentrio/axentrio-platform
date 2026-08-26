@@ -402,7 +402,17 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const qaDirty = qaBaseline !== null && JSON.stringify(qaSnapshot) !== qaBaseline;
   const qaHydrated = qaHydratedKeyRef.current === hydrationKey;
 
-  const setQuotedAddressEnabled = (checked: boolean) => {
+  const buildQuotedAddressPayload = (enabled: boolean): QuotedAddress => ({
+    enabled,
+    street: qaStreet.trim() || null,
+    streetNumber: qaStreetNumber.trim() || null,
+    boxNumber: qaBoxNumber.trim() || null,
+    postalCode: qaPostal.trim() || null,
+    city: qaCity.trim() || null,
+    country: qaCountry.trim() || null,
+  });
+
+  const setQuotedAddressEnabled = async (checked: boolean) => {
     if (checked) {
       const account = accountInformation?.invoiceAddress;
       setQaStreet((value) => value || account?.street || '');
@@ -411,21 +421,24 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       setQaPostal((value) => value || account?.postalCode || '');
       setQaCity((value) => value || account?.city || '');
       setQaCountry((value) => value || account?.country?.toUpperCase() || 'BE');
+      setQaEnabled(true);
+      return;
     }
-    setQaEnabled(checked);
+    // Toggling off deactivates the per-bot address at once. The Save button only
+    // shows while the address is on, so no separate save step applies here.
+    setQaEnabled(false);
+    try {
+      await updateBot.mutateAsync({ id: botId, quotedAddress: buildQuotedAddressPayload(false) });
+      setQaBaseline(JSON.stringify({ ...qaSnapshot, enabled: false }));
+    } catch {
+      // The save failed, so the backend still quotes the address. Snap the switch
+      // back on to match; the global mutation error toast reports the failure.
+      setQaEnabled(true);
+    }
   };
 
   const saveQuotedAddress = async () => {
-    const payload: QuotedAddress = {
-      enabled: qaEnabled,
-      street: qaStreet.trim() || null,
-      streetNumber: qaStreetNumber.trim() || null,
-      boxNumber: qaBoxNumber.trim() || null,
-      postalCode: qaPostal.trim() || null,
-      city: qaCity.trim() || null,
-      country: qaCountry.trim() || null,
-    };
-    await updateBot.mutateAsync({ id: botId, quotedAddress: payload });
+    await updateBot.mutateAsync({ id: botId, quotedAddress: buildQuotedAddressPayload(qaEnabled) });
     setQaBaseline(JSON.stringify(qaSnapshot));
   };
 
@@ -1177,32 +1190,34 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                     aria-label={t('ai.bot.operational.quotedAddress.label')}
                     checked={qaEnabled}
                     onCheckedChange={setQuotedAddressEnabled}
-                    disabled={readOnly || !qaHydrated}
-                    aria-busy={!qaHydrated}
+                    disabled={readOnly || !qaHydrated || updateBot.isPending}
+                    aria-busy={!qaHydrated || updateBot.isPending}
                   />
                 </div>
                 {qaEnabled && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.streetNumber')} value={qaStreetNumber} onChange={(e) => setQaStreetNumber(e.target.value)} disabled={readOnly} />
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.boxNumber')} value={qaBoxNumber} onChange={(e) => setQaBoxNumber(e.target.value)} disabled={readOnly} />
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
-                    <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
-                    <Input
-                      placeholder={t('ai.bot.operational.quotedAddress.country')}
-                      value={qaCountry}
-                      maxLength={2}
-                      onChange={(e) => setQaCountry(e.target.value.toUpperCase())}
-                      disabled={readOnly}
-                    />
-                  </div>
-                )}
-                {!readOnly && (
-                  <div className="flex justify-end">
-                    <Button variant="outline" size="sm" onClick={saveQuotedAddress} disabled={!qaDirty || updateBot.isPending}>
-                      {t('ai.bot.operational.quotedAddress.save')}
-                    </Button>
-                  </div>
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
+                      <Input placeholder={t('ai.bot.operational.quotedAddress.streetNumber')} value={qaStreetNumber} onChange={(e) => setQaStreetNumber(e.target.value)} disabled={readOnly} />
+                      <Input placeholder={t('ai.bot.operational.quotedAddress.boxNumber')} value={qaBoxNumber} onChange={(e) => setQaBoxNumber(e.target.value)} disabled={readOnly} />
+                      <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
+                      <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
+                      <Input
+                        placeholder={t('ai.bot.operational.quotedAddress.country')}
+                        value={qaCountry}
+                        maxLength={2}
+                        onChange={(e) => setQaCountry(e.target.value.toUpperCase())}
+                        disabled={readOnly}
+                      />
+                    </div>
+                    {!readOnly && (
+                      <div className="flex justify-end">
+                        <Button variant="outline" size="sm" onClick={saveQuotedAddress} disabled={!qaDirty || updateBot.isPending}>
+                          {t('ai.bot.operational.quotedAddress.save')}
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </AccordionContent>

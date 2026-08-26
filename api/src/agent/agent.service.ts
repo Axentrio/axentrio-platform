@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
+import { localClockTimes, namesSingleOfferedTime, unofferedTimesIn } from './clock-times';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -185,65 +186,9 @@ function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | u
 /**
  * Times the reply NAMES that were never offered.
  *
- * The sibling of `claimsBookingDone`, for the other half of the same lie. That one catches a
- * booking the model says it made; this catches a time the model says is free. Seen in production:
- * the chips carried 9:00, 9:30, 12:30, 13:00, 13:30, 14:00, 14:30, 15:00 while the sentence above
- * them read "09:30, 11:30, 12:00, 12:30, 13:00, 13:30, and 14:00" — two times nobody could book,
- * and three real ones left out. A customer reading the words asks for a slot that does not exist.
- *
- * NARROW ON PURPOSE, because the cost of firing wrongly is replacing a good reply. It only looks
- * at replies that are ENUMERATING (two or more clock times), and only ever compares against a list
- * we just offered. A single time in prose — "we open at 9:00" — is left alone.
+ * Re-exported so existing tests keep importing from this module.
  */
-export function unofferedTimesIn(text: string, offeredLocal: string[]): string[] {
-  // `9:00`, `09:30`, `1:30 PM`, `13.00`, and — since 2026-08-13 — `9 AM` and `9a.m.`.
-  //
-  // Minutes are optional ONLY when a meridiem follows. That asymmetry is the whole guard against
-  // false positives: a lone number is not a clock reading, so "3 slots", "45 EUR" and "17 August"
-  // stay prose. Before whole hours were recognised at all, the live sentence "9 AM, 11 AM, or
-  // 11:30 AM" presented one recognised time and stood down.
-  // The meridiem alternatives are deliberately symmetric — `a.m.` / `a.m` OR `am`, never `am.`.
-  // A lone trailing dot belongs to the sentence, and swallowing it reports the offence as
-  // "11:30 AM." to a log and a measurement that should hold a time.
-  const found = [...text.matchAll(/\b(\d{1,2})(?:[:.](\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
-
-  const offered = new Set(offeredLocal);
-  /** Every match that is genuinely a clock reading, paired with the text as written. */
-  const times: Array<{ written: string; key: string; ambiguous: boolean; hour: number; minute: number }> = [];
-  for (const m of found) {
-    const suffix = (m[3] ?? '').toLowerCase().replace(/\./g, '');
-    const hasMinutes = m[2] !== undefined;
-    if (!hasMinutes && !suffix) continue; // a bare number is not a time
-    let hour = Number(m[1]);
-    const minute = hasMinutes ? Number(m[2]) : 0;
-    if (hour > 23 || minute > 59) continue;
-    if (suffix === 'pm' && hour < 12) hour += 12;
-    if (suffix === 'am' && hour === 12) hour = 0;
-    times.push({
-      written: m[0].trim(),
-      key: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
-      ambiguous: suffix === '',
-      hour,
-      minute,
-    });
-  }
-
-  // Only ENUMERATIONS are judged. One time in prose — "we open at 08:00" — is a fact about the
-  // business, and replacing that reply is worse than leaving it. Counted after parsing, so the
-  // looser pattern above cannot inflate the count with numbers that are not times.
-  if (times.length < 2) return [];
-
-  const named: string[] = [];
-  for (const t of times) {
-    // A 12-hour time with no suffix is ambiguous — "1:30" could be 13:30. Accept either reading,
-    // so an unsuffixed time only counts as unoffered when NEITHER interpretation was offered.
-    const alt = t.hour < 12
-      ? `${String(t.hour + 12).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`
-      : t.key;
-    if (!offered.has(t.key) && !(t.ambiguous && offered.has(alt))) named.push(t.written);
-  }
-  return named;
-}
+export { unofferedTimesIn, namesSingleOfferedTime } from './clock-times';
 
 const BELGIAN_COUNTRY_TOKENS = new Set(['be', 'belgie', 'belgique', 'belgien', 'belgium']);
 
@@ -912,27 +857,27 @@ export class AgentService {
           trace.finishReason = 'completed';
           trace.terminal = { result: 'completed' };
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-          const slotChips = buildSlotQuickReplies(pendingAvailability);
+          // Chips exist to pick a time. If the customer already named one that we can actually
+          // book, or the reply is confirming that one time, attaching hours again is how the
+          // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
+          const chipWindow = pendingAvailability ? pendingAvailability.slots.slice(0, 8) : [];
+          const offeredLocal = pendingAvailability
+            ? localClockTimes(chipWindow, pendingAvailability.timezone)
+            : null;
+          const alreadyChoseTime = !!(
+            offeredLocal &&
+            (namesSingleOfferedTime(message, offeredLocal) ||
+              namesSingleOfferedTime(finalContent, offeredLocal))
+          );
+          const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(pendingAvailability);
 
           // A reply that NAMES a time nobody can book is the availability twin of a false
           // confirmation, and it reaches the customer as plain prose above perfectly correct
           // chips. Compared against what the chips actually carry, not the whole slot list -
           // a time truncated away by the channel is one the customer cannot take either.
           let safeContent = finalContent;
-          if (slotChips?.length && pendingAvailability) {
-            // The chips are the first N slots, in order, so the prefix IS the delivered set. Read
-            // with the SAME expression `buildSlotQuickReplies` uses, so what is compared against is
-            // by construction what the customer can tap.
-            const offeredTimes = pendingAvailability.slots
-              .slice(0, slotChips.length)
-              .map((slot) => DateTime.fromISO(slot.start).setZone(pendingAvailability!.timezone));
-            // FAIL SAFE on anything unreadable. A slot that will not parse is not evidence the
-            // reply is wrong, and every time would then look unoffered — throwing away a good
-            // answer, which is worse than letting a bad one through.
-            const offeredLocal = offeredTimes.every((t) => t.isValid)
-              ? offeredTimes.map((t) => t.toFormat('HH:mm'))
-              : null;
-            const bogus = offeredLocal ? unofferedTimesIn(finalContent, offeredLocal) : [];
+          if (slotChips?.length && pendingAvailability && offeredLocal) {
+            const bogus = unofferedTimesIn(finalContent, offeredLocal);
             if (bogus.length) {
               logger.warn('[agent] reply named times that were never offered; replacing it', {
                 sessionId: session.id,

@@ -265,6 +265,50 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined);
   });
 
+  it('tells the model not to re-offer hours when the customer already named a free time', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+        { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-05', endDate: '2026-10-05' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik maandag 5 oktober 2026 om 10:00 langskomen?' },
+        ],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBe(true);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/already named this time/i);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/do not list or offer other times/i);
+  });
+
+  it('does not claim a named time is free when that hour is not in the slots', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-05', endDate: '2026-10-05' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik om 10:00 langskomen?' },
+        ],
+      }),
+    );
+
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBeUndefined();
+  });
+
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {
     // `data` is serialised into the tool message verbatim and truncated at 4000 characters. Left
     // there, the scoring both teaches a model that is meant to be unaware of any ranking AND

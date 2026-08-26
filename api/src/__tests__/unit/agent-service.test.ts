@@ -379,6 +379,97 @@ describe('AgentService', () => {
     }
   });
 
+  it('does not attach slot chips when the reply confirms the one time the customer named', async () => {
+    // WhatsApp production: customer asked for Monday 10:00, the bot confirmed 10:00 is free,
+    // then still attached Mon 9:00 / 9:30 / 10:00. Tapping 10:00 looped the same question.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          slots: [
+            { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+            { start: '2026-10-05T07:30:00.000Z', end: '2026-10-05T08:00:00.000Z' },
+            { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-05', endDate: '2026-10-05' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Maandag 5 oktober 2026 om 10:00 is beschikbaar. Zal ik deze afspraak bevestigen?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan ik maandag 5 oktober 2026 om 10:00 langskomen?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeUndefined();
+    }
+  });
+
+  it('does not re-attach slot chips when the customer taps the time they already chose', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          slots: [
+            { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+            { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-05', endDate: '2026-10-05' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'I have 9:00, 9:30 and 10:00. Which works?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Book Lekdetectie on Monday 5 October at 10:00 AM',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeUndefined();
+    }
+  });
+
   it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {
     // TWO failures guarded at once, and both are silent. Scoring vocabulary in the tool message
     // teaches a model that is meant to be unaware any ranking happened - it can start telling a

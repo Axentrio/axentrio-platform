@@ -11,7 +11,7 @@
  * a good reply.
  */
 import { describe, it, expect } from 'vitest';
-import { unofferedTimesIn } from '../../agent/agent.service';
+import { namesSingleOfferedTime, unofferedTimesIn } from '../../agent/clock-times';
 
 const OFFERED = ['09:00', '09:30', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00'];
 
@@ -120,5 +120,34 @@ describe('when it must stay quiet', () => {
     // is inventing them outright. The caller only runs this where chips exist, so it cannot fire
     // in production today - but a future caller gets the safe answer rather than a permissive one.
     expect(unofferedTimesIn('I can do 09:00 or 10:00.', [])).toEqual(['09:00', '10:00']);
+  });
+});
+
+describe('namesSingleOfferedTime — the customer already chose an offered hour', () => {
+  const OFFERED_MORNING = ['09:00', '09:30', '10:00'];
+
+  it('is true when the reply confirms the one offered time the customer named', () => {
+    // Production: customer asked for 10:00, the bot confirmed 10:00, then still attached 9:00 /
+    // 9:30 / 10:00 chips. Tapping 10:00 re-ran the same turn and looped.
+    const reply =
+      'Lekdetectie is beschikbaar. Maandag 5 oktober 2026 om 10:00 is beschikbaar. Zal ik deze afspraak van 30 minuten bevestigen op naam van Jan Test?';
+    expect(namesSingleOfferedTime(reply, OFFERED_MORNING)).toBe(true);
+  });
+
+  it('is true for a tapped slot chip payload', () => {
+    expect(namesSingleOfferedTime('Book Lekdetectie on Monday 5 October at 10:00 AM', OFFERED_MORNING)).toBe(true);
+    expect(namesSingleOfferedTime('Mon 10:00 AM', OFFERED_MORNING)).toBe(true);
+  });
+
+  it('is false when they are still choosing among several offered times', () => {
+    expect(namesSingleOfferedTime('I have 9:00, 9:30 and 10:00. Which works?', OFFERED_MORNING)).toBe(false);
+  });
+
+  it('is false when they named a time that was not offered', () => {
+    expect(namesSingleOfferedTime('Kan ik om 11:00 langskomen?', OFFERED_MORNING)).toBe(false);
+  });
+
+  it('is false when no clock time is named', () => {
+    expect(namesSingleOfferedTime('when can I book?', OFFERED_MORNING)).toBe(false);
   });
 });

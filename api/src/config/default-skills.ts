@@ -52,7 +52,7 @@ export const DEFAULT_SKILLS: DefaultSkill[] = [
     description: 'Lets visitors book, reschedule, or cancel appointments directly in the chat.',
     trigger: 'User wants to schedule, reschedule, cancel, or check availability for an appointment or meeting',
     tools: ['check_availability', 'create_booking', 'list_bookings', 'reschedule_booking', 'cancel_booking'],
-    instructions: "For new bookings: check available time slots, present options clearly, create the booking, and confirm details. For changes: ask for identifying information, find their booking, confirm the new details before applying. Always confirm cancellations before proceeding. CRITICAL: when confirming a booking or reschedule, state the appointment time using the tool result's booking.displayTime field EXACTLY as given — never re-compute, convert, or reformat the time from startTime (it is UTC and will drift).",
+    instructions: "For new bookings: check the time the customer named; if they did not name one, check available slots and present options. If their named time is free, confirm that time only - do not list other times. A tapped slot button is their choice of that time; if you already asked to confirm it and they choose it again, create the booking. Confirm details. For changes: ask for identifying information, find their booking, confirm the new details before applying. Always confirm cancellations before proceeding. CRITICAL: when confirming a booking or reschedule, state the appointment time using the tool result's booking.displayTime field EXACTLY as given — never re-compute, convert, or reformat the time from startTime (it is UTC and will drift).",
     maxSteps: 8,
     enabled: false,
   },

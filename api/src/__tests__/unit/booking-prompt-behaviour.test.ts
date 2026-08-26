@@ -55,6 +55,16 @@ describe('an existing address binding reaches the model', () => {
   });
 });
 
+describe('a customer who already named the hour', () => {
+  it('tells the model not to offer other times, and that a tapped slot is confirmation', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/already named a specific clock time/i);
+    expect(p).toMatch(/do not list or offer other times/i);
+    expect(p).toMatch(/tapped slot button/i);
+    expect(p).toMatch(/they have confirmed/i);
+  });
+});
+
 /**
  * The catalog line for a service, isolated from the rules below it.
  *

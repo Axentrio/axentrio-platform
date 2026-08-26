@@ -19,6 +19,8 @@ import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
+import { contentToText } from '../../llm/llm.types';
+import { localClockTimes, namesSingleOfferedTime } from '../clock-times';
 
 /**
  * The platform's own address check, reused rather than re-invented.
@@ -142,6 +144,34 @@ function addressReplyFact(
   };
 }
 
+const NAMED_TIME_GUIDANCE =
+  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. If they tapped a slot button or already asked you to book this time, and you have their name, call create_booking - do not ask them to pick a time again.';
+
+function lastCustomerText(ctx: ToolContext): string {
+  const history = ctx.conversationHistory;
+  if (!Array.isArray(history)) return '';
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role === 'user') return contentToText(m.content);
+  }
+  return '';
+}
+
+function namedTimeGuidance(
+  ctx: ToolContext,
+  data: { slots?: Array<{ start: string }>; timezone?: string; guidance?: string },
+): Record<string, unknown> {
+  const slots = data.slots;
+  if (!Array.isArray(slots) || slots.length === 0) return {};
+  const offered = localClockTimes(slots, data.timezone ?? 'UTC');
+  if (!offered) return {};
+  if (!namesSingleOfferedTime(lastCustomerText(ctx), offered)) return {};
+  return {
+    requestedTimeAvailable: true,
+    guidance: data.guidance ? `${data.guidance} ${NAMED_TIME_GUIDANCE}` : NAMED_TIME_GUIDANCE,
+  };
+}
+
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
   description = 'Check available appointment slots for a given date range and service.';
@@ -247,6 +277,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
             groupingNote: `The times in "slots" are already in the best order for this business. Offer them in the order given and do not re-sort them. If the customer asks why the first one is suggested, you may say: "${result.travel.grouped.customerReason}" Never invent a different reason, and never mention other customers or their addresses.`,
           }
         : {};
+      const withNamedTime = (data: Record<string, unknown>) => ({
+        ...data,
+        ...namedTimeGuidance(ctx, data as { slots?: Array<{ start: string }>; timezone?: string; guidance?: string }),
+      });
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
       // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
       // empty-slots branch below it would be read out as "no times in this range", which turns
@@ -258,7 +292,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           ...measurement,
           ...affordance,
           ...replyFact,
-          data: {
+          data: withNamedTime({
             ...result,
             ...groupedNote,
             ...addressEcho(chosen.address),
@@ -266,7 +300,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             guidance: travel.addressTooVague
               ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
               : 'Times in "slots" can be confirmed now. Times in "travel.requestableSlots" are further away and the journey has not been measured, so they CANNOT be auto-confirmed: offer them as times the business will confirm, and if the customer picks one, capture it with request_appointment rather than create_booking. Never present a requestable time as booked.',
-          },
+          }),
         };
       }
       // An empty slot list is the single most consequential result this tool returns, and
@@ -280,7 +314,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           ...measurement,
           ...affordance,
           ...replyFact,
-          data: {
+          data: withNamedTime({
             ...result,
             ...groupedNote,
             ...addressEcho(chosen.address),
@@ -288,12 +322,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
             suggestedAction: 'request_appointment',
             guidance:
               'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked. Do not turn the customer away and do not hand off: ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
-          },
+          }),
         };
       }
       return {
         success: true,
-        data: { ...result, ...groupedNote, ...addressEcho(chosen.address) },
+        data: withNamedTime({ ...result, ...groupedNote, ...addressEcho(chosen.address) }),
         ...measurement,
         ...affordance,
         ...replyFact,

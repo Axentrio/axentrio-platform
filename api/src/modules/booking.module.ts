@@ -466,7 +466,7 @@ export function buildServicesSection(
   return `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId (use the SAME service whose availability you checked). Before you call create_booking or request_appointment, collect the following — and never invent any of it:
 - NAME: if it's already known from their profile (see above), confirm it rather than asking from scratch; otherwise ask for it.
-- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture.
+- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture. If they already named a specific clock time and check_availability includes it, confirm THAT time only - do not list or offer other times. A tapped slot button (a short "Mon 10:00 AM" or "Book ... at ..." message) IS their choice of that time; do not offer times again. If you already asked whether to book that same time and they choose it again, call create_booking - they have confirmed.
 - EMAIL (optional): ask once so we can send a calendar invite, but if they have none or decline, proceed without it — don't insist, re-ask, or block the booking on it.
 - SUMMARY (optional, never asked for): if the conversation told you something the business owner would want to know before this appointment — what the customer actually needs, a constraint, an urgency, something they mentioned in passing — pass it as aiSummary, one plain line written for the owner. It goes on their calendar entry and the customer never sees it. Do NOT invent one, and skip it entirely when nothing was said beyond the booking itself.
 RESULT: a booking tool may answer with "requested": true. That means it was NOT confirmed — it was captured as a request for the business owner to review, which happens when the service is request-only, when the calendar cannot be reached, or when a variable-length job's length was never established. Say so plainly: it is a request the owner will come back on. Never describe such a result as booked or confirmed, and never read a time back as confirmed from one.
@@ -521,7 +521,7 @@ export const bookingModule: ModuleDefinition = {
   displayName: 'Bookings',
   description: 'Lets the bot check availability and book, reschedule, or cancel appointments for the customer.',
   readinessHint: 'Ready once the bot has at least one online-bookable service and business hours set.',
-  defaultProse: 'Help the customer book, reschedule, or cancel an appointment. Understand which service they need, offer the soonest suitable time, and confirm the service, date, and time back to them before booking.',
+  defaultProse: 'Help the customer book, reschedule, or cancel an appointment. Understand which service they need. If they named a time, check that time and confirm it when it is free; only offer other times when they did not name one, or theirs is not free. Confirm the service, date, and time back to them before booking.',
   provides: ['check_availability', 'create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'],
   gate: { kind: 'feature', feature: 'bookings' },
   tools: [

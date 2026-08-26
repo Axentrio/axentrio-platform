@@ -157,6 +157,24 @@ function lastCustomerText(ctx: ToolContext): string {
   return '';
 }
 
+/**
+ * Strip an ISO offset the model was told never to add.
+ *
+ * Both booking tools demand a ZONELESS local time in the business's timezone. Live on WhatsApp
+ * (2026-08-26) a model wrote the customer's "om 10:00" as "2026-10-05T10:00:00.000Z"; the provider
+ * read that as an instant and booked 12:00 Brussels. The customer's words are the wall clock, so
+ * an offset-bearing value is re-read as that same wall clock: strip the suffix, keep the digits.
+ */
+function stripIsoOffset(value: string): string {
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return value;
+  const stripped = value.replace(/(?:Z|[+-]\d{2}:?\d{2})$/i, '');
+  logger.warn('[booking] model added a timezone offset to a local time; re-read as business wall clock', {
+    received: value,
+    interpreted: stripped,
+  });
+  return stripped;
+}
+
 function namedTimeGuidance(
   ctx: ToolContext,
   data: { slots?: Array<{ start: string }>; timezone?: string; guidance?: string },
@@ -498,12 +516,13 @@ export class CreateBookingTool implements ToolAdapter {
       // only fires when a BINDING exists, and a binding is written in exactly one place
       // (`/places/select`). Wherever address suggestions are unavailable, that guard never runs
       // and this key is all that is left.
-      const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}:${addressToken(booked)}`;
+      const startTime = stripIsoOffset(args.startTime as string);
+      const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${startTime}:${addressToken(booked)}`;
       const result = await createBooking(
         'agent',
         ctx.sessionId,
         idempotencyKey,
-        args.startTime as string,
+        startTime,
         { name: args.attendeeName as string, email: args.attendeeEmail as string | undefined },
         args.notes as string | undefined,
         args.serviceId as string | undefined,
@@ -691,14 +710,15 @@ export class RequestAppointmentTool implements ToolAdapter {
       // token the correction deduped into the original row and the model was handed a success
       // carrying the OLD address, which is how a customer came to be told a booking was confirmed
       // at a door the system had never recorded.
-      const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}:${addressToken(requested)}`;
+      const preferredTime = stripIsoOffset(args.preferredTime as string);
+      const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${preferredTime}:${addressToken(requested)}`;
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;
       const result = await requestBooking(
         'agent',
         ctx.sessionId,
         idempotencyKey,
-        args.preferredTime as string,
+        preferredTime,
         { name: args.attendeeName as string, email: args.attendeeEmail as string | undefined },
         args.notes as string | undefined,
         args.serviceId as string | undefined,

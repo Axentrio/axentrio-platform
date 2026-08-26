@@ -374,8 +374,8 @@ describe('CreateBookingTool', () => {
       'sess-1',
       // `noaddr` rather than a hash: this booking named no address, and a service that needs
       // none must key exactly as it always did.
-      'create_booking:sess-1:default:2026-04-01T10:00:00Z:noaddr',
-      '2026-04-01T10:00:00Z',
+      'create_booking:sess-1:default:2026-04-01T10:00:00:noaddr',
+      '2026-04-01T10:00:00',
       { name: 'Alice', email: 'alice@test.com' },
       undefined,
       undefined,
@@ -416,13 +416,41 @@ describe('CreateBookingTool', () => {
     expect(mockCreateBooking).toHaveBeenCalledWith(
       'agent',
       'sess-2',
-      'create_booking:sess-2:default:2026-04-02T09:00:00Z:noaddr',
-      '2026-04-02T09:00:00Z',
+      'create_booking:sess-2:default:2026-04-02T09:00:00:noaddr',
+      '2026-04-02T09:00:00',
       { name: 'Bob', email: 'bob@test.com' },
       'Need consultation',
       undefined,
       undefined,
       { customerAddress: undefined, customerPhone: undefined, durationMin: undefined }    );
+  });
+
+  it('re-reads a UTC or offset startTime as the wall clock the customer named', async () => {
+    // Live 2026-08-26: customer said "om 10:00", the model passed 10:00Z, the provider booked
+    // 12:00 Brussels. The digits are the local hour; the suffix is the lie.
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-z' } });
+
+    await tool.execute(
+      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({ sessionId: 'sess-z' }),
+    );
+
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00.000');
+
+    mockCreateBooking.mockClear();
+    await tool.execute(
+      { startTime: '2026-10-05T10:00:00+02:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({ sessionId: 'sess-z2' }),
+    );
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
+
+    mockCreateBooking.mockClear();
+    await tool.execute(
+      { startTime: '2026-10-05T10:00:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({ sessionId: 'sess-z3' }),
+    );
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
   });
 
   it('#5: emits appointment.booked with the real booking id + canonical UTC startTime (not the idempotency key / arg time)', async () => {

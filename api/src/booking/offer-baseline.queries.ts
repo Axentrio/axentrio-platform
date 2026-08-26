@@ -23,6 +23,7 @@
  * Contract: `docs/specs/lp3-offer-record.md`.
  */
 import { AppDataSource } from '../database/data-source';
+import { CLOCK_SKEW_GRACE_MS } from './offer-record.service';
 
 /** Only these two count as delivered. Kept as one string so no query can drift from it. */
 const DELIVERED = `('provider_accepted', 'widget_assumed')`;
@@ -30,13 +31,30 @@ const DELIVERED = `('provider_accepted', 'widget_assumed')`;
 export interface BaselineWindow {
   /** Inclusive lower bound on `created_at`. */
   since: Date;
-  /** Exclusive upper bound. Defaults to now. */
+  /** Exclusive upper bound. Defaults to now, plus a second of clock slack (see `untilBound`). */
   until?: Date;
   /** Narrow to one tenant. Omit for the platform-wide figure. */
   tenantId?: string;
   /** Narrow to one location mode, e.g. `customer_location`. Omit for all. */
   locationMode?: string;
 }
+
+/**
+ * The exclusive upper bound every query below shares, and why it is not plainly `now`.
+ *
+ * `created_at` is POSTGRES' clock; a default taken here is THIS process's, read microseconds
+ * later. Let the database lead by even a millisecond and the row just inserted satisfies
+ * `created_at >= until`, so it drops out of the window - always the newest row, which is the one
+ * a caller measuring "what just happened" cares about most. `offer-record.test.ts` failed exactly
+ * this way on CI: a multi-day call and an unparseable call written and counted inside the same
+ * millisecond, reported as 0.
+ *
+ * An absent `until` means "everything since", so this bound exists only to keep the eight
+ * statements uniform. A second of slack keeps them uniform without letting two clocks decide
+ * what is counted. An explicit `until` from a caller is honoured exactly as given.
+ */
+const untilBound = (window: BaselineWindow): Date =>
+  window.until ?? new Date(Date.now() + CLOCK_SKEW_GRACE_MS);
 
 export interface Ratio {
   numerator: number;
@@ -69,7 +87,7 @@ export async function firstOfferAcceptance(window: BaselineWindow): Promise<Rati
        AND s.created_at >= $1 AND s.created_at < $2
        AND ($3::uuid IS NULL OR o.tenant_id = $3)
        AND ($4::varchar IS NULL OR o.location_mode = $4)`,
-    [window.since, window.until ?? new Date(), window.tenantId ?? null, window.locationMode ?? null]
+    [window.since, untilBound(window), window.tenantId ?? null, window.locationMode ?? null]
   );
   return ratio(Number(rows[0]?.ordinal_one ?? 0), Number(rows[0]?.total ?? 0));
 }
@@ -91,7 +109,7 @@ export async function offerConversion(window: BaselineWindow): Promise<Ratio> {
        AND o.created_at >= $1 AND o.created_at < $2
        AND ($3::uuid IS NULL OR o.tenant_id = $3)
        AND ($4::varchar IS NULL OR o.location_mode = $4)`,
-    [window.since, window.until ?? new Date(), window.tenantId ?? null, window.locationMode ?? null]
+    [window.since, untilBound(window), window.tenantId ?? null, window.locationMode ?? null]
   );
   return ratio(Number(rows[0]?.converted ?? 0), Number(rows[0]?.total ?? 0));
 }
@@ -112,7 +130,7 @@ export async function multiDayShare(window: BaselineWindow): Promise<Ratio> {
      WHERE range_valid = true
        AND created_at >= $1 AND created_at < $2
        AND ($3::uuid IS NULL OR tenant_id = $3)`,
-    [window.since, window.until ?? new Date(), window.tenantId ?? null]
+    [window.since, untilBound(window), window.tenantId ?? null]
   );
   return ratio(Number(rows[0]?.multi_day ?? 0), Number(rows[0]?.total ?? 0));
 }
@@ -145,7 +163,7 @@ export async function baselineSummary(window: BaselineWindow): Promise<{
            WHERE range_valid = false
              AND created_at >= $1 AND created_at < $2
              AND ($3::uuid IS NULL OR tenant_id = $3)) AS unparseable_ranges`,
-      [window.since, window.until ?? new Date(), window.tenantId ?? null]
+      [window.since, untilBound(window), window.tenantId ?? null]
     ) as Promise<Array<{ rejected_offers: string; unparseable_ranges: string }>>,
   ]);
   return {
@@ -208,7 +226,7 @@ export async function scorerGate(window: BaselineWindow): Promise<ScorerGate> {
           AND created_at >= $1 AND created_at < $2
           AND ($3::uuid IS NULL OR tenant_id = $3)
           AND ($4::text IS NULL OR location_mode = $4)`,
-      [window.since, window.until ?? new Date(), window.tenantId ?? null, window.locationMode ?? null]
+      [window.since, untilBound(window), window.tenantId ?? null, window.locationMode ?? null]
     ),
     // Per SLOT rather than per offer: an offer where one slot of eight scored is not 100% covered,
     // and counting offers would say it was.
@@ -221,7 +239,7 @@ export async function scorerGate(window: BaselineWindow): Promise<ScorerGate> {
           AND o.created_at >= $1 AND o.created_at < $2
           AND ($3::uuid IS NULL OR o.tenant_id = $3)
           AND ($4::text IS NULL OR o.location_mode = $4)`,
-      [window.since, window.until ?? new Date(), window.tenantId ?? null, window.locationMode ?? null]
+      [window.since, untilBound(window), window.tenantId ?? null, window.locationMode ?? null]
     ),
     AppDataSource.query(
       `SELECT DISTINCT scorer_version
@@ -230,7 +248,7 @@ export async function scorerGate(window: BaselineWindow): Promise<ScorerGate> {
           AND created_at >= $1 AND created_at < $2
           AND ($3::uuid IS NULL OR tenant_id = $3)
         ORDER BY scorer_version`,
-      [window.since, window.until ?? new Date(), window.tenantId ?? null]
+      [window.since, untilBound(window), window.tenantId ?? null]
     ),
   ])) as never;
 
@@ -280,7 +298,7 @@ export async function pilotCohorts(window: BaselineWindow): Promise<{
         WHERE delivery_basis IN ${DELIVERED}
           AND created_at >= $1 AND created_at < $2
           AND ($3::uuid IS NULL OR tenant_id = $3)`,
-      [window.since, window.until ?? new Date(), window.tenantId ?? null]
+      [window.since, untilBound(window), window.tenantId ?? null]
     );
   return {
     steered: Number(rows[0]?.steered ?? 0),

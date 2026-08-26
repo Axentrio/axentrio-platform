@@ -435,6 +435,23 @@ describe('the canonical baseline, computed once so LP4 and LP5 cannot disagree',
     expect(summary.multiDayShare).toMatchObject({ numerator: 1, denominator: 2 });
     expect(summary.excluded.unparseableRanges).toBe(1);
   });
+
+  it('counts a row whose database clock reads AHEAD of this process', async () => {
+    // THE SECOND CI FLAKE, pinned, and the same cross-clock class as the attribution one. Every
+    // baseline query bounds the window with `created_at < until`, and an absent `until` used to
+    // default to a `new Date()` taken here. `created_at` is Postgres' clock: let it lead by a
+    // millisecond and the row just written falls outside the window - always the newest row.
+    // CI wrote three calls and counted them inside the same millisecond, and reported 0.
+    await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: 'soon', endDate: 'later', slotCount: 0 });
+    // Simulate the lead the runner really had: put the row 200ms into this process's future.
+    await AppDataSource.query(
+      `UPDATE chatbot_availability_calls SET created_at = now() + interval '200 milliseconds' WHERE session_id = $1`,
+      [sessionId],
+    );
+
+    const summary = await baselineSummary({ since });
+    expect(summary.excluded.unparseableRanges).toBe(1);
+  });
 });
 
 /**

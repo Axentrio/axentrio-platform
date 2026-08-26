@@ -137,23 +137,26 @@ export async function recordBookingOffer(input: {
 }
 
 /**
- * How much later than the booking a delivery may LOOK and still count.
+ * How far apart a database timestamp and a timestamp from THIS process may look, and still be
+ * treated as the same moment.
  *
- * TWO CLOCKS AND TWO PRECISIONS. `createdAt` is written by the DATABASE, in microseconds, and
- * truncated to milliseconds when it is read back; the booking instant comes from THIS process.
- * So an offer stored at 12:00:00.500_800 reads back as .500, and a selection recorded moments
- * later in the same millisecond compares EQUAL - scored as "delivered after the booking" and
- * dropped out of the baseline. In production the database is not even on the same machine as the
- * API, so its clock may genuinely read a few milliseconds ahead.
+ * TWO CLOCKS AND TWO PRECISIONS. `created_at` is written by the DATABASE, in microseconds, and
+ * truncated to milliseconds when it is read back; every instant we compare it against comes from
+ * this process. So a row stored at 12:00:00.500_800 reads back as .500 and compares EQUAL to a
+ * `new Date()` taken just after it, or even LATER than one - and in production the database is
+ * not on the same machine as the API, so its clock may genuinely run a few milliseconds ahead.
  *
- * That is why `offer-record.test.ts` fails on CI, where a booking follows its offer inside one
- * millisecond, and passes against a Docker Postgres whose round trip is slower than that.
+ * Two places pay for that. An attribution asks "was this offer delivered before the booking",
+ * and the newest offer scored as delivered after it. The baseline's window asks "is this row
+ * before `until`", and the row just written fell outside it. Both dropped exactly the newest
+ * row, both only when the gap closed to under a millisecond - so `offer-record.test.ts` failed
+ * on CI, twice in two different metrics, and passed against a slower Docker Postgres every time.
  *
- * The question being asked is whether the customer could have acted on the offer, which is a
- * human timescale. A second of slack answers it, and no real "the offer came later" case is
- * inside a second - those are minutes apart, which is what the test for them uses.
+ * Both questions are about human timescales: whether a customer could have acted, and which
+ * period a row belongs to. A second of slack answers both, and no real case lives inside a
+ * second - the "offer came later" test puts them a minute apart.
  */
-const CLOCK_SKEW_GRACE_MS = 1000;
+export const CLOCK_SKEW_GRACE_MS = 1000;
 
 /**
  * Attribute a Booking or Request to the offer it came from.

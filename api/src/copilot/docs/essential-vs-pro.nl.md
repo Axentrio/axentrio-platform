@@ -17,7 +17,7 @@ Kort gezegd: Essential is "bot plus leads", Pro is "bot plus leads plus boekinge
 - Bezoekers geven hun contactgegevens en er verschijnt een lead in je lijst
 
 **Overstappen naar Pro geeft je bovendien:**
-- **Boekingen via Cal.com** — de bot zet afspraken rechtstreeks in je agenda
+- **Agendaboekingen** — de bot zet afspraken rechtstreeks in je Google- of Outlook-agenda
 - **Eigen huisstijl** — je kleuren, je welkomstbericht, onze vermelding weg
 - **Eigen leadvelden en doorsturen** — breid je leads uit en stuur ze door op basis van de bron
 - **De AI-platformassistent** — de AI van Axentrio helpt je het platform te bedienen (deze Copilot)

@@ -17,7 +17,7 @@ The short version: Essential is "bot + leads", Pro is "bot + leads + bookings + 
 - Visitors give contact info → Lead row appears in the inbox
 
 **Upgrading to Pro unlocks:**
-- **Cal.com bookings** — bot books meetings directly into your calendar
+- **Calendar bookings** — the bot books meetings into your Google or Outlook calendar
 - **Widget branding** — your colours, your welcome message, hide our attribution
 - **Custom Lead fields + routing** — extend the Lead schema, route by source
 - **AI Platform Assistant** — Axentrio's own AI helps you operate the platform (this Copilot)

@@ -17,4 +17,4 @@ The first three things to do after signing up:
 2. **Install the widget.** Open *AI Bot & Content → Embed*, copy the snippet, and paste it before `</body>` on your website.
 3. **Capture your first lead.** When a visitor gives the bot their email or phone, it's saved to *Lead Capture → Leads*.
 
-Everything else — Cal.com bookings, social channels, custom appearance — is in the sidebar once those three are set.
+Everything else — calendar bookings, social channels, custom appearance — is in the sidebar once those three are set.

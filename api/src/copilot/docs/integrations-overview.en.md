@@ -19,7 +19,8 @@ Axentrio integrates with three classes of external tool: **channels** (where the
 - Telegram (every tier)
 
 **Calendar:**
-- Cal.com (Pro+; for booking meetings during chats)
+- Google Calendar (Pro+; the bot books meetings into your calendar during chats)
+- Outlook Calendar (Pro+; the same, for Microsoft 365 / Outlook)
 
 **CRM / outbound:**
 - n8n workflows (Pro+; route Lead captures into your CRM, Slack, email — any n8n node)
@@ -30,6 +31,6 @@ Axentrio integrates with three classes of external tool: **channels** (where the
 - Stripe customer linking (post-booking checkout)
 - Zapier (community-driven)
 
-**Where to find them:** all under *Social Media* (for channels), *Bookings → Integrations* (for Cal.com), and *Settings → Integrations* (for webhooks and n8n).
+**Where to find them:** all under *Social Media* (for channels), *Bookings → Setup* (to connect Google or Outlook Calendar), and *Settings → Integrations* (for webhooks and n8n).
 
 **Status of each integration:** the *AI Bot & Content* status card on the dashboard shows which integrations are connected vs. not.

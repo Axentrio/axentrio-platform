@@ -17,4 +17,4 @@ De eerste drie dingen die je doet na je registratie:
 2. **Installeer de widget.** Open *AI-bot & inhoud → Embed*, kopieer het codefragment en plak het vlak voor `</body>` op je website.
 3. **Leg je eerste lead vast.** Zodra een bezoeker zijn e-mailadres of telefoonnummer geeft, verschijnt die bij *Leads*.
 
-Al de rest — boekingen via Cal.com, social media, een eigen uitzicht — staat in de zijbalk zodra die drie klaar zijn.
+Al de rest — agendaboekingen, social media, een eigen uitzicht — staat in de zijbalk zodra die drie klaar zijn.

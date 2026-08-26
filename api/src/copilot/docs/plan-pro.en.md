@@ -13,7 +13,7 @@ tags:
 Pro adds everything you need to scale beyond the basics — booking integrations, branding, richer Lead handling, and the AI Platform Assistant.
 
 **Everything in Essential, plus:**
-- Cal.com bookings (the bot books meetings directly into your calendar)
+- Calendar bookings (the bot books meetings into your Google or Outlook calendar)
 - Hide the "Powered by Axentrio" attribution on your widget
 - Custom widget appearance (colours, position, welcome message)
 - Custom Lead fields + lead routing rules

@@ -11,7 +11,7 @@ tags:
 
 # De AI-platformassistent
 
-De AI-platformassistent is een AI in het portaal die je vragen over Axentrio zelf beantwoordt — hoe je je bot instelt, de widget installeert, leads terugvindt, Cal.com koppelt of je abonnement begrijpt.
+De AI-platformassistent is een AI in het portaal die je vragen over Axentrio zelf beantwoordt — hoe je je bot instelt, de widget installeert, leads terugvindt, je agenda koppelt of je abonnement begrijpt.
 
 **Waar hij zit:** rechtsonder op elke pagina van het portaal. Klik op de chatbel om het paneel te openen. Het blijft open terwijl je navigeert en sluit wanneer je wilt.
 
@@ -20,12 +20,12 @@ De AI-platformassistent is een AI in het portaal die je vragen over Axentrio zel
 - "Welk abonnement heb ik en wanneer wordt het verlengd?"
 - "Hoeveel leads heb ik deze week binnengekregen?"
 - "Waarom antwoordt mijn bot niet?"
-- "Hoe koppel ik Cal.com?"
+- "Hoe koppel ik mijn agenda?"
 
 Hij verwijst je ook rechtstreeks door naar het juiste scherm: vraag waar iets staat en je krijgt een klikbare link.
 
 **Wat hij NIET doet:**
-- Dingen voor jou uitvoeren — hij legt uit hoe je Cal.com koppelt, maar koppelt het niet zelf
+- Dingen voor jou uitvoeren — hij legt uit hoe je je agenda koppelt, maar koppelt het niet zelf
 - Gegevens van andere klanten bekijken (altijd alleen die van jou)
 - Wachtwoorden, API-sleutels of Stripe-gegevens tonen of delen
 

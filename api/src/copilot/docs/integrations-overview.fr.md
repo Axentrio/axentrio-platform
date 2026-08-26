@@ -19,7 +19,8 @@ Axentrio se connecte à trois types d'outils externes : les **canaux** (où le b
 - Telegram (toutes formules)
 
 **Agenda :**
-- Cal.com (à partir de Pro ; pour réserver des rendez-vous pendant les conversations)
+- Google Agenda (à partir de Pro ; le bot place les rendez-vous dans votre agenda pendant les conversations)
+- Outlook (à partir de Pro ; idem, pour Microsoft 365 / Outlook)
 
 **CRM et sortant :**
 - Workflows n8n (à partir de Pro ; envoyez les leads vers votre CRM, Slack, e-mail — n'importe quel nœud n8n)
@@ -30,6 +31,6 @@ Axentrio se connecte à trois types d'outils externes : les **canaux** (où le b
 - Liaison avec les clients Stripe (paiement après réservation)
 - Zapier (à la demande de la communauté)
 
-**Où les trouver :** sous *Réseaux sociaux* (canaux), *Réservations → Intégrations* (Cal.com) et *Paramètres → Intégrations* (webhooks et n8n).
+**Où les trouver :** sous *Réseaux sociaux* (canaux), *Réservations → Configuration* (pour connecter Google Agenda ou Outlook) et *Paramètres → Intégrations* (webhooks et n8n).
 
 **État de chaque intégration :** la carte d'état de *Bot IA & Contenu* sur le tableau de bord indique lesquelles sont connectées.

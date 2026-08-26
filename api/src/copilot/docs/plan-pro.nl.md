@@ -13,7 +13,7 @@ tags:
 Pro voegt alles toe wat je nodig hebt om verder te groeien: boekingen, je eigen huisstijl, rijkere opvolging van leads en de AI-platformassistent.
 
 **Alles uit Essential, plus:**
-- Boekingen via Cal.com (de bot zet afspraken rechtstreeks in je agenda)
+- Agendaboekingen (de bot zet afspraken in je Google- of Outlook-agenda)
 - Het label "Powered by Axentrio" verbergen op je widget
 - Een eigen uitzicht voor de widget (kleuren, positie, welkomstbericht)
 - Eigen leadvelden en doorstuurregels

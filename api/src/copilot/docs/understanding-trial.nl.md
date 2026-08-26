@@ -15,7 +15,7 @@ Nieuwe klanten krijgen automatisch een gratis **Pro-proefperiode** — alle Pro-
 **Duur:** 14 dagen vanaf je registratie.
 
 **Wat werkt tijdens de proefperiode:**
-- Alle Pro-functies staan aan: boekingen via Cal.com, eigen huisstijl, eigen leadvelden en de AI-platformassistent
+- Alle Pro-functies staan aan: agendaboekingen, eigen huisstijl, eigen leadvelden en de AI-platformassistent
 - De daglimiet aan berichten ligt op het niveau van Pro
 - Je volledige lijst met leads
 

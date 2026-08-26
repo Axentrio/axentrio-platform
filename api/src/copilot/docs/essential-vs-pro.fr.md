@@ -17,7 +17,7 @@ En résumé : Essential, c'est « bot et leads » ; Pro, c'est « bot, leads, r�
 - Des visiteurs qui laissent leurs coordonnées et un lead qui apparaît dans votre liste
 
 **Passer à Pro vous donne en plus :**
-- **Réservations via Cal.com** — le bot place les rendez-vous directement dans votre agenda
+- **Réservations via agenda** — le bot place les rendez-vous directement dans votre agenda Google ou Outlook
 - **Identité visuelle** — vos couleurs, votre message d'accueil, notre mention retirée
 - **Champs de lead et acheminement personnalisés** — enrichissez vos leads et orientez-les selon leur source
 - **L'assistant IA de la plateforme** — l'IA d'Axentrio vous aide à piloter la plateforme (ce Copilot)

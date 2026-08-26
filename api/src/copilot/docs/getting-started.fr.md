@@ -17,4 +17,4 @@ Les trois premières choses à faire après votre inscription :
 2. **Installez le widget.** Ouvrez *Bot IA & Contenu → Embed*, copiez l'extrait de code et collez-le juste avant `</body>` sur votre site.
 3. **Recueillez votre premier lead.** Dès qu'un visiteur donne son e-mail ou son téléphone, il apparaît dans *Leads*.
 
-Tout le reste — réservations via Cal.com, réseaux sociaux, apparence personnalisée — se trouve dans le menu latéral une fois ces trois étapes faites.
+Tout le reste — réservations via agenda, réseaux sociaux, apparence personnalisée — se trouve dans le menu latéral une fois ces trois étapes faites.

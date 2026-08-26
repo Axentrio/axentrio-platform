@@ -15,7 +15,7 @@ New signups get a free **Pro trial** automatically — every Pro feature is unlo
 **Trial duration:** 14 days from signup.
 
 **What works during trial:**
-- Every Pro feature is active: Cal.com bookings, widget branding, custom Lead fields, the AI Platform Assistant
+- Every Pro feature is active: calendar bookings, widget branding, custom Lead fields, the AI Platform Assistant
 - Daily LLM call cap is at Pro level
 - Full Lead Capture inbox
 

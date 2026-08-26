@@ -15,7 +15,7 @@ Les nouveaux clients reçoivent automatiquement un **essai Pro** gratuit — tou
 **Durée :** 14 jours à partir de l'inscription.
 
 **Ce qui fonctionne pendant l'essai :**
-- Toutes les fonctionnalités Pro sont actives : réservations Cal.com, identité visuelle, champs de lead personnalisés et l'assistant IA de la plateforme
+- Toutes les fonctionnalités Pro sont actives : réservations agenda, identité visuelle, champs de lead personnalisés et l'assistant IA de la plateforme
 - Le plafond quotidien de messages est celui de Pro
 - Votre liste complète de leads
 

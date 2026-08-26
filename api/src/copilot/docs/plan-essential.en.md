@@ -21,7 +21,7 @@ Essential is the entry tier — everything you need to put a bot on your website
 - Email support
 
 **What's NOT included (these need Pro):**
-- Cal.com bookings
+- Calendar bookings (Google or Outlook)
 - Hide the "Powered by Axentrio" attribution
 - Custom widget appearance (colours, branding)
 - Custom Lead fields and routing rules

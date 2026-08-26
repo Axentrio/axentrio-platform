@@ -21,7 +21,7 @@ Essential est la formule d'entrée — tout ce qu'il faut pour mettre un bot sur
 - Assistance par e-mail
 
 **Ce qui n'est PAS compris (il faut Pro) :**
-- Réservations via Cal.com
+- Réservations via agenda (Google ou Outlook)
 - Masquer la mention « Powered by Axentrio »
 - Apparence personnalisée du widget (couleurs, identité visuelle)
 - Champs de lead personnalisés et règles d'acheminement

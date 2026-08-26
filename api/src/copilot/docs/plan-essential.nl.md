@@ -21,7 +21,7 @@ Essential is het instapabonnement — alles wat je nodig hebt om een bot op je w
 - Ondersteuning via e-mail
 
 **Wat er NIET in zit (daarvoor heb je Pro nodig):**
-- Boekingen via Cal.com
+- Agendaboekingen (Google of Outlook)
 - Het label "Powered by Axentrio" verbergen
 - Een eigen uitzicht voor de widget (kleuren, huisstijl)
 - Eigen leadvelden en doorstuurregels

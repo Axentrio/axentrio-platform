@@ -13,7 +13,7 @@ tags:
 Pro ajoute tout ce qu'il faut pour aller plus loin : réservations, identité visuelle, gestion plus riche des leads et l'assistant IA de la plateforme.
 
 **Tout Essential, plus :**
-- Réservations via Cal.com (le bot place les rendez-vous directement dans votre agenda)
+- Réservations via agenda (le bot place les rendez-vous dans votre agenda Google ou Outlook)
 - Masquer la mention « Powered by Axentrio » sur votre widget
 - Apparence personnalisée du widget (couleurs, position, message d'accueil)
 - Champs de lead personnalisés et règles d'acheminement

@@ -11,7 +11,7 @@ tags:
 
 # L'assistant IA de la plateforme
 
-L'assistant IA de la plateforme est une IA intégrée au portail qui répond à vos questions sur Axentrio même — comment configurer votre bot, installer le widget, retrouver vos leads, connecter Cal.com ou comprendre votre formule.
+L'assistant IA de la plateforme est une IA intégrée au portail qui répond à vos questions sur Axentrio même — comment configurer votre bot, installer le widget, retrouver vos leads, connecter votre agenda ou comprendre votre formule.
 
 **Où le trouver :** en bas à droite de chaque page du portail. Cliquez sur la bulle de chat pour ouvrir le panneau. Il reste ouvert pendant que vous naviguez et se ferme quand vous le souhaitez.
 
@@ -20,12 +20,12 @@ L'assistant IA de la plateforme est une IA intégrée au portail qui répond à 
 - « Quelle est ma formule et quand est-elle renouvelée ? »
 - « Combien de leads ai-je reçus cette semaine ? »
 - « Pourquoi mon bot ne répond-il pas ? »
-- « Comment connecter Cal.com ? »
+- « Comment connecter mon agenda ? »
 
 Il vous renvoie aussi directement au bon écran : demandez où se trouve un réglage et vous recevez un lien cliquable.
 
 **Ce qu'il ne fait PAS :**
-- Agir à votre place — il explique comment connecter Cal.com, mais ne le connecte pas lui-même
+- Agir à votre place — il explique comment connecter votre agenda, mais ne le connecte pas lui-même
 - Consulter les données d'autres clients (toujours uniquement les vôtres)
 - Afficher ou transmettre des mots de passe, clés d'API ou informations Stripe
 

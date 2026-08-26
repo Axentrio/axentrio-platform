@@ -339,6 +339,13 @@ describe('AgentService', () => {
           ],
           timezone: 'UTC',
         },
+        availability: {
+          slots: [
+            { start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' },
+            { start: '2026-06-10T09:00:00.000Z', end: '2026-06-10T09:30:00.000Z' },
+          ],
+          timezone: 'UTC',
+        },
       }),
     };
     mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
@@ -397,6 +404,14 @@ describe('AgentService', () => {
           ],
           timezone: 'Europe/Brussels',
         },
+        availability: {
+          slots: [
+            { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+            { start: '2026-10-05T07:30:00.000Z', end: '2026-10-05T08:00:00.000Z' },
+            { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
       }),
     };
     mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
@@ -426,6 +441,220 @@ describe('AgentService', () => {
     }
   });
 
+  it('replaces a reply that recommends ONE time nobody offered, and keeps the chips', async () => {
+    // THE REPORTED FAILURE, end to end. Brussels, 09:00-17:00, 60 minutes with a 15-minute
+    // pre-buffer and a 09:45 appointment in the way: the engine offers 10:30, 11:00 and 11:30.
+    // Asked for the next valid time, the model answered "08:30" - the first slot's UTC instant,
+    // read as a wall clock, half an hour before the business opens - beside chips saying 10:30.
+    // The enumeration guard stands down on one time, so this sentence shipped.
+    const slots = [
+      { start: '2026-10-09T08:30:00.000Z', end: '2026-10-09T09:30:00.000Z' },
+      { start: '2026-10-09T09:00:00.000Z', end: '2026-10-09T10:00:00.000Z' },
+      { start: '2026-10-09T09:30:00.000Z', end: '2026-10-09T10:30:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Het eerstvolgende geldige tijdstip is vrijdag 9 oktober 2026 om 08:30, voor 60 minuten.',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Als 10:00 niet kan, geef mij het eerstvolgende geldige tijdstip.',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toContain('08:30');
+      expect(result.content).toMatch(/not available/i);
+      // The chips were never wrong, and they are the customer's way out of this turn.
+      expect(result.quickReplies).toHaveLength(3);
+      expect(result.quickReplies![0].title).toContain('10:30');
+    }
+  });
+
+  it('keeps a reply that names a REQUESTABLE travel time, which no chip carries', async () => {
+    // The other half of the same guard. A mixed travel result confirms 10:30 and offers 14:00 as
+    // a time the business must be asked about - `check_availability` tells the model in so many
+    // words to offer it and capture it with request_appointment. Judged against the chips alone,
+    // doing exactly as asked would be answered with "that time is not available".
+    const slots = [{ start: '2026-10-09T08:30:00.000Z', end: '2026-10-09T09:30:00.000Z' }];
+    const requestableSlots = [{ start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' }];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, requestableSlots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
+      })
+      .mockResolvedValueOnce({
+        content: '14:00 kan ik niet meteen bevestigen, maar ik vraag het na bij de zaak. Is dat goed?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan 14:00 ook?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      // 14:00 local is the 12:00Z requestable slot. The sentence survives untouched.
+      expect(result.content).toContain('14:00');
+      expect(result.content).not.toMatch(/not available/i);
+      // The confirmable slot still gets its chip: 10:30 local.
+      expect(result.quickReplies).toHaveLength(1);
+      expect(result.quickReplies![0].title).toContain('10:30');
+    }
+  });
+
+  it('still judges a reply when NOTHING is tappable, and does not point at absent chips', async () => {
+    // The turn the chip gate used to skip. An all-requestable travel result offers every time in
+    // prose - no slot is auto-confirmable, so no chip exists - which is exactly where an invented
+    // time does the most damage: the tool has just told the model to read times out, and nothing
+    // on screen contradicts it. The replacement must not promise a list either.
+    const requestableSlots = [{ start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' }];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [], timezone: 'Europe/Brussels' },
+        availability: { slots: [], requestableSlots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Het eerstvolgende geldige tijdstip is om 08:30. Zal ik dat boeken?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Wat is het eerstvolgende geldige tijdstip?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toContain('08:30');
+      // Nothing is on screen, so the reply must ask rather than point at a list.
+      expect(result.content).toMatch(/tell me which time suits you/i);
+      expect(result.content).not.toMatch(/here are the times/i);
+      expect(result.quickReplies).toBeUndefined();
+    }
+  });
+
+  it('keeps a confirmation that names the appointment as a SPAN', async () => {
+    // The end of a booked span is nobody's slot start. Here the day's last slot runs 16:00-17:00
+    // and closing time is 17:00, so a reply confirming "16:00 tot 17:00" names one offered time
+    // and one time that cannot exist. Read as two, the customer loses their confirmation.
+    const slots = [
+      { start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' },
+      { start: '2026-10-09T14:00:00.000Z', end: '2026-10-09T15:00:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Prima, ik zet uw afspraak op vrijdag 16:00 tot 17:00. Klopt dat?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ja, doe die laatste.',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      // 16:00 local is the 14:00Z slot; 17:00 is its end and no slot's start.
+      expect(result.content).toContain('16:00 tot 17:00');
+    }
+  });
+
   it('does not re-attach slot chips when the customer taps the time they already chose', async () => {
     const checkAvailability: ToolAdapter = {
       name: 'check_availability',
@@ -435,6 +664,13 @@ describe('AgentService', () => {
       execute: vi.fn().mockResolvedValue({
         success: true,
         data: {
+          slots: [
+            { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+            { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
+        availability: {
           slots: [
             { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
             { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
@@ -492,6 +728,7 @@ describe('AgentService', () => {
       execute: vi.fn().mockResolvedValue({
         success: true,
         data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+        availability: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
         measurement: { grouping: scoring },
       }),
     };
@@ -535,6 +772,11 @@ describe('AgentService', () => {
           timezone: 'UTC',
           serviceName: 'Mens Haircut',
         },
+        availability: {
+          slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }],
+          timezone: 'UTC',
+          serviceName: 'Mens Haircut',
+        },
       }),
     };
     mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
@@ -573,6 +815,7 @@ describe('AgentService', () => {
       execute: vi.fn().mockResolvedValue({
         success: true,
         data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+        availability: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
       }),
     };
     const createBooking: ToolAdapter = {
@@ -626,6 +869,7 @@ describe('AgentService', () => {
       execute: vi.fn().mockResolvedValue({
         success: true,
         data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+        availability: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
       }),
     };
     const requestAppointment: ToolAdapter = {

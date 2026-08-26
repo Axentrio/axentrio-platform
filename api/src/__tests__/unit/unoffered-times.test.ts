@@ -11,7 +11,7 @@
  * a good reply.
  */
 import { describe, it, expect } from 'vitest';
-import { namesSingleOfferedTime, unofferedTimesIn } from '../../agent/clock-times';
+import { collapseSpans, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from '../../agent/clock-times';
 
 const OFFERED = ['09:00', '09:30', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00'];
 
@@ -149,5 +149,90 @@ describe('namesSingleOfferedTime — the customer already chose an offered hour'
 
   it('is false when no clock time is named', () => {
     expect(namesSingleOfferedTime('when can I book?', OFFERED_MORNING)).toBe(false);
+  });
+});
+
+/**
+ * The one-time hole the enumeration guard left open.
+ *
+ * Live on 2026-08-26: asked for the next valid time, a Brussels bot answered "08:30" - the UTC
+ * instant of its own 10:30 slot, half an hour before the business opens - while the chips beside
+ * it said 10:30, 11:00 and 11:30. One time is under the enumeration guard's floor, so nothing
+ * looked at it.
+ */
+describe('unofferedSingleTimeIn — one invented time IS the whole recommendation', () => {
+  const OFFERED = ['10:30', '11:00', '11:30', '12:00', '15:00'];
+
+  it('catches the time nobody offered', () => {
+    expect(
+      unofferedSingleTimeIn('Het eerstvolgende geldige tijdstip is vrijdag 9 oktober 2026 om 08:30, voor 60 minuten.', OFFERED),
+    ).toBe('08:30');
+  });
+
+  it('stands down on a time that WAS offered, however far down the list', () => {
+    // 15:00 is past the eight chips a channel may show, and create_booking still takes it. The
+    // enumeration guard compares against the delivered prefix; this one must not.
+    expect(unofferedSingleTimeIn('15:00 werkt, zal ik dat boeken?', OFFERED)).toBeNull();
+    expect(unofferedSingleTimeIn('Friday at 10:30 it is.', OFFERED)).toBeNull();
+  });
+
+  it('stands down on an enumeration, which the other guard judges', () => {
+    expect(unofferedSingleTimeIn('I have 10:30, 11:00 and 08:30.', OFFERED)).toBeNull();
+  });
+
+  it('reads a repeated time as one time', () => {
+    expect(unofferedSingleTimeIn('08:30 past, dus 08:30 boeken?', OFFERED)).toBe('08:30');
+  });
+
+  it('does not read a decimal price as an invented time', () => {
+    // A whole reply is replaced when this fires, and "de kosten zijn 14.00 euro" is not a time.
+    expect(unofferedSingleTimeIn('De kosten zijn 14.00 euro.', OFFERED)).toBeNull();
+    // A decimal WITH a meridiem is unambiguously a clock, so it is still judged.
+    expect(unofferedSingleTimeIn('How about 8.30 AM?', OFFERED)).toBe('8.30 AM');
+  });
+
+  it('says nothing when the reply names no time at all', () => {
+    expect(unofferedSingleTimeIn('Here are some available times:', OFFERED)).toBeNull();
+  });
+
+  it('treats every time as invented when nothing was offered', () => {
+    expect(unofferedSingleTimeIn('I can do 09:00.', [])).toBe('09:00');
+  });
+});
+
+/**
+ * A confirmation names a SPAN, and a span's end is nobody's slot start.
+ *
+ * "Perfect, 16:00 to 17:00 on Friday" is the correct reply for the last slot of a day that closes
+ * at 17:00. Read as two offered times it flags 17:00, and the customer gets a fallback instead of
+ * their confirmation.
+ */
+describe('collapseSpans — one appointment, not two times', () => {
+  const OFFERED = ['10:30', '16:00'];
+
+  it('keeps the start and drops the end, for the separators these languages write', () => {
+    for (const said of [
+      'Perfect, 16:00 to 17:00 on Friday.',
+      'Perfect, 16:00 tot 17:00 op vrijdag.',
+      'Parfait, 16:00 à 17:00 vendredi.',
+      'Prima, 16:00-17:00 vrijdag.',
+      'Prima, 16:00 - 17:00 vrijdag.',
+    ]) {
+      expect(unofferedTimesIn(collapseSpans(said), OFFERED)).toEqual([]);
+    }
+  });
+
+  it('collapses a 12-hour span too', () => {
+    expect(collapseSpans('That is 10:30 AM to 11:30 AM.')).toBe('That is 10:30 AM.');
+  });
+
+  it('leaves a real enumeration alone, so the guard still judges it', () => {
+    const said = 'I have 10:30, 16:00 and 08:30.';
+    expect(collapseSpans(said)).toBe(said);
+    expect(unofferedTimesIn(said, OFFERED)).toEqual(['08:30']);
+  });
+
+  it('still catches an invented span, because the START is judged', () => {
+    expect(unofferedSingleTimeIn(collapseSpans('Ik boek 08:30 tot 09:30.'), OFFERED)).toBe('08:30');
   });
 });

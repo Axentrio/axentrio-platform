@@ -56,6 +56,40 @@ export interface ToolResult {
    * serialised into the model-facing tool payload, response metadata, or persisted trace.
    */
   replyFact?: ReplyFact;
+  /**
+   * The offered slots as INSTANTS, for the server's own use: the slot chips, the offer record,
+   * and the guard that catches a reply naming a time nobody offered.
+   *
+   * Same rule as `measurement` and `affordance`, for a reason this file has now paid for twice.
+   * `data` is what the MODEL reads, and a model handed a UTC instant reads its digits as a wall
+   * clock: on 2026-08-26 a Brussels bot answered "the next valid time is 08:30" from a
+   * `2026-10-09T08:30:00.000Z` slot whose local time was 10:30, above chips that said 10:30.
+   * So `data.slots` speaks the business's local wall clock, with no offset to misread, and the
+   * instants the server needs travel here instead of being derived back out of local strings.
+   */
+  availability?: {
+    /** ISO UTC, exactly as the provider emitted them. */
+    slots: Array<{ start: string; end: string }>;
+    /**
+     * Travel times the owner MIGHT reach, offered in prose and captured with
+     * request_appointment.
+     *
+     * They carry no chip, so nothing else on this object mentions them - but the guard that
+     * replaces a reply naming an unofferable time must count them as offered. Without them, a
+     * mixed result turns the one sentence the tool asked for ("14:00 is further away, shall I
+     * ask the business?") into "that time is not available".
+     */
+    requestableSlots?: Array<{ start: string; end: string }>;
+    timezone: string;
+    serviceId?: string;
+    serviceName?: string;
+    locationMode?: string;
+    travel?: {
+      groupingPilot?: boolean;
+      grouped?: { savedMinutes: number };
+      groupingPreviousOrder?: string[];
+    };
+  };
 }
 
 export interface BookingAddressReplyFact {

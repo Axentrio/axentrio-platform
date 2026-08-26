@@ -264,16 +264,32 @@ describe('CheckAvailabilityTool', () => {
     expect(tool.hasSideEffects).toBe(false);
   });
 
-  it('execute calls checkAvailability with sessionId, startDate, endDate', async () => {
+  it('says the slots in the business wall clock and keeps the instants off `data`', async () => {
+    // THE MODEL READS THE DIGITS, NOT THE ZONE. Handed `2026-10-09T08:30:00.000Z` and told the
+    // business is in Brussels, a live bot answered "the next valid time is 08:30" - the 10:30
+    // slot, said half an hour before the business opens, above chips that said 10:30. The same
+    // call had already called 10:00 free off a `T10:00:00Z` slot that starts at 12:00 local.
     const tool = new CheckAvailabilityTool();
     const ctx = makeCtx({ sessionId: 'sess-1' });
-    const slots = { slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }], timezone: 'UTC' };
-    mockCheckAvailability.mockResolvedValue(slots);
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }],
+      timezone: 'Europe/Brussels',
+    });
 
     const result = await tool.execute({ startDate: '2026-04-01', endDate: '2026-04-07' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(result.data).toEqual(slots);
+    expect(result.data).toMatchObject({
+      slots: [{ start: '2026-04-01T12:00:00', end: '2026-04-01T12:30:00' }],
+      timezone: 'Europe/Brussels',
+    });
+    // No offset anywhere in the payload, so there is nothing left to misread.
+    expect(JSON.stringify(result.data)).not.toMatch(/T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/);
+    // Moved, not dropped: chips, the offer record and the invented-time guard need real instants.
+    expect(result.availability).toMatchObject({
+      slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }],
+      timezone: 'Europe/Brussels',
+    });
     // Trailing undefineds: customerAddress, then #149 locationChoice.
     expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined);
   });
@@ -303,7 +319,10 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { guidance?: string }).guidance).toMatch(/do not list or offer other times/i);
   });
 
-  it('does not claim a named time is free when that hour is not in the slots', async () => {
+  it('tells the model outright that a named time it did not offer is unavailable', async () => {
+    // The positive twin above has existed for months; its absence said nothing, and nothing is
+    // what shipped "10:00 is beschikbaar" for a 10:00 the buffers had already ruled out. Only
+    // the create call refused it, one turn and one confirmation too late.
     const tool = new CheckAvailabilityTool();
     mockCheckAvailability.mockResolvedValue({
       slots: [{ start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' }],
@@ -319,7 +338,15 @@ describe('CheckAvailabilityTool', () => {
       }),
     );
 
-    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBeUndefined();
+    // One named assertion at the boundary: `data` is `unknown` on ToolResult by design.
+    const data = result.data as {
+      requestedTimeAvailable?: boolean;
+      requestedTimeUnavailable?: string;
+      guidance?: string;
+    };
+    expect(data.requestedTimeAvailable).toBeUndefined();
+    expect(data.requestedTimeUnavailable).toBe('10:00');
+    expect(data.guidance).toMatch(/never tell the customer it is available/i);
   });
 
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
-import { localClockTimes, namesSingleOfferedTime, unofferedTimesIn } from './clock-times';
+import { collapseSpans, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -144,6 +144,14 @@ function claimsBookingForAgentNudge(text: string): boolean {
 
 interface PendingAvailability {
   slots: Array<{ start: string; end: string }>;
+  /**
+   * Travel times offered as a REQUEST, never as a chip (`buildSlotQuickReplies` reads `slots`
+   * only, because a tap leads to create_booking and these cannot be auto-confirmed).
+   *
+   * Carried because the reply guards judge what the customer may take, and a requestable time is
+   * one the tool told the model to offer in prose.
+   */
+  requestableSlots: Array<{ start: string; end: string }>;
   timezone: string;
   /** #80: carried so the offer record can name the service and its mode without a later join. */
   serviceId?: string;
@@ -296,6 +304,29 @@ const ADDRESS_CONFLICT_FALLBACK =
  */
 const AVAILABILITY_SAFE_FALLBACK =
   'Here are the times I have available — let me know which one suits you.';
+
+/**
+ * A reply that names ONE time nobody offered.
+ *
+ * TRUE IN BOTH READINGS, which is why one sentence can replace either. A model that invented an
+ * opening ("the next valid time is 08:30") and a model refusing the hour the customer asked for
+ * are both talking about a time this business cannot book, and the chips underneath carry the
+ * times it can.
+ */
+const UNBOOKABLE_TIME_FALLBACK =
+  'That time is not available. Here are the times I have — let me know which one suits you.';
+
+/**
+ * The same replacement, for a turn with NOTHING on screen to point at.
+ *
+ * Two turns reach the guards without chips: an all-requestable travel result (every time needs
+ * the owner's say-so, so no time is tappable) and a turn where the customer already chose an
+ * offered time. Both fallbacks above promise a list the customer cannot see, so neither can be
+ * used - and the guard used to be switched off for exactly that reason, which left the one case
+ * with no correction on screen as the one case nothing checked.
+ */
+const NO_SLOTS_ON_SCREEN_FALLBACK =
+  'I cannot confirm that time. Tell me which time suits you and I will check it for you.';
 
 /** Internal nudge (user role — the Anthropic adapter only honours the FIRST system
  *  message) telling the model to actually call the booking tool instead of claiming
@@ -868,6 +899,24 @@ export class AgentService {
           const offeredLocal = pendingAvailability
             ? localClockTimes(chipWindow, pendingAvailability.timezone)
             : null;
+          // TIMES WITH NO CHIP. A requestable travel time is one the tool told the model to offer
+          // in prose and capture with request_appointment, so naming it is doing as it was asked.
+          // Both guards below must count it as offered, or a mixed result answers a perfectly
+          // good sentence with "that time is not available".
+          const requestableLocal = pendingAvailability
+            ? localClockTimes(pendingAvailability.requestableSlots, pendingAvailability.timezone) ?? []
+            : [];
+          // What the CHANNEL delivered, plus the prose-only times: the enumeration guard's set.
+          const deliverableLocal = offeredLocal ? [...offeredLocal, ...requestableLocal] : null;
+          // EVERY time the customer may take, delivered or not. Only the single-time guard uses
+          // it: a slot further down the list is one create_booking accepts, so a reply confirming
+          // it is right, while a time nobody offered is an invention whatever the channel showed.
+          const everyOfferableLocal = pendingAvailability
+            ? [
+                ...(localClockTimes(pendingAvailability.slots, pendingAvailability.timezone) ?? []),
+                ...requestableLocal,
+              ]
+            : null;
           const alreadyChoseTime = !!(
             offeredLocal &&
             (namesSingleOfferedTime(message, offeredLocal) ||
@@ -876,19 +925,51 @@ export class AgentService {
           const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(pendingAvailability);
 
           // A reply that NAMES a time nobody can book is the availability twin of a false
-          // confirmation, and it reaches the customer as plain prose above perfectly correct
-          // chips. Compared against what the chips actually carry, not the whole slot list -
-          // a time truncated away by the channel is one the customer cannot take either.
+          // confirmation, and it reaches the customer as plain prose - above perfectly correct
+          // chips, or above nothing at all. An ENUMERATION is compared against what was actually
+          // delivered, not the whole slot list: a time truncated away by the channel is one the
+          // customer cannot take.
+          //
+          // GATED ON THE AVAILABILITY, NOT ON THE CHIPS. A requestable-only result has no chip by
+          // design, and that is the turn where an invented time is most dangerous - the tool has
+          // just asked the model to read times out in prose, and nothing on screen contradicts it.
+          // Skipped only when this call offered NOTHING: with no ground truth every named time
+          // reads as invented, including the request-capture flow's job of repeating the time the
+          // customer themselves asked for.
           let safeContent = finalContent;
-          if (slotChips?.length && pendingAvailability && offeredLocal) {
-            const bogus = unofferedTimesIn(finalContent, offeredLocal);
+          if (pendingAvailability && deliverableLocal?.length) {
+            // "11:30 to 12:30" is ONE appointment. The end of a booked span is never a slot start,
+            // so both guards read the span as its start or they replace correct confirmations.
+            const judged = collapseSpans(finalContent);
+            const onScreen = !!slotChips?.length;
+            // THE ENUMERATION GUARD STAYS ON CHIPPED TURNS, which is the only place its rule makes
+            // sense: it compares a list against what the channel delivered, and a time truncated
+            // away is one the customer cannot tap. With nothing on screen there is no delivered
+            // list to contradict, and its 2-or-more floor makes it the wrong instrument anyway.
+            const bogus = onScreen ? unofferedTimesIn(judged, deliverableLocal) : [];
+            // ONE named time is not a stray item in a list, it is the whole recommendation, so it
+            // is judged on EVERY turn a time was offered. That exemption shipped "the next valid
+            // time is 08:30" - the first slot's UTC instant read as a wall clock - above chips
+            // that said 10:30, and shipped it again where no chip existed to contradict it.
+            const invented = bogus.length
+              ? null
+              : unofferedSingleTimeIn(judged, everyOfferableLocal ?? deliverableLocal);
             if (bogus.length) {
               logger.warn('[agent] reply named times that were never offered; replacing it', {
                 sessionId: session.id,
                 named: bogus.slice(0, 6),
-                offered: offeredLocal,
+                offered: deliverableLocal,
+                chips: onScreen,
               });
-              safeContent = AVAILABILITY_SAFE_FALLBACK;
+              safeContent = onScreen ? AVAILABILITY_SAFE_FALLBACK : NO_SLOTS_ON_SCREEN_FALLBACK;
+            } else if (invented) {
+              logger.warn('[agent] reply recommended a time nobody offered; replacing it', {
+                sessionId: session.id,
+                named: invented,
+                offered: everyOfferableLocal ?? deliverableLocal,
+                chips: onScreen,
+              });
+              safeContent = onScreen ? UNBOOKABLE_TIME_FALLBACK : NO_SLOTS_ON_SCREEN_FALLBACK;
             }
           }
 
@@ -997,33 +1078,29 @@ export class AgentService {
             // whole area keeps producing.
             if (result.affordance) pendingAffordance = result.affordance;
             // Track offered slots for the chip UI; a booking mutation clears them.
-            if (tool.name === 'check_availability' && result.success && result.data) {
-              const d = result.data as {
-                slots?: Array<{ start: string; end: string }>;
-                timezone?: string;
-                serviceName?: string;
-                serviceId?: string;
-                locationMode?: string;
-                travel?: {
-                  groupingPilot?: boolean;
-                  grouped?: { savedMinutes: number };
-                  groupingPreviousOrder?: string[];
-                };
-              };
-              if (Array.isArray(d.slots)) {
+            //
+            // OFF `availability`, never off `data`. `data` speaks the business's wall clock now,
+            // because a model handed a `Z` instant reads its digits out loud - so the chips, the
+            // offer record and the invented-time guard take the instants from the field the model
+            // never sees, exactly as #81's scoring comes off `measurement`.
+            if (tool.name === 'check_availability' && result.success && result.availability) {
+              const a = result.availability;
+              if (Array.isArray(a.slots)) {
                 pendingAvailability = {
-                  slots: d.slots,
-                  timezone: d.timezone ?? 'UTC',
-                  serviceName: d.serviceName,
-                  serviceId: d.serviceId,
-                  locationMode: d.locationMode,
+                  slots: a.slots,
+                  // Prose-only times: no chip carries them, and the reply guards must not treat
+                  // one the tool asked the model to offer as an invention.
+                  requestableSlots: Array.isArray(a.requestableSlots) ? a.requestableSlots : [],
+                  timezone: a.timezone ?? 'UTC',
+                  serviceName: a.serviceName,
+                  serviceId: a.serviceId,
+                  locationMode: a.locationMode,
                   // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
                   // shown, and this is deliberately invisible to it.
                   grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,
-                  groupingPilot: (d.travel as { groupingPilot?: boolean } | undefined)?.groupingPilot === true,
-                  grouped: (d.travel as { grouped?: { savedMinutes: number } } | undefined)?.grouped,
-                  groupingPreviousOrder: (d.travel as { groupingPreviousOrder?: string[] } | undefined)
-                    ?.groupingPreviousOrder,
+                  groupingPilot: a.travel?.groupingPilot === true,
+                  grouped: a.travel?.grouped,
+                  groupingPreviousOrder: a.travel?.groupingPreviousOrder,
                 };
                 // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
                 // and it exists separately from the offer because a call the model never surfaces
@@ -1039,10 +1116,10 @@ export class AgentService {
                       // The RESOLVED service, not the one the caller named: `check_availability`
                       // picks the sole bookable service when the argument is omitted, and the
                       // record should say which service was actually offered.
-                      serviceId: d.serviceId ?? callArgs?.serviceId ?? null,
+                      serviceId: a.serviceId ?? callArgs?.serviceId ?? null,
                       startDate: callArgs?.startDate,
                       endDate: callArgs?.endDate,
-                      slotCount: d.slots?.length ?? 0,
+                      slotCount: a.slots.length,
                     })
                   )
                   .then((id) => {

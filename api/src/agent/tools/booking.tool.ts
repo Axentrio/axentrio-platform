@@ -20,8 +20,9 @@ import { autocompleteAddress } from '../../booking/travel/places.service';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
-import { localClockTimes, namesSingleOfferedTime } from '../clock-times';
+import { localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
+import { DateTime } from 'luxon';
 
 /**
  * The platform's own address check, reused rather than re-invented.
@@ -148,6 +149,18 @@ function addressReplyFact(
 const NAMED_TIME_GUIDANCE =
   'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. If they tapped a slot button or already asked you to book this time, and you have their name, call create_booking - do not ask them to pick a time again.';
 
+/**
+ * The customer named a time this call has just ruled out.
+ *
+ * The positive twin below has existed since the model started re-offering hours somebody had
+ * already chosen. Its absence said nothing, and "nothing" is what produced the 2026-08-26
+ * failure: asked for 10:00 on a diary whose 15-minute pre-buffer ran into a 09:45 appointment,
+ * the bot answered "10:00 is available" and only the create call refused it. A time this call
+ * did not offer is a fact the tool knows and the model was left to infer.
+ */
+const NAMED_TIME_UNAVAILABLE_GUIDANCE =
+  'That time is NOT in "slots", so it cannot be booked - the appointment length, the buffers around it, or another appointment rules it out. Never tell the customer it is available and never invent a time that is not in "slots": say plainly that it cannot be done, and offer the times in "slots" instead.';
+
 function lastCustomerText(ctx: ToolContext): string {
   const history = ctx.conversationHistory;
   if (!Array.isArray(history)) return '';
@@ -158,19 +171,56 @@ function lastCustomerText(ctx: ToolContext): string {
   return '';
 }
 
+/** Zoneless local ISO — the format create_booking/request_appointment already document. */
+const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm:ss";
+
+/**
+ * An instant, said in the business's own wall clock.
+ *
+ * THE MODEL IS NEVER SHOWN AN OFFSET, because it reads the digits rather than the zone. On
+ * 2026-08-26 a Brussels bot asked for "the next valid time" answered 08:30 from a
+ * `2026-10-09T08:30:00.000Z` slot that starts at 10:30 local, half an hour before the business
+ * opens, while its own slot buttons said 10:30. The same call had already claimed 10:00 was free
+ * off a `T10:00:00Z` slot that is 12:00 local. Both sentences are correct arithmetic on a string
+ * nobody should have handed it.
+ *
+ * The result is also exactly what the booking tools ask for when the model constructs a time, so
+ * copying a slot start verbatim is now right by construction rather than by luck.
+ */
+function wallClock(instant: string, timezone: string): string {
+  const dt = DateTime.fromISO(instant, { zone: 'utc' }).setZone(timezone);
+  // Unparseable can only be a fixture: keep the value rather than lose the slot.
+  return dt.isValid ? dt.toFormat(WALL_CLOCK) : instant;
+}
+
+function wallClockSlots<T extends { start: string; end: string }>(slots: T[], timezone: string): T[] {
+  return slots.map((s) => ({ ...s, start: wallClock(s.start, timezone), end: wallClock(s.end, timezone) }));
+}
+
+/**
+ * What the model is told about the one time the customer named.
+ *
+ * Compared against the clock times of the slots this very call produced, so "free" and "not
+ * free" are the same fact the write path will re-check seconds later. A requestable travel time
+ * is neither: it is offerable as a request, so it must not be called unavailable.
+ */
 function namedTimeGuidance(
   ctx: ToolContext,
-  data: { slots?: Array<{ start: string }>; timezone?: string; guidance?: string },
+  offered: { confirmable: string[]; requestable: string[] },
+  guidance?: string,
 ): Record<string, unknown> {
-  const slots = data.slots;
-  if (!Array.isArray(slots) || slots.length === 0) return {};
-  const offered = localClockTimes(slots, data.timezone ?? 'UTC');
-  if (!offered) return {};
-  if (!namesSingleOfferedTime(lastCustomerText(ctx), offered)) return {};
-  return {
-    requestedTimeAvailable: true,
-    guidance: data.guidance ? `${data.guidance} ${NAMED_TIME_GUIDANCE}` : NAMED_TIME_GUIDANCE,
-  };
+  const known = [...offered.confirmable, ...offered.requestable];
+  if (known.length === 0) return {};
+  const said = lastCustomerText(ctx);
+  const append = (line: string) => (guidance ? `${guidance} ${line}` : line);
+  if (namesSingleOfferedTime(said, offered.confirmable)) {
+    return { requestedTimeAvailable: true, guidance: append(NAMED_TIME_GUIDANCE) };
+  }
+  const ruledOut = unofferedSingleTimeIn(said, known);
+  if (ruledOut) {
+    return { requestedTimeUnavailable: ruledOut, guidance: append(NAMED_TIME_UNAVAILABLE_GUIDANCE) };
+  }
+  return {};
 }
 
 export class CheckAvailabilityTool implements ToolAdapter {
@@ -278,18 +328,66 @@ export class CheckAvailabilityTool implements ToolAdapter {
             groupingNote: `The times in "slots" are already in the best order for this business. Offer them in the order given and do not re-sort them. If the customer asks why the first one is suggested, you may say: "${result.travel.grouped.customerReason}" Never invent a different reason, and never mention other customers or their addresses.`,
           }
         : {};
+      // ONE list, said two ways: the model is given the business's wall clock, the server keeps
+      // the instants. Both come out of this same call, so the sentence the model writes and the
+      // buttons the customer taps can no longer disagree - which is precisely what happened
+      // while the model was left to convert a `Z` instant for itself.
+      const zone = result.timezone ?? 'UTC';
+      const utcSlots = Array.isArray(result.slots) ? result.slots : [];
+      const modelResult = {
+        ...result,
+        slots: wallClockSlots(utcSlots, zone),
+        ...(result.travel
+          ? {
+              travel: {
+                ...result.travel,
+                requestableSlots: wallClockSlots(result.travel.requestableSlots ?? [], zone),
+                unreachableSlots: wallClockSlots(result.travel.unreachableSlots ?? [], zone),
+              },
+            }
+          : {}),
+      };
+      // The chips, the offer record and the invented-time guard all need real instants. They
+      // travel OFF `data` for the same reason `measurement` does: `data` is what the model reads.
+      const availability = {
+        availability: {
+          slots: utcSlots,
+          timezone: zone,
+          serviceId: result.serviceId,
+          serviceName: result.serviceName,
+          locationMode: result.locationMode,
+          ...(result.travel
+            ? {
+                // Offered in prose, so the reply guard must know them: they are times the
+                // customer may legitimately name even though no chip carries them.
+                requestableSlots: result.travel.requestableSlots ?? [],
+                travel: {
+                  groupingPilot: result.travel.groupingPilot,
+                  grouped: result.travel.grouped,
+                  groupingPreviousOrder: result.travel.groupingPreviousOrder,
+                },
+              }
+            : {}),
+        },
+      };
+      // Judged on the CLOCK TIMES this call offered, so "free" and "not free" are the same fact
+      // the create call will re-check seconds later.
+      const offeredClocks = {
+        confirmable: localClockTimes(utcSlots, zone) ?? [],
+        requestable: localClockTimes(result.travel?.requestableSlots ?? [], zone) ?? [],
+      };
       const withNamedTime = (data: Record<string, unknown>) => ({
         ...data,
-        ...namedTimeGuidance(ctx, data as { slots?: Array<{ start: string }>; timezone?: string; guidance?: string }),
+        ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined),
       });
       // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time
       // the model constructed from the customer's words (strip the Z). That judgement needs the
       // exact strings this call returned, which may be turns behind the booking.
-      if (Array.isArray(result?.slots) && result.slots.length > 0) {
+      if (utcSlots.length > 0) {
         void rememberOfferedSlots(
           ctx.sessionId,
-          (result.slots as Array<{ start: string }>).map((s) => s.start),
-          (result as { timezone?: string }).timezone ?? 'UTC',
+          utcSlots.map((s) => s.start),
+          zone,
         );
       }
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
@@ -301,10 +399,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
         return {
           success: true,
           ...measurement,
+          ...availability,
           ...affordance,
           ...replyFact,
           data: withNamedTime({
-            ...result,
+            ...modelResult,
             ...groupedNote,
             ...addressEcho(chosen.address),
             suggestedAction: 'request_appointment',
@@ -323,10 +422,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
         return {
           success: true,
           ...measurement,
+          ...availability,
           ...affordance,
           ...replyFact,
           data: withNamedTime({
-            ...result,
+            ...modelResult,
             ...groupedNote,
             ...addressEcho(chosen.address),
             noSlotsInRange: true,
@@ -338,8 +438,9 @@ export class CheckAvailabilityTool implements ToolAdapter {
       }
       return {
         success: true,
-        data: withNamedTime({ ...result, ...groupedNote, ...addressEcho(chosen.address) }),
+        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address) }),
         ...measurement,
+        ...availability,
         ...affordance,
         ...replyFact,
       };

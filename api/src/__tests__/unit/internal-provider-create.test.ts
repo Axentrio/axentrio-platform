@@ -2156,3 +2156,102 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     );
   });
 });
+
+/**
+ * WHY a range came back empty, across the seam where the answer is decided.
+ *
+ * Two reports against AUTO-BOOK services. One needed 1440 minutes of notice and was asked for
+ * the next morning; one took bookings 14 days out and was asked for the fifteenth day. The
+ * engine refused both correctly - the reports say so - and the bot then offered to submit the
+ * appointment as a request for someone to confirm by hand, on services whose owners had chosen
+ * automatic booking, with bookable times sitting one day away.
+ *
+ * Nothing was wrong with the arithmetic. `slots: []` simply cannot tell "the diary is full"
+ * from "your day was outside the window", and the caller had to guess. `emptyRange` is that
+ * missing fact, and these tests drive the real provider through both reported configurations.
+ * The two negative cases are the other half of the contract: a genuinely shut day must NOT get
+ * a policy reason, because the request advice is right for it.
+ */
+describe('InternalProvider.checkAvailability · a range the policy ruled out', () => {
+  let provider: InternalProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // Tue 25 Aug 2026 at 21:02 Brussels — when both reports were run.
+    vi.setSystemTime(new Date('2026-08-25T19:02:00Z'));
+    provider = new InternalProvider();
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValue([]);
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  /** An auto-book service at the premises, so travel stays inert and the times are the engine's. */
+  const configured = (service: Record<string, unknown>, rule: Record<string, unknown>): void => {
+    const svc = { ...EVENT_TYPE, bookingMode: 'auto', ...service };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    ruleFindOne.mockResolvedValue({ ...RULE, ...rule });
+  };
+
+  const OPEN_NINE_TO_FIVE = {
+    weeklyHours: {
+      wed: [{ start: '09:00', end: '17:00' }],
+      thu: [{ start: '09:00', end: '17:00' }],
+    },
+  };
+  const ALWAYS_OPEN = { availabilityMode: 'always_open', weeklyHours: {} };
+
+  it('report 1: a minimum-notice refusal reads as too_soon, not as an empty diary', async () => {
+    // The whole of Wednesday's opening hours is inside the notice, which expires at 21:02 that
+    // evening - four hours after the business shuts.
+    configured({ minNoticeMin: 1440 }, OPEN_NINE_TO_FIVE);
+    const res = await provider.checkAvailability(ctx, '2026-08-26', '2026-08-26');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toEqual({ reason: 'too_soon', boundary: '2026-08-26T19:02:00.000Z' });
+  });
+
+  it('report 1: and Thursday, which the bot named only when pushed, was bookable all along', async () => {
+    configured({ minNoticeMin: 1440 }, OPEN_NINE_TO_FIVE);
+    const res = await provider.checkAvailability(ctx, '2026-08-27', '2026-08-27');
+    expect(res.slots[0]?.start).toBe('2026-08-27T07:00:00.000Z'); // Thu 27 Aug, 09:00 Brussels
+    expect(res.emptyRange).toBeUndefined();
+  });
+
+  it('report 2: a max-horizon refusal reads as too_far', async () => {
+    configured({ maxHorizonDays: 14 }, ALWAYS_OPEN);
+    const res = await provider.checkAvailability(ctx, '2026-09-09', '2026-09-09');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toEqual({ reason: 'too_far', boundary: '2026-09-08T19:02:00.000Z' });
+  });
+
+  it('report 2: and the fourteenth day itself still books', async () => {
+    // Checked explicitly in the report, and it bounds the correction: the retry range this
+    // produces ends ON this day, so pushing past it would skip a day the customer can have.
+    configured({ maxHorizonDays: 14 }, ALWAYS_OPEN);
+    const res = await provider.checkAvailability(ctx, '2026-09-08', '2026-09-08');
+    expect(res.slots.map((s) => s.start)).toContain('2026-09-08T08:00:00.000Z'); // 10:00 Brussels
+    expect(res.emptyRange).toBeUndefined();
+  });
+
+  it('says nothing about a day the business is simply shut', async () => {
+    // The request advice is RIGHT here and must survive. A policy reason would send the
+    // customer to a range with nothing in it either.
+    configured({ minNoticeMin: 1440 }, { weeklyHours: {} });
+    const res = await provider.checkAvailability(ctx, '2026-08-26', '2026-08-26');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toBeUndefined();
+  });
+
+  it('says nothing at all when there are times to offer', async () => {
+    configured({ minNoticeMin: 0 }, OPEN_NINE_TO_FIVE);
+    const res = await provider.checkAvailability(ctx, '2026-08-26', '2026-08-26');
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.emptyRange).toBeUndefined();
+  });
+});

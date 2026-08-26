@@ -20,7 +20,7 @@ import type {
 } from '../../database/entities/AvailabilityRule';
 import { isRangedOverride, pickOverrideForDate } from '../../database/entities/AvailabilityRule';
 import type { ServiceType } from '../../database/entities/ServiceType';
-import type { BookingSlot } from './types';
+import type { BookingSlot, EmptyRangeDiagnosis } from './types';
 
 export interface BusyInterval {
   start: Date;
@@ -160,13 +160,11 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
   const rangeEnd = DateTime.fromISO(input.rangeEnd, { zone: 'utc' });
   if (!rangeStart.isValid || !rangeEnd.isValid || rangeEnd <= rangeStart) return [];
 
-  const nowDt = DateTime.fromJSDate(now).toUTC();
-  // A slot may start no earlier than now + minNotice, and no later than now + horizon.
-  const earliestStartMs = Math.max(
-    rangeStart.toMillis(),
-    nowDt.plus({ minutes: eventType.minNoticeMin || 0 }).toMillis()
-  );
-  const horizonMs = nowDt.plus({ days: eventType.maxHorizonDays || 0 }).toMillis();
+  // A slot may start no earlier than now + minNotice, and no later than now + horizon. ONE
+  // definition, shared with `diagnoseEmptyRange`, so the bound the engine enforces and the
+  // bound the customer is told about can never drift apart.
+  const { earliestMs, latestMs: horizonMs } = bookableWindow(eventType, now);
+  const earliestStartMs = Math.max(rangeStart.toMillis(), earliestMs);
   const rangeEndMs = rangeEnd.toMillis();
 
   // Iterate local calendar days across the (clamped) range.
@@ -236,6 +234,62 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
 
   slots.sort((a, b) => a.start.localeCompare(b.start));
   return slots;
+}
+
+/**
+ * The window a slot start must fall inside: `[now + minNotice, now + maxHorizon]`.
+ *
+ * Exported because two callers have to agree on it exactly - `computeSlots` enforces it and
+ * `diagnoseEmptyRange` explains it. A second copy of this arithmetic could drift and send a
+ * customer back on a day the engine still refuses.
+ */
+export function bookableWindow(
+  eventType: Pick<ServiceType, 'minNoticeMin' | 'maxHorizonDays'>,
+  now: Date
+): { earliestMs: number; latestMs: number } {
+  const nowDt = DateTime.fromJSDate(now).toUTC();
+  return {
+    earliestMs: nowDt.plus({ minutes: eventType.minNoticeMin || 0 }).toMillis(),
+    latestMs: nowDt.plus({ days: eventType.maxHorizonDays || 0 }).toMillis(),
+  };
+}
+
+/** Far enough ahead to lift the horizon in practice. The day walk is capped independently. */
+const NO_HORIZON_DAYS = 3650;
+
+/**
+ * WHY a range produced nothing, when the answer is the owner's own notice/horizon policy.
+ *
+ * An empty range has two very different causes and one of them used to be invisible. A shut or
+ * full diary genuinely has nothing to offer. A range the POLICY ruled out is full of times this
+ * business would happily take on another day - and told only `slots: []`, the caller advised a
+ * manual request, which drops an auto-book service into a flow its owner never chose.
+ *
+ * THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only the notice and the horizon lifted.
+ * Anything that appears is a start the policy removed and nothing else did. It is one pure pass
+ * over data the caller has already loaded, so it costs no query, and it cannot disagree with the
+ * real pass about opening hours, buffers, busy time or day caps - it runs the same engine.
+ *
+ * Null unless EVERY would-be start falls on one side of the window. A range holding even one
+ * policy-allowed start that busy time or a day cap removed is an ordinary empty range, and
+ * calling it "too soon" would be false.
+ */
+export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis | null {
+  const wouldBe = computeSlots({
+    ...input,
+    eventType: { ...input.eventType, minNoticeMin: 0, maxHorizonDays: NO_HORIZON_DAYS },
+  });
+  if (wouldBe.length === 0) return null; // shut, full, or entirely in the past
+
+  const { earliestMs, latestMs } = bookableWindow(input.eventType, input.now);
+  const starts = wouldBe.map((s) => new Date(s.start).getTime());
+  if (starts.every((ms) => ms < earliestMs)) {
+    return { reason: 'too_soon', boundary: new Date(earliestMs).toISOString() };
+  }
+  if (starts.every((ms) => ms > latestMs)) {
+    return { reason: 'too_far', boundary: new Date(latestMs).toISOString() };
+  }
+  return null;
 }
 
 /**

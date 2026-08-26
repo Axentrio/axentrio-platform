@@ -36,7 +36,7 @@ import {
   RescheduleResult,
   CancelResult,
 } from './types';
-import { computeSlots } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
@@ -346,7 +346,10 @@ export class InternalProvider implements BookingProvider {
       business.maxBookingsPerDay || business.maxBookedMinutesPerDay
         ? await loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId)
         : undefined;
-    const slots = computeSlots({
+    // ONE instant for the whole computation. The diagnosis below re-runs this engine, and a
+    // second `new Date()` would measure its window against a `now` milliseconds later than the
+    // one the slots were built from - which at a window edge is a different answer.
+    const engineInput: SlotEngineInput = {
       rule,
       eventType: { ...service, durationMin: availDuration },
       rangeStart,
@@ -355,7 +358,12 @@ export class InternalProvider implements BookingProvider {
       busy,
       business,
       dayLedger,
-    });
+    };
+    const slots = computeSlots(engineInput);
+    // WHY nothing came back, when the reason is this owner's notice or horizon and not a full
+    // or closed diary. Only on the path that produced nothing, and it costs no query: it re-runs
+    // the pure engine over the busy data already in hand.
+    const emptyRange = slots.length === 0 ? diagnoseEmptyRange(engineInput) : null;
     // Travel time filters what the engine produced rather than teaching the engine about it.
     // The engine is pure and DST-critical and expresses everything as busy intervals; this pad
     // is asymmetric, per-neighbour and depends on where the customer lives, which that model
@@ -382,6 +390,7 @@ export class InternalProvider implements BookingProvider {
       // baseline is about what was true at the moment of the offer.
       locationMode: resolveServiceLocationMode(service),
       travel: travel.summary,
+      ...(emptyRange ? { emptyRange } : {}),
       ...(travel.grouping ? { grouping: travel.grouping } : {}),
     };
   }

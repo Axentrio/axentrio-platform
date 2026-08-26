@@ -17,7 +17,7 @@
  *    because the SERVICES block asks it to. That ask went missing once already, which is
  *    why the field looked broken in prod while its wiring was provably fine.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildBoundAddressSection, buildServicesSection, formatHoursForPlaceholder } from '../../modules/booking.module';
 import { composeSystemPrompt } from '../../llm/compose-system-prompt';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
@@ -171,7 +171,9 @@ describe('aiSummary — the ask the model needs', () => {
  * "No slots in this range" is the most consequential thing check_availability can return,
  * and until now the only thing telling the model what to do about it was a prompt rule. A
  * model that reads `slots: []` and concludes "they are fully booked" has just told a paying
- * customer to go elsewhere — when the correct answer, always, is to capture a request.
+ * customer to go elsewhere. Capturing a request is the right answer when the diary really is
+ * full. When the owner's OWN notice or horizon ruled the range out it is the wrong one, and
+ * `emptyRange` carries that distinction to the branch pinned at the bottom of this file.
  * Prose is the right place for the WORDING and the wrong place for the DECISION.
  */
 describe('check_availability — the empty result carries its own instruction', () => {
@@ -555,5 +557,106 @@ describe('#149 — customer chooses location', () => {
     expect(section).toMatch(/locationChoice/);
     expect(section).toMatch(/at the business or at their own address/);
     expect(section).toMatch(/Only ask for \(and pass\) customerAddress when they chose their own/);
+  });
+});
+
+/**
+ * An auto-book service must stay in the auto-book flow when its own policy refuses a day.
+ *
+ * Two reports, one cause. A service with 1440 minutes of notice was asked for the next
+ * morning; a service with a 14-day horizon was asked for the fifteenth day. The engine refused
+ * both correctly. The tool then returned the empty-range advice above, and the bot offered to
+ * submit the appointment as a request for someone to confirm by hand - on a service whose owner
+ * had chosen automatic booking, while bookable times sat one day either side. The second report
+ * records the customer declining the request flow and asking again before the bot would name
+ * Thursday, which it then got right.
+ *
+ * So the guidance here is pinned on what it must NOT say as much as what it must. It must not
+ * mention request_appointment, and it must name a DIFFERENT range: a model told only "nothing
+ * in this range" re-checks the same day and reads the same nothing back.
+ */
+describe('check_availability — a range the policy ruled out is not an empty diary', () => {
+  // Only Date is faked. The too_far correction clamps its start to today, and full fake timers
+  // would risk hanging the awaited tool call over a real timeout.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-25T19:02:00Z')); // Tue 25 Aug 2026, 21:02 Brussels
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const load = async (emptyRange: { reason: string; boundary: string }) => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      emptyRange,
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    // Imported dynamically because `vi.doMock` is not hoisted: a static import would bind the
+    // real booking.service before the mock above is registered.
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-08-26', endDate: '2026-08-26' },
+      { sessionId: 'cs-1' } as never,
+    );
+    // `ToolResult.data` is `unknown` for every tool; this one always answers with an object.
+    return { success: res.success, data: res.data as Record<string, unknown> };
+  };
+
+  // Report 1: the earliest bookable instant is Wed 26 Aug at 21:02 Brussels.
+  const tooSoon = { reason: 'too_soon', boundary: '2026-08-26T19:02:00.000Z' };
+  // Report 2: the last bookable instant is Tue 8 Sep at 21:02 Brussels.
+  const tooFar = { reason: 'too_far', boundary: '2026-09-08T19:02:00.000Z' };
+
+  it('sends the model back to check_availability, never to a request', async () => {
+    for (const range of [tooSoon, tooFar]) {
+      const res = await load(range);
+      expect(res.success, range.reason).toBe(true);
+      expect(res.data.suggestedAction, range.reason).toBe('check_availability');
+      // The tool is named ONLY to forbid it. Every other empty-ish result in this file tells
+      // the model to "capture it with request_appointment", so an un-negated mention here
+      // would read as exactly the recommendation this branch exists to withdraw.
+      expect(res.data.guidance, range.reason).toMatch(/do NOT capture it with request_appointment/);
+      expect(res.data.guidance, range.reason).not.toMatch(/(?<!do NOT )capture it with request_appointment/);
+    }
+  });
+
+  it('refuses the manual-confirmation offer in so many words', async () => {
+    // What the bot actually did. "Do not hand off" did not cover it: offering to have the team
+    // confirm the appointment by hand is a surrender that never mentions a human.
+    for (const range of [tooSoon, tooFar]) {
+      const res = await load(range);
+      expect(res.data.guidance, range.reason).toMatch(/confirm the appointment by hand/i);
+      expect(res.data.guidance, range.reason).toMatch(/books automatically/i);
+      expect(res.data.guidance, range.reason).toMatch(/closed or fully booked/i);
+    }
+  });
+
+  it('names the notice bound and a LATER range to check', async () => {
+    const res = await load(tooSoon);
+    expect(res.data.guidance).toMatch(/too soon/i);
+    // The business's own clock, never the UTC instant the server holds.
+    expect(res.data.guidance).toContain('2026-08-26T21:02:00');
+    expect(res.data.guidance).not.toContain('19:02');
+    // A week from the bound, so the retry cannot land on the same empty day again.
+    expect(res.data.guidance).toContain('startDate 2026-08-26 and endDate 2026-09-01');
+  });
+
+  it('names the horizon bound and an EARLIER range to check', async () => {
+    const res = await load(tooFar);
+    expect(res.data.guidance).toMatch(/further ahead than this business takes bookings/i);
+    expect(res.data.guidance).toContain('2026-09-08T21:02:00');
+    // Ends ON the bound: 14 days ahead is still bookable, and the report checked that.
+    expect(res.data.guidance).toContain('startDate 2026-09-02 and endDate 2026-09-08');
+  });
+
+  it('states the bound in the business clock on the payload too', async () => {
+    const res = await load(tooSoon);
+    expect(res.data.emptyRange).toEqual({ reason: 'too_soon', boundary: '2026-08-26T21:02:00' });
   });
 });

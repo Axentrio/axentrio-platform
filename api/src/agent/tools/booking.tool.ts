@@ -174,6 +174,9 @@ function lastCustomerText(ctx: ToolContext): string {
 /** Zoneless local ISO — the format create_booking/request_appointment already document. */
 const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm:ss";
 
+/** Calendar day only — the format `check_availability` takes for startDate/endDate. */
+const DAY = 'yyyy-MM-dd';
+
 /**
  * An instant, said in the business's own wall clock.
  *
@@ -195,6 +198,33 @@ function wallClock(instant: string, timezone: string): string {
 
 function wallClockSlots<T extends { start: string; end: string }>(slots: T[], timezone: string): T[] {
   return slots.map((s) => ({ ...s, start: wallClock(s.start, timezone), end: wallClock(s.end, timezone) }));
+}
+
+/**
+ * The range to check INSTEAD, named concretely.
+ *
+ * "Try the days after it" is an instruction a model can satisfy by re-checking the same day and
+ * reading the same emptiness back, which is how a helpful correction turns into a loop. Naming
+ * both ends removes the choice.
+ *
+ * A week, in the direction that actually holds the times: forward from the earliest a booking
+ * may start, backward from the last date the business accepts. Seven days is already what
+ * `endDate` documents as the widest a single check may span.
+ */
+function retryRange(
+  reason: 'too_soon' | 'too_far',
+  boundary: string,
+  timezone: string,
+): { startDate: string; endDate: string } {
+  const at = DateTime.fromISO(boundary, { zone: 'utc' }).setZone(timezone);
+  // Unparseable can only be a fixture: keep the date rather than lose the correction.
+  if (!at.isValid) return { startDate: boundary.slice(0, 10), endDate: boundary.slice(0, 10) };
+  if (reason === 'too_soon') {
+    return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
+  }
+  // Backward, but never into the past: a short horizon can leave the bound less than a week off.
+  const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
+  return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
 }
 
 /**
@@ -346,6 +376,9 @@ export class CheckAvailabilityTool implements ToolAdapter {
               },
             }
           : {}),
+        ...(result.emptyRange
+          ? { emptyRange: { ...result.emptyRange, boundary: wallClock(result.emptyRange.boundary, zone) } }
+          : {}),
       };
       // The chips, the offer record and the invented-time guard all need real instants. They
       // travel OFF `data` for the same reason `measurement` does: `data` is what the model reads.
@@ -410,6 +443,45 @@ export class CheckAvailabilityTool implements ToolAdapter {
             guidance: travel.addressTooVague
               ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
               : 'Times in "slots" can be confirmed now. Times in "travel.requestableSlots" are further away and the journey has not been measured, so they CANNOT be auto-confirmed: offer them as times the business will confirm, and if the customer picks one, capture it with request_appointment rather than create_booking. Never present a requestable time as booked.',
+          }),
+        };
+      }
+      // THE RANGE WAS OUT OF BOUNDS, WHICH IS NOT AN EMPTY DIARY. Checked before the empty
+      // branch below because it is a strictly better-informed version of it: both see no slots,
+      // and only this one knows the business would have taken the customer on another day.
+      //
+      // Two live reports, one cause. An auto-book service with 1440 minutes of notice was asked
+      // for the next morning, and one with a 14-day horizon was asked for the fifteenth day.
+      // The engine refused both correctly, the branch below then advised a manual request, and
+      // the bot offered to send the appointment for someone to confirm by hand - on a service
+      // whose owner had chosen automatic booking, with bookable times sitting one day away. The
+      // second report notes the customer had to ask a second time before the bot would name
+      // them. Naming the bound here is what makes the retry land somewhere different: told only
+      // "nothing in this range", a model re-checks the same day and gets the same nothing.
+      const outOfWindow = result?.emptyRange;
+      if (outOfWindow) {
+        const boundary = wallClock(outOfWindow.boundary, zone);
+        const retry = retryRange(outOfWindow.reason, outOfWindow.boundary, zone);
+        return {
+          success: true,
+          ...measurement,
+          ...availability,
+          ...affordance,
+          ...replyFact,
+          data: withNamedTime({
+            ...modelResult,
+            ...groupedNote,
+            ...addressEcho(chosen.address),
+            noSlotsInRange: true,
+            suggestedAction: 'check_availability',
+            guidance:
+              (outOfWindow.reason === 'too_soon'
+                ? `That range is too soon: this business needs more notice than that, and the earliest appointment it can take starts at ${boundary} (their own clock).`
+                : `That range is further ahead than this business takes bookings: the last time they accept is ${boundary} (their own clock).`) +
+              ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
+              ' Checking the same range again returns the same nothing, so do not repeat it.' +
+              ' This does NOT mean the business is closed or fully booked, so do not say either.' +
+              ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.',
           }),
         };
       }

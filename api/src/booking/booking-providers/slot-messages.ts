@@ -29,14 +29,22 @@ export const SLOT_TAKEN_ON_CREATE =
  * The reason is not enumerated here because the engine does not hand one back - it returns a slot
  * list, and a time is either in it or not. Re-offering is the honest recovery: it shows what IS
  * possible rather than guessing why this was not.
+ *
+ * CAPTURING A REQUEST IS REFUSED IN SO MANY WORDS, because forbidding the handoff was not enough.
+ * Two reports arrived against auto-book services - one refused for minimum notice, one for the
+ * horizon - where the bot did not hand off and did not use the fallback, and instead offered to
+ * send the appointment for somebody to confirm by hand. That is the same surrender wearing a
+ * different hat: the owner chose automatic booking, and a time the policy ruled out has bookable
+ * neighbours the customer could have had in the same turn.
  */
 export const SLOT_NOT_OFFERABLE =
   'That time is not one this business can take. It may be outside their opening hours, on a day ' +
   'they are closed, sooner than the notice they need, further ahead than they book, or the day ' +
   'may already be full. Do NOT say it was just taken and do NOT say it is unavailable without ' +
   'explanation. Call check_availability for that day and the days around it, then offer the ' +
-  'customer the times that actually exist. Do not hand the conversation to a human and do not ' +
-  'use the fallback message.';
+  'customer the times that actually exist. Do not hand the conversation to a human, do not use ' +
+  'the fallback message, and do NOT capture it with request_appointment or offer to have anyone ' +
+  'confirm it by hand: this service books automatically and another time will book outright.';
 
 /** `SLOT_NOT_OFFERABLE` for a move: same distinction, and the appointment still stands. */
 export const SLOT_NOT_OFFERABLE_ON_RESCHEDULE =
@@ -44,8 +52,9 @@ export const SLOT_NOT_OFFERABLE_ON_RESCHEDULE =
   'changed. It may be outside their opening hours, on a day they are closed, sooner than the ' +
   'notice they need, further ahead than they book, or the day may already be full. Do NOT say it ' +
   'was just taken. Say both of those things, call check_availability for that day, and offer the ' +
-  'times that actually exist. Do not hand the conversation to a human and do not use the ' +
-  'fallback message.';
+  'times that actually exist. Do not hand the conversation to a human, do not use the fallback ' +
+  'message, and do NOT capture it with request_appointment: a move is not a new request, and ' +
+  'another time will book outright.';
 
 /** The same, for a move. The customer keeps their existing appointment until one succeeds. */
 export const SLOT_TAKEN_ON_RESCHEDULE =

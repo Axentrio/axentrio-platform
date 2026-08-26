@@ -39,6 +39,7 @@ export const V1_COPILOT_TOOL_NAMES = [
   'getRecentChatSessionStats',
   'getKnownGapTopics',
   'getSetupProgress',
+  'getBusinessHours',
   'listBots',
 ] as const;
 

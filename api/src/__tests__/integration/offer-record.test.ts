@@ -449,12 +449,18 @@ describe('the canonical baseline, computed once so LP4 and LP5 cannot disagree',
     // millisecond and the row just written falls outside the window - always the newest row.
     // CI wrote three calls and counted them inside the same millisecond, and reported 0.
     await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: 'soon', endDate: 'later', slotCount: 0 });
-    // The lead is written from THIS process's clock, not `now()`, so both directions hold
-    // whatever the database clock reads: 200ms ahead of here is inside a 1000ms grace and
-    // outside a bare `new Date()`. Racing the real clocks would rebuild the flake being fixed.
+    // The lead is written from THIS process's clock, not `now()`, so the assertion holds whatever
+    // the database clock reads.
+    //
+    // 500ms, and the number matters in BOTH directions. `until` defaults to an instant taken
+    // inside `baselineSummary`, AFTER this update, so the offset has to beat the time the update
+    // and the query take: at 200ms a loaded runner could spend longer than that, the row would
+    // land inside even a bare `new Date()` bound, and the check would quietly stop protecting
+    // anything - vacuous in exactly the conditions the original bug hid in. It also has to stay
+    // under CLOCK_SKEW_GRACE_MS, or the row would fall outside the window it is meant to be in.
     await AppDataSource.query(
       `UPDATE chatbot_availability_calls SET created_at = $2 WHERE session_id = $1`,
-      [sessionId, new Date(Date.now() + 200)],
+      [sessionId, new Date(Date.now() + 500)],
     );
 
     const summary = await baselineSummary({ since });

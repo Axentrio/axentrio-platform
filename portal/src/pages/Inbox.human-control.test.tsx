@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -122,6 +122,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
+const authRef = vi.hoisted(() => ({ role: 'admin' as string }));
+vi.mock('@auth/useAppAuth', () => ({
+  useAppAuth: () => ({ user: { role: authRef.role } }),
+}));
+
 import Inbox from './Inbox';
 import { toast } from 'sonner';
 import { __resetConversationLiveState } from '../queries/conversationLive';
@@ -197,6 +202,7 @@ function renderInbox(chat: Chat) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authRef.role = 'admin';
   tenantSettingsRef.current = undefined;
   __resetConversationLiveState();
   handoffState.handoffs = [];
@@ -574,5 +580,51 @@ describe('Inbox takeover visibility', () => {
     renderInbox(makeChat({ ownership: 'bot_owned', status: 'closed' }));
     await screen.findByTestId('chat-window');
     expect(screen.queryByRole('button', { name: /Take Over/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('Inbox super-admin reset', () => {
+  it('hides Reset for a tenant admin on a bot-owned chat', async () => {
+    authRef.role = 'admin';
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot' }));
+    await screen.findByTestId('chat-window');
+    expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
+  });
+
+  it('shows Reset for a super admin on a bot-owned chat', async () => {
+    authRef.role = 'super_admin';
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot', channel: 'whatsapp' }));
+    expect(await screen.findByRole('button', { name: /^Reset$/ })).toBeInTheDocument();
+  });
+
+  it('hides Reset when a super admin already owns the chat (Close covers that)', async () => {
+    authRef.role = 'super_admin';
+    renderInbox(makeOwnedChat());
+    await screen.findByTestId('chat-window');
+    expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Close$/ })).toBeInTheDocument();
+  });
+
+  it('hides Reset on a closed chat', async () => {
+    authRef.role = 'super_admin';
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'closed' }));
+    await screen.findByTestId('chat-window');
+    expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
+  });
+
+  it('POSTs /chats/:id/close after confirm', async () => {
+    authRef.role = 'super_admin';
+    apiPost.mockResolvedValue({ outcome: 'closed', conversation: { sessionId: 'c1', status: 'closed' } });
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot', channel: 'whatsapp' }));
+
+    await user.click(await screen.findByRole('button', { name: /^Reset$/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^Reset$/ }));
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    expect(apiPost).toHaveBeenCalledWith('/chats/c1/close', {
+      idempotencyKey: expect.any(String),
+    });
   });
 });

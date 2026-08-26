@@ -2240,7 +2240,9 @@
       "transfer": "Transfer",
       "returnToBot": "Return to Bot",
       "close": "Close",
-      "closing": "Closing…"
+      "closing": "Closing…",
+      "reset": "Reset",
+      "resetting": "Resetting…"
     },
     "detail": {
       "empty": {
@@ -2252,6 +2254,11 @@
       "title": "Close this chat?",
       "description": "The conversation will be marked as resolved and removed from the active list. This action cannot be undone.",
       "confirm": "Close chat"
+    },
+    "resetDialog": {
+      "title": "Reset this conversation?",
+      "description": "The next message from this customer starts a new chat. The old transcript stays. Nothing is sent to them.",
+      "confirm": "Reset"
     },
     "transferModal": {
       "title": "Transfer to teammate",
@@ -2278,6 +2285,8 @@
       "transferFailed": "Failed to transfer chat",
       "closeSuccess": "Chat closed",
       "closeFailed": "Failed to close chat",
+      "resetSuccess": "Conversation reset. The next message starts a new chat.",
+      "resetFailed": "Failed to reset the conversation",
       "returnToBotSuccess": "Chat returned to bot",
       "returnToBotFailed": "Failed to return chat to bot",
       "durationUpdated": "Control duration updated",

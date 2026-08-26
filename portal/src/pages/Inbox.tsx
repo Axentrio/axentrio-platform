@@ -19,6 +19,7 @@ import {
   UserCheck,
   Users,
   X,
+  RotateCcw,
   ArrowLeft,
   Bot,
   CheckCircle,
@@ -73,6 +74,7 @@ import { normalizeChatDetail } from '../queries/useChatQueries';
 import { agentOptions } from '../queries/useAgentQueries';
 import { useTenantSettings } from '../queries/useTenantQueries';
 import { cn } from '@/lib/utils';
+import { useAppAuth } from '@auth/useAppAuth';
 import type { Chat, ChatStatus, Agent, CommandConversationSummary } from '@app-types/index';
 import type { HandoffRequest } from '@app-types/index';
 
@@ -158,6 +160,8 @@ const getReasonIcon = (reason: HandoffRequest['reason']) => {
 
 const Inbox: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAppAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
   const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
   const defaultTakeoverHours = tenant?.settings?.inbox?.defaultTakeoverHours;
@@ -189,6 +193,7 @@ const Inbox: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   // B-PR5b FIX 3: takeover/policy commands are SERIALIZED. A same-owner
   // policy update keeps the ownershipVersion, so two in-flight duration
   // changes cannot be ordered by the revision gates — the UI must not allow
@@ -404,28 +409,35 @@ const Inbox: React.FC = () => {
     }
   };
 
-  const handleCloseChat = async () => {
+  const closeSelectedChat = async (toasts: { success: string; failed: string }) => {
     if (!selectedChat) return;
     const prev = selectedChat;
     // Optimistic: deselect immediately
     setIsClosing(true);
     setSelectedChat(null);
     setConfirmClose(false);
+    setConfirmReset(false);
     try {
       const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
         `/chats/${prev.id}/close`,
         { idempotencyKey: newUuid() },
       );
       applyCommandConversation(queryClient, res.conversation);
-      toast.success(t('inbox.toasts.closeSuccess'));
+      toast.success(t(toasts.success));
     } catch (error) {
       console.error('Failed to close chat:', error);
-      toast.error(t('inbox.toasts.closeFailed'));
+      toast.error(t(toasts.failed));
       setSelectedChat((current) => current === null ? prev : current);
     } finally {
       setIsClosing(false);
     }
   };
+
+  const handleCloseChat = () =>
+    closeSelectedChat({ success: 'inbox.toasts.closeSuccess', failed: 'inbox.toasts.closeFailed' });
+
+  const handleResetChat = () =>
+    closeSelectedChat({ success: 'inbox.toasts.resetSuccess', failed: 'inbox.toasts.resetFailed' });
 
   const handleReturnToBot = async () => {
     if (!selectedChat) return;
@@ -471,6 +483,14 @@ const Inbox: React.FC = () => {
   // offers the control — a same-owner re-claim is harmless.
   const canTakeOver =
     !!selectedChat && selectedChat.ownership !== 'human_owned' && selectedChat.status !== 'closed';
+  // Super-admin testing reset: close a bot-owned conversation so the next
+  // inbound message (WhatsApp/Messenger/widget) starts a NEW session. Hidden
+  // when human-owned because Close already covers that case.
+  const canReset =
+    isSuperAdmin &&
+    !!selectedChat &&
+    selectedChat.status !== 'closed' &&
+    !isHumanOwned;
   // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
   const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
 
@@ -720,6 +740,19 @@ const Inbox: React.FC = () => {
                       }
                     />
                   )}
+                  {canReset && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfirmReset(true)}
+                      disabled={isClosing}
+                      className="gap-2 rounded-xl"
+                      title={t('inbox.resetDialog.description')}
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      {isClosing ? t('inbox.actions.resetting') : t('inbox.actions.reset')}
+                    </Button>
+                  )}
                   {isHumanOwned && (
                     <>
                       <TakeoverMenu
@@ -804,6 +837,20 @@ const Inbox: React.FC = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleCloseChat} className="bg-red-600 hover:bg-red-700">{t('inbox.closeDialog.confirm')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Super-admin testing reset — next inbound starts a new session. */}
+      <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('inbox.resetDialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('inbox.resetDialog.description')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetChat}>{t('inbox.resetDialog.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

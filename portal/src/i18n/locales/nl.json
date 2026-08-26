@@ -2202,7 +2202,9 @@
       "transfer": "Overdragen",
       "returnToBot": "Terug naar bot",
       "close": "Sluiten",
-      "closing": "Bezig met sluiten…"
+      "closing": "Bezig met sluiten…",
+      "reset": "Resetten",
+      "resetting": "Bezig met resetten…"
     },
     "detail": {
       "empty": {
@@ -2214,6 +2216,11 @@
       "title": "Dit gesprek sluiten?",
       "description": "Het gesprek wordt gemarkeerd als opgelost en uit de actieve lijst verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
       "confirm": "Gesprek sluiten"
+    },
+    "resetDialog": {
+      "title": "Dit gesprek resetten?",
+      "description": "Het volgende bericht van deze klant start een nieuw gesprek. Het oude transcript blijft. Er gaat niets naar hen.",
+      "confirm": "Resetten"
     },
     "transferModal": {
       "title": "Overdragen aan een teamgenoot",
@@ -2240,6 +2247,8 @@
       "transferFailed": "Gesprek overdragen mislukt",
       "closeSuccess": "Gesprek gesloten",
       "closeFailed": "Gesprek sluiten mislukt",
+      "resetSuccess": "Gesprek gereset. Het volgende bericht start een nieuw gesprek.",
+      "resetFailed": "Reset van het gesprek is mislukt",
       "returnToBotSuccess": "Gesprek terug naar bot",
       "returnToBotFailed": "Terugzetten naar bot mislukt",
       "durationUpdated": "Duur van overname bijgewerkt",

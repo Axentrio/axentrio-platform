@@ -2201,7 +2201,9 @@
       "transfer": "Transférer",
       "returnToBot": "Rendre au bot",
       "close": "Clôturer",
-      "closing": "Clôture en cours…"
+      "closing": "Clôture en cours…",
+      "reset": "Réinitialiser",
+      "resetting": "Réinitialisation…"
     },
     "detail": {
       "empty": {
@@ -2213,6 +2215,11 @@
       "title": "Clôturer cette conversation ?",
       "description": "La conversation sera marquée comme résolue et retirée de la liste active. Cette action est irréversible.",
       "confirm": "Clôturer la conversation"
+    },
+    "resetDialog": {
+      "title": "Réinitialiser cette conversation ?",
+      "description": "Le prochain message de ce client démarre un nouveau chat. L'ancien transcript reste. Rien ne leur est envoyé.",
+      "confirm": "Réinitialiser"
     },
     "transferModal": {
       "title": "Transférer à un collègue",
@@ -2239,6 +2246,8 @@
       "transferFailed": "Échec du transfert de la conversation",
       "closeSuccess": "Conversation clôturée",
       "closeFailed": "Échec de la clôture de la conversation",
+      "resetSuccess": "Conversation réinitialisée. Le prochain message démarre un nouveau chat.",
+      "resetFailed": "Échec de la réinitialisation de la conversation",
       "returnToBotSuccess": "Conversation rendue au bot",
       "returnToBotFailed": "Échec du retour de la conversation au bot",
       "durationUpdated": "Durée de prise en charge mise à jour",

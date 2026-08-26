@@ -32,12 +32,20 @@ describe('widget.js — New conversation control', () => {
     expect(allowlist).toContain("'newConversation'");
   });
 
-  it('hides the New-conversation header button by default; team flags reveal it', () => {
+  it('hides the New-conversation header button unless this browser opted in', () => {
     // Default OFF - a mid-conversation reset is a testing affordance, so real
-    // visitors never see it. Revealed by data-show-new-chat="true" on the
-    // embed or the per-browser team override key.
-    expect(widgetSrc).toMatch(/showNewChat:\s*false/);
+    // visitors never see it. The ONLY reveal path is a personal debug flag
+    // (localStorage cb_show_new_chat=1). Not a DEFAULT_CONFIG key: that would
+    // auto-parse a customer-controlled data-show-new-chat attribute. Not a
+    // per-tenant server flag: that would show the button to every visitor of
+    // that tenant.
+    expect(widgetSrc).not.toMatch(/showNewChat\s*:/);
+    expect(widgetSrc).not.toContain('newChatEnabled');
+    expect(widgetSrc).not.toContain('_syncNewChatButton');
     expect(widgetSrc).toContain("const SHOW_NEW_CHAT_OVERRIDE_KEY = 'cb_show_new_chat'");
+    const ctor = from('constructor(config = {}) {').slice(0, 2800);
+    expect(ctor).toMatch(/this\.canNewChat = false/);
+    expect(ctor).toMatch(/localStorage\.getItem\(SHOW_NEW_CHAT_OVERRIDE_KEY\) === '1'/);
     // The template gates BOTH the button and the header grid class on canNewChat.
     expect(widgetSrc).toMatch(/cb-header\$\{this\.canNewChat/);
     expect(widgetSrc).toMatch(/\$\{this\.canNewChat \? `\s*<button class="cb-header__new"/);

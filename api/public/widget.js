@@ -61,11 +61,6 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     enableFileUpload: true,
     enableVoiceInput: false,
     enableCamera: true,
-    // "New conversation" header button. DEFAULT OFF: mid-conversation reset is a
-    // testing affordance, not something a real visitor should see. Opt in per
-    // embed with data-show-new-chat="true", or per browser with the team
-    // override key below (works on sites the team doesn't control).
-    showNewChat: false,
     maxFileSize: 25 * 1024 * 1024, // 25MB
     // Mirrors the server allowlist (DEFAULT_UPLOAD_CONFIG.allowedMimeTypes). The old
     // wildcard list let svg, webm and legacy .doc through the picker only to be rejected
@@ -296,11 +291,11 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // Survives session recovery and "new conversation" - the server uses it to
   // resolve the same conversation for a returning visitor.
   const VISITOR_KEY_PREFIX = 'cb_visitor_v1_';
-  // Per-browser team override that reveals the "New conversation" header
-  // button without editing the embed: localStorage.setItem('cb_show_new_chat', '1').
-  // Presentational gate only - the newConversation() API and postMessage
-  // command stay available, and the action only ever replaces the visitor's
-  // OWN session (a visitor could get the same effect by clearing storage).
+  // Personal debug flag that reveals the "New conversation" header button:
+  // localStorage.setItem('cb_show_new_chat', '1'). Per-browser, so it works
+  // on sites the team does not control and does not show the button to other
+  // visitors. Not a DEFAULT_CONFIG key — that would auto-parse a customer-
+  // controlled data-show-new-chat attribute.
   const SHOW_NEW_CHAT_OVERRIDE_KEY = 'cb_show_new_chat';
   const CONNECTION_STATUS = {
     connecting: {
@@ -1441,13 +1436,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this._agentActivityTimer = null;
       this.appearance = (this.config && this.config.appearance) || {};
 
-      // "New conversation" visibility (see DEFAULT_CONFIG.showNewChat): hidden
-      // from real visitors; shown for embeds that opt in or browsers that
-      // carry the team override. Computed once here, BEFORE render().
+      // "New conversation" header button. Hidden unless THIS browser opted
+      // in via localStorage (see SHOW_NEW_CHAT_OVERRIDE_KEY). A mid-conversation
+      // reset is a testing affordance, not a visitor feature.
       this.canNewChat = false;
       try {
-        this.canNewChat = !!this.config.showNewChat ||
-          localStorage.getItem(SHOW_NEW_CHAT_OVERRIDE_KEY) === '1';
+        this.canNewChat = localStorage.getItem(SHOW_NEW_CHAT_OVERRIDE_KEY) === '1';
       } catch (err) { /* storage blocked - stays hidden */ }
 
       // Render immediately, connect async
@@ -1750,6 +1744,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       // render. New bot messages pick up this.appearance.avatarUrl via the
       // message template (line ~1801).
     }
+
 
     async _initConnection() {
       if (!this.config.apiKey) {

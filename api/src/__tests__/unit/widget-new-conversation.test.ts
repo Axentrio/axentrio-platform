@@ -32,8 +32,16 @@ describe('widget.js — New conversation control', () => {
     expect(allowlist).toContain("'newConversation'");
   });
 
-  it('renders a New-conversation header button with an accessible label', () => {
-    expect(widgetSrc).toContain('cb-header__new');
+  it('hides the New-conversation header button by default; team flags reveal it', () => {
+    // Default OFF - a mid-conversation reset is a testing affordance, so real
+    // visitors never see it. Revealed by data-show-new-chat="true" on the
+    // embed or the per-browser team override key.
+    expect(widgetSrc).toMatch(/showNewChat:\s*false/);
+    expect(widgetSrc).toContain("const SHOW_NEW_CHAT_OVERRIDE_KEY = 'cb_show_new_chat'");
+    // The template gates BOTH the button and the header grid class on canNewChat.
+    expect(widgetSrc).toMatch(/cb-header\$\{this\.canNewChat/);
+    expect(widgetSrc).toMatch(/\$\{this\.canNewChat \? `\s*<button class="cb-header__new"/);
+    expect(widgetSrc).toContain('cb-header--no-new');
     expect(widgetSrc).toContain('aria-label="New conversation"');
   });
 

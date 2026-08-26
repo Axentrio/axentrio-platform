@@ -61,6 +61,11 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     enableFileUpload: true,
     enableVoiceInput: false,
     enableCamera: true,
+    // "New conversation" header button. DEFAULT OFF: mid-conversation reset is a
+    // testing affordance, not something a real visitor should see. Opt in per
+    // embed with data-show-new-chat="true", or per browser with the team
+    // override key below (works on sites the team doesn't control).
+    showNewChat: false,
     maxFileSize: 25 * 1024 * 1024, // 25MB
     // Mirrors the server allowlist (DEFAULT_UPLOAD_CONFIG.allowedMimeTypes). The old
     // wildcard list let svg, webm and legacy .doc through the picker only to be rejected
@@ -291,6 +296,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // Survives session recovery and "new conversation" - the server uses it to
   // resolve the same conversation for a returning visitor.
   const VISITOR_KEY_PREFIX = 'cb_visitor_v1_';
+  // Per-browser team override that reveals the "New conversation" header
+  // button without editing the embed: localStorage.setItem('cb_show_new_chat', '1').
+  // Presentational gate only - the newConversation() API and postMessage
+  // command stay available, and the action only ever replaces the visitor's
+  // OWN session (a visitor could get the same effect by clearing storage).
+  const SHOW_NEW_CHAT_OVERRIDE_KEY = 'cb_show_new_chat';
   const CONNECTION_STATUS = {
     connecting: {
       label: 'Connecting...',
@@ -472,6 +483,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       align-items: center;
       column-gap: 10px;
       flex-shrink: 0;
+    }
+    /* Header without the new-conversation button: drop its grid column so the
+       status and close buttons don't pick up a phantom gap. */
+    .cb-header--no-new {
+      /* avatar | info(1fr) | status | close */
+      grid-template-columns: auto 1fr auto auto;
     }
     .cb-header::after {
       content: "";
@@ -1424,6 +1441,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this._agentActivityTimer = null;
       this.appearance = (this.config && this.config.appearance) || {};
 
+      // "New conversation" visibility (see DEFAULT_CONFIG.showNewChat): hidden
+      // from real visitors; shown for embeds that opt in or browsers that
+      // carry the team override. Computed once here, BEFORE render().
+      this.canNewChat = false;
+      try {
+        this.canNewChat = !!this.config.showNewChat ||
+          localStorage.getItem(SHOW_NEW_CHAT_OVERRIDE_KEY) === '1';
+      } catch (err) { /* storage blocked - stays hidden */ }
+
       // Render immediately, connect async
       this.loadSession();
       // Resolve the durable visitorId AFTER loadSession: the stored blob is
@@ -2275,7 +2301,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             <span class="cb-upload-overlay__text">Drop files here to upload</span>
           </div>
           
-          <header class="cb-header">
+          <header class="cb-header${this.canNewChat ? '' : ' cb-header--no-new'}">
             <div class="cb-header__avatar">
               ${botAvatarHtml(this.appearance.avatarUrl, { eager: true })}
             </div>
@@ -2287,9 +2313,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
               <span class="cb-header__status-dot"></span>
               <span class="cb-header__status-text">Connecting...</span>
             </div>
+            ${this.canNewChat ? `
             <button class="cb-header__new" type="button" aria-label="New conversation" title="New conversation">
               ${ICONS.newChat}
-            </button>
+            </button>` : ''}
             <button class="cb-header__close" type="button" aria-label="Close chat" title="Close chat">
               ${ICONS.close}
             </button>

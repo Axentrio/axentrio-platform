@@ -96,12 +96,12 @@ import {
   SLOT_NOT_OFFERABLE,
   SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
   SLOT_TAKEN_ON_RESCHEDULE,
-  REQUEST_TOO_SOON,
-  REQUEST_TOO_FAR,
+  requestTooSoon,
+  requestTooFar,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields } from './contact';
-import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime } from './booking-dates';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, businessClock } from './booking-dates';
 import {
   resolveDuration,
   assertDurationChosen,
@@ -1786,11 +1786,25 @@ export class InternalProvider implements BookingProvider {
     if (service.bookingMode !== 'request' && canAuto) {
       const { earliestMs, latestMs } = bookableWindow(service, new Date());
       const startMs = start.getTime();
+      // The bound goes INTO the message. A refusal that does not say where to go instead gets a
+      // date invented for it - see the note on `requestTooSoon`.
       if (startMs < earliestMs) {
-        throw new BookingError(REQUEST_TOO_SOON, 'REQUEST_OUTSIDE_WINDOW', 409);
+        const at = new Date(earliestMs).toISOString();
+        const { startDate, endDate } = retryRange('too_soon', at, rule.timezone);
+        throw new BookingError(
+          requestTooSoon(businessClock(at, rule.timezone), startDate, endDate),
+          'REQUEST_OUTSIDE_WINDOW',
+          409
+        );
       }
       if (startMs > latestMs) {
-        throw new BookingError(REQUEST_TOO_FAR, 'REQUEST_OUTSIDE_WINDOW', 409);
+        const at = new Date(latestMs).toISOString();
+        const { startDate, endDate } = retryRange('too_far', at, rule.timezone);
+        throw new BookingError(
+          requestTooFar(businessClock(at, rule.timezone), startDate, endDate),
+          'REQUEST_OUTSIDE_WINDOW',
+          409
+        );
       }
     }
 

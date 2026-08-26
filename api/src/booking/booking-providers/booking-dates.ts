@@ -62,3 +62,45 @@ export function parseBookingStart(input: string, timezone: string): Date | null 
 export function formatBookingDisplayTime(startUtc: Date, timezone: string): string {
   return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a");
 }
+
+/** Calendar day only - the format `check_availability` takes for startDate/endDate. */
+const DAY = 'yyyy-MM-dd';
+
+/**
+ * The range to check INSTEAD of one the notice or horizon ruled out, named concretely.
+ *
+ * BOTH REFUSAL PATHS USE THIS, and they must not disagree. `check_availability` returns an empty
+ * range with a reason; `requestAppointment` refuses a capture outright. A customer who meets one
+ * and then the other must be sent to the same place.
+ *
+ * Naming both ends is the point. "Try the days after it" is an instruction a model satisfies by
+ * re-checking the same day and reading the same emptiness back. Worse, with no date at all the
+ * model invents one: on production a min-notice refusal produced "choose a date after Wednesday
+ * 2 September" when the earliest bookable was 25 September, because the refusal it was given
+ * carried no boundary. Every date the customer could then pick for three weeks was refused again.
+ *
+ * A week, in the direction that actually holds the times: forward from the earliest a booking may
+ * start, backward from the last date the business accepts. Seven days is already what `endDate`
+ * documents as the widest a single check may span.
+ */
+export function retryRange(
+  reason: 'too_soon' | 'too_far',
+  boundary: string,
+  timezone: string,
+): { startDate: string; endDate: string } {
+  const at = DateTime.fromISO(boundary, { zone: 'utc' }).setZone(timezone);
+  // Unparseable can only be a fixture: keep the date rather than lose the correction.
+  if (!at.isValid) return { startDate: boundary.slice(0, 10), endDate: boundary.slice(0, 10) };
+  if (reason === 'too_soon') {
+    return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
+  }
+  // Backward, but never into the past: a short horizon can leave the bound less than a week off.
+  const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
+  return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
+}
+
+/** An instant in the business's own wall clock, for a message the model reads aloud. */
+export function businessClock(instant: string, timezone: string): string {
+  const dt = DateTime.fromISO(instant, { zone: 'utc' }).setZone(timezone);
+  return dt.isValid ? dt.toFormat("cccc d LLLL yyyy 'at' HH:mm") : instant;
+}

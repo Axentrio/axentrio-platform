@@ -2325,6 +2325,29 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
     await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/team will come back on it/i);
   });
 
+  it('NAMES the bound and the range to check, so the model cannot invent one', async () => {
+    // Production, min-notice run: told only "too soon", the bot answered "choose a date after
+    // Wednesday 2 September" when the earliest bookable was the 25th. Every date the customer
+    // could pick for three weeks was refused again. A refusal with no destination gets one
+    // invented for it, so the bound travels with the message.
+    //
+    // now = 2026-06-05T00:00Z, 60-day horizon -> last bookable 2026-08-04T00:00Z (02:00 Brussels).
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/Tuesday 4 August 2026 at 02:00/);
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/never name a date after that/i);
+    // A week back from the bound, ending ON it: 4 August is still bookable.
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/startDate 2026-07-29 and endDate 2026-08-04/);
+  });
+
+  it('names the notice bound the same way', async () => {
+    const soon = { ...EVENT_TYPE, minNoticeMin: 1440 };
+    eventTypeFindOne.mockResolvedValue(soon);
+    serviceTypeFind.mockResolvedValue([soon]);
+    // earliest = now + 24h = 2026-06-06T00:00Z = 02:00 Brussels.
+    await expect(ask('2026-06-05T10:00:00Z')).rejects.toThrow(/Saturday 6 June 2026 at 02:00/);
+    await expect(ask('2026-06-05T10:00:00Z')).rejects.toThrow(/never name a date before that/i);
+    await expect(ask('2026-06-05T10:00:00Z')).rejects.toThrow(/startDate 2026-06-06 and endDate 2026-06-12/);
+  });
+
   it('still captures inside the window', async () => {
     await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ success: true, requested: true });
   });

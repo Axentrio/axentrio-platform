@@ -14,13 +14,14 @@ import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 import type { CreateBookingResult } from '../../booking/booking-providers/types';
+import { retryRange } from '../../booking/booking-providers/booking-dates';
 import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
-import { localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
+import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
 import { DateTime } from 'luxon';
 
@@ -164,18 +165,15 @@ const NAMED_TIME_UNAVAILABLE_GUIDANCE =
 function lastCustomerText(ctx: ToolContext): string {
   const history = ctx.conversationHistory;
   if (!Array.isArray(history)) return '';
-  for (let i = history.length - 1; i >= 0; i--) {
-    const m = history[i];
-    if (m.role === 'user') return contentToText(m.content);
+  const texts: string[] = [];
+  for (const m of history) {
+    if (m.role === 'user') texts.push(contentToText(m.content));
   }
-  return '';
+  return latestCustomerTimeText(texts);
 }
 
 /** Zoneless local ISO — the format create_booking/request_appointment already document. */
 const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm:ss";
-
-/** Calendar day only — the format `check_availability` takes for startDate/endDate. */
-const DAY = 'yyyy-MM-dd';
 
 /**
  * An instant, said in the business's own wall clock.
@@ -200,32 +198,6 @@ function wallClockSlots<T extends { start: string; end: string }>(slots: T[], ti
   return slots.map((s) => ({ ...s, start: wallClock(s.start, timezone), end: wallClock(s.end, timezone) }));
 }
 
-/**
- * The range to check INSTEAD, named concretely.
- *
- * "Try the days after it" is an instruction a model can satisfy by re-checking the same day and
- * reading the same emptiness back, which is how a helpful correction turns into a loop. Naming
- * both ends removes the choice.
- *
- * A week, in the direction that actually holds the times: forward from the earliest a booking
- * may start, backward from the last date the business accepts. Seven days is already what
- * `endDate` documents as the widest a single check may span.
- */
-function retryRange(
-  reason: 'too_soon' | 'too_far',
-  boundary: string,
-  timezone: string,
-): { startDate: string; endDate: string } {
-  const at = DateTime.fromISO(boundary, { zone: 'utc' }).setZone(timezone);
-  // Unparseable can only be a fixture: keep the date rather than lose the correction.
-  if (!at.isValid) return { startDate: boundary.slice(0, 10), endDate: boundary.slice(0, 10) };
-  if (reason === 'too_soon') {
-    return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
-  }
-  // Backward, but never into the past: a short horizon can leave the bound less than a week off.
-  const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
-  return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
-}
 
 /**
  * What the model is told about the one time the customer named.

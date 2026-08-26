@@ -77,18 +77,26 @@ export const SLOT_TAKEN_ON_RESCHEDULE =
  *
  * The tool description invites exactly this ("...or you are not confident you can safely confirm
  * a time"), so the refusal has to live on the write path. Prose could not have stopped it.
+ *
+ * THE BOUND TRAVELS WITH THE REFUSAL. The first version of these was a bare string, and the
+ * model filled the gap: told only "too soon", it answered "choose a date after Wednesday 2
+ * September" when the earliest bookable was the 25th, so every date the customer could pick for
+ * three weeks was refused again. A refusal that does not say WHERE to go instead gets one
+ * invented for it.
  */
-export const REQUEST_TOO_SOON =
-  'That time is sooner than the notice this business needs, so it cannot be booked OR requested ' +
-  '- they have already said they do not take appointments at that notice, so there is nothing ' +
-  'for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ' +
-  'on it. Call check_availability for the days after that, offer the customer the times it ' +
-  'returns, and book one outright: this service books automatically.';
+export const requestTooSoon = (earliest: string, startDate: string, endDate: string): string =>
+  `That time is sooner than the notice this business needs, so it cannot be booked OR requested ` +
+  `- they have already said they do not take appointments at that notice, so there is nothing ` +
+  `for them to confirm. The earliest they can take one is ${earliest} (their own clock); never ` +
+  `name a date before that. Do NOT capture it and do NOT tell the customer the team will come ` +
+  `back on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer ` +
+  `the customer the times it returns, and book one outright: this service books automatically.`;
 
-/** The horizon twin. Same refusal, opposite end of the window. */
-export const REQUEST_TOO_FAR =
-  'That time is further ahead than this business takes bookings, so it cannot be booked OR ' +
-  'requested - they have already said they do not accept dates that far out, so there is ' +
-  'nothing for them to confirm. Do NOT capture it and do NOT tell the customer the team will ' +
-  'come back on it. Call check_availability for a date inside the range they do book, offer the ' +
-  'customer the times it returns, and book one outright: this service books automatically.';
+/** The horizon twin. Same refusal, same duty to name the bound, opposite end of the window. */
+export const requestTooFar = (latest: string, startDate: string, endDate: string): string =>
+  `That time is further ahead than this business takes bookings, so it cannot be booked OR ` +
+  `requested - they have already said they do not accept dates that far out, so there is ` +
+  `nothing for them to confirm. The last time they accept is ${latest} (their own clock); never ` +
+  `name a date after that. Do NOT capture it and do NOT tell the customer the team will come ` +
+  `back on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer ` +
+  `the customer the times it returns, and book one outright: this service books automatically.`;

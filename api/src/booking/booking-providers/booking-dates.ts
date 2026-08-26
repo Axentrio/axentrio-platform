@@ -98,9 +98,3 @@ export function retryRange(
   const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
   return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
 }
-
-/** An instant in the business's own wall clock, for a message the model reads aloud. */
-export function businessClock(instant: string, timezone: string): string {
-  const dt = DateTime.fromISO(instant, { zone: 'utc' }).setZone(timezone);
-  return dt.isValid ? dt.toFormat("cccc d LLLL yyyy 'at' HH:mm") : instant;
-}

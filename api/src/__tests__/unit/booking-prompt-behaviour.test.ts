@@ -656,26 +656,35 @@ describe('check_availability — a range the policy ruled out is not an empty di
     }
   });
 
-  it('names the notice bound and a LATER range to check', async () => {
+  it('sends the model to a LATER range, without naming a time of its own', async () => {
     const res = await load(tooSoon);
     expect(res.data.guidance).toMatch(/too soon/i);
-    // The business's own clock, never the UTC instant the server holds.
-    expect(res.data.guidance).toContain('2026-08-26T21:02:00');
-    expect(res.data.guidance).not.toContain('19:02');
     // A week from the bound, so the retry cannot land on the same empty day again.
     expect(res.data.guidance).toContain('startDate 2026-08-26 and endDate 2026-09-01');
+    expect(res.data.guidance).toMatch(/Offer ONLY times that call gives you/);
   });
 
-  it('names the horizon bound and an EARLIER range to check', async () => {
+  it('sends the model to an EARLIER range for the horizon', async () => {
     const res = await load(tooFar);
     expect(res.data.guidance).toMatch(/further ahead than this business takes bookings/i);
-    expect(res.data.guidance).toContain('2026-09-08T21:02:00');
     // Ends ON the bound: 14 days ahead is still bookable, and the report checked that.
     expect(res.data.guidance).toContain('startDate 2026-09-02 and endDate 2026-09-08');
   });
 
-  it('states the bound in the business clock on the payload too', async () => {
-    const res = await load(tooSoon);
-    expect(res.data.emptyRange).toEqual({ reason: 'too_soon', boundary: '2026-08-26T21:02:00' });
+  it('never states the bound itself, in the guidance OR on the payload', async () => {
+    // The bound is `now + notice`, a POLICY instant that knows nothing about opening hours. On
+    // the Wednesday-only 09:00-17:00 diary this was found on it landed on a Friday at 20:26,
+    // while the first bookable slot was the Wednesday after. Said out loud it is an appointment
+    // the business cannot take, and it comes from the server, so the model repeats it over its
+    // own guess. `namedTimeGuidance` cannot save this turn either: it returns nothing when a
+    // call offered no clock times, which is exactly what an out-of-window range is.
+    for (const range of [tooSoon, tooFar]) {
+      const res = await load(range);
+      expect(res.data.emptyRange, range.reason).toBeUndefined();
+      expect(res.data.guidance, range.reason).not.toContain('21:02');
+      expect(res.data.guidance, range.reason).not.toContain('19:02');
+      // Only whole dates survive, and only as the range to search.
+      expect(res.data.guidance, range.reason).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    }
   });
 });

@@ -101,7 +101,7 @@ import {
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields } from './contact';
-import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, businessClock } from './booking-dates';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
 import {
   resolveDuration,
   assertDurationChosen,
@@ -1786,25 +1786,15 @@ export class InternalProvider implements BookingProvider {
     if (service.bookingMode !== 'request' && canAuto) {
       const { earliestMs, latestMs } = bookableWindow(service, new Date());
       const startMs = start.getTime();
-      // The bound goes INTO the message. A refusal that does not say where to go instead gets a
-      // date invented for it - see the note on `requestTooSoon`.
+      // The RANGE goes into the message, never the bound: it is a policy instant, not an opening
+      // time - see the note on `requestTooSoon`.
       if (startMs < earliestMs) {
-        const at = new Date(earliestMs).toISOString();
-        const { startDate, endDate } = retryRange('too_soon', at, rule.timezone);
-        throw new BookingError(
-          requestTooSoon(businessClock(at, rule.timezone), startDate, endDate),
-          'REQUEST_OUTSIDE_WINDOW',
-          409
-        );
+        const { startDate, endDate } = retryRange('too_soon', new Date(earliestMs).toISOString(), rule.timezone);
+        throw new BookingError(requestTooSoon(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       if (startMs > latestMs) {
-        const at = new Date(latestMs).toISOString();
-        const { startDate, endDate } = retryRange('too_far', at, rule.timezone);
-        throw new BookingError(
-          requestTooFar(businessClock(at, rule.timezone), startDate, endDate),
-          'REQUEST_OUTSIDE_WINDOW',
-          409
-        );
+        const { startDate, endDate } = retryRange('too_far', new Date(latestMs).toISOString(), rule.timezone);
+        throw new BookingError(requestTooFar(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
     }
 

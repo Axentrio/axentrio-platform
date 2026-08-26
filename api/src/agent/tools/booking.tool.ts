@@ -294,7 +294,13 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // scoring left on it teaches a model that is meant to be unaware of any ranking AND competes
       // with the slot list for that budget - a shadow feature able to break the real one. Splitting
       // at the single early return instead would leak through the two branches that return sooner.
-      const { grouping, ...result } = full;
+      // `emptyRange` splits off here for the same reason, and one more: its `boundary` is a
+      // POLICY instant (now + notice, or now + horizon), not a bookable time. On a Wednesday-only
+      // 09:00-17:00 diary a notice bound landed on a Friday at 20:26. Left on `data` the model
+      // reads it as the next appointment and says so, and the invented-time guard cannot catch
+      // it because a turn that offered no slots has no clock times to judge against. Only the
+      // retry RANGE derived from it is safe to say out loud.
+      const { grouping, emptyRange, ...result } = full;
       const measurement = grouping ? { measurement: { grouping } } : {};
       // OFFER TO VERIFY THE ADDRESS, computed here beside `measurement` and returned from every
       // branch below for exactly the reason stated there: this tool has four exits, and something
@@ -345,9 +351,6 @@ export class CheckAvailabilityTool implements ToolAdapter {
                 unreachableSlots: wallClockSlots(result.travel.unreachableSlots ?? [], zone),
               },
             }
-          : {}),
-        ...(result.emptyRange
-          ? { emptyRange: { ...result.emptyRange, boundary: wallClock(result.emptyRange.boundary, zone) } }
           : {}),
       };
       // The chips, the offer record and the invented-time guard all need real instants. They
@@ -426,11 +429,16 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // the bot offered to send the appointment for someone to confirm by hand - on a service
       // whose owner had chosen automatic booking, with bookable times sitting one day away. The
       // second report notes the customer had to ask a second time before the bot would name
-      // them. Naming the bound here is what makes the retry land somewhere different: told only
-      // "nothing in this range", a model re-checks the same day and gets the same nothing.
-      const outOfWindow = result?.emptyRange;
+      // them. Naming a DESTINATION here is what makes the retry land somewhere different: told
+      // only "nothing in this range", a model re-checks the same day and gets the same nothing.
+      //
+      // A RANGE, never the bound itself. The bound is `now + notice` or `now + horizon`, which is
+      // a policy instant and not an opening time: on a Wednesday-only 09:00-17:00 diary the notice
+      // bound fell on a Friday at 20:26, and the first bookable slot was the following Wednesday.
+      // Stated out loud that is a time the business cannot take, coming from the server, which the
+      // model trusts over its own guess.
+      const outOfWindow = emptyRange;
       if (outOfWindow) {
-        const boundary = wallClock(outOfWindow.boundary, zone);
         const retry = retryRange(outOfWindow.reason, outOfWindow.boundary, zone);
         return {
           success: true,
@@ -446,10 +454,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
             suggestedAction: 'check_availability',
             guidance:
               (outOfWindow.reason === 'too_soon'
-                ? `That range is too soon: this business needs more notice than that, and the earliest appointment it can take starts at ${boundary} (their own clock).`
-                : `That range is further ahead than this business takes bookings: the last time they accept is ${boundary} (their own clock).`) +
+                ? 'That range is too soon: this business needs more notice than that.'
+                : 'That range is further ahead than this business takes bookings.') +
               ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
               ' Checking the same range again returns the same nothing, so do not repeat it.' +
+              ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
               ' This does NOT mean the business is closed or fully booked, so do not say either.' +
               ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.',
           }),

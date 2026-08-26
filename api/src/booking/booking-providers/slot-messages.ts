@@ -78,25 +78,33 @@ export const SLOT_TAKEN_ON_RESCHEDULE =
  * The tool description invites exactly this ("...or you are not confident you can safely confirm
  * a time"), so the refusal has to live on the write path. Prose could not have stopped it.
  *
- * THE BOUND TRAVELS WITH THE REFUSAL. The first version of these was a bare string, and the
- * model filled the gap: told only "too soon", it answered "choose a date after Wednesday 2
- * September" when the earliest bookable was the 25th, so every date the customer could pick for
- * three weeks was refused again. A refusal that does not say WHERE to go instead gets one
- * invented for it.
+ * THE DESTINATION TRAVELS WITH THE REFUSAL, BUT NEVER THE BOUND ITSELF. The first version was a
+ * bare string and the model filled the gap: told only "too soon", it answered "choose a date
+ * after Wednesday 2 September" when the earliest was the 25th, so every date the customer could
+ * pick for three weeks was refused again.
+ *
+ * Putting the bound in the message is the WORSE fix, and the same live run shows why. The bound
+ * is `now + notice`, a policy instant that knows nothing about opening hours: on that
+ * Wednesday-only 09:00-17:00 diary it fell on a Friday at 20:26, while the first bookable slot
+ * was the Wednesday after. Coming from the server it outranks the model's own guess, and the
+ * invented-time guard is blind here because a refused turn offers no clock times to judge
+ * against. So these name a RANGE to search and nothing else.
  */
-export const requestTooSoon = (earliest: string, startDate: string, endDate: string): string =>
+export const requestTooSoon = (startDate: string, endDate: string): string =>
   `That time is sooner than the notice this business needs, so it cannot be booked OR requested ` +
   `- they have already said they do not take appointments at that notice, so there is nothing ` +
-  `for them to confirm. The earliest they can take one is ${earliest} (their own clock); never ` +
-  `name a date before that. Do NOT capture it and do NOT tell the customer the team will come ` +
-  `back on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer ` +
-  `the customer the times it returns, and book one outright: this service books automatically.`;
+  `for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ` +
+  `on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
+  `customer the times it returns, and book one outright: this service books automatically. ` +
+  `Offer ONLY times that call gives you - the notice says nothing about opening hours, so do ` +
+  `not work out the earliest date yourself and do not name one to the customer.`;
 
-/** The horizon twin. Same refusal, same duty to name the bound, opposite end of the window. */
-export const requestTooFar = (latest: string, startDate: string, endDate: string): string =>
+/** The horizon twin. Same refusal, same range-only rule, opposite end of the window. */
+export const requestTooFar = (startDate: string, endDate: string): string =>
   `That time is further ahead than this business takes bookings, so it cannot be booked OR ` +
   `requested - they have already said they do not accept dates that far out, so there is ` +
-  `nothing for them to confirm. The last time they accept is ${latest} (their own clock); never ` +
-  `name a date after that. Do NOT capture it and do NOT tell the customer the team will come ` +
-  `back on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer ` +
-  `the customer the times it returns, and book one outright: this service books automatically.`;
+  `nothing for them to confirm. Do NOT capture it and do NOT tell the customer the team will ` +
+  `come back on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, ` +
+  `offer the customer the times it returns, and book one outright: this service books ` +
+  `automatically. Offer ONLY times that call gives you - the horizon says nothing about opening ` +
+  `hours, so do not work out the last date yourself and do not name one to the customer.`;

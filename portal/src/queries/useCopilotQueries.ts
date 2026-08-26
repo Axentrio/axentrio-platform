@@ -62,11 +62,6 @@ export interface CopilotConversationResponse {
   nextCursor: number | null;
 }
 
-interface ApiEnvelope<T> {
-  success: true;
-  data: T;
-}
-
 const THIRTY_SECONDS_MS = 30 * 1000;
 
 /**
@@ -87,17 +82,22 @@ export function useCopilotConversation(opts: { enabled?: boolean } = {}) {
       // not just the first page. The server paginates oldest-first; the old
       // client read one page and dropped the rest, so history disappeared
       // past ~50 turns. Bounded by a page cap so a runaway can't loop.
+      // apiClient's response interceptor already unwraps the { success, data }
+      // envelope, so api.get returns the INNER payload directly. Type it as
+      // CopilotConversationResponse and read its fields — never `.data`. The old
+      // code typed this as an envelope and read `.data` (undefined), which is why
+      // the transcript was always empty and history never showed.
       const MAX_PAGES = 40; // 40 * 50-row pages = 2000 messages, far above any real convo
       let cursor: number | null = 0;
       let conversationId: string | null = null;
       const messages: CopilotConversationMessage[] = [];
       for (let page = 0; page < MAX_PAGES && cursor !== null; page++) {
-        const env: ApiEnvelope<CopilotConversationResponse> = await api.get<
-          ApiEnvelope<CopilotConversationResponse>
-        >(`/copilot/conversation?cursor=${cursor}`);
-        conversationId = env.data.conversationId;
-        messages.push(...env.data.messages);
-        cursor = env.data.nextCursor;
+        const res: CopilotConversationResponse = await api.get<CopilotConversationResponse>(
+          `/copilot/conversation?cursor=${cursor}`,
+        );
+        conversationId = res.conversationId;
+        messages.push(...res.messages);
+        cursor = res.nextCursor;
       }
       return { conversationId, messages, nextCursor: null };
     },
@@ -110,10 +110,7 @@ export function useClearCopilotConversation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const env = await api.post<ApiEnvelope<{ cleared: true }>>(
-        '/copilot/conversation/clear',
-      );
-      return env.data;
+      return api.post<{ cleared: true }>('/copilot/conversation/clear');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.copilot.conversation() });

@@ -238,7 +238,12 @@ const Inbox: React.FC = () => {
     ...agentOptions.list({ status: 'online' }),
     enabled: isTransferModalOpen,
   });
-  const agents: Agent[] = ((rawAgents as RawAgent[] | undefined) ?? []).map(mapRawAgent);
+  // GET /agents returns the paginated shape { agents: [...], meta } (the
+  // apiClient already stripped the success envelope). Older deploys answered
+  // with a bare array — accept both so the modal can never crash on .map.
+  const agentsPayload = rawAgents as { agents?: RawAgent[] } | RawAgent[] | undefined;
+  const agentsList = Array.isArray(agentsPayload) ? agentsPayload : (agentsPayload?.agents ?? []);
+  const agents: Agent[] = agentsList.map(mapRawAgent);
 
   // -----------------------------------------------------------------------
   // Handlers
@@ -478,19 +483,23 @@ const Inbox: React.FC = () => {
   // (deriveStatusFromOwnership) — portal status 'handsoff' — so a
   // status==='human' gate would never fire for a taken-over chat.
   const isHumanOwned = selectedChat?.ownership === 'human_owned';
+  // Super-admin testing reset: close a conversation so the next inbound
+  // message starts a NEW session. Scoped to the EXTERNAL channels (WhatsApp,
+  // Messenger, …) per the approved plan: the widget already has its own
+  // New-conversation button, and widget.js has no closed-session recovery, so
+  // a server-side close there would strand an open visitor until reload.
+  const canReset =
+    isSuperAdmin &&
+    !!selectedChat &&
+    selectedChat.status !== 'closed' &&
+    !isHumanOwned &&
+    !!selectedChat.channel &&
+    selectedChat.channel !== 'widget';
   // Take Over on any chat the AI still owns (bot or handoff), not only during
   // handoff. Closed sessions have nothing to claim. Unknown ownership still
   // offers the control — a same-owner re-claim is harmless.
   const canTakeOver =
     !!selectedChat && selectedChat.ownership !== 'human_owned' && selectedChat.status !== 'closed';
-  // Super-admin testing reset: close a bot-owned conversation so the next
-  // inbound message (WhatsApp/Messenger/widget) starts a NEW session. Hidden
-  // when human-owned because Close already covers that case.
-  const canReset =
-    isSuperAdmin &&
-    !!selectedChat &&
-    selectedChat.status !== 'closed' &&
-    !isHumanOwned;
   // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
   const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
 

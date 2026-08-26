@@ -612,6 +612,13 @@ describe('Inbox super-admin reset', () => {
     expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
   });
 
+  it('hides Reset on a widget chat (the widget has its own control)', async () => {
+    authRef.role = 'super_admin';
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot', channel: 'widget' }));
+    await screen.findByTestId('chat-window');
+    expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
+  });
+
   it('POSTs /chats/:id/close after confirm', async () => {
     authRef.role = 'super_admin';
     apiPost.mockResolvedValue({ outcome: 'closed', conversation: { sessionId: 'c1', status: 'closed' } });

@@ -305,14 +305,20 @@ describe('attribution - the rule two engineers would otherwise build differently
     // not even the same machine. A booking taken in the same millisecond as its offer compared
     // EQUAL and was dropped from the baseline, so `offer-record.test.ts` failed whenever CI was
     // fast enough to do both inside one millisecond, and passed against a slower Docker Postgres.
-    await offer([SLOT_A]);
+    //
+    // MEASURED AGAINST THE ROW'S OWN TIMESTAMP, not against this process's clock: a test for a
+    // clock bug that races the clock is the flake it is meant to remove. Both directions then
+    // hold whatever the two clocks read - it attributes with the grace, and skips without it.
+    const offerId = await offer([SLOT_A]);
+    const row = await AppDataSource.getRepository(BookingOffer).findOneByOrFail({ id: offerId! });
     await recordOfferSelection({
       sessionId,
       serviceId,
       bookingId: randomUUID(),
       startUtc: at(SLOT_A),
-      // 200ms of apparent skew: the booking looks OLDER than the offer row it came from.
-      bookingCreatedAt: new Date(Date.now() - 200),
+      // Half a second BEFORE the offer row exists: the booking cannot have been taken from it by
+      // the strict reading, which is exactly what the database leading the API looks like.
+      bookingCreatedAt: new Date(row.createdAt.getTime() - 500),
       selectionType: 'booking',
     });
     expect(await selections()).toHaveLength(1);
@@ -443,10 +449,12 @@ describe('the canonical baseline, computed once so LP4 and LP5 cannot disagree',
     // millisecond and the row just written falls outside the window - always the newest row.
     // CI wrote three calls and counted them inside the same millisecond, and reported 0.
     await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: 'soon', endDate: 'later', slotCount: 0 });
-    // Simulate the lead the runner really had: put the row 200ms into this process's future.
+    // The lead is written from THIS process's clock, not `now()`, so both directions hold
+    // whatever the database clock reads: 200ms ahead of here is inside a 1000ms grace and
+    // outside a bare `new Date()`. Racing the real clocks would rebuild the flake being fixed.
     await AppDataSource.query(
-      `UPDATE chatbot_availability_calls SET created_at = now() + interval '200 milliseconds' WHERE session_id = $1`,
-      [sessionId],
+      `UPDATE chatbot_availability_calls SET created_at = $2 WHERE session_id = $1`,
+      [sessionId, new Date(Date.now() + 200)],
     );
 
     const summary = await baselineSummary({ since });

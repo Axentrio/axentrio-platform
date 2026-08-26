@@ -319,6 +319,113 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { guidance?: string }).guidance).toMatch(/do not list or offer other times/i);
   });
 
+  it('still sees a named time after the customer answers a required intake question', async () => {
+    // Production: Lekonderzoek auto-book, required intake "Waar bevindt het probleem zich?".
+    // Customer named Monday 12 October 2026 at 10:00, then answered the intake. lastCustomerText
+    // read only that answer, so requestedTimeAvailable never fired and the model re-offered
+    // 00:00 / 00:30 / 01:00 instead of confirming 10:00.
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-12T07:00:00.000Z', end: '2026-10-12T08:00:00.000Z' },
+        { start: '2026-10-12T08:00:00.000Z', end: '2026-10-12T09:00:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-12', endDate: '2026-10-12' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil een lekonderzoek op maandag 12 oktober 2026 om 10:00' },
+          { role: 'assistant', content: 'Waar bevindt het probleem zich?' },
+          { role: 'user', content: 'Het probleem bevindt zich onder de lavabo in de badkamer.' },
+        ],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBe(true);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/already named this time/i);
+  });
+
+
+  it('still flags a named time as unavailable after an intake answer', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-10-12T07:00:00.000Z', end: '2026-10-12T08:00:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-12', endDate: '2026-10-12' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil een lekonderzoek op maandag 12 oktober 2026 om 10:00' },
+          { role: 'assistant', content: 'Waar bevindt het probleem zich?' },
+          { role: 'user', content: 'Het probleem bevindt zich onder de lavabo in de badkamer.' },
+        ],
+      }),
+    );
+
+    const data = result.data as {
+      requestedTimeAvailable?: boolean;
+      requestedTimeUnavailable?: string;
+    };
+    expect(data.requestedTimeAvailable).toBeUndefined();
+    expect(data.requestedTimeUnavailable).toBe('10:00');
+  });
+
+  it('uses a later named hour when they change their mind after intake', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-12T08:00:00.000Z', end: '2026-10-12T09:00:00.000Z' },
+        { start: '2026-10-12T12:00:00.000Z', end: '2026-10-12T13:00:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-12', endDate: '2026-10-12' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil een lekonderzoek op maandag 12 oktober 2026 om 10:00' },
+          { role: 'user', content: 'Liever om 14:00.' },
+        ],
+      }),
+    );
+
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBe(true);
+  });
+
+  it('does not treat a rejected 10:00 as still requested after other times were offered', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-12T08:00:00.000Z', end: '2026-10-12T09:00:00.000Z' },
+        { start: '2026-10-12T09:00:00.000Z', end: '2026-10-12T10:00:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-12', endDate: '2026-10-12' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik om 10:00 langskomen?' },
+          { role: 'assistant', content: '10:00 is niet vrij. Ik heb 11:00 en 11:30.' },
+          { role: 'user', content: 'ja' },
+        ],
+      }),
+    );
+
+    const data = result.data as { requestedTimeAvailable?: boolean };
+    expect(data.requestedTimeAvailable).toBeUndefined();
+  });
+
+
+
   it('tells the model outright that a named time it did not offer is unavailable', async () => {
     // The positive twin above has existed for months; its absence said nothing, and nothing is
     // what shipped "10:00 is beschikbaar" for a 10:00 the buffers had already ruled out. Only

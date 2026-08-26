@@ -165,11 +165,9 @@ const NAMED_TIME_UNAVAILABLE_GUIDANCE =
 function lastCustomerText(ctx: ToolContext): string {
   const history = ctx.conversationHistory;
   if (!Array.isArray(history)) return '';
-  const texts: string[] = [];
-  for (const m of history) {
-    if (m.role === 'user') texts.push(contentToText(m.content));
-  }
-  return latestCustomerTimeText(texts);
+  return latestCustomerTimeText(
+    history.map((m) => ({ role: m.role, text: contentToText(m.content) })),
+  );
 }
 
 /** Zoneless local ISO — the format create_booking/request_appointment already document. */

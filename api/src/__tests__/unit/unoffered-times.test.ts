@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   collapseAppointmentSpans,
+  latestCustomerTimeText,
   namesSingleOfferedTime,
   unofferedSingleTimeIn,
   unofferedTimesIn,
@@ -156,6 +157,48 @@ describe('namesSingleOfferedTime — the customer already chose an offered hour'
     expect(namesSingleOfferedTime('when can I book?', OFFERED_MORNING)).toBe(false);
   });
 });
+
+describe('latestCustomerTimeText — an intake answer is not the hour they named', () => {
+  it('walks back past a message that names no clock time', () => {
+    expect(
+      latestCustomerTimeText([
+        { role: 'user', text: 'Ik wil een lekonderzoek op maandag 12 oktober 2026 om 10:00' },
+        { role: 'assistant', text: 'Waar bevindt het probleem zich?' },
+        { role: 'user', text: 'Het probleem bevindt zich onder de lavabo in de badkamer.' },
+      ]),
+    ).toContain('10:00');
+  });
+
+  it('keeps a later hour when they change their mind', () => {
+    expect(
+      latestCustomerTimeText([
+        { role: 'user', text: 'Kan ik om 10:00 langskomen?' },
+        { role: 'user', text: 'Liever om 14:00.' },
+      ]),
+    ).toContain('14:00');
+  });
+
+  it('is empty when no customer text named a clock time', () => {
+    expect(
+      latestCustomerTimeText([
+        { role: 'user', text: 'ja' },
+        { role: 'user', text: 'Jan Test' },
+      ]),
+    ).toBe('');
+  });
+
+  it('does not resurrect an hour after the assistant offered other times', () => {
+    expect(
+      latestCustomerTimeText([
+        { role: 'user', text: 'Kan ik om 10:00 langskomen?' },
+        { role: 'assistant', text: '10:00 is niet vrij. Ik heb 11:00 en 11:30.' },
+        { role: 'user', text: 'ja' },
+      ]),
+    ).toBe('');
+  });
+});
+
+
 
 /**
  * The one-time hole the enumeration guard left open.

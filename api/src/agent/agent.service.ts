@@ -949,10 +949,11 @@ export class AgentService {
           // It only decides WHICH replacement is true: their own hour being unavailable is a
           // sharper sentence than a bare pointer at the list.
           const customerTimeText = latestCustomerTimeText([
-            ...conversationHistory
-              .filter((m) => m.role === 'user')
-              .map((m) => contentToText(m.content)),
-            message,
+            ...conversationHistory.map((m) => ({
+              role: m.role,
+              text: contentToText(m.content),
+            })),
+            { role: 'user', text: message },
           ]);
           const customerNamedLocal = parseClockTimes(customerTimeText).map((t) => t.key);
           // EVERY time the customer may take, delivered or not. Only the single-time guard uses
@@ -976,14 +977,19 @@ export class AgentService {
                 ),
               ]
             : [];
-          // Against EVERY bookable hour, not the 8-chip prefix: 10:00 further down the day is
+          // Against EVERY confirmable hour, not the 8-chip prefix: 10:00 further down the day is
           // still the time they named. Compared with the chip window, an intake answer that
           // names no clock time re-attached 00:00 / 00:30 / 01:00 above a confirmation of 10:00.
-          const bookableLocal = everyOfferableLocal ?? offeredLocal;
+          // Requestable travel times stay out: naming one is not a reason to hide the chip for a
+          // time they can actually book.
+          const confirmableLocal =
+            pendingAvailability
+              ? localClockTimes(pendingAvailability.slots, pendingAvailability.timezone)
+              : null;
           const alreadyChoseTime = !!(
-            bookableLocal &&
-            (namesSingleOfferedTime(customerTimeText, bookableLocal) ||
-              namesSingleOfferedTime(finalContent, bookableLocal))
+            confirmableLocal &&
+            (namesSingleOfferedTime(customerTimeText, confirmableLocal) ||
+              namesSingleOfferedTime(finalContent, confirmableLocal))
           );
           const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(pendingAvailability);
 

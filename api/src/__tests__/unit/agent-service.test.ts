@@ -448,6 +448,66 @@ describe('AgentService', () => {
     }
   });
 
+  it('does not re-offer hours after an intake answer when 10:00 was already named', async () => {
+    // Production: required intake sat between "maandag 12 oktober om 10:00" and the next
+    // check_availability. The current message had no clock time, so chips of 00:00 / 00:30 /
+    // 01:00 went back up and the English fallback replaced a Dutch confirmation of 10:00.
+    // 00:00, 00:30, 01:00 Brussels (CEST) fill the 8-chip window; 10:00 is further down.
+    const slots = [
+      { start: '2026-10-11T22:00:00.000Z', end: '2026-10-11T23:00:00.000Z' },
+      { start: '2026-10-11T22:30:00.000Z', end: '2026-10-11T23:30:00.000Z' },
+      { start: '2026-10-11T23:00:00.000Z', end: '2026-10-12T00:00:00.000Z' },
+      { start: '2026-10-11T23:30:00.000Z', end: '2026-10-12T00:30:00.000Z' },
+      { start: '2026-10-12T00:00:00.000Z', end: '2026-10-12T01:00:00.000Z' },
+      { start: '2026-10-12T00:30:00.000Z', end: '2026-10-12T01:30:00.000Z' },
+      { start: '2026-10-12T01:00:00.000Z', end: '2026-10-12T02:00:00.000Z' },
+      { start: '2026-10-12T01:30:00.000Z', end: '2026-10-12T02:30:00.000Z' },
+      { start: '2026-10-12T08:00:00.000Z', end: '2026-10-12T09:00:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-12', endDate: '2026-10-12' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Maandag 12 oktober 2026 om 10:00 is beschikbaar. Zal ik deze afspraak bevestigen?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Het probleem bevindt zich onder de lavabo in de badkamer.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [
+        { role: 'user', content: 'Ik wil een lekonderzoek op maandag 12 oktober 2026 om 10:00' },
+        { role: 'assistant', content: 'Waar bevindt het probleem zich?' },
+      ],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).toContain('10:00');
+      expect(result.content).not.toMatch(/here are the times I have available/i);
+      expect(result.quickReplies).toBeUndefined();
+    }
+  });
+
+
   it('replaces a reply that recommends ONE time nobody offered, and keeps the chips', async () => {
     // THE REPORTED FAILURE, end to end. Brussels, 09:00-17:00, 60 minutes with a 15-minute
     // pre-buffer and a 09:45 appointment in the way: the engine offers 10:30, 11:00 and 11:30.

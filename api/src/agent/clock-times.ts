@@ -47,6 +47,33 @@ export function parseClockTimes(text: string): ClockTime[] {
   return times;
 }
 
+/**
+ * The newest customer text that names a clock time, inside this booking attempt.
+ *
+ * Intake answers, names, and "yes" sit AFTER the hour they already gave. Reading only the last
+ * user turn then forgets that hour, and the booking tools re-offer times they already chose.
+ * A later message that names a different hour still wins: they changed their mind.
+ *
+ * STOP at the newest assistant turn that lists two or more clock times. That is an availability
+ * offer (or a refusal that named alternatives). Walking past it would resurrect an hour they
+ * already lost, and `resolveBookingTime` would then book it on a bare "yes".
+ */
+export function latestCustomerTimeText(
+  messagesOldestFirst: ReadonlyArray<{ role: string; text: string }>,
+): string {
+  for (let i = messagesOldestFirst.length - 1; i >= 0; i--) {
+    const m = messagesOldestFirst[i];
+    if (m.role === 'assistant') {
+      const distinct = new Set(parseClockTimes(m.text).map((t) => t.key));
+      if (distinct.size >= 2) return '';
+      continue;
+    }
+    if (m.role === 'user' && parseClockTimes(m.text).length > 0) return m.text;
+  }
+  return '';
+}
+
+
 function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {
   if (offered.has(t.key)) return t.key;
   // A 12-hour time with no suffix is ambiguous — "1:30" could be 13:30.

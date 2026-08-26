@@ -112,6 +112,17 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(p).toContain('AI-estimated');
   });
 
+  it('makes AI mode proceed on its own estimate and still check availability, never confabulating a closure', () => {
+    // Regression: the AI branch read the choose-length "wait for a number" rule as licence to
+    // skip check_availability and invent a "sluitingsdag" for an open slot. The AI's own
+    // estimate IS the number, and no closed/unavailable claim is allowed without a real check.
+    const p = buildServicesSection([svc({ ...RANGE, durationMode: 'ai' })])!;
+    expect(p).toMatch(/your own estimate is the number/i);
+    expect(p).toMatch(/always call check_availability before you tell the customer/i);
+    expect(p).toMatch(/never state that a day or time is unavailable, closed/i);
+    expect(p).toMatch(/unless a check_availability result says so/i);
+  });
+
   it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {
     // create_booking now returns DURATION_REQUIRED when the length is unknown. If the prompt
     // still lumps that with "calendar cannot be reached", the customer hears a technical
@@ -343,7 +354,15 @@ describe('intake questions — the owner’s steer reaches the model', () => {
     const p = withQuestions([{ ...Q, aiInstruction: 'x'.repeat(2000) }]);
     expect(qLine(p).length).toBeLessThan(500);
   });
+
+  it('resumes the already-named date and time after the intake answer', () => {
+    const p = withQuestions([Q]);
+    expect(p).toMatch(/keep the date and time they already gave/i);
+    expect(p).toMatch(/do not ask them to pick a time again unless that time is unavailable/i);
+  });
+
 });
+
 
 describe('intake questions — the calendar toggle', () => {
   const QS = [

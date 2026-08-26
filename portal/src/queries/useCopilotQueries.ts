@@ -83,10 +83,23 @@ export function useCopilotConversation(opts: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.copilot.conversation(),
     queryFn: async () => {
-      const env = await api.get<ApiEnvelope<CopilotConversationResponse>>(
-        '/copilot/conversation',
-      );
-      return env.data;
+      // Drain every page so the drawer shows the FULL active conversation,
+      // not just the first page. The server paginates oldest-first; the old
+      // client read one page and dropped the rest, so history disappeared
+      // past ~50 turns. Bounded by a page cap so a runaway can't loop.
+      const MAX_PAGES = 40; // 40 * 50-row pages = 2000 messages, far above any real convo
+      let cursor: number | null = 0;
+      let conversationId: string | null = null;
+      const messages: CopilotConversationMessage[] = [];
+      for (let page = 0; page < MAX_PAGES && cursor !== null; page++) {
+        const env: ApiEnvelope<CopilotConversationResponse> = await api.get<
+          ApiEnvelope<CopilotConversationResponse>
+        >(`/copilot/conversation?cursor=${cursor}`);
+        conversationId = env.data.conversationId;
+        messages.push(...env.data.messages);
+        cursor = env.data.nextCursor;
+      }
+      return { conversationId, messages, nextCursor: null };
     },
     staleTime: THIRTY_SECONDS_MS,
     enabled: opts.enabled ?? true,

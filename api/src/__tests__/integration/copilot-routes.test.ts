@@ -289,6 +289,28 @@ describe('GET /conversation', () => {
     // nextCursor should be the turn after the last returned message.
     expect(first.body.data.nextCursor).toBe(msgs[msgs.length - 1].turn + 1);
   });
+
+  it('pagination: a cursor past the first page returns the LATER turns', async () => {
+    // Regression: the old handler filtered a first-`limit` slice in JS, so
+    // any cursor beyond the first page returned []. A conversation longer
+    // than one page lost its newer half — the "history not showing" bug.
+    for (const m of ['one', 'two', 'three']) {
+      await request(app).post('/api/v1/copilot/messages').send({ message: m });
+    }
+    const first = await request(app)
+      .get('/api/v1/copilot/conversation')
+      .query({ limit: '3' });
+    const cursor = first.body.data.nextCursor;
+    expect(cursor).toBe(4);
+
+    const second = await request(app)
+      .get('/api/v1/copilot/conversation')
+      .query({ cursor: String(cursor), limit: '3' });
+    expect(second.status).toBe(200);
+    const turns = second.body.data.messages.map((m: { turn: number }) => m.turn);
+    expect(turns).toEqual([4, 5]);
+    expect(second.body.data.nextCursor).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------

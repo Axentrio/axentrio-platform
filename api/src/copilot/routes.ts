@@ -51,7 +51,7 @@ import { OpenAICopilotLlmStream } from './agent/openai-stream';
 import { serializeSSE, type CopilotSSEEvent, type CopilotSSESink } from './agent/sse';
 import { buildV1CopilotToolRegistry } from './tools';
 import { createCopilotKnowledgeSource } from './knowledge/factory';
-import { IsNull } from 'typeorm';
+import { IsNull, MoreThan, MoreThanOrEqual } from 'typeorm';
 import { logger } from '../utils/logger';
 import type { CopilotKnowledgeSource } from './knowledge/types';
 import type { CopilotLlmStream } from './agent/llm-stream';
@@ -233,23 +233,21 @@ router.get(
       return;
     }
 
-    // Fetch (limit + 1) rows starting at `cursor` ascending. If the
-    // (limit)-th row is a user with a paired assistant at turn+1
-    // beyond the page, we extend the page to include the assistant
-    // so we never split a pair (round 5 #9).
-    const fetched = await AppDataSource.getRepository(CopilotMessage).find({
-      where: { conversationId: conv.id },
+    // Fetch up to `limit` rows at turn >= cursor, ascending. The
+    // `turn >= cursor` filter runs in SQL: filtering a first-`limit`
+    // slice in JS (the previous approach) made every turn past the
+    // first page unreachable, so a long conversation lost its newer
+    // half. If the last row is a user with a paired assistant at
+    // turn+1 beyond the page, we extend to include the assistant so we
+    // never split a pair (round 5 #9).
+    const pageStart = await AppDataSource.getRepository(CopilotMessage).find({
+      where: { conversationId: conv.id, turn: MoreThanOrEqual(cursor) },
       order: { turn: 'ASC' },
-      skip: undefined,
       take: limit,
       cache: false,
-      // Filter by turn >= cursor via QueryBuilder for type safety.
     });
-    // (TypeORM's find() doesn't expose >= filtering directly without
-    //  more types; do it inline.)
-    const slice = fetched.filter((m) => m.turn >= cursor).slice(0, limit);
 
-    let pageRows = slice;
+    let pageRows = pageStart;
     if (pageRows.length === limit && pageRows[pageRows.length - 1]?.role === 'user') {
       const assistantTurn = pageRows[pageRows.length - 1].turn + 1;
       const paired = await AppDataSource.getRepository(CopilotMessage).findOne({
@@ -259,13 +257,14 @@ router.get(
     }
 
     const lastTurn = pageRows.length > 0 ? pageRows[pageRows.length - 1].turn : null;
-    const totalAfter = await AppDataSource.getRepository(CopilotMessage).count({
-      where: { conversationId: conv.id },
-    });
-    const nextCursor =
-      lastTurn !== null && lastTurn + 1 < (cursor + totalAfter)
-        ? lastTurn + 1
-        : null;
+    // More to fetch iff any message sits beyond the last returned turn.
+    const remaining =
+      lastTurn === null
+        ? 0
+        : await AppDataSource.getRepository(CopilotMessage).count({
+            where: { conversationId: conv.id, turn: MoreThan(lastTurn) },
+          });
+    const nextCursor = remaining > 0 ? lastTurn! + 1 : null;
 
     sendSuccess(res, {
       conversationId: conv.id,

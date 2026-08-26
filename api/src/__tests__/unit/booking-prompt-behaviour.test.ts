@@ -92,12 +92,22 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(line(range)).not.toBe(line(ai));
   });
 
-  it('instructs the bot to ask OR estimate, and names both cues', () => {
-    // Rule 7 is what turns the label into behaviour. Without the "estimate it from what
-    // they have described" half, an 'ai' service behaves exactly like a 'range' one.
+  it('makes "choose length" ask the customer and forbids inventing a length; "AI-estimated" estimates', () => {
+    // Both modes run identical code, so the prompt is the ONLY thing that stops an
+    // 'ai'-style guess on a 'range' service (the tool cannot tell an invented length from a
+    // real one). Rule 7 must force "choose length" to take the customer's number and never
+    // pick one itself, while "AI-estimated" estimates from the description.
     const p = buildServicesSection([svc(RANGE)])!;
+    // choose length: ask, and never self-select a length.
     expect(p).toMatch(/ask the customer how long they need/i);
+    expect(p).toMatch(/never[^.]*pick a length yourself/i);
+    expect(p).toMatch(/never default to the middle/i);
+    expect(p).toMatch(/until they have given you a number/i);
+    // Recovery must NOT let the bot shorten a chosen length on its own.
+    expect(p).toMatch(/ask the customer before changing their length/i);
+    // AI-estimated: estimate without asking.
     expect(p).toMatch(/estimate it from what they have described/i);
+    // Both cues still named so each label maps to its behaviour.
     expect(p).toContain('choose length');
     expect(p).toContain('AI-estimated');
   });

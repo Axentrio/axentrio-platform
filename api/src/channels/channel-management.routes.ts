@@ -11,7 +11,7 @@ import { WebhookEventLog } from '../database/entities/WebhookEventLog';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
-import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess, sendCreated } from '../utils/response';
 import {
   setupTelegramConnection,
@@ -22,6 +22,12 @@ import {
   setupWhatsAppConnection,
   disconnectWhatsAppConnection,
 } from './whatsapp/setup.service';
+import {
+  completeWhatsAppEmbeddedSignup,
+  getWhatsAppEmbeddedSignupPublicConfig,
+  isWhatsAppEmbeddedSignupReady,
+} from './whatsapp/embedded-signup.service';
+import { ERROR_CODES } from '../middleware/error-codes';
 import { runHealthCheck } from './health-check.service';
 import { requireChannelEntitled } from './channel-entitlement';
 import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
@@ -142,6 +148,71 @@ router.post(
       accessToken,
       wabaId,
       label,
+    });
+
+    const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;
+    sendCreated(res, safeConnection);
+  }),
+);
+
+/**
+ * GET /whatsapp/embedded-signup/config
+ * Public (authenticated) flag for the portal Connect button. Secrets stay off
+ * this payload. Off until Tech Provider + whatsapp_business_* Advanced access.
+ */
+router.get(
+  '/whatsapp/embedded-signup/config',
+  asyncHandler(async (_req: Request, res: Response): Promise<void> => {
+    sendSuccess(res, getWhatsAppEmbeddedSignupPublicConfig());
+  }),
+);
+
+/**
+ * POST /whatsapp/embedded-signup
+ * Complete Embedded Signup: exchange the 30s code (no redirect_uri), register
+ * the phone, subscribe the WABA, persist the connection.
+ * Body: { code, phoneNumberId, wabaId }
+ */
+router.post(
+  '/whatsapp/embedded-signup',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+
+    if (!isWhatsAppEmbeddedSignupReady()) {
+      throw new ApiError(
+        'WhatsApp Embedded Signup is not enabled on this app yet',
+        503,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
+    }
+
+    const { code, phoneNumberId, wabaId } = req.body as {
+      code?: string;
+      phoneNumberId?: string;
+      wabaId?: string;
+    };
+
+    if (!code || typeof code !== 'string') {
+      throw new BadRequestError('code is required');
+    }
+    if (!phoneNumberId || typeof phoneNumberId !== 'string') {
+      throw new BadRequestError('phoneNumberId is required');
+    }
+    if (!wabaId || typeof wabaId !== 'string') {
+      throw new BadRequestError('wabaId is required');
+    }
+
+    await requireChannelEntitled(tenantId, 'whatsapp');
+
+    const connection = await completeWhatsAppEmbeddedSignup(tenantId, {
+      code,
+      phoneNumberId,
+      wabaId,
     });
 
     const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;

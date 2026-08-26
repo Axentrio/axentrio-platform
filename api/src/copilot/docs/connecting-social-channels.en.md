@@ -18,7 +18,7 @@ Your bot can answer DMs on Facebook, Instagram, WhatsApp Business, and Telegram 
 
 Open *Settings → Channels* to see all channels.
 
-**Facebook + Instagram:** click **Facebook**. Authorize the Meta Page. The bot now handles Messenger DMs. There is no standalone Instagram connect. If the selected Page has a linked Instagram professional (business/creator) account and *Instagram DMs* is on under *Settings → Features*, Instagram is connected automatically alongside Facebook. Without that Meta-side link, only Facebook connects.
+**Facebook + Instagram:** click **Facebook**. A popup opens Facebook Login for Business (you stay on this page). Authorize the Meta Page. The bot now handles Messenger DMs. There is no standalone Instagram connect. If the selected Page has a linked Instagram professional (business/creator) account and *Instagram DMs* is on under *Settings → Features*, Instagram is connected automatically alongside Facebook. Without that Meta-side link, only Facebook connects.
 
 Link Instagram first on Meta's side: the account must be Professional and linked to a Facebook Page you admin (Instagram app settings / Page settings → Linked accounts, or Meta Business Suite). Instagram is DMs only — no feed posts, stories, or comments — and requires Essential or higher. Disconnecting the Facebook Page also disconnects the linked Instagram connection.
 

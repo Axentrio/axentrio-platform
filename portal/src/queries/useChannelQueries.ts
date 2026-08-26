@@ -77,10 +77,48 @@ export function useConnectWhatsApp() {
   });
 }
 
+export function useWhatsAppEmbeddedSignupConfig() {
+  return useQuery({
+    queryKey: ['channels', 'whatsapp', 'embedded-signup'],
+    queryFn: async () => {
+      const res = await api.get<Any>('/channels/whatsapp/embedded-signup/config');
+      const data = (res?.enabled !== undefined ? res : res?.data ?? res) as {
+        enabled?: boolean;
+        appId?: string;
+        configId?: string;
+        graphVersion?: string;
+      };
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCompleteWhatsAppEmbeddedSignup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { code: string; phoneNumberId: string; wabaId: string }) => {
+      return api.post('/channels/whatsapp/embedded-signup', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      toast.success('WhatsApp number connected');
+    },
+    onError: (error: Any) => {
+      if (error?.response?.status === 402) return;
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to connect WhatsApp');
+    },
+  });
+}
+
 export function useMetaOAuthUrl() {
   return useMutation({
-    mutationFn: async () => {
-      const res = await api.get<Any>('/channels/meta/oauth/url');
+    mutationFn: async (opts?: { display?: 'popup' | 'page'; returnPath?: string }) => {
+      const params = new URLSearchParams();
+      if (opts?.display) params.set('display', opts.display);
+      if (opts?.returnPath) params.set('returnPath', opts.returnPath);
+      const qs = params.toString();
+      const res = await api.get<Any>(`/channels/meta/oauth/url${qs ? `?${qs}` : ''}`);
       return (res?.url ?? res?.data?.url ?? res) as string;
     },
   });

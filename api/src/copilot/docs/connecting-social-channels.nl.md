@@ -18,7 +18,7 @@ Je bot kan DM's beantwoorden op Facebook, Instagram, WhatsApp Business en Telegr
 
 Open *Instellingen → Kanalen* om alle kanalen te zien.
 
-**Facebook en Instagram:** klik op **Facebook**. Geef de Meta-pagina toestemming. De bot behandelt vanaf dan de DM's van Messenger. Er is geen aparte Instagram-koppeling. Als de gekozen pagina een gekoppeld professioneel Instagram-account (business/creator) heeft én *Instagram-DM's* aanstaat onder *Instellingen → Functies*, wordt Instagram automatisch mee gekoppeld. Zonder die koppeling aan Meta-zijde wordt alleen Facebook gekoppeld.
+**Facebook en Instagram:** klik op **Facebook**. Er opent een popup voor Facebook Login for Business (je blijft op deze pagina). Geef de Meta-pagina toestemming. De bot behandelt vanaf dan de DM's van Messenger. Er is geen aparte Instagram-koppeling. Als de gekozen pagina een gekoppeld professioneel Instagram-account (business/creator) heeft én *Instagram-DM's* aanstaat onder *Instellingen → Functies*, wordt Instagram automatisch mee gekoppeld. Zonder die koppeling aan Meta-zijde wordt alleen Facebook gekoppeld.
 
 Koppel Instagram eerst aan Meta-zijde: het account moet Professional zijn en gekoppeld aan een Facebook-pagina waarvan je beheerder bent (Instagram-appinstellingen / pagina-instellingen → Gekoppelde accounts, of Meta Business Suite). Instagram ondersteunt alleen DM's — geen feedposts, stories of reacties — en vereist Essential of hoger. De Facebook-pagina ontkoppelen ontkoppelt ook Instagram.
 

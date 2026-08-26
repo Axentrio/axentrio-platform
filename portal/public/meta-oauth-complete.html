@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Connecting Facebook…</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font: 14px/1.4 system-ui, sans-serif;
+        background: #0b0b0f;
+        color: #e4e4e7;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Finishing Facebook connect…</p>
+    <script>
+      (function () {
+        var STORAGE_KEY = 'axentrio:meta-oauth';
+        var ALLOWED = ['/settings/channels', '/setup'];
+        var params = new URLSearchParams(location.search);
+        var token = params.get('meta_setup') || '';
+        var err = params.get('error') || '';
+        var ret = params.get('return') || '/settings/channels';
+        if (ALLOWED.indexOf(ret) === -1) ret = '/settings/channels';
+
+        var payload = {
+          type: 'axentrio:meta-oauth',
+          sessionToken: token || null,
+          error: err || null,
+          ts: Date.now(),
+        };
+
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        } catch (e) {}
+
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(payload, location.origin);
+          }
+        } catch (e) {}
+
+        var tries = 0;
+        var iv = setInterval(function () {
+          tries += 1;
+          var still = null;
+          try {
+            still = localStorage.getItem(STORAGE_KEY);
+          } catch (e) {}
+          var consumed = !still;
+          if (!consumed && tries <= 8) return;
+          clearInterval(iv);
+          if (consumed) {
+            try {
+              window.close();
+            } catch (e) {}
+            document.body.innerHTML =
+              '<p>You can close this window and return to Axentrio.</p>';
+            return;
+          }
+          var q = new URLSearchParams();
+          if (token) q.set('meta_setup', token);
+          if (err) q.set('error', err);
+          var qs = q.toString();
+          location.replace(ret + (qs ? '?' + qs : ''));
+        }, 200);
+      })();
+    </script>
+  </body>
+</html>

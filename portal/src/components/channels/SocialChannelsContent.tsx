@@ -39,6 +39,8 @@ import {
 import {
   useChannelConnections,
   useConnectWhatsApp,
+  useWhatsAppEmbeddedSignupConfig,
+  useCompleteWhatsAppEmbeddedSignup,
   useMetaOAuthUrl,
   useMetaOAuthPages,
   useConnectMeta,
@@ -53,7 +55,8 @@ import { queryKeys } from '../../queries/queryKeys';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { timeAgo } from '@/utils/timeAgo';
-
+import { openMetaOAuthPopup } from '@/lib/metaOAuthPopup';
+import { launchWhatsAppEmbeddedSignup } from '@/lib/whatsappEmbeddedSignup';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
@@ -129,6 +132,9 @@ export function SocialChannelsContent() {
   const [waAccessToken, setWaAccessToken] = useState('');
   const [waWabaId, setWaWabaId] = useState('');
   const connectWhatsApp = useConnectWhatsApp();
+  const { data: waEsConfig } = useWhatsAppEmbeddedSignupConfig();
+  const completeWhatsAppEs = useCompleteWhatsAppEmbeddedSignup();
+  const whatsappEsEnabled = Boolean(waEsConfig?.enabled && waEsConfig.appId && waEsConfig.configId);
 
   // Meta OAuth page selection state
   const metaSetupToken = searchParams.get('meta_setup');
@@ -138,7 +144,19 @@ export function SocialChannelsContent() {
   // Disconnect confirmation
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
 
-  // Handle Meta page selection
+  useEffect(() => {
+    const oauthError = searchParams.get('error');
+    if (!oauthError) return;
+    toast.error(
+      oauthError === 'denied'
+        ? t('ai.social.facebook.denied', { defaultValue: 'Facebook connect was cancelled.' })
+        : t('ai.social.facebook.failed', { defaultValue: 'Facebook connect failed. Try again.' }),
+    );
+    const next = new URLSearchParams(searchParams);
+    next.delete('error');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, t]);
+
   useEffect(() => {
     if (metaPages && metaPages.length > 0) {
       setSelectedPageIds(metaPages.map((p: Any) => p.id));
@@ -146,8 +164,26 @@ export function SocialChannelsContent() {
   }, [metaPages]);
 
   const handleConnectFacebook = async () => {
-    const url = await metaOAuthUrl.mutateAsync();
-    if (url) window.location.href = url;
+    const url = await metaOAuthUrl.mutateAsync({
+      display: 'popup',
+      returnPath: '/settings/channels',
+    });
+    if (!url) return;
+    const result = await openMetaOAuthPopup(url);
+    if (result.status === 'navigated') return;
+    if (result.status === 'cancelled') {
+      toast.info(t('ai.social.facebook.denied', { defaultValue: 'Facebook connect was cancelled.' }));
+      return;
+    }
+    if (result.status === 'error') {
+      toast.error(
+        result.error === 'denied'
+          ? t('ai.social.facebook.denied', { defaultValue: 'Facebook connect was cancelled.' })
+          : t('ai.social.facebook.failed', { defaultValue: 'Facebook connect failed. Try again.' }),
+      );
+      return;
+    }
+    setSearchParams({ meta_setup: result.sessionToken });
   };
 
   const handleConnectMetaPages = async () => {
@@ -192,6 +228,38 @@ export function SocialChannelsContent() {
     setWaAccessToken('');
     setWaWabaId('');
     setShowWhatsAppModal(false);
+  };
+
+  const handleConnectWhatsAppEmbedded = async () => {
+    if (!waEsConfig?.appId || !waEsConfig.configId) return;
+    try {
+      const result = await launchWhatsAppEmbeddedSignup({
+        appId: waEsConfig.appId,
+        configId: waEsConfig.configId,
+        graphVersion: waEsConfig.graphVersion,
+      });
+      const phoneNumberId = result.session.phone_number_id;
+      const wabaId = result.session.waba_id;
+      if (!phoneNumberId || !wabaId) {
+        toast.error(
+          t('ai.social.whatsapp.esMissingAssets', {
+            defaultValue: 'WhatsApp signup finished without a phone number. Try again.',
+          }),
+        );
+        return;
+      }
+      await completeWhatsAppEs.mutateAsync({
+        code: result.code,
+        phoneNumberId,
+        wabaId,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t('ai.social.whatsapp.esFailed', { defaultValue: 'WhatsApp connect failed. Try again.' }),
+      );
+    }
   };
 
   if (isLoading) {
@@ -289,14 +357,23 @@ export function SocialChannelsContent() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setShowWhatsAppModal(true)}
-              disabled={!channelAvailable('whatsapp')}
+              onClick={() => {
+                if (whatsappEsEnabled) {
+                  void handleConnectWhatsAppEmbedded();
+                  return;
+                }
+                setShowWhatsAppModal(true);
+              }}
+              disabled={!channelAvailable('whatsapp') || completeWhatsAppEs.isPending}
               title={!channelEntitled.whatsapp ? lockedHint : channelOff('whatsapp') ? offHint : undefined}
             >
               {!channelEntitled.whatsapp
                 ? <Lock className="h-3 w-3 mr-1" />
                 : channelOff('whatsapp') && <PowerOff className="h-3 w-3 mr-1" />}
-              <SiWhatsapp className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
+              {(completeWhatsAppEs.isPending)
+                ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                : <SiWhatsapp className="h-4 w-4 mr-1" />}
+              {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
             </Button>
           </div>
         </CardHeader>

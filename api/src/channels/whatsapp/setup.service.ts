@@ -1,10 +1,10 @@
 /**
- * WhatsApp Cloud API Setup Service (single-tenant / manual onboarding).
+ * WhatsApp Cloud API Setup Service (manual onboarding + Embedded Signup persist).
  *
- * Spike scope: the tenant pastes a phone_number_id + a permanent access token
+ * Tenants currently paste a phone_number_id + a permanent access token
  * (System User token) and, optionally, the WABA id so we can subscribe it to
- * webhooks. Multi-tenant Embedded Signup is a later phase — see
- * wiki/references/meta-messaging/whatsapp-cloud-api.md.
+ * webhooks. Multi-tenant Embedded Signup is implemented in
+ * embedded-signup.service.ts and stays off until WHATSAPP_ES_ENABLED=true.
  */
 
 import axios from 'axios';

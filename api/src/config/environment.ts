@@ -195,6 +195,10 @@ const envSchema = z.object({
   // in a separate app or you want a distinct webhook verify token.
   WHATSAPP_APP_SECRET: z.string().optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  // Embedded Signup (Tech Provider). Off until WHATSAPP_ES_CONFIG_ID is set
+  // from Facebook Login for Business → WhatsApp Embedded Signup template.
+  WHATSAPP_ES_ENABLED: z.enum(['true', 'false']).optional(),
+  WHATSAPP_ES_CONFIG_ID: z.string().optional(),
 
   // Billing — Stripe (required in non-test environments; validated below).
   // M0 subscription epic: EUR-only catalog (Essential + Pro + Enterprise).
@@ -529,6 +533,10 @@ export const config = {
     // Shared Meta app secret unless WhatsApp uses a separate app.
     appSecret: env.WHATSAPP_APP_SECRET || env.META_APP_SECRET || '',
     verifyToken: env.WHATSAPP_VERIFY_TOKEN || env.META_VERIFY_TOKEN || '',
+    embeddedSignup: {
+      enabled: env.WHATSAPP_ES_ENABLED === 'true',
+      configId: env.WHATSAPP_ES_CONFIG_ID || '',
+    },
   },
 
   email: {

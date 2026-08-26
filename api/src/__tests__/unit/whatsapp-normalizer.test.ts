@@ -85,4 +85,18 @@ describe('WhatsApp Event Normalizer', () => {
     });
     expect(normalizeWhatsAppPayload(payload)).toHaveLength(0);
   });
+
+  it('ignores Embedded Signup account_update fields', () => {
+    const payload = {
+      object: 'whatsapp_business_account' as const,
+      entry: [{
+        id: 'WABA_1',
+        changes: [{
+          field: 'account_update',
+          value: { event: 'PARTNER_ADDED', waba_info: { waba_id: 'WABA_1' } },
+        }],
+      }],
+    };
+    expect(normalizeWhatsAppPayload(payload as never)).toHaveLength(0);
+  });
 });

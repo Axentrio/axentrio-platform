@@ -5,6 +5,11 @@ import { config } from '../../config/environment';
 import { FB_GRAPH_API as GRAPH_API, FB_OAUTH_DIALOG } from './graph-api';
 import { logger } from '../../utils/logger';
 import { getRedisClient } from '../../config/redis';
+import {
+  sanitizeMetaOAuthDisplay,
+  sanitizeMetaOAuthReturnPath,
+  type MetaOAuthDisplay,
+} from './oauth-popup';
 
 // Scopes must be added to the app in Meta Developer Console before requesting.
 // Core messaging scopes plus Instagram DM scopes (instagram_basic +
@@ -34,8 +39,20 @@ interface MetaPage {
 
 /**
  * Build the Facebook Login OAuth URL for a tenant.
+ *
+ * `display=popup` sizes the Facebook dialog for a window.open popup. The
+ * matching claim in `state` tells the callback to land on the portal closer
+ * page instead of navigating the parent Channels tab away.
+ *
+ * WhatsApp Embedded Signup does NOT use this URL. Its code exchange must omit
+ * `redirect_uri` — see `channels/whatsapp/embedded-signup.service.ts`.
  */
-export function buildOAuthUrl(tenantId: string): string {
+export function buildOAuthUrl(
+  tenantId: string,
+  options?: { display?: MetaOAuthDisplay; returnPath?: string },
+): string {
+  const display = sanitizeMetaOAuthDisplay(options?.display);
+  const returnPath = sanitizeMetaOAuthReturnPath(options?.returnPath);
   // 30m (not 5m): Facebook Login for Business is now a multi-step consent
   // (Continue → Pages → Businesses → Instagram → review → Save) that routinely
   // takes longer than 5 min, which expired the state JWT and broke the callback.
@@ -43,7 +60,7 @@ export function buildOAuthUrl(tenantId: string): string {
   // bound to tenant/redirect, and don't overwrite a valid Page token until the
   // new OAuth exchange fully succeeds.
   const state = jwt.sign(
-    { tenantId, nonce: crypto.randomBytes(16).toString('hex') },
+    { tenantId, nonce: crypto.randomBytes(16).toString('hex'), display, returnPath },
     config.meta.oauthJwtSecret,
     { expiresIn: '30m' },
   );
@@ -55,6 +72,7 @@ export function buildOAuthUrl(tenantId: string): string {
     state,
     response_type: 'code',
     auth_type: 'rerequest', // Force re-show permission dialog
+    display,
   });
 
   return `${FB_OAUTH_DIALOG}?${params.toString()}`;
@@ -63,9 +81,21 @@ export function buildOAuthUrl(tenantId: string): string {
 /**
  * Validate the OAuth state JWT and extract tenantId.
  */
-export function validateOAuthState(state: string): { tenantId: string } {
-  const decoded = jwt.verify(state, config.meta.oauthJwtSecret) as { tenantId: string };
-  return { tenantId: decoded.tenantId };
+export function validateOAuthState(state: string): {
+  tenantId: string;
+  display: MetaOAuthDisplay;
+  returnPath: string;
+} {
+  const decoded = jwt.verify(state, config.meta.oauthJwtSecret) as {
+    tenantId: string;
+    display?: unknown;
+    returnPath?: unknown;
+  };
+  return {
+    tenantId: decoded.tenantId,
+    display: sanitizeMetaOAuthDisplay(decoded.display),
+    returnPath: sanitizeMetaOAuthReturnPath(decoded.returnPath),
+  };
 }
 
 /**

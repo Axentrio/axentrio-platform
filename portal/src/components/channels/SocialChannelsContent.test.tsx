@@ -29,6 +29,8 @@ const { connectionsRef, healthCheckMutate } = vi.hoisted(() => ({
 vi.mock('../../queries/useChannelQueries', () => ({
   useChannelConnections: () => ({ data: connectionsRef.current, isLoading: false }),
   useConnectWhatsApp: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useWhatsAppEmbeddedSignupConfig: () => ({ data: { enabled: false } }),
+  useCompleteWhatsAppEmbeddedSignup: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMetaOAuthUrl: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMetaOAuthPages: () => ({ data: undefined }),
   useConnectMeta: () => ({ mutateAsync: vi.fn(), isPending: false }),

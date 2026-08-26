@@ -12,11 +12,15 @@ import {
   useChannelConnections,
   useConnectMeta,
   useConnectWhatsApp,
+  useCompleteWhatsAppEmbeddedSignup,
   useMetaOAuthPages,
   useMetaOAuthUrl,
+  useWhatsAppEmbeddedSignupConfig,
 } from "@/queries/useChannelQueries";
 import { useIsEntitled } from "@/queries/useEntitlementsQueries";
 import type { StepProps } from "./types";
+import { openMetaOAuthPopup } from "@/lib/metaOAuthPopup";
+import { launchWhatsAppEmbeddedSignup } from "@/lib/whatsappEmbeddedSignup";
 
 interface MetaPage {
   id: string;
@@ -38,6 +42,11 @@ export function SocialStep({ submit }: StepProps) {
   const metaOAuthUrl = useMetaOAuthUrl();
   const connectMeta = useConnectMeta();
   const connectWhatsApp = useConnectWhatsApp();
+  const { data: waEsConfig } = useWhatsAppEmbeddedSignupConfig();
+  const completeWhatsAppEs = useCompleteWhatsAppEmbeddedSignup();
+  const whatsappEsEnabled = Boolean(
+    waEsConfig?.enabled && waEsConfig.appId && waEsConfig.configId,
+  );
   // Same plan gate as the Channels settings page: connect must not 402 on
   // Free. Essential+ has channelMessenger/channelWhatsapp; the plan step runs
   // before social, so these are live by the time the user reaches this step.
@@ -78,11 +87,34 @@ export function SocialStep({ submit }: StepProps) {
     submit.isPending ||
     metaOAuthUrl.isPending ||
     connectMeta.isPending ||
-    connectWhatsApp.isPending;
+    connectWhatsApp.isPending ||
+    completeWhatsAppEs.isPending;
 
   const startMetaOAuth = async () => {
-    const url = await metaOAuthUrl.mutateAsync();
-    if (url) window.location.href = url;
+    const url = await metaOAuthUrl.mutateAsync({
+      display: "popup",
+      returnPath: "/setup",
+    });
+    if (!url) return;
+    const result = await openMetaOAuthPopup(url);
+    if (result.status === "navigated") return;
+    if (result.status === "ok") {
+      setSearchParams({ meta_setup: result.sessionToken });
+      return;
+    }
+    if (result.status === "cancelled") {
+      toast.info(
+        t("setup.steps.social.facebookDenied", {
+          defaultValue: "Facebook connect was cancelled.",
+        }),
+      );
+      return;
+    }
+    toast.warning(
+      t("setup.steps.social.facebookFailed", {
+        defaultValue: "Facebook connect failed. Try again.",
+      }),
+    );
   };
 
   const connectSelectedPages = async () => {
@@ -122,6 +154,39 @@ export function SocialStep({ submit }: StepProps) {
     setPhoneNumberId("");
     setAccessToken("");
     setWabaId("");
+  };
+
+  const connectWhatsAppEmbedded = async () => {
+    if (!waEsConfig?.appId || !waEsConfig.configId) return;
+    try {
+      const result = await launchWhatsAppEmbeddedSignup({
+        appId: waEsConfig.appId,
+        configId: waEsConfig.configId,
+        graphVersion: waEsConfig.graphVersion,
+      });
+      if (!result.session.phone_number_id || !result.session.waba_id) {
+        toast.warning(
+          t("setup.steps.social.whatsappEsMissing", {
+            defaultValue:
+              "WhatsApp signup finished without a phone number. Try again.",
+          }),
+        );
+        return;
+      }
+      await completeWhatsAppEs.mutateAsync({
+        code: result.code,
+        phoneNumberId: result.session.phone_number_id,
+        wabaId: result.session.waba_id,
+      });
+    } catch (err) {
+      toast.warning(
+        err instanceof Error
+          ? err.message
+          : t("setup.steps.social.whatsappEsFailed", {
+              defaultValue: "WhatsApp connect failed. Try again.",
+            }),
+      );
+    }
   };
 
   return (
@@ -246,51 +311,64 @@ export function SocialStep({ submit }: StepProps) {
           {t("setup.steps.social.whatsappBody")}
         </p>
         {canConnectWhatsApp ? (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="setup-wa-phone">
-                  {t("setup.steps.social.phoneNumberId")}
-                </Label>
-                <Input
-                  id="setup-wa-phone"
-                  value={phoneNumberId}
-                  onChange={(event) => setPhoneNumberId(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="setup-wa-token">
-                  {t("setup.steps.social.accessToken")}
-                </Label>
-                <Input
-                  id="setup-wa-token"
-                  type="password"
-                  value={accessToken}
-                  onChange={(event) => setAccessToken(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="setup-wa-waba">
-                  {t("setup.steps.social.wabaId")}
-                </Label>
-                <Input
-                  id="setup-wa-waba"
-                  value={wabaId}
-                  onChange={(event) => setWabaId(event.target.value)}
-                />
-              </div>
-            </div>
+          whatsappEsEnabled ? (
             <Button
               variant="outline"
-              onClick={connectWhatsAppNumber}
-              disabled={busy || !phoneNumberId.trim() || !accessToken.trim()}
+              onClick={connectWhatsAppEmbedded}
+              disabled={busy}
             >
-              {connectWhatsApp.isPending && (
+              {completeWhatsAppEs.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               {t("setup.steps.social.connectWhatsApp")}
             </Button>
-          </>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="setup-wa-phone">
+                    {t("setup.steps.social.phoneNumberId")}
+                  </Label>
+                  <Input
+                    id="setup-wa-phone"
+                    value={phoneNumberId}
+                    onChange={(event) => setPhoneNumberId(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="setup-wa-token">
+                    {t("setup.steps.social.accessToken")}
+                  </Label>
+                  <Input
+                    id="setup-wa-token"
+                    type="password"
+                    value={accessToken}
+                    onChange={(event) => setAccessToken(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="setup-wa-waba">
+                    {t("setup.steps.social.wabaId")}
+                  </Label>
+                  <Input
+                    id="setup-wa-waba"
+                    value={wabaId}
+                    onChange={(event) => setWabaId(event.target.value)}
+                  />
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={connectWhatsAppNumber}
+                disabled={busy || !phoneNumberId.trim() || !accessToken.trim()}
+              >
+                {connectWhatsApp.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {t("setup.steps.social.connectWhatsApp")}
+              </Button>
+            </>
+          )
         ) : (
           <p className="text-xs text-text-muted">
             {t("setup.steps.social.upgradeHint")}

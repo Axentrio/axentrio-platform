@@ -26,6 +26,11 @@ vi.mock("@/queries/useChannelQueries", () => ({
     mutateAsync: connectWhatsApp,
     isPending: false,
   }),
+  useWhatsAppEmbeddedSignupConfig: () => ({ data: { enabled: false } }),
+  useCompleteWhatsAppEmbeddedSignup: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
   useMetaOAuthUrl: () => ({ mutateAsync: metaOAuthUrl, isPending: false }),
   useMetaOAuthPages: (sessionToken: string | null) => {
     metaSession.current = sessionToken;

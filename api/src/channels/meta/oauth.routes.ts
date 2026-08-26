@@ -9,6 +9,12 @@ import {
   getSessionPages,
   getCachedPageToken,
 } from './oauth.service';
+import {
+  buildMetaOAuthCompleteUrl,
+  buildMetaOAuthPageUrl,
+  sanitizeMetaOAuthDisplay,
+  sanitizeMetaOAuthReturnPath,
+} from './oauth-popup';
 import { setupMetaConnections } from './setup.service';
 import { requireAnyMetaChannelEntitled } from '../channel-entitlement';
 import {
@@ -52,7 +58,10 @@ router.get(
     // enough to start it; per-type filtering happens at connect time.
     await requireAnyMetaChannelEntitled(tenantId);
 
-    const url = buildOAuthUrl(tenantId);
+    const url = buildOAuthUrl(tenantId, {
+      display: sanitizeMetaOAuthDisplay(req.query.display),
+      returnPath: sanitizeMetaOAuthReturnPath(req.query.returnPath),
+    });
     sendSuccess(res, { url });
   }),
 );
@@ -64,30 +73,43 @@ router.get(
  */
 metaOAuthCallbackRouter.get('/callback', async (req: Request, res: Response) => {
   const { code, state, error: oauthError } = req.query;
+  let display = sanitizeMetaOAuthDisplay(undefined);
+  let returnPath = sanitizeMetaOAuthReturnPath(undefined);
+
+  if (typeof state === 'string' && state) {
+    try {
+      const decoded = validateOAuthState(state);
+      display = decoded.display;
+      returnPath = decoded.returnPath;
+    } catch {
+      // Fall through with defaults; missing/invalid state still errors below.
+    }
+  }
+
+  const finish = (params: { sessionToken?: string; error?: string }) => {
+    const portalUrl = getPortalUrl();
+    const target = display === 'popup'
+      ? buildMetaOAuthCompleteUrl(portalUrl, { ...params, returnPath, display })
+      : buildMetaOAuthPageUrl(portalUrl, { ...params, returnPath });
+    return res.redirect(target);
+  };
 
   if (oauthError) {
     logger.warn('[meta-oauth] User denied permissions', { error: oauthError });
-    return res.redirect(`${getPortalUrl()}/settings/channels?error=denied`);
+    return finish({ error: 'denied' });
   }
 
   if (!code || !state) {
-    return res.redirect(`${getPortalUrl()}/settings/channels?error=missing_params`);
+    return finish({ error: 'missing_params' });
   }
 
   try {
-    // Validate state JWT
-    const { tenantId: _tenantId } = validateOAuthState(state as string);
-
-    // Exchange code for tokens + list pages
+    validateOAuthState(state as string);
     const { sessionToken } = await handleOAuthCallback(code as string);
-
-    // Redirect to portal with session token
-    return res.redirect(
-      `${getPortalUrl()}/settings/channels?meta_setup=${sessionToken}`,
-    );
+    return finish({ sessionToken });
   } catch (error) {
     logger.error('[meta-oauth] Callback error', sanitizeGraphError(error));
-    return res.redirect(`${getPortalUrl()}/settings/channels?error=auth_failed`);
+    return finish({ error: 'auth_failed' });
   }
 });
 
@@ -185,7 +207,7 @@ router.post(
 );
 
 function getPortalUrl(): string {
-  // Derive portal URL from config
+  if (config.portal.url) return config.portal.url;
   const corsOrigins = Array.isArray(config.cors.origin) ? config.cors.origin : [config.cors.origin];
   return corsOrigins[0] || 'http://localhost:5173';
 }

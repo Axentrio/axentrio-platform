@@ -1,5 +1,5 @@
 /**
- * Integration: 8 Copilot tools — shape + zero-fills + cross-tenant
+ * Integration: Copilot tools — shape + zero-fills + cross-tenant
  * regression per tool (security invariant #10).
  *
  * The pattern (one `describe` per tool):
@@ -24,6 +24,7 @@ import { Tenant } from '../../database/entities/Tenant';
 import { Lead, type LeadSource } from '../../database/entities/Lead';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { ChatSession } from '../../database/entities/ChatSession';
+import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import {
   createTestTenant,
   createTestAnchorBot,
@@ -44,6 +45,7 @@ import {
   getRecentChatSessionStats,
   getKnownGapTopics,
   listBots,
+  getOpeningHours,
 } from '../../copilot/tools';
 import {
   TENANT_A_SENTINELS,
@@ -649,7 +651,7 @@ describe('Belt-and-suspenders: every tool response is JSON-serialisable', () => 
   // If a tool returns Date objects or circular refs we'd silently break
   // the SSE event encoding. Validate every v1 tool with a smoke-only
   // call as a fresh tenant.
-  it('all 7 tools return JSON-serialisable values', async () => {
+  it('every registered tool returns JSON-serialisable values', async () => {
     const a = await seedTenantWithSentinels(TENANT_A_SENTINELS);
     const ctx = { tenantId: a.tenantId, userId: a.userId, manager: a.manager };
 
@@ -661,6 +663,7 @@ describe('Belt-and-suspenders: every tool response is JSON-serialisable', () => 
       getLeadStats.execute({}, ctx),
       getRecentChatSessionStats.execute({}, ctx),
       getKnownGapTopics.execute({}, ctx),
+      getOpeningHours.execute({}, ctx),
     ]);
 
     for (const r of results) {
@@ -828,6 +831,79 @@ describe('listBots', () => {
     // The anchor's persona equals its own brand-voice sentinel, not its record name.
     const anchor = bots.find((b) => b.isDefault)!;
     expect(anchor.introducesItselfAs).toBe(TENANT_A_SENTINELS.brandVoiceName);
+  });
+
+  it('never leaks tenant B sentinels in the response JSON', async () => {
+    assertNoForeignSentinels(await call(), TENANT_B_SENTINELS);
+  });
+});
+
+describe('getOpeningHours', () => {
+  let a: SeededTenant;
+  beforeEach(async () => {
+    a = await seedTenantWithSentinels(TENANT_A_SENTINELS);
+    await seedTenantWithSentinels(TENANT_B_SENTINELS);
+  });
+
+  const call = () =>
+    getOpeningHours.execute({}, { tenantId: a.tenantId, userId: a.userId, manager: a.manager });
+
+  it('returns the configured weekly hours, not a setup-progress guess', async () => {
+    await AppDataSource.getRepository(Bot).update(a.botId, {
+      businessTimezone: 'Europe/Brussels',
+      settings: {
+        ai: { enabled: true, brandVoice: { name: TENANT_A_SENTINELS.brandVoiceName } },
+        businessHours: {
+          enabled: true,
+          timezone: 'Europe/Brussels',
+          schedule: [
+            { day: 'monday', open: '09:00', close: '17:00', closed: false },
+            { day: 'tuesday', open: '09:00', close: '17:00', closed: false },
+            { day: 'wednesday', open: '', close: '', closed: true },
+          ],
+        },
+      } as BotSettings,
+    });
+
+    const result = await call();
+    expect(result.source).toBe('configured');
+    expect(result.hours).toContain('Mon 09:00');
+    expect(result.hours).toContain('Wed closed');
+    expect(result.timezone).toBe('Europe/Brussels');
+  });
+
+  it('reports always-on when the owner left spoken hours switched off', async () => {
+    await AppDataSource.getRepository(Bot).update(a.botId, {
+      settings: {
+        ai: { enabled: true, brandVoice: { name: TENANT_A_SENTINELS.brandVoiceName } },
+        businessHours: {
+          enabled: false,
+          timezone: 'Europe/Brussels',
+          schedule: [{ day: 'monday', open: '09:00', close: '17:00', closed: false }],
+        },
+      } as BotSettings,
+    });
+
+    const result = await call();
+    expect(result.source).toBe('always_on');
+    expect(result.hours).toBeNull();
+  });
+
+  it('falls back to the booking AvailabilityRule when spoken hours are absent', async () => {
+    await AppDataSource.getRepository(AvailabilityRule).save(
+      AppDataSource.getRepository(AvailabilityRule).create({
+        tenantId: a.tenantId,
+        botId: a.botId,
+        timezone: 'Europe/Brussels',
+        availabilityMode: 'business_hours',
+        weeklyHours: { mon: [{ start: '08:00', end: '16:00' }] },
+        dateOverrides: [],
+      }),
+    );
+
+    const result = await call();
+    expect(result.source).toBe('configured');
+    expect(result.hours).toContain('Mon 08:00');
   });
 
   it('never leaks tenant B sentinels in the response JSON', async () => {

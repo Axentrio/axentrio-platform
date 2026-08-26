@@ -61,3 +61,34 @@ export const SLOT_TAKEN_ON_RESCHEDULE =
   'That time is no longer available, and the existing appointment has NOT been changed. Say both ' +
   'of those things, then call check_availability again for the day the customer wants and offer ' +
   'what is left. Do NOT hand the conversation to a human and do NOT use the fallback message.';
+
+/**
+ * A request captured for a time the business could never have taken anyway.
+ *
+ * `request_appointment` skips slot validation on purpose - a request is a preference, not a
+ * booking, and the owner decides. That is right for a full day, an out-of-area job, or a drive
+ * nobody measured. It is wrong for a time outside the owner's own notice or horizon, because
+ * there is nothing for the owner to decide: they already said they do not take those.
+ *
+ * OBSERVED ON PRODUCTION. An auto-book service with a 60-day horizon was asked for a day 63
+ * days out. The model never called check_availability at all - it asked for a name and captured
+ * a request - and a `request_created` row was written for a date the business does not accept.
+ * The customer was told the team would confirm it. Nobody could have.
+ *
+ * The tool description invites exactly this ("...or you are not confident you can safely confirm
+ * a time"), so the refusal has to live on the write path. Prose could not have stopped it.
+ */
+export const REQUEST_TOO_SOON =
+  'That time is sooner than the notice this business needs, so it cannot be booked OR requested ' +
+  '- they have already said they do not take appointments at that notice, so there is nothing ' +
+  'for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ' +
+  'on it. Call check_availability for the days after that, offer the customer the times it ' +
+  'returns, and book one outright: this service books automatically.';
+
+/** The horizon twin. Same refusal, opposite end of the window. */
+export const REQUEST_TOO_FAR =
+  'That time is further ahead than this business takes bookings, so it cannot be booked OR ' +
+  'requested - they have already said they do not accept dates that far out, so there is ' +
+  'nothing for them to confirm. Do NOT capture it and do NOT tell the customer the team will ' +
+  'come back on it. Call check_availability for a date inside the range they do book, offer the ' +
+  'customer the times it returns, and book one outright: this service books automatically.';

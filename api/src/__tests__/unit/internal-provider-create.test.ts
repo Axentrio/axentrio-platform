@@ -2255,3 +2255,96 @@ describe('InternalProvider.checkAvailability · a range the policy ruled out', (
     expect(res.emptyRange).toBeUndefined();
   });
 });
+
+/**
+ * An auto-book service must not BANK a time its own policy refuses.
+ *
+ * Found by smoke-testing the other half of this fix on production. An auto-book service with a
+ * 60-day horizon was asked for a date 63 days out. The model never called check_availability at
+ * all - it asked for the customer's name and went straight to request_appointment - so guidance
+ * on the availability path could not fire. A `request_created` row was written for a date the
+ * business does not accept, and the customer was told the team would come back to them.
+ *
+ * `request_appointment`'s own description invites this ("...or you are not confident you can
+ * safely confirm a time"), so the refusal belongs on the write path where the model cannot
+ * route around it.
+ *
+ * The negative cases carry the weight. A request is the RIGHT answer for a request-only
+ * service, a paused business, a dead calendar, and a full day - and each must still capture.
+ */
+describe('InternalProvider.requestAppointment · the bookable window', () => {
+  let provider: InternalProvider;
+
+  // now = 2026-06-05. EVENT_TYPE carries minNotice 0 and a 60-day horizon, so the window is
+  // [2026-06-05, 2026-08-04].
+  const BEYOND_HORIZON = '2026-09-10T07:00:00Z'; // 97 days out
+  const INSIDE_WINDOW = '2026-06-10T07:00:00Z'; // the ordinary offered slot
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE]);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValue([]);
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    managerQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const ask = (when: string) =>
+    provider.requestAppointment(ctx, `idem-w-${when}`, when, { name: 'Ada', email: 'ada@example.com' });
+
+  it('refuses a date past the horizon, and writes nothing', async () => {
+    // The exact production failure.
+    await expect(ask(BEYOND_HORIZON)).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('refuses a time inside the minimum notice, and writes nothing', async () => {
+    const soon = { ...EVENT_TYPE, minNoticeMin: 1440 };
+    eventTypeFindOne.mockResolvedValue(soon);
+    serviceTypeFind.mockResolvedValue([soon]);
+    await expect(ask('2026-06-05T10:00:00Z')).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('tells the model to go and find real times, not to hand over', async () => {
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/check_availability/);
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/books automatically/i);
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/do NOT capture it/i);
+    // The promise that could not be kept: somebody confirming it later.
+    await expect(ask(BEYOND_HORIZON)).rejects.toThrow(/team will come back on it/i);
+  });
+
+  it('still captures inside the window', async () => {
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ success: true, requested: true });
+  });
+
+  it('still captures for a REQUEST-ONLY service, whatever the date', async () => {
+    // The owner decides these by hand by definition, so a horizon is not theirs to enforce.
+    const requestOnly = { ...EVENT_TYPE, bookingMode: 'request' };
+    eventTypeFindOne.mockResolvedValue(requestOnly);
+    serviceTypeFind.mockResolvedValue([requestOnly]);
+    await expect(ask(BEYOND_HORIZON)).resolves.toMatchObject({ success: true, requested: true });
+  });
+
+  it('still captures while bookings are PAUSED', async () => {
+    // A pause is exactly when the capture-do-not-refuse machinery has to work.
+    bookingSettingsFindOne.mockResolvedValue({ bookingsPaused: true });
+    await expect(ask(BEYOND_HORIZON)).resolves.toMatchObject({ success: true, requested: true });
+  });
+
+  it('still captures when no calendar can auto-confirm', async () => {
+    hasHealthyCalendarConnection.mockResolvedValue(false);
+    await expect(ask(BEYOND_HORIZON)).resolves.toMatchObject({ success: true, requested: true });
+  });
+});

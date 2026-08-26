@@ -36,7 +36,7 @@ import {
   RescheduleResult,
   CancelResult,
 } from './types';
-import { computeSlots, diagnoseEmptyRange, type SlotEngineInput } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
@@ -96,6 +96,8 @@ import {
   SLOT_NOT_OFFERABLE,
   SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
   SLOT_TAKEN_ON_RESCHEDULE,
+  REQUEST_TOO_SOON,
+  REQUEST_TOO_FAR,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields } from './contact';
@@ -1763,6 +1765,34 @@ export class InternalProvider implements BookingProvider {
     // the end + persisted length are purely informational for the owner.
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
+
+    // AN AUTO-BOOK SERVICE MUST NOT BANK A TIME ITS OWN POLICY REFUSES.
+    //
+    // Requests deliberately skip slot validation: a request is a preference and the owner
+    // decides. That holds for a full day, an out-of-area job, or an unmeasured drive - all
+    // times the owner COULD say yes to. It does not hold outside their notice or horizon,
+    // where they have already said no and no decision is left to make.
+    //
+    // Seen on production with this fix's other half already deployed: the model skipped
+    // check_availability entirely, asked for a name, and captured a request for a date 63 days
+    // out against a 60-day horizon. The customer was promised a callback nobody could honour.
+    // The gate has to be here, because the tool the model chose never looked at a slot.
+    //
+    // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
+    // capturing exactly as before - a request is the RIGHT answer for those - and so does any
+    // time inside the window that is merely taken.
+    const canAuto =
+      (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
+    if (service.bookingMode !== 'request' && canAuto) {
+      const { earliestMs, latestMs } = bookableWindow(service, new Date());
+      const startMs = start.getTime();
+      if (startMs < earliestMs) {
+        throw new BookingError(REQUEST_TOO_SOON, 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
+      if (startMs > latestMs) {
+        throw new BookingError(REQUEST_TOO_FAR, 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
+    }
 
     // Dedup on the PARSED time (#35): a rapid re-confirm in another turn resolves to
     // the same normalized start, but the LLM may pass a slightly different raw

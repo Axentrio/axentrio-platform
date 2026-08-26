@@ -137,6 +137,25 @@ export async function recordBookingOffer(input: {
 }
 
 /**
+ * How much later than the booking a delivery may LOOK and still count.
+ *
+ * TWO CLOCKS AND TWO PRECISIONS. `createdAt` is written by the DATABASE, in microseconds, and
+ * truncated to milliseconds when it is read back; the booking instant comes from THIS process.
+ * So an offer stored at 12:00:00.500_800 reads back as .500, and a selection recorded moments
+ * later in the same millisecond compares EQUAL - scored as "delivered after the booking" and
+ * dropped out of the baseline. In production the database is not even on the same machine as the
+ * API, so its clock may genuinely read a few milliseconds ahead.
+ *
+ * That is why `offer-record.test.ts` fails on CI, where a booking follows its offer inside one
+ * millisecond, and passes against a Docker Postgres whose round trip is slower than that.
+ *
+ * The question being asked is whether the customer could have acted on the offer, which is a
+ * human timescale. A second of slack answers it, and no real "the offer came later" case is
+ * inside a second - those are minutes apart, which is what the test for them uses.
+ */
+const CLOCK_SKEW_GRACE_MS = 1000;
+
+/**
  * Attribute a Booking or Request to the offer it came from.
  *
  * THE RULE, stated exactly so two implementations agree: the LATEST offer where the session and
@@ -169,7 +188,7 @@ export async function recordOfferSelection(input: {
     const wanted = input.startUtc.getTime();
     for (const offer of offers) {
       if (offer.deliveryBasis === 'provider_rejected') continue;
-      if (offer.createdAt.getTime() >= before.getTime()) continue;
+      if (offer.createdAt.getTime() - CLOCK_SKEW_GRACE_MS >= before.getTime()) continue;
       const ordinal = offer.offeredSlots.findIndex((s) => new Date(s.start).getTime() === wanted);
       if (ordinal === -1) continue;
 

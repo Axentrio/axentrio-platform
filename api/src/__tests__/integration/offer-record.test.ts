@@ -299,6 +299,25 @@ describe('attribution - the rule two engineers would otherwise build differently
     expect(await selections()).toHaveLength(0);
   });
 
+  it('attributes a booking recorded a moment BEFORE the offer row it came from', async () => {
+    // THE CI FLAKE, pinned. `created_at` is the database's clock in microseconds, read back
+    // truncated to milliseconds, and the booking instant is this process's clock - in production
+    // not even the same machine. A booking taken in the same millisecond as its offer compared
+    // EQUAL and was dropped from the baseline, so `offer-record.test.ts` failed whenever CI was
+    // fast enough to do both inside one millisecond, and passed against a slower Docker Postgres.
+    await offer([SLOT_A]);
+    await recordOfferSelection({
+      sessionId,
+      serviceId,
+      bookingId: randomUUID(),
+      startUtc: at(SLOT_A),
+      // 200ms of apparent skew: the booking looks OLDER than the offer row it came from.
+      bookingCreatedAt: new Date(Date.now() - 200),
+      selectionType: 'booking',
+    });
+    expect(await selections()).toHaveLength(1);
+  });
+
   it('leaves a booking UNATTRIBUTED rather than guessing', async () => {
     // An owner adding an appointment by hand was never steered and cannot evidence steering.
     // Guessing an offer for it would put a row in the denominator that nothing offered.

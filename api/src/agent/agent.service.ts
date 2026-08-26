@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
-import { collapseAppointmentSpans, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -328,6 +328,40 @@ const UNBOOKABLE_TIME_FALLBACK =
  */
 const NO_SLOTS_ON_SCREEN_FALLBACK =
   'I cannot confirm that time. Tell me which time suits you and I will check it for you.';
+
+/**
+ * A replacement said in the customer's language, but NEVER at the cost of the reply.
+ *
+ * `localizeMessage` is two sequential LLM calls, and its own header rules it out of "the hot reply
+ * path" for good reason: it fails open on an error and NOT on a hang, while `agent.service`'s own
+ * provider calls go through `callProviderWithRetry` and this one would not. A customer is waiting
+ * here, and a silent turn on a session that still shows the bot as active is a far worse outcome
+ * than an English sentence.
+ *
+ * So it races a deadline. Past it the authored English ships - which is exactly what shipped
+ * before localization existed, so the worst case is the old behaviour and never a dead end.
+ */
+const LOCALIZE_DEADLINE_MS = 2500;
+
+async function inCustomerLanguage(
+  text: string,
+  customerText: string,
+  session: ChatSession,
+): Promise<string> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      localizeMessage(text, customerText, session),
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve(text), LOCALIZE_DEADLINE_MS);
+      }),
+    ]);
+  } catch {
+    return text; // localizeMessage is fail-open, but never let this path throw a reply away.
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Internal nudge (user role — the Anthropic adapter only honours the FIRST system
  *  message) telling the model to actually call the booking tool instead of claiming
@@ -914,7 +948,13 @@ export class AgentService {
           // the single-time guard stands down and the enumeration guard is the only thing left).
           // It only decides WHICH replacement is true: their own hour being unavailable is a
           // sharper sentence than a bare pointer at the list.
-          const customerNamedLocal = parseClockTimes(message).map((t) => t.key);
+          const customerTimeText = latestCustomerTimeText([
+            ...conversationHistory
+              .filter((m) => m.role === 'user')
+              .map((m) => contentToText(m.content)),
+            message,
+          ]);
+          const customerNamedLocal = parseClockTimes(customerTimeText).map((t) => t.key);
           // EVERY time the customer may take, delivered or not. Only the single-time guard uses
           // it: a slot further down the list is one create_booking accepts, so a reply confirming
           // it is right, while a time nobody offered is an invention whatever the channel showed.
@@ -936,10 +976,14 @@ export class AgentService {
                 ),
               ]
             : [];
+          // Against EVERY bookable hour, not the 8-chip prefix: 10:00 further down the day is
+          // still the time they named. Compared with the chip window, an intake answer that
+          // names no clock time re-attached 00:00 / 00:30 / 01:00 above a confirmation of 10:00.
+          const bookableLocal = everyOfferableLocal ?? offeredLocal;
           const alreadyChoseTime = !!(
-            offeredLocal &&
-            (namesSingleOfferedTime(message, offeredLocal) ||
-              namesSingleOfferedTime(finalContent, offeredLocal))
+            bookableLocal &&
+            (namesSingleOfferedTime(customerTimeText, bookableLocal) ||
+              namesSingleOfferedTime(finalContent, bookableLocal))
           );
           const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(pendingAvailability);
 
@@ -995,7 +1039,7 @@ export class AgentService {
               // reply the model wrote in the customer's, so shipping them raw answers a Dutch
               // question in English - seen on production on 2026-08-26, driving the real widget.
               // `localizeMessage` fails open: anything it cannot do returns the original.
-              safeContent = await localizeMessage(replacement, message, session);
+              safeContent = await inCustomerLanguage(replacement, message, session);
             }
           }
 

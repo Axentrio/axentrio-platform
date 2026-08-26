@@ -19,8 +19,13 @@
 // output is re-validated before use — anything wrong (no customer text, no key, LLM
 // error, undetectable language, injection that adds a link / extra content / a
 // guardrail violation, or output far longer than the original) returns the ORIGINAL
-// canned message unchanged. Used only on the off-hours/escalation paths (not the hot
-// reply path, not the LLM-down error fallbacks).
+// canned message unchanged.
+//
+// WHERE IT MAY BE CALLED FROM. The off-hours/escalation paths, and NOT the LLM-down error
+// fallbacks. It is two sequential LLM calls and it fails open on an ERROR but not on a HANG, so
+// anywhere a customer is waiting on the reply itself it MUST be raced against a deadline - see
+// `inCustomerLanguage` in `agent/agent.service.ts`, which is the one such caller: it localizes the
+// availability-guard replacements and ships the English original once the deadline passes.
 
 import { getProvider } from './provider-factory';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';

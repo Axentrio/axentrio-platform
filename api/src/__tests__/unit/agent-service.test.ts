@@ -621,6 +621,64 @@ describe('AgentService', () => {
     }
   });
 
+  it('ships the reply in English rather than wait on a hanging localizer', async () => {
+    // `localizeMessage` is two sequential LLM calls, it fails open on an error and NOT on a hang,
+    // and it does not go through `callProviderWithRetry`. On the reply path a stalled provider
+    // would mean NO answer at all on a session that still shows the bot as active, which is far
+    // worse than an English sentence. The deadline is what makes the nicer wording safe to want.
+    vi.useFakeTimers();
+    mockLocalize.mockImplementationOnce(() => new Promise<string>(() => {}));
+    const slots = [
+      { start: '2026-09-02T07:00:00.000Z', end: '2026-09-02T07:30:00.000Z' },
+      { start: '2026-09-02T07:30:00.000Z', end: '2026-09-02T08:00:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik heb 08:00 en 09:00 vrij. Wat past?',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const run = agent.run(
+      'Welke tijden zijn vrij op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    const result = await run;
+    vi.useRealTimers();
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      // The authored English, which is exactly what shipped before localization existed.
+      expect(result.content).toMatch(/^Here are the times I have available/);
+      expect(result.quickReplies).toHaveLength(2);
+    }
+  });
+
   it('keeps a reply that names a REQUESTABLE travel time, which no chip carries', async () => {
     // The other half of the same guard. A mixed travel result confirms 10:30 and offers 14:00 as
     // a time the business must be asked about - `check_availability` tells the model in so many

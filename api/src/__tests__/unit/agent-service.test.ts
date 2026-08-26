@@ -661,10 +661,11 @@ describe('AgentService', () => {
 
   it('keeps an opening-hours range on a turn with nothing tappable', async () => {
     // The other side of the length gate, and the reason it exists. The customer already chose
-    // 14:00, so the chips come off and only the always-on single-time guard is left. The reply
-    // states a business fact - "we are open 9:00 tot 17:00" - which is 480 minutes and no
-    // appointment length here, so it stays two readings and the guard stands down. Collapsed, it
-    // would become one unoffered time and a true sentence would be replaced.
+    // 14:00, so the chips come off and only the always-on single-time guard is left. The reply is
+    // a business fact and NOTHING else - one range, no chosen time beside it - because a reply
+    // that also named 14:00 would survive an unconditional collapse too and prove nothing. This
+    // range is 480 minutes and no appointment length here, so it stays two readings and the guard
+    // stands down. Collapsed, it would be a lone unoffered 9:00 and a true sentence would go.
     const slots = [{ start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' }];
     const checkAvailability: ToolAdapter = {
       name: 'check_availability',
@@ -686,7 +687,7 @@ describe('AgentService', () => {
         toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
       })
       .mockResolvedValueOnce({
-        content: 'Prima, 14:00 staat klaar. Wij zijn open van 9:00 tot 17:00.',
+        content: 'Wij zijn open van 9:00 tot 17:00.',
         usage: { promptTokens: 100, completionTokens: 10 },
         finishReason: 'stop',
       });

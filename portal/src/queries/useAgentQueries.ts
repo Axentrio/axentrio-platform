@@ -8,7 +8,15 @@ type Any = any;
 export const agentOptions = {
   list: (filters?: Record<string, unknown>) => queryOptions({
     queryKey: queryKeys.agents.list(filters),
-    queryFn: () => api.get<Any[]>('/agents', { params: filters }),
+    // GET /agents answers the paginated shape { agents: [...], meta } (the
+    // apiClient already stripped the success envelope). Unwrap HERE so every
+    // consumer gets a plain array — the Inbox mapped the raw object and its
+    // Transfer modal crashed on .map; Team fell through to an empty list.
+    // Older deploys answered a bare array — accept both.
+    queryFn: async () => {
+      const payload = await api.get<{ agents?: Any[] } | Any[]>('/agents', { params: filters });
+      return Array.isArray(payload) ? payload : (payload.agents ?? []);
+    },
   }),
   detail: (id: string) => queryOptions({
     queryKey: queryKeys.agents.detail(id),

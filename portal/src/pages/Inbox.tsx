@@ -238,12 +238,8 @@ const Inbox: React.FC = () => {
     ...agentOptions.list({ status: 'online' }),
     enabled: isTransferModalOpen,
   });
-  // GET /agents returns the paginated shape { agents: [...], meta } (the
-  // apiClient already stripped the success envelope). Older deploys answered
-  // with a bare array — accept both so the modal can never crash on .map.
-  const agentsPayload = rawAgents as { agents?: RawAgent[] } | RawAgent[] | undefined;
-  const agentsList = Array.isArray(agentsPayload) ? agentsPayload : (agentsPayload?.agents ?? []);
-  const agents: Agent[] = agentsList.map(mapRawAgent);
+  // agentOptions.list unwraps the paginated { agents } response to a plain array.
+  const agents: Agent[] = ((rawAgents ?? []) as RawAgent[]).map(mapRawAgent);
 
   // -----------------------------------------------------------------------
   // Handlers

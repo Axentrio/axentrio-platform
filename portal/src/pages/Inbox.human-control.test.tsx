@@ -635,3 +635,34 @@ describe('Inbox super-admin reset', () => {
     });
   });
 });
+
+describe('Inbox transfer modal', () => {
+  it('opens on the paginated { agents } payload instead of crashing', async () => {
+    // GET /agents answers { agents: [...], meta } after the apiClient strips
+    // the success envelope. Mapping that object directly crashed the whole
+    // page (".map is not a function") the moment Transfer opened.
+    // renderInbox() stamps apiGet.mockResolvedValue(chat) for the deep-link
+    // GET — install the paginated /agents mock AFTER that, so it is not
+    // overwritten.
+    const user = userEvent.setup();
+    renderInbox(makeOwnedChat());
+    await screen.findByRole('button', { name: 'Transfer' });
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/agents') {
+        return Promise.resolve({
+          agents: [
+            { id: 'a2', name: 'Ann Other', status: 'online', currentChatCount: 0, maxConcurrentChats: 5 },
+          ],
+        });
+      }
+      return Promise.resolve(makeOwnedChat());
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Transfer' }));
+
+    expect(await screen.findByText('Transfer to teammate')).toBeInTheDocument();
+    expect(await screen.findByText(/Ann/)).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
+  });
+});
+

@@ -1362,7 +1362,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
  */
 async function ensureBotParticipant(
   session: ChatSession,
-  aiSettings: BotAiSettings,
+  aiSettings: BotAiSettings | undefined,
 ): Promise<Participant> {
   let botParticipant = await participantRepository.findOne({
     where: { sessionId: session.id, type: 'bot', isDeleted: false },
@@ -1537,6 +1537,34 @@ async function sendBotMessage(
   await markAddressQuestionAskedAfterDelivery(session, saved.id, extras);
 
   return saved;
+}
+
+/**
+ * Persist and deliver deterministic customer-facing information outside the
+ * model-authored reply. Booking uses this for preparation instructions so the
+ * model cannot omit or rewrite operational guidance.
+ */
+export async function sendInformationalBotMessage(
+  sessionId: string,
+  content: string,
+): Promise<void> {
+  const session = await sessionRepository.findOne({ where: { id: sessionId } });
+  if (!session) throw new Error(`Chat session ${sessionId} not found`);
+
+  let aiSettings: BotAiSettings | undefined;
+  try {
+    ({ settings: { ai: aiSettings } } = await getBotConfigForSession(session));
+  } catch (err) {
+    // The Agent turn already has a bot participant in normal operation. Config
+    // lookup is only needed to name a participant if that invariant is broken.
+    logger.warn('[message-forwarding] bot config unavailable for informational message', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+  await sendBotMessage(session, botParticipant.id, content);
 }
 
 /**

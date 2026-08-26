@@ -549,6 +549,27 @@ export class CreateBookingTool implements ToolAdapter {
       // downstream automations).
       const r = result as CreateBookingResult;
       const isRequest = r.requested === true;
+
+      const preparationInstructions = r.preparationInstructions?.trim();
+      if (!isRequest && !r.idempotent && preparationInstructions) {
+        try {
+          // Lazy to avoid booking.tool -> message-forwarding -> AgentService ->
+          // booking.module -> booking.tool during module initialization.
+          const { sendInformationalBotMessage } = await import('../../services/message-forwarding.service');
+          await sendInformationalBotMessage(
+            ctx.sessionId,
+            `Before your appointment:\n${preparationInstructions}`,
+          );
+        } catch (err) {
+          // The Booking is already confirmed. Chat notification is best-effort,
+          // just like email/webhook delivery, and must never undo that success.
+          logger.warn('[booking] preparation instructions chat notification failed', {
+            sessionId: ctx.sessionId,
+            bookingId: r.booking?.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       if (!isRequest && !r.idempotent) void (async () => {
         try {
           // #5: the id + canonical UTC time live at result.booking.{id,startTime} —
@@ -599,9 +620,12 @@ export class CreateBookingTool implements ToolAdapter {
         }
       })();
 
+      // Keep the operational text out of the LLM-visible tool result: the
+      // deterministic message above is the single customer notification.
+      const { preparationInstructions: _preparationInstructions, ...modelResult } = r;
       return {
         success: true,
-        data: { ...result, ...addressEcho(booked.address) },
+        data: { ...modelResult, ...addressEcho(booked.address) },
         ...addressReplyFact(
           booked.address,
           isRequest ? 'request' : 'confirmed_booking',

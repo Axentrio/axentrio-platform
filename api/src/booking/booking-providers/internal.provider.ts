@@ -1000,13 +1000,20 @@ export class InternalProvider implements BookingProvider {
   }
 
 
-  private toResult(booking: Booking, idempotent: boolean, timezone?: string, serviceName?: string): CreateBookingResult {
+  private toResult(
+    booking: Booking,
+    idempotent: boolean,
+    timezone?: string,
+    serviceName?: string,
+    preparationInstructions?: string | null,
+  ): CreateBookingResult {
     return {
       success: true,
       idempotent: idempotent || undefined,
       requested: booking.status === 'request_created' || undefined,
       timezone,
       serviceName,
+      preparationInstructions,
       booking: {
         id: booking.id,
         startTime: booking.startUtc.toISOString(),
@@ -1048,7 +1055,7 @@ export class InternalProvider implements BookingProvider {
     // 'failed', a status nothing ever wrote.)
     if (existing) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
-      return this.toResult(existing, true, rule.timezone, service.name);
+      return this.toResult(existing, true, rule.timezone, service.name, service.preparationInstructions);
     }
 
     // 2. Compute times. P5c: effective length depends on durationMode (range/ai use
@@ -1083,7 +1090,7 @@ export class InternalProvider implements BookingProvider {
         callDedupIdentity(service.customerAddressRequired, extras)
     ) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
-      return this.toResult(recentDup, true, rule.timezone, service.name);
+      return this.toResult(recentDup, true, rule.timezone, service.name, service.preparationInstructions);
     }
 
     // P3: normalize intake answers against THIS resolved service (the row's real service).
@@ -1371,7 +1378,7 @@ export class InternalProvider implements BookingProvider {
         });
         if (dup) {
           await consumeBindingAfterIdempotentReturn(ctx, extras);
-          return this.toResult(dup, true, rule.timezone, service.name);
+          return this.toResult(dup, true, rule.timezone, service.name, service.preparationInstructions);
         }
         throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
       }
@@ -1497,6 +1504,7 @@ export class InternalProvider implements BookingProvider {
       success: true,
       timezone: rule.timezone,
       serviceName: service.name,
+      preparationInstructions: service.preparationInstructions,
       booking: {
         id: bookingId,
         startTime: start.toISOString(),

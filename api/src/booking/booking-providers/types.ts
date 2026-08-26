@@ -213,6 +213,11 @@ export interface CreateBookingResult {
   timezone?: string;
   /** Service name, so the confirmation can name it without the model guessing. */
   serviceName?: string;
+  /**
+   * Internal handoff to the chat booking tool. The tool posts this as a
+   * deterministic follow-up message and removes it from the LLM-visible result.
+   */
+  preparationInstructions?: string | null;
   booking: {
     id: string | undefined;
     startTime: string | undefined;

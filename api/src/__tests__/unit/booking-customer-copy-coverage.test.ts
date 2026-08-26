@@ -47,6 +47,7 @@ const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   BOT_NOT_FOUND: 'owner-side Agent selection; the public path resolves its Agent from the booking',
   CAPACITY_REACHED: 'a ceiling on NEW bookings; a reschedule is checked as SLOT_UNAVAILABLE',
   DURATION_OUT_OF_RANGE: 'agent-side service configuration while creating',
+  DURATION_REQUIRED: 'the agent re-asks for a length while CREATING a booking',
   FILE_NOT_READY: 'attachment upload during creation',
   FILE_UPLOAD_NOT_ALLOWED: 'attachment upload during creation',
   TOO_MANY_FILES: 'attachment upload during creation',

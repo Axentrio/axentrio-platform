@@ -197,7 +197,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       durationMin: {
         type: 'number',
         description:
-          "For a service whose duration is a range or AI-estimated (flagged in the SERVICES list), the chosen/estimated length in minutes, so the offered slots fit. Omit for fixed-duration services.",
+          "For a service whose duration is a range or AI-estimated (flagged in the SERVICES list), the chosen/estimated length in minutes, so the offered slots fit. Omit for fixed-duration services. Pass a single number (e.g. 60), never a range string.",
       },
       locationChoice: {
         type: 'string',
@@ -401,7 +401,7 @@ export class CreateBookingTool implements ToolAdapter {
       durationMin: {
         type: 'number',
         description:
-          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes — pass the SAME value you checked availability with. Omit for fixed-duration services.",
+          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes — pass the SAME value you checked availability with. Omit for fixed-duration services. If omitted on a range service, the tool returns DURATION_REQUIRED: ask the customer, then retry. Never treat that as a calendar or technical failure.",
       },
       fileSessionIds: {
         type: 'array',
@@ -697,7 +697,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       durationMin: {
         type: 'number',
         description:
-          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Omit for fixed-duration services.",
+          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Pass a single number (e.g. 60). Omit for fixed-duration services.",
       },
       fileSessionIds: {
         type: 'array',

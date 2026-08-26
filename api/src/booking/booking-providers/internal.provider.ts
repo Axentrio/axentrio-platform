@@ -102,7 +102,7 @@ import { resolveContactFields } from './contact';
 import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime } from './booking-dates';
 import {
   resolveDuration,
-  durationUnresolved,
+  assertDurationChosen,
   effectiveDurationForAvailability,
 } from './service-duration';
 import {
@@ -1064,6 +1064,9 @@ export class InternalProvider implements BookingProvider {
     if (!start) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
+    // A range/ai service with no chosen length must ASK, not confirm and not capture.
+    // Capturing a request here is what the model then recites as a calendar failure.
+    assertDurationChosen(service, extras?.durationMin);
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
 
@@ -1103,10 +1106,9 @@ export class InternalProvider implements BookingProvider {
     // check (or a stale slot chip) must not slip a confirmation past a paused business.
     const canAuto = (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     // Request-only OR can't auto-confirm (no healthy calendar OR sync disabled) →
-    // capture a request, not a confirmed booking. Mirrors readiness willAutoConfirm.
-    // Request-only, no healthy calendar, OR a variable-length job whose length nobody
-    // established — all three mean "do not confirm this, capture it".
-    if (service.bookingMode === 'request' || !canAuto || durationUnresolved(service, extras?.durationMin)) {
+    // capture a request, not a confirmed booking. Missing length is DURATION_REQUIRED
+    // above, not a silent request.
+    if (service.bookingMode === 'request' || !canAuto) {
       // Carry the model's summary through the downgrade — passing `undefined` here meant a
       // job captured because the calendar was down reached the owner with no context.
       return this.createRequest(ctx, idempotencyKey, service, itineraryKey, start, end, attendee, notes, extras?.aiSummary, intakeAnswers, extras, effectiveDuration);

@@ -102,13 +102,14 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(p).toContain('AI-estimated');
   });
 
-  it('still refuses to guess: an unestablished length is captured, never booked short', () => {
-    // The safety property that makes a prompt-only estimator acceptable. If the model
-    // cannot establish a length, the server downgrades to a request rather than booking
-    // the shortest option — so a bad estimate costs a confirmation, not a wrong slot.
+  it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {
+    // create_booking now returns DURATION_REQUIRED when the length is unknown. If the prompt
+    // still lumps that with "calendar cannot be reached", the customer hears a technical
+    // problem instead of "how long do you need?".
     const p = buildServicesSection([svc(RANGE)])!;
-    expect(p).toMatch(/captured as a REQUEST/i);
-    expect(p).toMatch(/not confirmed at the shortest option/i);
+    expect(p).toMatch(/DURATION_REQUIRED/);
+    expect(p).toMatch(/Ask the customer/i);
+    expect(p).toMatch(/Never describe DURATION_REQUIRED as a technical problem or a calendar failure/i);
   });
 
   it('says nothing about length for a fixed service', () => {

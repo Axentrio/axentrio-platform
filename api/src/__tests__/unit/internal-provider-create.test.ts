@@ -833,17 +833,24 @@ describe('InternalProvider.createBooking', () => {
     expect(insertParam(insert as any, 'booked_duration_min')).toBe(60);
   });
 
-  it('CAPTURES a range service whose length was never established, instead of guessing short', async () => {
-    // This used to confirm the booking at minDurationMin. A two-hour repair silently
-    // booked as a thirty-minute one is the wrong appointment, not a cautious one — so an
-    // unestablished length now becomes a request for the owner to scope.
+  it('rejects DURATION_REQUIRED when a range service has no chosen length, instead of capturing a request', async () => {
+    // Guessing short books the wrong appointment. Capturing a request is also wrong: the
+    // model then recites the calendar-failure copy. Ask for a number of minutes instead.
     serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
-    // The downgrade lands in createRequest, whose INSERT goes through the repository query.
-    managerQuery.mockImplementation(async (sql: string) =>
-      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-dur' }] : []
+    await expect(
+      provider.createBooking(ctx, 'idem-dur-def', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'DURATION_REQUIRED' });
+  });
+
+  it('books a range service when durationMin arrives as a numeric string', async () => {
+    serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    const res = await provider.createBooking(
+      ctx, 'idem-dur-str', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { durationMin: '60' as unknown as number }
     );
-    const res = await provider.createBooking(ctx, 'idem-dur-def', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
-    expect(res.requested).toBe(true);
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeUndefined();
+    expect(res.booking.endTime).toBe('2026-06-10T08:00:00.000Z');
   });
 
   it('still confirms a range service once the length IS given', async () => {

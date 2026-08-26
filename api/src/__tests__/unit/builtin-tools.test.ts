@@ -466,25 +466,62 @@ describe('CreateBookingTool', () => {
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
   });
 
-  it('keeps a verbatim offered slot instant, strips a constructed offset time', async () => {
-    // Two live failures, one per reading: 10:00Z for "om 10:00" booked 12:00 Brussels, and a
-    // blanket strip of the offered 09:00Z slot booked 09:00 instead of the 11:00 it named.
-    // The offered-slot memory is the disambiguator.
+  it('keeps a verbatim offered slot when it does not contradict the customer', async () => {
+    // Live: the model copied the offered 09:00Z slot (11:00 Brussels) for "om 11:00". A blanket
+    // strip booked 09:00. The slot stands: its local clock is the hour the customer named.
     const tool = new CreateBookingTool();
     mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-slot' } });
 
-    redisStore.set('booking:offered:sess-verbatim', JSON.stringify(['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z']));
+    redisStore.set('booking:offered:sess-verbatim', JSON.stringify({
+      starts: ['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z'],
+      timezone: 'Europe/Brussels',
+    }));
     await tool.execute(
       { startTime: '2026-10-05T09:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
-      makeCtx({ sessionId: 'sess-verbatim' }),
+      makeCtx({
+        sessionId: 'sess-verbatim',
+        conversationHistory: [{ role: 'user', content: 'Kan ik maandag 5 oktober om 11:00 langskomen?' }],
+      }),
     );
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T09:00:00.000Z');
+  });
 
-    mockCreateBooking.mockClear();
-    redisStore.set('booking:offered:sess-constructed', JSON.stringify(['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z']));
+  it('strips an offset that contradicts the hour the customer named', async () => {
+    // Live: customer said "om 13:00"; the model echoed 13:00Z (= 15:00 Brussels), and 15:00
+    // HAPPENED to be an offered slot, so the offered-slot check kept it and booked 15:00.
+    // The customer's own clock time is the tiebreaker.
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-contradict' } });
+
+    redisStore.set('booking:offered:sess-contradict', JSON.stringify({
+      starts: ['2026-10-05T13:00:00.000Z'],
+      timezone: 'Europe/Brussels',
+    }));
+    await tool.execute(
+      { startTime: '2026-10-05T13:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({
+        sessionId: 'sess-contradict',
+        conversationHistory: [{ role: 'user', content: 'Kan ik maandag 5 oktober om 13:00 langskomen?' }],
+      }),
+    );
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T13:00:00.000');
+  });
+
+  it('strips a constructed offset time that was never offered', async () => {
+    // Live: customer said "om 10:00", the model passed 10:00Z, the provider booked 12:00.
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-constructed' } });
+
+    redisStore.set('booking:offered:sess-constructed', JSON.stringify({
+      starts: ['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z'],
+      timezone: 'Europe/Brussels',
+    }));
     await tool.execute(
       { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
-      makeCtx({ sessionId: 'sess-constructed' }),
+      makeCtx({
+        sessionId: 'sess-constructed',
+        conversationHistory: [{ role: 'user', content: 'Kan ik om 10:00 langskomen?' }],
+      }),
     );
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00.000');
   });

@@ -286,7 +286,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // the model constructed from the customer's words (strip the Z). That judgement needs the
       // exact strings this call returned, which may be turns behind the booking.
       if (Array.isArray(result?.slots) && result.slots.length > 0) {
-        void rememberOfferedSlots(ctx.sessionId, (result.slots as Array<{ start: string }>).map((s) => s.start));
+        void rememberOfferedSlots(
+          ctx.sessionId,
+          (result.slots as Array<{ start: string }>).map((s) => s.start),
+          (result as { timezone?: string }).timezone ?? 'UTC',
+        );
       }
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
       // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
@@ -505,7 +509,7 @@ export class CreateBookingTool implements ToolAdapter {
       // only fires when a BINDING exists, and a binding is written in exactly one place
       // (`/places/select`). Wherever address suggestions are unavailable, that guard never runs
       // and this key is all that is left.
-      const startTime = await resolveBookingTime(ctx.sessionId, args.startTime as string);
+      const startTime = await resolveBookingTime(ctx.sessionId, args.startTime as string, lastCustomerText(ctx));
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${startTime}:${addressToken(booked)}`;
       const result = await createBooking(
         'agent',
@@ -699,7 +703,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       // token the correction deduped into the original row and the model was handed a success
       // carrying the OLD address, which is how a customer came to be told a booking was confirmed
       // at a door the system had never recorded.
-      const preferredTime = await resolveBookingTime(ctx.sessionId, args.preferredTime as string);
+      const preferredTime = await resolveBookingTime(ctx.sessionId, args.preferredTime as string, lastCustomerText(ctx));
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${preferredTime}:${addressToken(requested)}`;
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;

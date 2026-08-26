@@ -685,10 +685,17 @@ describe('check_availability — a range the policy ruled out is not an empty di
     for (const range of [tooSoon, tooFar]) {
       const res = await load(range);
       expect(res.data.emptyRange, range.reason).toBeUndefined();
-      expect(res.data.guidance, range.reason).not.toContain('21:02');
-      expect(res.data.guidance, range.reason).not.toContain('19:02');
-      // Only whole dates survive, and only as the range to search.
-      expect(res.data.guidance, range.reason).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+      // THE WHOLE PAYLOAD, not the two fields that happened to come to mind. `modelResult`
+      // begins `...result`, so anything left on the availability result rides into `data`
+      // unformatted - and a raw `Z` instant is worse there than a formatted one. The precedent
+      // is on `wallClock`: a Brussels bot answered "the next valid time is 08:30" off a
+      // `2026-10-09T08:30:00.000Z` slot that starts at 10:30 local. Destructuring `emptyRange`
+      // off `result` is what keeps the boundary server-side; this assertion is what notices if
+      // somebody puts it back.
+      const payload = JSON.stringify(res.data);
+      expect(payload, range.reason).not.toMatch(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/);
+      expect(payload, range.reason).not.toContain('21:02');
+      expect(payload, range.reason).not.toContain('19:02');
     }
   });
 });

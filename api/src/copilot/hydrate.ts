@@ -14,7 +14,7 @@
  */
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { logger } from '../utils/logger';
 
 const BUNDLE_PATH = path.join(__dirname, '..', '..', 'dist', 'copilot', 'docs-bundle.json');
@@ -41,6 +41,7 @@ export interface HydrationResult {
   inserted: number;
   updated: number;
   unchanged: number;
+  pruned: number;
   total: number;
 }
 
@@ -68,6 +69,38 @@ async function readBundle(): Promise<Bundle> {
   return parsed;
 }
 
+/**
+ * Delete corpus rows whose (slug, locale) is not in `kept`, and return what was
+ * removed. Exported so the prune can be tested without building the bundle.
+ *
+ * An EMPTY keep-set removes NOTHING. The corpus is only ever pruned against a
+ * real bundle (readBundle refuses an empty one), and "keep nothing" is almost
+ * always a caller bug, not an intent to wipe every doc — so we fail safe.
+ */
+export async function pruneRemovedDocs(
+  manager: EntityManager,
+  kept: ReadonlyArray<{ slug: string; locale: string }>,
+): Promise<Array<{ slug: string; locale: string }>> {
+  if (kept.length === 0) return [];
+  const slugs = kept.map((e) => e.slug);
+  const locales = kept.map((e) => e.locale);
+  const result = await manager.query(
+    `DELETE FROM chatbot_copilot_docs d
+      WHERE NOT EXISTS (
+        SELECT 1 FROM unnest($1::text[], $2::text[]) AS b(slug, locale)
+        WHERE b.slug = d.slug AND b.locale = d.locale
+      )
+      RETURNING d.slug, d.locale`,
+    [slugs, locales],
+  );
+  // TypeORM's query() returns [rows, affectedCount] for DELETE ... RETURNING
+  // (but bare rows for SELECT/INSERT). Normalize to just the rows.
+  const rows: Array<{ slug: string; locale: string }> = Array.isArray(result[0])
+    ? result[0]
+    : result;
+  return rows;
+}
+
 export async function hydrateCopilotDocs(dataSource: DataSource): Promise<HydrationResult> {
   const bundle = await readBundle();
   const start = Date.now();
@@ -75,6 +108,7 @@ export async function hydrateCopilotDocs(dataSource: DataSource): Promise<Hydrat
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
+  let pruned = 0;
 
   await dataSource.transaction(async (manager) => {
     for (const entry of bundle.entries) {
@@ -110,6 +144,19 @@ export async function hydrateCopilotDocs(dataSource: DataSource): Promise<Hydrat
         updated++;
       }
     }
+
+    // Remove rows whose (slug, locale) is no longer in the bundle — a doc
+    // deleted, or a slug renamed, at build time. Runs in the SAME transaction as
+    // the upserts so the corpus never has a torn state; readBundle already
+    // refused an empty bundle above, so this cannot wipe it.
+    const removed = await pruneRemovedDocs(manager, bundle.entries);
+    pruned = removed.length;
+    if (pruned > 0) {
+      logger.info('Copilot docs pruned (no longer in the bundle)', {
+        pruned,
+        removed: removed.map((r) => `${r.slug}/${r.locale}`),
+      });
+    }
   });
 
   const total = inserted + updated + unchanged;
@@ -117,10 +164,11 @@ export async function hydrateCopilotDocs(dataSource: DataSource): Promise<Hydrat
     inserted,
     updated,
     unchanged,
+    pruned,
     total,
     bundleGeneratedAt: bundle.generatedAt,
     durationMs: Date.now() - start,
   });
 
-  return { inserted, updated, unchanged, total };
+  return { inserted, updated, unchanged, pruned, total };
 }

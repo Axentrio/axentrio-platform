@@ -83,3 +83,10 @@ docs/reports/
 docs/microsoft-outlook-integration-setup.pdf
 api/AGENTS.md
 claude
+
+# Advisor tooling artifacts (local only, like .pi/)
+.omp/
+WATCHDOG.md
+
+# Finance / unit-economics working docs — business material, kept local
+docs/finance/

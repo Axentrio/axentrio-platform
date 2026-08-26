@@ -21,6 +21,7 @@ import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { localClockTimes, namesSingleOfferedTime } from '../clock-times';
+import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
 
 /**
  * The platform's own address check, reused rather than re-invented.
@@ -157,24 +158,6 @@ function lastCustomerText(ctx: ToolContext): string {
   return '';
 }
 
-/**
- * Strip an ISO offset the model was told never to add.
- *
- * Both booking tools demand a ZONELESS local time in the business's timezone. Live on WhatsApp
- * (2026-08-26) a model wrote the customer's "om 10:00" as "2026-10-05T10:00:00.000Z"; the provider
- * read that as an instant and booked 12:00 Brussels. The customer's words are the wall clock, so
- * an offset-bearing value is re-read as that same wall clock: strip the suffix, keep the digits.
- */
-function stripIsoOffset(value: string): string {
-  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return value;
-  const stripped = value.replace(/(?:Z|[+-]\d{2}:?\d{2})$/i, '');
-  logger.warn('[booking] model added a timezone offset to a local time; re-read as business wall clock', {
-    received: value,
-    interpreted: stripped,
-  });
-  return stripped;
-}
-
 function namedTimeGuidance(
   ctx: ToolContext,
   data: { slots?: Array<{ start: string }>; timezone?: string; guidance?: string },
@@ -299,6 +282,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ...data,
         ...namedTimeGuidance(ctx, data as { slots?: Array<{ start: string }>; timezone?: string; guidance?: string }),
       });
+      // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time
+      // the model constructed from the customer's words (strip the Z). That judgement needs the
+      // exact strings this call returned, which may be turns behind the booking.
+      if (Array.isArray(result?.slots) && result.slots.length > 0) {
+        void rememberOfferedSlots(ctx.sessionId, (result.slots as Array<{ start: string }>).map((s) => s.start));
+      }
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
       // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
       // empty-slots branch below it would be read out as "no times in this range", which turns
@@ -516,7 +505,7 @@ export class CreateBookingTool implements ToolAdapter {
       // only fires when a BINDING exists, and a binding is written in exactly one place
       // (`/places/select`). Wherever address suggestions are unavailable, that guard never runs
       // and this key is all that is left.
-      const startTime = stripIsoOffset(args.startTime as string);
+      const startTime = await resolveBookingTime(ctx.sessionId, args.startTime as string);
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${startTime}:${addressToken(booked)}`;
       const result = await createBooking(
         'agent',
@@ -710,7 +699,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       // token the correction deduped into the original row and the model was handed a success
       // carrying the OLD address, which is how a customer came to be told a booking was confirmed
       // at a door the system had never recorded.
-      const preferredTime = stripIsoOffset(args.preferredTime as string);
+      const preferredTime = await resolveBookingTime(ctx.sessionId, args.preferredTime as string);
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${preferredTime}:${addressToken(requested)}`;
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;

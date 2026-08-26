@@ -42,6 +42,19 @@ vi.mock('../../llm/rag.service', () => ({
   searchKnowledge: (...args: unknown[]) => mockSearchKnowledge(...args),
 }));
 
+
+// A tiny in-memory Redis: the offered-slot store must run its REAL path, because a module
+// mock of the store would not rebind the internal call from resolveBookingTime.
+const redisStore = new Map<string, string>();
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () => ({
+    get: async (k: string) => redisStore.get(k) ?? null,
+    set: async (k: string, v: string) => { redisStore.set(k, v); },
+    del: async (k: string) => { redisStore.delete(k); },
+  }),
+}));
+
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { KbSearchTool } from '../../agent/tools/kb-search.tool';
@@ -347,7 +360,7 @@ describe('CheckAvailabilityTool', () => {
 });
 
 describe('CreateBookingTool', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); redisStore.clear(); });
 
   it('has hasSideEffects=true', () => {
     const tool = new CreateBookingTool();
@@ -451,6 +464,29 @@ describe('CreateBookingTool', () => {
       makeCtx({ sessionId: 'sess-z3' }),
     );
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
+  });
+
+  it('keeps a verbatim offered slot instant, strips a constructed offset time', async () => {
+    // Two live failures, one per reading: 10:00Z for "om 10:00" booked 12:00 Brussels, and a
+    // blanket strip of the offered 09:00Z slot booked 09:00 instead of the 11:00 it named.
+    // The offered-slot memory is the disambiguator.
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-slot' } });
+
+    redisStore.set('booking:offered:sess-verbatim', JSON.stringify(['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z']));
+    await tool.execute(
+      { startTime: '2026-10-05T09:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({ sessionId: 'sess-verbatim' }),
+    );
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T09:00:00.000Z');
+
+    mockCreateBooking.mockClear();
+    redisStore.set('booking:offered:sess-constructed', JSON.stringify(['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z']));
+    await tool.execute(
+      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx({ sessionId: 'sess-constructed' }),
+    );
+    expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00.000');
   });
 
   it('#5: emits appointment.booked with the real booking id + canonical UTC startTime (not the idempotency key / arg time)', async () => {

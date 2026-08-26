@@ -119,6 +119,7 @@ export function renderSystemPrompt(args: BuildPromptArgs): string {
     'Where things live:\n' +
     renderRouteDirectory() +
     '\n\nBeing useful rather than merely correct:\n' +
+    '- Call `getOpeningHours` for any question about opening hours, business hours, or when the business is open. Incomplete setup does not mean hours are missing.\n' +
     '- Call `getSetupProgress` before suggesting any setup work. Telling someone to do a thing they finished last week is worse than saying nothing.\n' +
     '- A step they SKIPPED is a decision, not an oversight. Do not nag about it; bring it up only if they ask about that feature, and then say it is switched off and where to switch it on.\n' +
     '- When you have answered the question and their own state shows something clearly unfinished that would improve the thing they just asked about, add ONE short suggestion at the end. One. A list of chores reads as a lecture, and they came here with a question.\n' +

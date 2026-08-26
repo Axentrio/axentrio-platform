@@ -10,7 +10,7 @@
  *
  *   2. The end-user registry's tool list is data-driven by the
  *      Tenant's enabled features. Copilot's list is the engineering
- *      whitelist below — same 7 tools for every Pro tenant.
+ *      whitelist below — the same tools for every Pro tenant.
  *
  * Registration-time invariants (enforced HERE, not at execution):
  *
@@ -20,7 +20,7 @@
  *
  * `getCopilotTools()` returns the registered tools in registration
  * order. The unit test `copilot-registry.test.ts` asserts the
- * registered name set equals the v1 plan's 7-tool list exactly —
+ * registered name set equals the v1 plan's tool list exactly —
  * adding or removing a tool is therefore a deliberate spec change,
  * not a silent regression.
  */
@@ -40,6 +40,7 @@ export const V1_COPILOT_TOOL_NAMES = [
   'getKnownGapTopics',
   'getSetupProgress',
   'listBots',
+  'getOpeningHours',
 ] as const;
 
 export type V1CopilotToolName = (typeof V1_COPILOT_TOOL_NAMES)[number];

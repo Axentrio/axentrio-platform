@@ -604,10 +604,12 @@ describe('AgentService', () => {
     }
   });
 
-  it('keeps a confirmation that names the appointment as a SPAN', async () => {
-    // The end of a booked span is nobody's slot start. Here the day's last slot runs 16:00-17:00
-    // and closing time is 17:00, so a reply confirming "16:00 tot 17:00" names one offered time
-    // and one time that cannot exist. Read as two, the customer loses their confirmation.
+  it('keeps a confirmation that names the appointment as a SPAN, with the chips still up', async () => {
+    // The universal confirmation turn: the customer says "that last one" and names no clock time,
+    // so the chips stay and the enumeration guard runs. The reply says the appointment in full -
+    // "16:00 tot 17:00" - and 17:00 is the slot's END, which is nobody's slot start on a day that
+    // closes at 17:00. Judged as two offered times it loses the customer their confirmation. The
+    // span is exactly one appointment long, so it is read as the one time it names.
     const slots = [
       { start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' },
       { start: '2026-10-09T14:00:00.000Z', end: '2026-10-09T15:00:00.000Z' },
@@ -652,6 +654,58 @@ describe('AgentService', () => {
     if (result.type === 'response') {
       // 16:00 local is the 14:00Z slot; 17:00 is its end and no slot's start.
       expect(result.content).toContain('16:00 tot 17:00');
+      // They named no time, so the offer stands and the enumeration guard really did run.
+      expect(result.quickReplies).toHaveLength(2);
+    }
+  });
+
+  it('keeps an opening-hours range on a turn with nothing tappable', async () => {
+    // The other side of the length gate, and the reason it exists. The customer already chose
+    // 14:00, so the chips come off and only the always-on single-time guard is left. The reply
+    // states a business fact - "we are open 9:00 tot 17:00" - which is 480 minutes and no
+    // appointment length here, so it stays two readings and the guard stands down. Collapsed, it
+    // would become one unoffered time and a true sentence would be replaced.
+    const slots = [{ start: '2026-10-09T12:00:00.000Z', end: '2026-10-09T13:00:00.000Z' }];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-10-09', endDate: '2026-10-09' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Prima, 14:00 staat klaar. Wij zijn open van 9:00 tot 17:00.',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      '14:00 graag.',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).toContain('open van 9:00 tot 17:00');
+      expect(result.quickReplies).toBeUndefined();
     }
   });
 

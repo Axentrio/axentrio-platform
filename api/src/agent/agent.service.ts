@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
-import { collapseSpans, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { collapseAppointmentSpans, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -917,6 +917,18 @@ export class AgentService {
                 ...requestableLocal,
               ]
             : null;
+          // HOW LONG AN APPOINTMENT IS HERE, so a confirmation that says the whole span
+          // ("16:00 tot 17:00") is read as the one time it names, while a range that is not an
+          // appointment ("we are open 9:00 tot 17:00") stays two readings and is left alone.
+          const slotLengthsMin = pendingAvailability
+            ? [
+                ...new Set(
+                  [...pendingAvailability.slots, ...pendingAvailability.requestableSlots]
+                    .map((s) => Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60_000))
+                    .filter((min) => min > 0),
+                ),
+              ]
+            : [];
           const alreadyChoseTime = !!(
             offeredLocal &&
             (namesSingleOfferedTime(message, offeredLocal) ||
@@ -938,10 +950,8 @@ export class AgentService {
           // customer themselves asked for.
           let safeContent = finalContent;
           if (pendingAvailability && deliverableLocal?.length) {
-            // "11:30 to 12:30" is ONE appointment. The end of a booked span is never a slot start,
-            // so both guards read the span as its start or they replace correct confirmations.
-            const judged = collapseSpans(finalContent);
             const onScreen = !!slotChips?.length;
+            const judged = collapseAppointmentSpans(finalContent, slotLengthsMin);
             // THE ENUMERATION GUARD STAYS ON CHIPPED TURNS, which is the only place its rule makes
             // sense: it compares a list against what the channel delivered, and a time truncated
             // away is one the customer cannot tap. With nothing on screen there is no delivered

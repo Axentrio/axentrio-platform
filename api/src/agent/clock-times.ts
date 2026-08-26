@@ -58,24 +58,37 @@ function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {
 }
 
 /**
- * "11:30 to 12:30" names ONE appointment, not two offered times.
+ * "16:00 tot 17:00" is ONE appointment said in full. "9:00 tot 17:00" is when the shop is open.
  *
- * A booked span's END is never a slot start, so a guard that reads both halves replaces a
- * perfectly correct confirmation: "Perfect, 16:00 to 17:00 on Friday" flags 17:00 the moment the
- * day's last slot ends at closing time, and on any granularity where no slot begins where the
- * previous one ends. Collapsing to the start keeps the sentence judged - the start still has to
- * be a time somebody offered - without inventing a rule about end times nobody offers.
+ * Both are two clock times in one sentence, and the difference decides whether a guard may read
+ * them. A confirmation's END is nobody's slot start - the day closes at 17:00, so no slot begins
+ * there - and judging it replaces a perfectly correct confirmation. An opening-hours range was
+ * never an offer either, and collapsing THAT to one reading would hand it to the single-time
+ * guard and replace a true statement about the business.
  *
- * The separators are the ones the platform's languages actually write, plus the dashes. Anything
- * unmatched simply stays two readings, which is the behaviour before this existed.
+ * THE LENGTH TELLS THEM APART, and it is the one thing already known: a span exactly as long as
+ * an offered slot is this appointment, anything else is a range. So the collapse is gated on the
+ * appointment lengths this very call offered, and no rule about "spans" is invented.
+ *
+ * With no offered lengths nothing collapses, which is the behaviour before this existed.
  */
-// The meridiem alternation is `parseClockTimes`' own, deliberately: `a.m.` / `a.m` OR `am`, never
-// `am.` - so a sentence's full stop is left where the author put it.
 const NAMED_SPAN =
-  /(\d{1,2}[:.]\d{2}\s*(?:[ap]\.m\.?|[ap]m)?)\s*(?:-|–|—|to|tot|t\/m|until|till|à|bis|hasta|até)\s*\d{1,2}[:.]\d{2}\s*(?:[ap]\.m\.?|[ap]m)?/gi;
+  // The meridiem alternation is `parseClockTimes`' own, deliberately: `a.m.` / `a.m` OR `am`,
+  // never `am.` - so a sentence's full stop is left where the author put it.
+  /(\d{1,2}[:.]\d{2}\s*(?:[ap]\.m\.?|[ap]m)?)\s*(?:-|–|—|to|tot|t\/m|until|till|à|bis|hasta|até)\s*(\d{1,2}[:.]\d{2}\s*(?:[ap]\.m\.?|[ap]m)?)/gi;
 
-export function collapseSpans(text: string): string {
-  return text.replace(NAMED_SPAN, '$1');
+export function collapseAppointmentSpans(text: string, slotLengthsMin: number[]): string {
+  if (slotLengthsMin.length === 0) return text;
+  const lengths = new Set(slotLengthsMin);
+  return text.replace(NAMED_SPAN, (whole: string, from: string, to: string) => {
+    const [start] = parseClockTimes(from);
+    const [end] = parseClockTimes(to);
+    if (!start || !end) return whole;
+    // Modulo a day, so a span running past midnight measures as the appointment it is.
+    const minutes = (end.hour * 60 + end.minute - (start.hour * 60 + start.minute) + 1440) % 1440;
+    // `from` may carry the space the separator sat behind; the sentence keeps its own spacing.
+    return lengths.has(minutes) ? from.trimEnd() : whole;
+  });
 }
 
 /**

@@ -11,7 +11,12 @@
  * a good reply.
  */
 import { describe, it, expect } from 'vitest';
-import { collapseSpans, namesSingleOfferedTime, unofferedSingleTimeIn, unofferedTimesIn } from '../../agent/clock-times';
+import {
+  collapseAppointmentSpans,
+  namesSingleOfferedTime,
+  unofferedSingleTimeIn,
+  unofferedTimesIn,
+} from '../../agent/clock-times';
 
 const OFFERED = ['09:00', '09:30', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00'];
 
@@ -201,16 +206,20 @@ describe('unofferedSingleTimeIn — one invented time IS the whole recommendatio
 });
 
 /**
- * A confirmation names a SPAN, and a span's end is nobody's slot start.
+ * TWO CLOCK TIMES IN ONE SENTENCE, and the length says which kind it is.
  *
- * "Perfect, 16:00 to 17:00 on Friday" is the correct reply for the last slot of a day that closes
- * at 17:00. Read as two offered times it flags 17:00, and the customer gets a fallback instead of
- * their confirmation.
+ * "16:00 tot 17:00" is one appointment said in full, and its END is nobody's slot start - the day
+ * closes at 17:00, so no slot begins there. Judging that end replaces a correct confirmation.
+ * "We are open 9:00 to 17:00" is a fact about the business, and collapsing THAT to one reading
+ * would hand it to the always-on single-time guard and replace a true statement.
+ *
+ * The offered appointment length is the only thing that separates them, so it is the gate.
  */
-describe('collapseSpans — one appointment, not two times', () => {
+describe('collapseAppointmentSpans — an appointment, or a range', () => {
   const OFFERED = ['10:30', '16:00'];
+  const HOUR = [60];
 
-  it('keeps the start and drops the end, for the separators these languages write', () => {
+  it('collapses a span exactly one appointment long, whichever separator was written', () => {
     for (const said of [
       'Perfect, 16:00 to 17:00 on Friday.',
       'Perfect, 16:00 tot 17:00 op vrijdag.',
@@ -218,21 +227,39 @@ describe('collapseSpans — one appointment, not two times', () => {
       'Prima, 16:00-17:00 vrijdag.',
       'Prima, 16:00 - 17:00 vrijdag.',
     ]) {
-      expect(unofferedTimesIn(collapseSpans(said), OFFERED)).toEqual([]);
+      const judged = collapseAppointmentSpans(said, HOUR);
+      expect(unofferedTimesIn(judged, OFFERED)).toEqual([]);
+      expect(unofferedSingleTimeIn(judged, OFFERED)).toBeNull();
     }
   });
 
-  it('collapses a 12-hour span too', () => {
-    expect(collapseSpans('That is 10:30 AM to 11:30 AM.')).toBe('That is 10:30 AM.');
+  it('keeps a 12-hour span, and its sentence, intact', () => {
+    expect(collapseAppointmentSpans('That is 10:30 AM to 11:30 AM.', HOUR)).toBe('That is 10:30 AM.');
+  });
+
+  it('LEAVES an opening-hours range as two readings, so the business fact survives', () => {
+    const said = 'We are open 9:00 to 17:00 every weekday.';
+    expect(collapseAppointmentSpans(said, HOUR)).toBe(said);
+    // Two readings means the always-on single-time guard stands down. That is the exemption.
+    expect(unofferedSingleTimeIn(collapseAppointmentSpans(said, HOUR), OFFERED)).toBeNull();
+  });
+
+  it('collapses nothing when the call offered no appointment length', () => {
+    const said = 'Prima, 16:00 tot 17:00 op vrijdag.';
+    expect(collapseAppointmentSpans(said, [])).toBe(said);
+  });
+
+  it('measures a span that runs past midnight as the appointment it is', () => {
+    expect(collapseAppointmentSpans('Dat is 23:30 tot 00:30.', HOUR)).toBe('Dat is 23:30.');
+  });
+
+  it('still catches an invented span, because the START is then judged', () => {
+    expect(unofferedSingleTimeIn(collapseAppointmentSpans('Ik boek 08:30 tot 09:30.', HOUR), OFFERED)).toBe('08:30');
   });
 
   it('leaves a real enumeration alone, so the guard still judges it', () => {
     const said = 'I have 10:30, 16:00 and 08:30.';
-    expect(collapseSpans(said)).toBe(said);
+    expect(collapseAppointmentSpans(said, HOUR)).toBe(said);
     expect(unofferedTimesIn(said, OFFERED)).toEqual(['08:30']);
-  });
-
-  it('still catches an invented span, because the START is judged', () => {
-    expect(unofferedSingleTimeIn(collapseSpans('Ik boek 08:30 tot 09:30.'), OFFERED)).toBe('08:30');
   });
 });

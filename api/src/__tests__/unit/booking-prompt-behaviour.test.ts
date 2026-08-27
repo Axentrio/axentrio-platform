@@ -391,6 +391,31 @@ describe('intake questions — the owner’s steer reaches the model', () => {
     expect(p).toMatch(/do not ask them to pick a time again unless that time is unavailable/i);
   });
 
+  it('asks a listed optional question — Ask this, not Required, is what puts it in the prompt', () => {
+    // Production: Sanitaire controle auto-book, optional text "Heb je dit probleem al eerder gehad?".
+    // Ask this was on and Required was off, so the catalog marked it optional. The rule then
+    // said the model MAY ask optional questions, so it skipped them and went straight to
+    // availability + confirmation. Ask this means pose it; Required means the booking waits.
+    const p = withQuestions([
+      { id: 'q-opt', label: 'Heb je dit probleem al eerder gehad?', type: 'text', required: false },
+    ]);
+    expect(qLine(p, 'q-opt')).toContain('optional');
+    expect(p).toContain('Heb je dit probleem al eerder gehad?');
+    expect(p).not.toMatch(/you may ask optional ones too/i);
+    expect(p).toMatch(/ask every listed/i);
+    expect(p).toMatch(/optional questions must still be asked/i);
+    expect(p).toMatch(/INTAKE:/);
+    expect(p).toMatch(/BEFORE you call check_availability/i);
+  });
+
+  it('resumes the already-named date and time after the customer declines an optional question', () => {
+    const p = withQuestions([
+      { id: 'q-opt', label: 'Heb je dit probleem al eerder gehad?', type: 'text', required: false },
+    ]);
+    expect(p).toMatch(/after they answer or decline/i);
+    expect(p).toMatch(/keep the date and time they already gave/i);
+  });
+
 });
 
 

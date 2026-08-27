@@ -187,7 +187,7 @@ export class InternalProvider implements BookingProvider {
   private async loadRule(bot: Bot): Promise<AvailabilityRule> {
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } });
     if (!rule) {
-      throw new BookingError('This business has not finished setting up online booking (no availability is configured), so nothing can be booked or captured as a request right now. Do not tell the customer a service is unavailable or send them away. Apologise briefly and offer to take their details for the team with capture_lead, or hand off with escalate_to_human.', 'BOOKING_NOT_CONFIGURED', 400);
+      throw new BookingError('Online booking is not set up for this business yet (no availability is configured), so this cannot be completed online right now. Do not tell the customer a service is unavailable or blame them. Explain briefly that it cannot be done online at the moment and that the business will need to handle it directly.', 'BOOKING_NOT_CONFIGURED', 400);
     }
     rule.timezone = bot.businessTimezone || rule.timezone;
     return rule;
@@ -213,7 +213,7 @@ export class InternalProvider implements BookingProvider {
     }
     const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC', createdAt: 'ASC' } });
     if (active.length === 0) {
-      throw new BookingError('This business has no online-bookable service set up, so nothing can be booked or captured as a request right now. Do not tell the customer a specific service is unavailable or send them away. Apologise briefly and offer to take their details for the team with capture_lead, or hand off with escalate_to_human.', 'BOOKING_NOT_CONFIGURED', 400);
+      throw new BookingError('This business has no online-bookable service set up, so nothing can be booked or captured right now. Do not tell the customer a specific service is unavailable or blame them. If you have a tool for taking their details or handing off to a person, use it; otherwise ask for their name and phone number and tell them the team will follow up.', 'BOOKING_NOT_CONFIGURED', 400);
     }
     if (active.length > 1) {
       throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);

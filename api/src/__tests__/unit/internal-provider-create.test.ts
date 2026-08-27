@@ -782,13 +782,14 @@ describe('InternalProvider.createBooking', () => {
 
   it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a dead end', async () => {
     // A customer who already confirmed must not be told the service is unavailable and sent
-    // away. The message the model reads has to name a recovery (capture their details), like
-    // every sibling error on this path — the bare "Booking not configured" was the dead end
-    // the report reproduced.
+    // away. The message the model reads has to name a recovery that survives ANY toolset —
+    // capture_lead/escalate are entitlement-gated, so the fallback also names the plain ask
+    // (name + phone, team follows up). The bare "Booking not configured" was the dead end the
+    // report reproduced.
     serviceTypeFind.mockResolvedValue([]);
     await expect(
       provider.createBooking(ctx, 'idem-nc-copy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
-    ).rejects.toThrow(/capture_lead/);
+    ).rejects.toThrow(/name and phone number/i);
   });
 
   it('SERVICE_NOT_FOUND coaches re-identifying the service, not a dead end', async () => {

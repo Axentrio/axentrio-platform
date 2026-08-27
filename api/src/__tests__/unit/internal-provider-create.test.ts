@@ -459,6 +459,21 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
   });
 
+  it('books when an optional Ask-this question is unanswered', async () => {
+    // Ask this lists the question; Required off means a skip must not refuse the booking.
+    const svc = {
+      ...EVENT_TYPE,
+      intakeQuestions: [{ id: 'q-prior', label: 'Heb je dit probleem al eerder gehad?', type: 'text', required: false }],
+    };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    const res = await provider.createBooking(ctx, 'idem-optional-skip', OFFERED_START, {
+      name: 'Sofie Test',
+      email: 'sofie@example.com',
+    });
+    expect(res.success).toBe(true);
+  });
+
   it('returns the existing booking on idempotent retry without inserting', async () => {
     bookingFindOne.mockResolvedValue({
       id: 'bk-existing',
@@ -763,6 +778,27 @@ describe('InternalProvider.createBooking', () => {
       provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hidden')
     ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
     expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hidden', botId: 'bot-1', isActive: true, onlineBookable: true } });
+  });
+
+  it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a dead end', async () => {
+    // A customer who already confirmed must not be told the service is unavailable and sent
+    // away. The message the model reads has to name a recovery (capture their details), like
+    // every sibling error on this path — the bare "Booking not configured" was the dead end
+    // the report reproduced.
+    serviceTypeFind.mockResolvedValue([]);
+    await expect(
+      provider.createBooking(ctx, 'idem-nc-copy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toThrow(/capture_lead/);
+  });
+
+  it('SERVICE_NOT_FOUND coaches re-identifying the service, not a dead end', async () => {
+    // A stale/wrong serviceId must send the model back to the SERVICES catalog, not tell the
+    // customer the service is unavailable. request_appointment re-resolves the same id, so the
+    // recovery is a fresh id, never a hand-off to a tool that would throw the same code.
+    eventTypeFindOne.mockResolvedValue(null);
+    await expect(
+      provider.createBooking(ctx, 'idem-snf-copy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-stale')
+    ).rejects.toThrow(/omit serviceId/i);
   });
 
   it('keeps a request-only service a request regardless of calendar state', async () => {

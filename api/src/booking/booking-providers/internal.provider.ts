@@ -187,7 +187,7 @@ export class InternalProvider implements BookingProvider {
   private async loadRule(bot: Bot): Promise<AvailabilityRule> {
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } });
     if (!rule) {
-      throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
+      throw new BookingError('This business has not finished setting up online booking (no availability is configured), so nothing can be booked or captured as a request right now. Do not tell the customer a service is unavailable or send them away. Apologise briefly and offer to take their details for the team with capture_lead, or hand off with escalate_to_human.', 'BOOKING_NOT_CONFIGURED', 400);
     }
     rule.timezone = bot.businessTimezone || rule.timezone;
     return rule;
@@ -208,12 +208,12 @@ export class InternalProvider implements BookingProvider {
     const rules = await loadBusinessRules(botId);
     if (serviceId) {
       const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true, onlineBookable: true } });
-      if (!svc) throw new BookingError('That service is unavailable', 'SERVICE_NOT_FOUND', 404);
+      if (!svc) throw new BookingError('That serviceId is not currently a bookable service for this business (it may have been changed or removed). Do not tell the customer the service is unavailable or send them to contact the business. Re-read the SERVICES list and call again with the current id of the service they mean; if only one service is listed there, omit serviceId and retry.', 'SERVICE_NOT_FOUND', 404);
       return resolveServiceTiming(svc, rules);
     }
     const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC', createdAt: 'ASC' } });
     if (active.length === 0) {
-      throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
+      throw new BookingError('This business has no online-bookable service set up, so nothing can be booked or captured as a request right now. Do not tell the customer a specific service is unavailable or send them away. Apologise briefly and offer to take their details for the team with capture_lead, or hand off with escalate_to_human.', 'BOOKING_NOT_CONFIGURED', 400);
     }
     if (active.length > 1) {
       throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);

@@ -295,6 +295,44 @@ describe('admin observability — agent traces', () => {
     ]);
   });
 
+  it('surfaces a failed tool call’s DOMAIN error code, never its message or args', async () => {
+    // The gap this closes: a create_booking that threw SERVICE_NOT_FOUND showed only ok:false,
+    // so a customer told "the service is unavailable" had no visible cause in the trace. The
+    // leading UPPER_SNAKE code is safe (enum-like); the message after the colon and the args are
+    // not, and must not appear.
+    const repo = AppDataSource.getRepository(AgentTrace);
+    const t = await repo.save(
+      repo.create({
+        tenantId,
+        finishReason: 'completed',
+        trace: {
+          iterations: [
+            {
+              llmCall: { model: 'gpt-4.1-mini', latencyMs: 10, promptTokens: 1, completionTokens: 1 },
+              toolCalls: [
+                {
+                  name: 'create_booking',
+                  latencyMs: 5,
+                  args: { serviceId: 'svc-SECRET', attendeeName: 'LEAK-NAME' },
+                  result: { success: false, error: 'SERVICE_NOT_FOUND: That serviceId is not bookable LEAK-MESSAGE' },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const res = await request(app).get(`${LIST}/${t.id}`);
+    expect(res.body.data.trace.iterations[0].toolCalls).toEqual([
+      { name: 'create_booking', ok: false, errorCode: 'SERVICE_NOT_FOUND', latencyMs: 5 },
+    ]);
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain('LEAK-MESSAGE');
+    expect(body).not.toContain('LEAK-NAME');
+    expect(body).not.toContain('svc-SECRET');
+  });
+
   it('NEVER returns tool args or results, even to a super admin', async () => {
     const t = await seedTrace();
     const detail = JSON.stringify((await request(app).get(`${LIST}/${t.id}`)).body);

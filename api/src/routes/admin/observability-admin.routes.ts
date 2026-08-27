@@ -43,7 +43,7 @@ interface TraceShape {
   corrections?: string[];
   iterations?: Array<{
     llmCall?: { model?: string; latencyMs?: number; promptTokens?: number; completionTokens?: number };
-    toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean } }>;
+    toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean; error?: string } }>;
   }>;
 }
 import { sendSuccess } from '../../utils/response';
@@ -393,6 +393,22 @@ router.get(
   }),
 );
 
+/**
+ * A DOMAIN error code from a failed tool call, and NOTHING ELSE.
+ *
+ * `booking.tool.ts` formats a BookingError as "CODE: message" (e.g.
+ * "SERVICE_NOT_FOUND: That serviceId is not..."), so the leading UPPER_SNAKE token is a safe,
+ * enum-like code. Everything after the colon - and any raw exception with no such prefix - is
+ * free text that can carry PII or internal detail, so it is never projected: an unmatched error
+ * reports a bare 'error'. This is the one field that made a booking failure diagnosable from the
+ * trace at all (a customer told "the service is unavailable" was a bare SERVICE_NOT_FOUND with no
+ * visible reason), without loosening the args/results embargo this route exists to enforce.
+ */
+function toolErrorCode(error: unknown): string {
+  const m = typeof error === 'string' ? /^([A-Z][A-Z0-9_]{2,}):/.exec(error) : null;
+  return m ? m[1] : 'error';
+}
+
 router.get(
   '/observability/traces/:id',
   asyncHandler(async (req: Request, res: Response) => {
@@ -424,10 +440,12 @@ router.get(
           latencyMs: it.llmCall?.latencyMs ?? null,
           promptTokens: it.llmCall?.promptTokens ?? null,
           completionTokens: it.llmCall?.completionTokens ?? null,
-          // Names + outcomes only. Args and results stay server-side.
+          // Names + outcomes only, plus a DOMAIN error CODE on failure (never args, results, or
+          // the error's free-text message — see toolErrorCode).
           toolCalls: (it.toolCalls ?? []).map((tc) => ({
             name: tc.name,
             ok: tc.result?.success !== false,
+            ...(tc.result?.success === false ? { errorCode: toolErrorCode(tc.result?.error) } : {}),
             latencyMs: tc.latencyMs ?? null,
           })),
         })),

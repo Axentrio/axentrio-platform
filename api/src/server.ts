@@ -556,6 +556,13 @@ async function startServer(): Promise<void> {
         "./services/turn-coalescer"
       );
       registerProcessor(TURN_COALESCE_QUEUE, coalesceProcessor);
+
+      const { createChatDocumentProcessor } = await import(
+        "./services/chat-documents"
+      );
+      registerProcessor("file-processing", createChatDocumentProcessor());
+      logger.info("Chat document processor registered");
+
       logger.info("Turn coalescer processor registered");
     } catch (err) {
       logger.warn("Knowledge ingestion processor registration failed", {

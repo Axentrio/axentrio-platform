@@ -148,6 +148,8 @@ export const DEFAULT_UPLOAD_CONFIG: UploadConfig = {
     'video/quicktime',
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'text/plain',
   ],
   bucketName: process.env.AWS_S3_BUCKET || '',
@@ -727,59 +729,16 @@ export class UploadService {
       return null;
     }
 
-    // Download (SSRF-guarded, bounded buffer). safeOutboundRequest hardcodes
-    // maxRedirects:0, so follow redirects MANUALLY (≤3 hops) — re-calling
-    // safeOutboundRequest for each Location re-runs assertSafeOutboundUrl on the
-    // hop, so every redirect target is SSRF-validated. This is required because
-    // Meta attachment URLs (lookaside.fbsbx.com) 302-redirect to the real CDN.
-    let buffer: Buffer;
-    try {
-      let url = input.url;
-      let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
-      for (let hop = 0; hop < 4; hop++) {
-        response = await safeOutboundRequest({
-          url,
-          method: 'GET',
-          responseType: 'arraybuffer',
-          headers: input.headers,
-          timeout: 15_000,
-          maxContentLength: INGEST_MAX_BYTES,
-          maxBodyLength: INGEST_MAX_BYTES,
-        });
-
-        if (response.status >= 300 && response.status < 400) {
-          const location = (response.headers as Record<string, string> | undefined)?.location;
-          if (!location) break; // 3xx with no Location → treat as failure below
-          url = new URL(location, url).toString(); // re-validated by the next safeOutboundRequest
-          response = undefined;
-          continue;
-        }
-        break;
-      }
-      if (!response || response.status < 200 || response.status >= 300) {
-        return null;
-      }
-      buffer = Buffer.from(response.data as ArrayBuffer);
-    } catch (err) {
-      logger.warn('[ingest] remote-file download failed', {
-        tenantId: input.tenantId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    const buffer = await this.downloadRemoteFile(input);
+    if (!buffer) {
       return null;
     }
 
-    // Authoritative image sniff via sharp.
-    let format: string | undefined;
-    try {
-      format = (await sharp(buffer).metadata()).format;
-    } catch {
+    const sniffed = await this.sniffIngestImage(buffer);
+    if (!sniffed) {
       return null;
     }
-    const mimeType = format ? INGEST_FORMAT_TO_MIME[format] : undefined;
-    const ext = format && INGEST_FORMAT_TO_MIME[format] ? format : undefined;
-    if (!mimeType || !ext) {
-      return null;
-    }
+    const { mimeType, ext } = sniffed;
 
     // Quota (over → null, no throw).
     try {
@@ -834,8 +793,177 @@ export class UploadService {
       createdAt: new Date(),
     };
 
+    const persisted = await this.persistIngestSession(session, input, fileKey);
+    if (!persisted) {
+      return null;
+    }
+
+    await this.updateTenantQuota(input.tenantId, buffer.length);
+
+    return { sessionId, fileKey, needsScan: true };
+  }
+
+  /**
+   * Persist an already-downloaded document buffer as an upload session (no
+   * image sniff). Used by chat-document virus scan for channel files.
+   */
+  async ingestRemoteDocumentBuffer(
+    buffer: Buffer,
+    mime: string,
+    fileName: string,
+    tenantId: string,
+    chatSessionId: string,
+    botId: string,
+  ): Promise<{ sessionId: string; fileKey: string } | null> {
+    if (!this.isConfigured()) return null;
+    try {
+      await this.validateQuota(tenantId, buffer.length);
+    } catch {
+      return null;
+    }
+    const sessionId = uuidv4();
+    const ext =
+      mime === 'application/pdf' ? 'pdf'
+      : mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? 'docx'
+      : mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ? 'xlsx'
+      : mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ? 'pptx'
+      : mime === 'image/jpeg' ? 'jpg'
+      : mime === 'image/png' ? 'png'
+      : mime === 'image/webp' ? 'webp'
+      : mime === 'image/gif' ? 'gif'
+      : mime === 'text/plain' ? 'txt'
+      : 'bin';
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const fileKey = `uploads/${tenantId}/${year}/${month}/${day}/${sessionId}.${ext}`;
+    const fileHash = createHash('sha256').update(buffer).digest('hex').substring(0, 16);
+    const originalName = fileName
+      ? this.sanitizeFileName(fileName)
+      : `document-${sessionId.slice(0, 8)}.${ext}`;
+    const metadata: Record<string, string> = {
+      'tenant-id': tenantId,
+      'user-id': botId,
+      'session-id': chatSessionId,
+      'original-name': originalName,
+      'file-hash': fileHash,
+      'upload-date': now.toISOString(),
+      'gdpr-delete-after': this.calculateGDPRDeleteDate(),
+      'content-type': mime,
+    };
+    await this.putObjectBuffer(fileKey, buffer, mime, metadata);
+    const session: UploadSession = {
+      sessionId,
+      uploadUrl: '',
+      publicUrl: await this.generatePublicUrl(fileKey),
+      expiresAt: new Date(Date.now() + this.config.retentionDays * 24 * 60 * 60 * 1000),
+      fileKey,
+      fileHash,
+      status: 'pending',
+      tenantId,
+      userId: botId,
+      originalName,
+      fileSize: buffer.length,
+      mimeType: mime,
+      createdAt: now,
+    };
+    const persisted = await this.persistIngestSession(
+      session,
+      {
+        url: '',
+        tenantId,
+        chatSessionId,
+        botId,
+        externalUserId: '',
+        eventDedupeKey: sessionId,
+        eventTimestamp: now,
+      },
+      fileKey,
+    );
+    if (!persisted) return null;
+    await this.updateTenantQuota(tenantId, buffer.length);
+    return { sessionId, fileKey };
+  }
+
+
+  /**
+   * Download (SSRF-guarded, bounded buffer). safeOutboundRequest hardcodes
+   * maxRedirects:0, so follow redirects MANUALLY (≤3 hops) — re-calling
+   * safeOutboundRequest for each Location re-runs assertSafeOutboundUrl on the
+   * hop, so every redirect target is SSRF-validated. This is required because
+   * Meta attachment URLs (lookaside.fbsbx.com) 302-redirect to the real CDN.
+   *
+   * Returns `null` on any rejection — never throws.
+   */
+  private async downloadRemoteFile(input: IngestRemoteFileInput): Promise<Buffer | null> {
+    try {
+      let url = input.url;
+      let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
+      for (let hop = 0; hop < 4; hop++) {
+        response = await safeOutboundRequest({
+          url,
+          method: 'GET',
+          responseType: 'arraybuffer',
+          headers: input.headers,
+          timeout: 15_000,
+          maxContentLength: INGEST_MAX_BYTES,
+          maxBodyLength: INGEST_MAX_BYTES,
+        });
+
+        if (response.status >= 300 && response.status < 400) {
+          const location = (response.headers as Record<string, string> | undefined)?.location;
+          if (!location) break; // 3xx with no Location → treat as failure below
+          url = new URL(location, url).toString(); // re-validated by the next safeOutboundRequest
+          response = undefined;
+          continue;
+        }
+        break;
+      }
+      if (!response || response.status < 200 || response.status >= 300) {
+        return null;
+      }
+      return Buffer.from(response.data as ArrayBuffer);
+    } catch (err) {
+      logger.warn('[ingest] remote-file download failed', {
+        tenantId: input.tenantId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  /** Authoritative image sniff via sharp. Non-image / unsupported → `null`. */
+  private async sniffIngestImage(
+    buffer: Buffer,
+  ): Promise<{ mimeType: string; ext: string } | null> {
+    let format: string | undefined;
+    try {
+      format = (await sharp(buffer).metadata()).format;
+    } catch {
+      return null;
+    }
+    const mimeType = format ? INGEST_FORMAT_TO_MIME[format] : undefined;
+    const ext = format && INGEST_FORMAT_TO_MIME[format] ? format : undefined;
+    if (!mimeType || !ext) {
+      return null;
+    }
+    return { mimeType, ext };
+  }
+
+  /**
+   * Persist the pending session row. On failure the just-written object is
+   * removed best-effort so a failed persist doesn't leak an orphan +
+   * un-accounted object. Returns `false` when the row was not persisted.
+   */
+  private async persistIngestSession(
+    session: UploadSession,
+    input: IngestRemoteFileInput,
+    fileKey: string,
+  ): Promise<boolean> {
     try {
       await this.persistSession(session, input.chatSessionId);
+      return true;
     } catch (err) {
       // Best-effort cleanup of the just-written object so a failed persist
       // doesn't leak an orphan + un-accounted object.
@@ -849,12 +977,8 @@ export class UploadService {
         fileKey,
         error: err instanceof Error ? err.message : String(err),
       });
-      return null;
+      return false;
     }
-
-    await this.updateTenantQuota(input.tenantId, buffer.length);
-
-    return { sessionId, fileKey, needsScan: true };
   }
 
   /**

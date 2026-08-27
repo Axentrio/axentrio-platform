@@ -3,9 +3,10 @@
  * Handles forwarding visitor messages to n8n webhooks
  * Used by both WebSocket handler and HTTP chat routes
  */
-import { WatermarkConflictError, getCoalescedHistory, getUnansweredUserTextUpTo, getUnansweredUserWindow } from './unanswered-window';
+import { WatermarkConflictError, getCoalescedHistory, getUnansweredUserTextUpTo, getUnansweredUserWindow, aiVisibleTypesSql } from './unanswered-window';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { resolveInboundImage } from './inbound-images';
+import { hasPendingExtraction, renderDocumentForContext } from './chat-documents';
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock } from './session-lock';
 
 // Facade re-exports: these three moved to unanswered-window.ts but the
@@ -212,6 +213,152 @@ export async function releaseExpiredHumanControlOnInbound(session: ChatSession):
   }
 }
 
+/** Tenant + effective AI settings for the legacy path, or null when the message
+ *  must not be forwarded (missing tenant, paused/deleted bot, AI off, or the
+ *  agent service isn't wired yet). */
+async function resolveLegacyConfig(
+  session: ChatSession,
+  savedMessage: Message,
+): Promise<{ tenant: Tenant; aiSettings: BotAiSettings } | null> {
+  const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
+  if (!tenant) {
+    logger.warn(`Tenant not found for session ${session.id}`);
+    await writeRoutingDropLog(
+      session,
+      savedMessage.id,
+      'missing_tenant',
+      `Tenant ${session.tenantId} was not found`,
+    );
+    return null;
+  }
+
+  // Multi-bot Phase 4 (#16d): resolve per-bot config. The behavioural slice
+  // (ai, businessHours, integrations) lives on Bot.settings; only the LLM
+  // provider apiKey stays on Tenant.settings.ai.apiKey (fetched lazily in the
+  // RAG fallback path below via getLlmRuntimeConfigForSession).
+  let botSettings: BotSettings;
+  let bot: Bot;
+  try {
+    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
+  } catch (err) {
+    if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
+      // Traffic to a paused/deleted bot should have been rejected upstream
+      // (widget/auth layer, #16b). Don't propagate as 500 — log and drop.
+      logger.warn(
+        `Session ${session.id} points at a paused/deleted bot — should have been caught upstream`,
+        { error: err.message, tenantId: session.tenantId, botId: session.botId },
+      );
+      await writeRoutingDropLog(session, savedMessage.id, 'missing_bot', err.message);
+      return null;
+    }
+    throw err;
+  }
+  // Tone + policy guardrails (offHours/fallback messages etc.) come from the
+  // bound template; override the AI slice once so all downstream reads + the n8n
+  // payload + the RAG fallback use the effective values. escalationKeywords +
+  // businessHours stay tenant-owned (preserved / read from botSettings directly).
+  const resolvedTemplates = await resolveBoundTemplates(bot);
+  const aiSettings = botSettings.ai ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates)) : botSettings.ai;
+
+  // External n8n forwarding has been retired — every AI-enabled bot is answered by
+  // the in-house platform agent. Bots with AI off (or before the agent service is
+  // wired) stay waiting for a human to pick up.
+  const willUsePlatformAgent = !!aiSettings?.enabled && !!agentService;
+  if (!willUsePlatformAgent) return null;
+
+  return { tenant, aiSettings };
+}
+
+/**
+ * ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────
+ * Single per-message gate for the legacy path, called BEFORE the local
+ * autoresponders (business-hours / escalation) so spam never receives an
+ * off-hours or fallback reply. Every inbound message reaches this entry exactly
+ * once (scheduleTurn → forwardMessageToN8n per message), so the drain loop does
+ * NOT re-gate (that would double-count). The coalescer path (runTurn) runs the
+ * same gate under its own lock. The gate is idempotent per message
+ * (guardrail_checked claim), so a message that's also seen by the coalescer
+ * window isn't double-counted. Shadow mode logs only.
+ *
+ * `blocked` means the message is fully handled: no reply, no forward.
+ */
+async function legacyGuardrailGate(
+  session: ChatSession,
+  savedMessage: Message,
+): Promise<{ blocked: boolean; reply?: string }> {
+  if (savedMessage.type !== 'text' && savedMessage.type !== 'image') return { blocked: false };
+  const gateContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
+  const gate = await runInboundGate({
+    session, tenantId: session.tenantId, message: savedMessage, content: gateContent, channel: session.channel,
+  });
+  if (!gate.proceed) {
+    logger.info(`[guardrails] message blocked for session ${session.id} (${gate.category})`);
+    return { blocked: true };
+  }
+  return { blocked: false, reply: gate.replyOverride };
+}
+
+/**
+ * ── Pre-forwarding checks (cheap, local) — shared with the coalesced path ──
+ * The guardrail warn-reply, then the off-hours / escalation-keyword
+ * autoresponder. Returns true when the message is fully handled, so the platform
+ * agent must not run.
+ */
+async function legacyPreAgentReply(
+  session: ChatSession,
+  savedMessage: Message,
+  aiSettings: NonNullable<BotAiSettings>,
+  plainContent: string,
+  guardrailReply: string | undefined,
+): Promise<boolean> {
+  if (guardrailReply) {
+    // Use the same transactional watermark finalizer as the coalescer so a
+    // legacy/coalescer retry race can persist and deliver this reply only once.
+    const botParticipant = await ensureBotParticipant(session, aiSettings);
+    const fin = await finalizeReply(
+      session,
+      botParticipant.id,
+      guardrailReply,
+      undefined,
+      savedMessage.id,
+      true,
+      session.ownershipVersion ?? 0,
+    );
+    if (fin.status === 'answered') {
+      await routeBotMessageOutbound(session, fin.savedId, guardrailReply);
+    }
+    return true;
+  }
+
+  const auto = localAutoresponse(
+    session,
+    savedMessage.type,
+    plainContent,
+    aiSettings,
+  );
+  if (!auto) return false;
+
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+  const autoMsg = await localizeMessage(auto.message, plainContent, session);
+  try {
+    // Fenced on the ingress-loaded entity's version: a takeover between the
+    // message arriving and this canned reply suppresses it.
+    await sendBotMessage(session, botParticipant.id, autoMsg, undefined, undefined, {
+      ownershipVersion: session.ownershipVersion ?? 0,
+    });
+  } catch (err) {
+    if (err instanceof OwnershipChangedError) {
+      logger.info(`[legacy] canned reply suppressed for session ${session.id} — ownership changed`);
+      return true;
+    }
+    throw err;
+  }
+  if (auto.kind === 'escalation') {
+    await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+  }
+  return true;
+}
+
 /**
  * Forward a visitor message to n8n if applicable.
  * Called after the message is saved to DB and broadcast via WebSocket.
@@ -232,123 +379,16 @@ export async function forwardMessageToN8n(
     return false;
   }
 
-  const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
-  if (!tenant) {
-    logger.warn(`Tenant not found for session ${session.id}`);
-    await writeRoutingDropLog(
-      session,
-      savedMessage.id,
-      'missing_tenant',
-      `Tenant ${session.tenantId} was not found`,
-    );
-    return false;
-  }
+  const config = await resolveLegacyConfig(session, savedMessage);
+  if (!config) return false;
+  const { tenant, aiSettings } = config;
 
-  // Multi-bot Phase 4 (#16d): resolve per-bot config. The behavioural slice
-  // (ai, businessHours, integrations) lives on Bot.settings; only the LLM
-  // provider apiKey stays on Tenant.settings.ai.apiKey (fetched lazily in the
-  // RAG fallback path below via getLlmRuntimeConfigForSession).
-  let botSettings: BotSettings;
-  let bot: Bot;
-  try {
-    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
-  } catch (err) {
-    if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
-      // Traffic to a paused/deleted bot should have been rejected upstream
-      // (widget/auth layer, #16b). Don't propagate as 500 — log and drop.
-      logger.warn(
-        `Session ${session.id} points at a paused/deleted bot — should have been caught upstream`,
-        { error: err.message, tenantId: session.tenantId, botId: session.botId },
-      );
-      await writeRoutingDropLog(session, savedMessage.id, 'missing_bot', err.message);
-      return false;
-    }
-    throw err;
-  }
-  // Tone + policy guardrails (offHours/fallback messages etc.) come from the
-  // bound template; override the AI slice once so all downstream reads + the n8n
-  // payload + the RAG fallback use the effective values. escalationKeywords +
-  // businessHours stay tenant-owned (preserved / read from botSettings directly).
-  const resolvedTemplates = await resolveBoundTemplates(bot);
-  const aiSettings = botSettings.ai ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates)) : botSettings.ai;
+  const gate = await legacyGuardrailGate(session, savedMessage);
+  if (gate.blocked) return true; // handled — no reply, no forward
 
-  // External n8n forwarding has been retired — every AI-enabled bot is answered by
-  // the in-house platform agent. Bots with AI off (or before the agent service is
-  // wired) stay waiting for a human to pick up.
-  const willUsePlatformAgent = !!aiSettings?.enabled && !!agentService;
-  if (!willUsePlatformAgent) {
-    return false;
-  }
-
-  // ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────
-  // Single per-message gate for the legacy path, placed BEFORE the local
-  // autoresponders (business-hours / escalation) so spam never receives an
-  // off-hours or fallback reply. Covers BOTH the platform-agent and custom-webhook
-  // branches below. Every inbound message reaches this entry exactly once
-  // (scheduleTurn → forwardMessageToN8n per message), so the drain loop does NOT
-  // re-gate (that would double-count). The coalescer path (runTurn) runs the same
-  // gate under its own lock. The gate is idempotent per message (guardrail_checked
-  // claim), so a message that's also seen by the coalescer window isn't
-  // double-counted. Shadow mode logs only.
-  let guardrailReply: string | undefined;
-  if (savedMessage.type === 'text' || savedMessage.type === 'image') {
-    const gateContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
-    const gate = await runInboundGate({
-      session, tenantId: session.tenantId, message: savedMessage, content: gateContent, channel: session.channel,
-    });
-    if (!gate.proceed) {
-      logger.info(`[guardrails] message blocked for session ${session.id} (${gate.category})`);
-      return true; // handled — no reply, no forward
-    }
-    guardrailReply = gate.replyOverride;
-  }
-
-  // ── Pre-forwarding checks (cheap, local) — shared with the coalesced path ──
   if (aiSettings) {
     const plainContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
-    if (guardrailReply) {
-      // Use the same transactional watermark finalizer as the coalescer so a
-      // legacy/coalescer retry race can persist and deliver this reply only once.
-      const botParticipant = await ensureBotParticipant(session, aiSettings);
-      const fin = await finalizeReply(
-        session,
-        botParticipant.id,
-        guardrailReply,
-        undefined,
-        savedMessage.id,
-        true,
-        session.ownershipVersion ?? 0,
-      );
-      if (fin.status === 'answered') {
-        await routeBotMessageOutbound(session, fin.savedId, guardrailReply);
-      }
-      return true;
-    }
-    const auto = localAutoresponse(
-      session,
-      savedMessage.type,
-      plainContent,
-      aiSettings,
-    );
-    if (auto) {
-      const botParticipant = await ensureBotParticipant(session, aiSettings);
-      const autoMsg = await localizeMessage(auto.message, plainContent, session);
-      try {
-        // Fenced on the ingress-loaded entity's version: a takeover between the
-        // message arriving and this canned reply suppresses it.
-        await sendBotMessage(session, botParticipant.id, autoMsg, undefined, undefined, {
-          ownershipVersion: session.ownershipVersion ?? 0,
-        });
-      } catch (err) {
-        if (err instanceof OwnershipChangedError) {
-          logger.info(`[legacy] canned reply suppressed for session ${session.id} — ownership changed`);
-          return true;
-        }
-        throw err;
-      }
-      if (auto.kind === 'escalation') {
-        await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
-      }
+    if (await legacyPreAgentReply(session, savedMessage, aiSettings, plainContent, gate.reply)) {
       return true;
     }
   }
@@ -441,7 +481,7 @@ async function getLatestUnansweredUserMessage(sessionId: string): Promise<Messag
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] })
+    .andWhere(aiVisibleTypesSql('message'))
     .andWhere('message.guardrailFlagged = false')
     .orderBy('message.createdAt', 'DESC')
     .getOne();
@@ -452,6 +492,315 @@ async function getLatestUnansweredUserMessage(sessionId: string): Promise<Messag
 
 
 // ── Platform Agent Path ──────────────────────────────────────────────────
+
+/** Pre-run gate for one drain turn. Re-checks the guardrail pause each turn — a
+ *  concurrent spam message could have disabled the session mid-drain. Ownership
+ *  is re-read too: a human claim mid-drain ends the bot's turn-taking (B2), and
+ *  the version is the fence base for this turn's commit. */
+async function legacyPreTurnGate(
+  session: ChatSession,
+): Promise<{ stop: boolean; ownershipVersion: number }> {
+  const live = await sessionRepository.findOne({
+    where: { id: session.id },
+    select: { id: true, aiAutoReplyEnabled: true, ownership: true, ownershipVersion: true } as never,
+  });
+  if (live && live.aiAutoReplyEnabled === false) return { stop: true, ownershipVersion: 0 };
+  if (live && live.ownership !== 'bot_owned') return { stop: true, ownershipVersion: 0 };
+  return { stop: false, ownershipVersion: live?.ownershipVersion ?? session.ownershipVersion ?? 0 };
+}
+
+/** In-flight pause: a concurrent guardrail block may have disabled the session
+ *  while the agent was thinking — don't send the reply. A moved ownership_version
+ *  (human takeover, even a claim→release ABA) equally suppresses it; the
+ *  sendBotMessage fence closes the remaining read-to-commit race
+ *  transactionally. Stops typing and returns true when the reply must not go. */
+async function legacyPostRunGate(
+  session: ChatSession,
+  turnOwnershipVersion: number,
+): Promise<boolean> {
+  const liveAfter = await sessionRepository.findOne({
+    where: { id: session.id },
+    select: { id: true, aiAutoReplyEnabled: true, ownershipVersion: true } as never,
+  });
+  if (liveAfter && liveAfter.aiAutoReplyEnabled === false) {
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+    return true;
+  }
+  if (liveAfter && (liveAfter.ownershipVersion ?? 0) !== turnOwnershipVersion) {
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Send this drain turn's reply and apply the handoff policy.
+ *
+ * `stopDrain`: an upstream failure sends the fallback but writes NO handoff (the
+ * bot keeps the session); it must still stop the drain, or the outage becomes a
+ * storm of failing runs over the rest of the burst.
+ *
+ * `explicitHandoff`: the customer explicitly asked for a human and
+ * `escalate_to_human` succeeded this run. Exactly ONE handoff per turn: every
+ * per-case `bot_error` handoff below stands down, and one `escalation_trigger`
+ * handoff fires AFTER the reply — winning even over an `error` exit, INCLUDING
+ * `infraFailure` (which otherwise does not hand off): a provider outage is no
+ * reason to lose a human the customer explicitly asked for.
+ */
+async function dispatchLegacyAgentResult(args: {
+  session: ChatSession;
+  tenant: Tenant;
+  botParticipantId: string;
+  result: AgentResult;
+  fallbackMessage: string;
+  messageContent: string;
+  fence: { ownershipVersion: number };
+  inCustomerLanguage: (message: string, customerText: string) => Promise<string>;
+}): Promise<{ handedOff: boolean; stopDrain: boolean }> {
+  const { session, tenant, botParticipantId, result, fallbackMessage, messageContent, fence } = args;
+  const { inCustomerLanguage } = args;
+  let handedOff = false;
+  let stopDrain = false;
+  const explicitHandoff = result.handoffRequested === true;
+  switch (result.type) {
+    case 'response': {
+      // Output guardrails (AC14): a blocked AI reply is treated like an agent
+      // error — send the fallback (no quick replies) + hand off to a human.
+      const guard = await applyOutputGuardrails({
+        tenantId: tenant.id, session, channel: session.channel,
+        content: result.content, fallbackMessage, generationPath: 'legacy',
+        validationContext: result.validationContext,
+      });
+      if (guard.blocked) {
+        await sendBotMessage(session, botParticipantId, guard.content, undefined, undefined, fence);
+        if (!explicitHandoff) {
+          await handleBotHandoff(session, botParticipantId, 'bot_error');
+          handedOff = true;
+        }
+      } else {
+        await sendBotMessage(
+          session,
+          botParticipantId,
+          result.content,
+          { quickReplies: result.quickReplies, affordance: result.affordance },
+          result.offer,
+          fence,
+        );
+      }
+      break;
+    }
+
+    case 'error':
+      logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
+      await sendBotMessage(session, botParticipantId, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
+      // Mirror the coalescer path: an UPSTREAM failure (out of credit, throttled,
+      // provider down, queue/Redis unreachable) hits every conversation at once.
+      // Handing it to a human parks the whole inbox and SILENCES the bot for the
+      // 60-minute sweep. So send the fallback, stop the drain, and keep the session
+      // with the bot. A genuine bot fault still escalates.
+      if (result.infraFailure) {
+        stopDrain = true;
+      } else if (!explicitHandoff) {
+        await handleBotHandoff(session, botParticipantId, 'bot_error');
+        handedOff = true;
+      }
+      break;
+
+    case 'budget_exceeded':
+      logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
+      await sendBotMessage(session, botParticipantId, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
+      if (!explicitHandoff) {
+        await handleBotHandoff(session, botParticipantId, 'bot_error');
+        handedOff = true;
+      }
+      break;
+
+    case 'max_iterations':
+      logger.warn(`Platform agent max iterations for session ${session.id}`);
+      await sendBotMessage(session, botParticipantId, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
+      if (!explicitHandoff) {
+        await handleBotHandoff(session, botParticipantId, 'bot_error');
+        handedOff = true;
+      }
+      break;
+
+    case 'awaiting_confirmation': {
+      // Confirmation gate — just send the preview message, don't handoff
+      // (unless output guardrails block it in enforce mode).
+      const guard = await applyOutputGuardrails({
+        tenantId: tenant.id, session, channel: session.channel,
+        content: result.message, fallbackMessage, generationPath: 'legacy',
+        validationContext: result.validationContext,
+      });
+      if (guard.blocked) {
+        await sendBotMessage(session, botParticipantId, guard.content, undefined, undefined, fence);
+        if (!explicitHandoff) {
+          await handleBotHandoff(session, botParticipantId, 'bot_error');
+          handedOff = true;
+        }
+      } else {
+        await sendBotMessage(session, botParticipantId, result.message, undefined, undefined, fence);
+      }
+      break;
+    }
+  }
+
+  // The one explicit-escalation handoff, after the reply reached the customer.
+  if (explicitHandoff) {
+    await handleBotHandoff(session, botParticipantId, 'escalation_trigger');
+    handedOff = true;
+  }
+  return { handedOff, stopDrain };
+}
+
+/**
+ * Drain loop: answer the latest unanswered user message (with the rest of the
+ * burst as history) and keep going while new user messages land — including any
+ * that arrive *while* the agent is thinking. `processed` guards against
+ * re-answering the same message (and any infinite loop if a bot reply fails to
+ * persist).
+ *
+ * 'pending-document' means an extraction is still running, so the turn belongs
+ * to the extraction callback: the caller returns WITHOUT the waiting → bot
+ * transition, exactly as the inline version did.
+ */
+async function runLegacyDrain(
+  session: ChatSession,
+  tenant: Tenant,
+  aiSettings: BotAiSettings,
+  lockToken: string,
+): Promise<'drained' | 'pending-document'> {
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+  const fallbackMessage =
+    aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
+
+  /**
+   * The owner's canned wording, said in the language the customer is writing in.
+   *
+   * The fallback is a tenant setting, so it is written once in the business's own language and
+   * then posted verbatim to everybody. Observed in production: an English customer asked about a
+   * Sunday and was answered `Laat me je verbinden met ons team`. The off-hours message already
+   * goes through this exact helper for the same reason; these three exits were simply missed.
+   *
+   * Fail-open by construction - `localizeMessage` returns the original when the languages match
+   * or when anything at all goes wrong, so a translation outage costs the old behaviour and
+   * never a missing reply.
+   */
+  const inCustomerLanguage = (message: string, customerText: string) =>
+    localizeMessage(message, customerText, session);
+
+  // Debounce: wait a quiet-window so a burst of messages typed in quick
+  // succession settles before we run, and is answered as ONE coherent turn
+  // instead of replying only to the first message.
+  if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
+
+  const processed = new Set<string>();
+
+  for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
+    await refreshSessionLock(session.id, lockToken);
+    const pending = await getLatestUnansweredUserMessage(session.id);
+    if (!pending || processed.has(pending.id)) break;
+    if (await hasPendingExtraction(session.id)) return 'pending-document';
+
+    processed.add(pending.id);
+    // No guardrails gate here: every message was already gated at its own
+    // forwardMessageToN8n entry (above), so the drain only coalesces
+    // already-gated messages. Re-gating would double-count loop counters.
+    const pre = await legacyPreTurnGate(session);
+    if (pre.stop) break;
+    const turnOwnershipVersion = pre.ownershipVersion;
+
+    // Show typing indicator while AI processes — portal + widget over the
+    // WebSocket, and the end user on their external channel (best-effort).
+    emitToTenantAgents(session.tenantId, 'typing:indicator', {
+      sessionId: session.id, isTyping: true, participantType: 'bot',
+    });
+    emitToSession(session.tenantId, session.id, 'typing:start', {});
+    void sendChannelTypingIndicator(session.id).catch(() => {});
+
+    const input = await resolveTurnMessageInput(session, pending);
+
+    // Exclude the live turn itself; earlier burst messages remain in history
+    // so the agent sees the whole burst.
+    const history = await getConversationHistory(session.id, pending.id);
+
+    const result: AgentResult = await agentService!.run(
+      input.messageContent,
+      session,
+      tenant,
+      history,
+      input.images,
+    );
+
+    if (await legacyPostRunGate(session, turnOwnershipVersion)) break;
+    const fence = { ownershipVersion: turnOwnershipVersion };
+
+    let dispatched: { handedOff: boolean; stopDrain: boolean };
+    try {
+      dispatched = await dispatchLegacyAgentResult({
+        session, tenant, botParticipantId: botParticipant.id, result, fallbackMessage,
+        messageContent: input.messageContent, fence, inCustomerLanguage,
+      });
+    } catch (err) {
+      // The commit-time fence: ownership moved between the liveAfter read and
+      // the reply's persist transaction (a human claimed the conversation).
+      // Suppress the reply AND the follow-up handoff, and stop draining — the
+      // human owns the turn-taking now.
+      if (err instanceof OwnershipChangedError) {
+        logger.info(`[legacy] bot reply suppressed for session ${session.id} — ownership changed mid-run`);
+        emitToSession(session.tenantId, session.id, 'typing:stop', {});
+        break;
+      }
+      throw err;
+    }
+
+    // Stop typing indicator
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+
+    // Keep the durable coalesced watermark current: if the coalescer is enabled
+    // and this message reached the legacy path via the fail-open fallback, this
+    // stops a coalescer job from re-answering the same message.
+    await advanceCoalescedWatermark(session.id, pending.id);
+
+    // Stop draining when the turn was handed to a human (the bot no longer owns
+    // the session), OR when an upstream failure means re-running the agent now
+    // would only fail again over the rest of the burst.
+    if (dispatched.handedOff || dispatched.stopDrain) break;
+
+    // Brief settle so a message typed right after this reply joins the same
+    // drain rather than racing the lock release.
+    if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
+  }
+  return 'drained';
+}
+
+/** Emergency fallback for an unexpected legacy-path failure. Goes through the
+ *  SAME transactional fence as the ordinary replies (S1): re-read ownership +
+ *  version, then let the FOR UPDATE check in sendBotMessage close the
+ *  read-to-commit race — an ownership check alone is blind to a claim→release
+ *  ABA mid-failure. */
+async function legacyEmergencyFallback(
+  session: ChatSession,
+  aiSettings: BotAiSettings,
+): Promise<void> {
+  const ownNow = await sessionRepository.findOne({
+    where: { id: session.id },
+    select: { id: true, ownership: true, ownershipVersion: true } as never,
+  });
+  if (!ownNow || ownNow.ownership !== 'bot_owned') return;
+  const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
+    "We're connecting you to an agent. Please hold on.";
+  const bp = await ensureBotParticipant(session, aiSettings);
+  try {
+    await sendBotMessage(session, bp.id, fallbackContent, undefined, undefined, {
+      ownershipVersion: ownNow.ownershipVersion ?? 0,
+    });
+    await handleBotHandoff(session, bp.id, 'bot_error');
+  } catch (err) {
+    if (!(err instanceof OwnershipChangedError)) throw err;
+    logger.info(`[legacy] emergency fallback suppressed for session ${session.id} — ownership changed`);
+  }
+}
 
 async function platformAgentPath(
   session: ChatSession,
@@ -470,277 +819,14 @@ async function platformAgentPath(
   }
 
   try {
-    const botParticipant = await ensureBotParticipant(session, aiSettings);
-    const fallbackMessage =
-      aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
-
-    /**
-     * The owner's canned wording, said in the language the customer is writing in.
-     *
-     * The fallback is a tenant setting, so it is written once in the business's own language and
-     * then posted verbatim to everybody. Observed in production: an English customer asked about a
-     * Sunday and was answered `Laat me je verbinden met ons team`. The off-hours message already
-     * goes through this exact helper for the same reason; these three exits were simply missed.
-     *
-     * Fail-open by construction - `localizeMessage` returns the original when the languages match
-     * or when anything at all goes wrong, so a translation outage costs the old behaviour and
-     * never a missing reply.
-     */
-    const inCustomerLanguage = (message: string, customerText: string) =>
-      localizeMessage(message, customerText, session);
-
-    // Debounce: wait a quiet-window so a burst of messages typed in quick
-    // succession settles before we run, and is answered as ONE coherent turn
-    // instead of replying only to the first message.
-    if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
-
-    // Drain loop: answer the latest unanswered user message (with the rest of
-    // the burst as history) and keep going while new user messages land —
-    // including any that arrive *while* the agent is thinking. `processed`
-    // guards against re-answering the same message (and any infinite loop if a
-    // bot reply fails to persist).
-    const processed = new Set<string>();
-
-    for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
-      await refreshSessionLock(session.id, lockToken);
-      const pending = await getLatestUnansweredUserMessage(session.id);
-      if (!pending || processed.has(pending.id)) break;
-      processed.add(pending.id);
-      // No guardrails gate here: every message was already gated at its own
-      // forwardMessageToN8n entry (above), so the drain only coalesces
-      // already-gated messages. Re-gating would double-count loop counters.
-      // But re-check the guardrail pause each turn — a concurrent spam message
-      // could have disabled the session mid-drain. Ownership is re-read too:
-      // a human claim mid-drain ends the bot's turn-taking (B2), and the
-      // version is the fence base for this turn's commit.
-      const live = await sessionRepository.findOne({
-        where: { id: session.id },
-        select: { id: true, aiAutoReplyEnabled: true, ownership: true, ownershipVersion: true } as never,
-      });
-      if (live && live.aiAutoReplyEnabled === false) break;
-      if (live && live.ownership !== 'bot_owned') break;
-      const turnOwnershipVersion = live?.ownershipVersion ?? session.ownershipVersion ?? 0;
-
-      // Show typing indicator while AI processes — portal + widget over the
-      // WebSocket, and the end user on their external channel (best-effort).
-      emitToTenantAgents(session.tenantId, 'typing:indicator', {
-        sessionId: session.id, isTyping: true, participantType: 'bot',
-      });
-      emitToSession(session.tenantId, session.id, 'typing:start', {});
-      void sendChannelTypingIndicator(session.id).catch(() => {});
-
-      let messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
-      // Picture turn: fetch the image and hand it to the agent as vision input.
-      // If the fetch fails we still answer — with a note so the bot acknowledges
-      // the photo instead of replying to an empty message.
-      let images: AgentImageInput[] | undefined;
-      if (pending.type === 'image') {
-        const img = await resolveInboundImage(pending, session);
-        if (img) {
-          images = [img];
-        } else if (!messageContent) {
-          messageContent = '[The customer sent an image, but it could not be loaded.]';
-        }
-      }
-      // Exclude the live turn itself; earlier burst messages remain in history
-      // so the agent sees the whole burst.
-      const history = await getConversationHistory(session.id, pending.id);
-
-      const result: AgentResult = await agentService!.run(
-        messageContent,
-        session,
-        tenant,
-        history,
-        images,
-      );
-
-      // In-flight pause: a concurrent guardrail block may have disabled the
-      // session while the agent was thinking — don't send the reply. A moved
-      // ownership_version (human takeover, even a claim→release ABA) equally
-      // suppresses it; the sendBotMessage fence below closes the remaining
-      // read-to-commit race transactionally.
-      const liveAfter = await sessionRepository.findOne({
-        where: { id: session.id },
-        select: { id: true, aiAutoReplyEnabled: true, ownershipVersion: true } as never,
-      });
-      if (liveAfter && liveAfter.aiAutoReplyEnabled === false) {
-        emitToSession(session.tenantId, session.id, 'typing:stop', {});
-        break;
-      }
-      if (liveAfter && (liveAfter.ownershipVersion ?? 0) !== turnOwnershipVersion) {
-        emitToSession(session.tenantId, session.id, 'typing:stop', {});
-        break;
-      }
-      const fence = { ownershipVersion: turnOwnershipVersion };
-
-      let handedOff = false;
-      // An upstream failure sends the fallback but writes NO handoff (the bot keeps
-      // the session); it must still stop the drain, or the outage becomes a storm of
-      // failing runs over the rest of the burst.
-      let stopDrain = false;
-      // The customer explicitly asked for a human and `escalate_to_human`
-      // succeeded this run. Exactly ONE handoff per turn: every per-case
-      // `bot_error` handoff below stands down, and one `escalation_trigger`
-      // handoff fires AFTER the reply — winning even over an `error` exit,
-      // INCLUDING `infraFailure` (which otherwise does not hand off): a provider
-      // outage is no reason to lose a human the customer explicitly asked for.
-      const explicitHandoff = result.handoffRequested === true;
-      try {
-      switch (result.type) {
-        case 'response': {
-          // Output guardrails (AC14): a blocked AI reply is treated like an agent
-          // error — send the fallback (no quick replies) + hand off to a human.
-          const guard = await applyOutputGuardrails({
-            tenantId: tenant.id, session, channel: session.channel,
-            content: result.content, fallbackMessage, generationPath: 'legacy',
-            validationContext: result.validationContext,
-          });
-          if (guard.blocked) {
-            await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
-            if (!explicitHandoff) {
-              await handleBotHandoff(session, botParticipant.id, 'bot_error');
-              handedOff = true;
-            }
-          } else {
-            await sendBotMessage(
-              session,
-              botParticipant.id,
-              result.content,
-              { quickReplies: result.quickReplies, affordance: result.affordance },
-              result.offer,
-              fence,
-            );
-          }
-          break;
-        }
-
-        case 'error':
-          logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
-          // Mirror the coalescer path: an UPSTREAM failure (out of credit, throttled,
-          // provider down, queue/Redis unreachable) hits every conversation at once.
-          // Handing it to a human parks the whole inbox and SILENCES the bot for the
-          // 60-minute sweep. So send the fallback, stop the drain, and keep the session
-          // with the bot. A genuine bot fault still escalates.
-          if (result.infraFailure) {
-            stopDrain = true;
-          } else if (!explicitHandoff) {
-            await handleBotHandoff(session, botParticipant.id, 'bot_error');
-            handedOff = true;
-          }
-          break;
-
-        case 'budget_exceeded':
-          logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
-          if (!explicitHandoff) {
-            await handleBotHandoff(session, botParticipant.id, 'bot_error');
-            handedOff = true;
-          }
-          break;
-
-        case 'max_iterations':
-          logger.warn(`Platform agent max iterations for session ${session.id}`);
-          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent), undefined, undefined, fence);
-          if (!explicitHandoff) {
-            await handleBotHandoff(session, botParticipant.id, 'bot_error');
-            handedOff = true;
-          }
-          break;
-
-        case 'awaiting_confirmation': {
-          // Confirmation gate — just send the preview message, don't handoff
-          // (unless output guardrails block it in enforce mode).
-          const guard = await applyOutputGuardrails({
-            tenantId: tenant.id, session, channel: session.channel,
-            content: result.message, fallbackMessage, generationPath: 'legacy',
-            validationContext: result.validationContext,
-          });
-          if (guard.blocked) {
-            await sendBotMessage(session, botParticipant.id, guard.content, undefined, undefined, fence);
-            if (!explicitHandoff) {
-              await handleBotHandoff(session, botParticipant.id, 'bot_error');
-              handedOff = true;
-            }
-          } else {
-            await sendBotMessage(session, botParticipant.id, result.message, undefined, undefined, fence);
-          }
-          break;
-        }
-      }
-
-      // The one explicit-escalation handoff, after the reply reached the customer.
-      if (explicitHandoff) {
-        await handleBotHandoff(session, botParticipant.id, 'escalation_trigger');
-        handedOff = true;
-      }
-      } catch (err) {
-        // The commit-time fence: ownership moved between the liveAfter read and
-        // the reply's persist transaction (a human claimed the conversation).
-        // Suppress the reply AND the follow-up handoff, and stop draining — the
-        // human owns the turn-taking now.
-        if (err instanceof OwnershipChangedError) {
-          logger.info(`[legacy] bot reply suppressed for session ${session.id} — ownership changed mid-run`);
-          emitToSession(session.tenantId, session.id, 'typing:stop', {});
-          break;
-        }
-        throw err;
-      }
-
-      // Stop typing indicator
-      emitToSession(session.tenantId, session.id, 'typing:stop', {});
-
-      // Keep the durable coalesced watermark current: if the coalescer is enabled
-      // and this message reached the legacy path via the fail-open fallback, this
-      // stops a coalescer job from re-answering the same message.
-      await advanceCoalescedWatermark(session.id, pending.id);
-
-      // Stop draining when the turn was handed to a human (the bot no longer owns
-      // the session), OR when an upstream failure means re-running the agent now
-      // would only fail again over the rest of the burst.
-      if (handedOff || stopDrain) break;
-
-      // Brief settle so a message typed right after this reply joins the same
-      // drain rather than racing the lock release.
-      if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
-    }
-
+    const drain = await runLegacyDrain(session, tenant, aiSettings, lockToken);
     // Transition waiting → bot on first message (no-op if a handoff moved it on).
-    if (session.status === 'waiting') {
-      await sessionRepository
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({ status: 'bot' })
-        .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
-        .execute();
-    }
-
+    if (drain === 'drained') await transitionWaitingToBot(session);
     return true;
   } catch (error) {
     emitToSession(session.tenantId, session.id, 'typing:stop', {});
     logger.error(`Platform agent unexpected error for session ${session.id}`, error);
-    // Emergency fallback goes through the SAME transactional fence as the
-    // ordinary replies (S1): re-read ownership + version, then let the
-    // FOR UPDATE check in sendBotMessage close the read-to-commit race — an
-    // ownership check alone is blind to a claim→release ABA mid-failure.
-    const ownNow = await sessionRepository.findOne({
-      where: { id: session.id },
-      select: { id: true, ownership: true, ownershipVersion: true } as never,
-    });
-    if (ownNow && ownNow.ownership === 'bot_owned') {
-      const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
-        "We're connecting you to an agent. Please hold on.";
-      const bp = await ensureBotParticipant(session, aiSettings);
-      try {
-        await sendBotMessage(session, bp.id, fallbackContent, undefined, undefined, {
-          ownershipVersion: ownNow.ownershipVersion ?? 0,
-        });
-        await handleBotHandoff(session, bp.id, 'bot_error');
-      } catch (err) {
-        if (!(err instanceof OwnershipChangedError)) throw err;
-        logger.info(`[legacy] emergency fallback suppressed for session ${session.id} — ownership changed`);
-      }
-    }
+    await legacyEmergencyFallback(session, aiSettings);
     return true;
   } finally {
     await releaseSessionLock(session.id, lockToken);
@@ -756,7 +842,7 @@ async function platformAgentPath(
 // See .scratch/plan-message-coalescer.md.
 
 /** Status returned by runTurn so the coalescer can decide clear-vs-re-arm. */
-export type RunTurnStatus = 'answered' | 'stale' | 'noop';
+export type RunTurnStatus = 'answered' | 'stale' | 'noop' | 'pending-document';
 
 
 /**
@@ -1100,34 +1186,14 @@ async function routeBotMessageOutbound(
   await markAddressQuestionAskedAfterDelivery(session, savedId, extras);
 }
 
-/**
- * Run the platform agent EXACTLY ONCE for the snapped `pending` (= hwm) message,
- * with history bounded to `<= hwm`, then finalise. The coalescer (not this fn)
- * owns the run-lock, timing, and re-running. Returns 'answered' | 'stale' |
- * 'noop' so the coalescer can clear state or re-arm.
- */
-export async function runTurn(session: ChatSession, pending: Message): Promise<RunTurnStatus> {
-  // B-PR5a: mirror forwardMessageToN8n - release an EXPIRED timed human control
-  // before the routing gates, so a coalesced turn on an expired session is
-  // answered by the AI instead of noop-ing until the 60s sweep.
-  await releaseExpiredHumanControlOnInbound(session);
-
-  // Status gate — mirror forwardMessageToN8n: never run the agent on a session a
-  // human owns ('active'/'handoff') or that's closed. Without this the coalescer
-  // path would bypass human takeover (R11/AC9).
-  if (session.status !== 'bot' && session.status !== 'waiting') return 'noop';
-
-  // Ownership gate + fence snapshot (B2). `session` is loaded fresh by the
-  // coalescer right before this call; if ownership moves after this read, the
-  // finalize predicate (ownership_version = this value) rolls the reply back.
-  if (session.ownership !== 'bot_owned') return 'noop';
-  const ownershipVersionAtRunStart = session.ownershipVersion ?? 0;
-
-  // Guardrail pause used to return here. That skipped the inbound gate, so a
-  // follow-up that arrived after bot_loop/phishing paused the session stayed
-  // unflagged and unanswered on a conversation that still showed status=bot.
-  // The gate's already-disabled path flags those messages. Do not bypass it.
-
+/** Everything a coalesced turn needs from the tenant + bot config, or null when
+ *  the turn must not run at all (missing tenant, paused/deleted bot, AI off, or
+ *  the agent service isn't wired). Each null path journals/logs exactly what the
+ *  inline version did. */
+async function resolveTurnConfig(
+  session: ChatSession,
+  pending: Message,
+): Promise<{ tenant: Tenant; aiSettings: NonNullable<BotAiSettings> } | null> {
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
   if (!tenant) {
     await writeRoutingDropLog(
@@ -1136,7 +1202,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       'missing_tenant',
       `Tenant ${session.tenantId} was not found`,
     );
-    return 'noop';
+    return null;
   }
 
   let botSettings: BotSettings;
@@ -1149,7 +1215,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
         error: (err as Error).message,
       });
       await writeRoutingDropLog(session, pending.id, 'missing_bot', (err as Error).message);
-      return 'noop';
+      return null;
     }
     throw err;
   }
@@ -1158,17 +1224,25 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   const aiSettings = botSettings.ai
     ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates))
     : botSettings.ai;
-  if (!aiSettings?.enabled || !agentService) return 'noop';
+  if (!aiSettings?.enabled || !agentService) return null;
+  return { tenant, aiSettings };
+}
 
-  // ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────────
-  // Gate EVERY unanswered user message in this coalesced window — not just the
-  // hwm — or an earlier burst message (e.g. phishing) would enter history
-  // ungated. The gate is idempotent per message (guardrail_checked claim), so a
-  // 'stale' re-run never double-counts. Placed AFTER config resolution, so
-  // AI-off / no-target sessions (returned above) are never gated.
-  // If any window message is rejected, keep gating the rest so they are flagged
-  // too, then drop the turn. Returning on the first reject left the later live
-  // question unanswered on a paused session that still looked live.
+/**
+ * ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────────
+ * Gate EVERY unanswered user message in this coalesced window — not just the
+ * hwm — or an earlier burst message (e.g. phishing) would enter history
+ * ungated. The gate is idempotent per message (guardrail_checked claim), so a
+ * 'stale' re-run never double-counts. Called AFTER config resolution, so
+ * AI-off / no-target sessions are never gated.
+ * If any window message is rejected, keep gating the rest so they are flagged
+ * too, then drop the turn. Returning on the first reject left the later live
+ * question unanswered on a paused session that still looked live.
+ */
+async function gateTurnWindow(
+  session: ChatSession,
+  pending: Message,
+): Promise<{ windowMsgs: Message[]; blockedCategory?: string; guardrailReply?: string }> {
   const windowMsgs = await getUnansweredUserWindow(session, pending.id);
   let guardrailReply: string | undefined;
   let blockedCategory: string | undefined;
@@ -1183,90 +1257,125 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     }
     if (!blockedCategory) guardrailReply ??= g.replyOverride;
   }
-  if (blockedCategory) {
-    logger.info(`[guardrails] turn blocked for session ${session.id} (${blockedCategory})`);
-    return 'noop';
-  }
-  // Pause still wins after a clean gate (shadow mode, or the flag was already
-  // off). The loop above is what flags the follow-up; this only stops the agent.
-  if (session.aiAutoReplyEnabled === false) return 'noop';
+  return { windowMsgs, blockedCategory, guardrailReply };
+}
 
-  const botParticipant = await ensureBotParticipant(session, aiSettings);
+/** A platform-authored reply that replaces this turn's agent run. */
+type TurnAutoresponse =
+  | { kind: 'guardrail'; message: string }
+  | { kind: 'escalation'; message: string };
 
-  // Local autoresponders (off-hours / escalation-keyword) — same gate as the
-  // legacy path (shared helper), so coalesced platform-agent tenants don't lose
-  // them. Finalise via the watermark so the turn is marked answered (won't re-run)
-  // and route outbound; escalation also hands off.
-  const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
-  let auto = guardrailReply
-    ? { kind: 'guardrail' as const, message: guardrailReply }
-    : localAutoresponse(session, pending.type, pendingPlain, aiSettings);
+/**
+ * Local autoresponders (off-hours / escalation-keyword) — same gate as the
+ * legacy path (shared helper), so coalesced platform-agent tenants don't lose
+ * them. A guardrail warn-reply wins outright.
+ */
+async function resolveTurnAutoresponse(args: {
+  session: ChatSession;
+  pending: Message;
+  pendingPlain: string;
+  aiSettings: NonNullable<BotAiSettings>;
+  windowMsgs: Message[];
+  guardrailReply?: string;
+}): Promise<TurnAutoresponse | null> {
+  const { session, pending, aiSettings, windowMsgs } = args;
+  const auto = args.guardrailReply
+    ? { kind: 'guardrail' as const, message: args.guardrailReply }
+    : localAutoresponse(session, pending.type, args.pendingPlain, aiSettings);
+  if (auto) return auto;
+
   // The hwm itself didn't trip escalation — but an EARLIER message in this
   // coalesced burst might contain an escalation keyword (the legacy path sees
   // each message individually; we must scan the whole window for parity).
-  if (!auto) {
-    const kwCount = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords).length;
-    // windowMsgs is the small guardrails window (newest 11). If it's at the cap
-    // AND escalation keywords are configured, scan the FULL unanswered text
-    // backlog up to the hwm so a keyword in an older burst message isn't missed
-    // (legacy checks each message individually). Common case (no keywords / small
-    // burst) reuses the already-loaded window — no extra query.
-    const scan = kwCount > 0 && windowMsgs.length >= 11
-      ? await getUnansweredUserTextUpTo(session, pending.id, 200)
-      : windowMsgs;
-    for (const m of scan) {
-      if (m.id === pending.id || m.type !== 'text') continue;
-      const mc = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
-      const esc = localAutoresponse(session, 'text', mc, aiSettings);
-      if (esc?.kind === 'escalation') { auto = esc; break; }
-    }
+  const kwCount = effectiveEscalationKeywords(aiSettings.guardrails?.escalationKeywords).length;
+  // windowMsgs is the small guardrails window (newest 11). If it's at the cap
+  // AND escalation keywords are configured, scan the FULL unanswered text
+  // backlog up to the hwm so a keyword in an older burst message isn't missed
+  // (legacy checks each message individually). Common case (no keywords / small
+  // burst) reuses the already-loaded window — no extra query.
+  const scan = kwCount > 0 && windowMsgs.length >= 11
+    ? await getUnansweredUserTextUpTo(session, pending.id, 200)
+    : windowMsgs;
+  for (const m of scan) {
+    if (m.id === pending.id || m.type !== 'text') continue;
+    const mc = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
+    const esc = localAutoresponse(session, 'text', mc, aiSettings);
+    if (esc?.kind === 'escalation') return esc;
   }
-  if (auto) {
-    // Guardrail warn-replies are stale-guarded (a newer message arriving
-    // mid-finalize should be its own turn). Escalation is not: hand off now;
-    // the human sees newer messages and the takeover gate stops further bot replies.
-    const staleGuard = auto.kind === 'guardrail';
-    if (auto.kind === 'guardrail') {
-      const fin = await finalizeReply(session, botParticipant.id, auto.message, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
-      if (fin.status === 'stale') return 'stale';
-      await routeBotMessageOutbound(session, fin.savedId, auto.message);
-      return 'answered';
-    }
-    const autoMsg = await localizeMessage(auto.message, pendingPlain, session);
-    const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard, ownershipVersionAtRunStart);
+  return null;
+}
+
+/**
+ * Finalise an autoresponse via the watermark so the turn is marked answered
+ * (won't re-run) and route it outbound; escalation also hands off.
+ *
+ * Guardrail warn-replies are stale-guarded (a newer message arriving
+ * mid-finalize should be its own turn). Escalation is not: hand off now; the
+ * human sees newer messages and the takeover gate stops further bot replies.
+ */
+async function deliverTurnAutoresponse(args: {
+  session: ChatSession;
+  botParticipantId: string;
+  pending: Message;
+  pendingPlain: string;
+  auto: TurnAutoresponse;
+  ownershipVersionAtRunStart: number;
+}): Promise<RunTurnStatus> {
+  const { session, botParticipantId, pending, auto } = args;
+  const staleGuard = auto.kind === 'guardrail';
+  if (auto.kind === 'guardrail') {
+    const fin = await finalizeReply(session, botParticipantId, auto.message, undefined, pending.id, staleGuard, args.ownershipVersionAtRunStart);
     if (fin.status === 'stale') return 'stale';
-    await routeBotMessageOutbound(session, fin.savedId, autoMsg);
-    if (auto.kind === 'escalation') await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+    await routeBotMessageOutbound(session, fin.savedId, auto.message);
     return 'answered';
   }
+  const autoMsg = await localizeMessage(auto.message, args.pendingPlain, session);
+  const fin = await finalizeReply(session, botParticipantId, autoMsg, undefined, pending.id, staleGuard, args.ownershipVersionAtRunStart);
+  if (fin.status === 'stale') return 'stale';
+  await routeBotMessageOutbound(session, fin.savedId, autoMsg);
+  if (auto.kind === 'escalation') await handleBotHandoff(session, botParticipantId, 'bot_escalation_keyword');
+  return 'answered';
+}
 
-  // Typing indicators — portal + widget over WS, and the end user's channel.
-  emitToTenantAgents(session.tenantId, 'typing:indicator', {
-    sessionId: session.id, isTyping: true, participantType: 'bot',
-  });
-  emitToSession(session.tenantId, session.id, 'typing:start', {});
-  void sendChannelTypingIndicator(session.id).catch(() => {});
-
+/** The live turn's text plus, for a picture turn, the image handed to the agent
+ *  as vision input. If the image fetch fails we still answer — with a note so the
+ *  bot acknowledges the photo instead of replying to an empty message. A document
+ *  turn appends its extracted text. Shared by the coalesced and legacy paths. */
+async function resolveTurnMessageInput(
+  session: ChatSession,
+  pending: Message,
+): Promise<{ messageContent: string; images?: AgentImageInput[] }> {
   let messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
   let images: AgentImageInput[] | undefined;
   if (pending.type === 'image') {
     const img = await resolveInboundImage(pending, session);
-    if (img) images = [img];
-    else if (!messageContent) messageContent = '[The customer sent an image, but it could not be loaded.]';
+    if (img) {
+      images = [img];
+    } else if (!messageContent) {
+      messageContent = '[The customer sent an image, but it could not be loaded.]';
+    }
   }
-
-  const history = await getCoalescedHistory(session.id, pending.id);
-
-  let result: AgentResult;
-  try {
-    result = await agentService.run(messageContent, session, tenant, history, images);
-  } finally {
-    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+  if (pending.type === 'file') {
+    const doc = renderDocumentForContext(pending, 'live');
+    messageContent = [messageContent, doc].filter(Boolean).join('\n\n');
   }
+  return { messageContent, images };
+}
 
-  // Map the agent result to (content, handoff, stale-guard). Only the normal
-  // answer paths are stale-guarded; error/handoff paths always finalise so the
-  // turn isn't retried forever (the human picks up the newer messages).
+/** The reply a coalesced turn will persist, deliver, and hand off on. */
+interface TurnReply {
+  content: string;
+  handoffReason: HandoffRequest['reason'] | null;
+  staleGuard: boolean;
+  extras: ReplyExtras;
+}
+
+/**
+ * Map the agent result to (content, handoff, stale-guard, extras). Only the
+ * normal answer paths are stale-guarded; error/handoff paths always finalise so
+ * the turn isn't retried forever (the human picks up the newer messages).
+ */
+function mapAgentResult(session: ChatSession, tenant: Tenant, result: AgentResult): TurnReply {
   let content: string;
   let handoffReason: HandoffRequest['reason'] | null = null;
   let staleGuard = false;
@@ -1303,62 +1412,173 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       handoffReason = 'bot_error';
       break;
   }
-  let quickReplies = result.type === 'response' ? result.quickReplies : undefined;
-  // Read alongside `quickReplies` and cleared alongside it, because the guardrail block below is
-  // about a reply the customer must not be shown - and a control attached to a suppressed reply
-  // would render under a fallback that says nothing about it.
-  let affordance = result.type === 'response' ? result.affordance : undefined;
+  return {
+    content,
+    handoffReason,
+    staleGuard,
+    extras: {
+      quickReplies: result.type === 'response' ? result.quickReplies : undefined,
+      // Read alongside `quickReplies` and cleared alongside it, because the guardrail block below is
+      // about a reply the customer must not be shown - and a control attached to a suppressed reply
+      // would render under a fallback that says nothing about it.
+      affordance: result.type === 'response' ? result.affordance : undefined,
+    },
+  };
+}
 
-  // ── Output guardrails (AC14) ──────────────────────────────────────────────
-  // Validate only AI-GENERATED content (response / booking confirmation); the
-  // error/budget/max_iterations branches already carry the platform-authored
-  // fallback. In enforce mode a blocked reply is treated exactly like an agent
-  // error: send the fallback (no quick replies) and hand off to a human.
-  if (result.type === 'response' || result.type === 'awaiting_confirmation') {
-    const fallbackMessage =
-      aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
-    const guard = await applyOutputGuardrails({
-      tenantId: session.tenantId, session, channel: session.channel,
-      content, fallbackMessage, generationPath: 'coalescer',
-      validationContext: result.validationContext,
-    });
-    if (guard.blocked) {
-      content = guard.content;
-      quickReplies = undefined;
-      affordance = undefined;
-      handoffReason = 'bot_error';
-      staleGuard = false;
-    }
-  }
+/**
+ * ── Output guardrails (AC14) ──────────────────────────────────────────────
+ * Validate only AI-GENERATED content (response / booking confirmation); the
+ * error/budget/max_iterations branches already carry the platform-authored
+ * fallback. In enforce mode a blocked reply is treated exactly like an agent
+ * error: send the fallback (no quick replies) and hand off to a human.
+ */
+async function guardTurnReply(
+  session: ChatSession,
+  aiSettings: NonNullable<BotAiSettings>,
+  result: AgentResult,
+  reply: TurnReply,
+): Promise<TurnReply> {
+  if (result.type !== 'response' && result.type !== 'awaiting_confirmation') return reply;
+  const fallbackMessage =
+    aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
+  const guard = await applyOutputGuardrails({
+    tenantId: session.tenantId, session, channel: session.channel,
+    content: reply.content, fallbackMessage, generationPath: 'coalescer',
+    validationContext: result.validationContext,
+  });
+  if (!guard.blocked) return reply;
+  return {
+    content: guard.content,
+    handoffReason: 'bot_error',
+    staleGuard: false,
+    extras: { quickReplies: undefined, affordance: undefined },
+  };
+}
 
-  // The customer explicitly asked for a human and `escalate_to_human` succeeded
-  // this run. Exactly ONE handoff per turn, and this reason WINS: it replaces any
-  // `bot_error` set above (including the guardrail block) and overrides the
-  // infraFailure no-handoff rule — a provider outage is no reason to lose a human
-  // the customer explicitly asked for. `staleGuard` is forced off to match the
-  // deterministic escalation-keyword path: a newer customer message arriving
-  // mid-run must not roll back the turn that asked for a person.
+/**
+ * Map + output-guardrail the agent result, then apply the explicit-escalation
+ * override.
+ *
+ * The customer explicitly asked for a human and `escalate_to_human` succeeded
+ * this run. Exactly ONE handoff per turn, and this reason WINS: it replaces any
+ * `bot_error` set above (including the guardrail block) and overrides the
+ * infraFailure no-handoff rule — a provider outage is no reason to lose a human
+ * the customer explicitly asked for. `staleGuard` is forced off to match the
+ * deterministic escalation-keyword path: a newer customer message arriving
+ * mid-run must not roll back the turn that asked for a person.
+ */
+async function resolveTurnOutcome(
+  session: ChatSession,
+  tenant: Tenant,
+  aiSettings: NonNullable<BotAiSettings>,
+  result: AgentResult,
+): Promise<TurnReply> {
+  const guarded = await guardTurnReply(
+    session, aiSettings, result, mapAgentResult(session, tenant, result),
+  );
   if (result.handoffRequested) {
-    handoffReason = 'escalation_trigger';
-    staleGuard = false;
+    return { ...guarded, handoffReason: 'escalation_trigger', staleGuard: false };
+  }
+  return guarded;
+}
+
+/** Transition waiting → bot on the first answered message (no-op if a handoff
+ *  moved it on). */
+async function transitionWaitingToBot(session: ChatSession): Promise<void> {
+  if (session.status !== 'waiting') return;
+  await sessionRepository
+    .createQueryBuilder()
+    .update(ChatSession)
+    .set({ status: 'bot' })
+    .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
+    .execute();
+}
+
+/**
+ * Run the platform agent EXACTLY ONCE for the snapped `pending` (= hwm) message,
+ * with history bounded to `<= hwm`, then finalise. The coalescer (not this fn)
+ * owns the run-lock, timing, and re-running. Returns 'answered' | 'stale' |
+ * 'noop' so the coalescer can clear state or re-arm.
+ */
+export async function runTurn(session: ChatSession, pending: Message): Promise<RunTurnStatus> {
+  // B-PR5a: mirror forwardMessageToN8n - release an EXPIRED timed human control
+  // before the routing gates, so a coalesced turn on an expired session is
+  // answered by the AI instead of noop-ing until the 60s sweep.
+  await releaseExpiredHumanControlOnInbound(session);
+
+  // Status gate — mirror forwardMessageToN8n: never run the agent on a session a
+  // human owns ('active'/'handoff') or that's closed. Without this the coalescer
+  // path would bypass human takeover (R11/AC9).
+  if (session.status !== 'bot' && session.status !== 'waiting') return 'noop';
+
+  // Ownership gate + fence snapshot (B2). `session` is loaded fresh by the
+  // coalescer right before this call; if ownership moves after this read, the
+  // finalize predicate (ownership_version = this value) rolls the reply back.
+  if (session.ownership !== 'bot_owned') return 'noop';
+  const ownershipVersionAtRunStart = session.ownershipVersion ?? 0;
+
+  // Guardrail pause used to return here. That skipped the inbound gate, so a
+  // follow-up that arrived after bot_loop/phishing paused the session stayed
+  // unflagged and unanswered on a conversation that still showed status=bot.
+  // The gate's already-disabled path flags those messages. Do not bypass it.
+
+  const config = await resolveTurnConfig(session, pending);
+  if (!config) return 'noop';
+  const { tenant, aiSettings } = config;
+
+  if (await hasPendingExtraction(session.id)) return 'pending-document';
+
+  const gate = await gateTurnWindow(session, pending);
+  if (gate.blockedCategory) {
+    logger.info(`[guardrails] turn blocked for session ${session.id} (${gate.blockedCategory})`);
+    return 'noop';
+  }
+  // Pause still wins after a clean gate (shadow mode, or the flag was already
+  // off). The gate above is what flags the follow-up; this only stops the agent.
+  if (session.aiAutoReplyEnabled === false) return 'noop';
+
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+
+  const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
+  const auto = await resolveTurnAutoresponse({
+    session, pending, pendingPlain, aiSettings,
+    windowMsgs: gate.windowMsgs, guardrailReply: gate.guardrailReply,
+  });
+  if (auto) {
+    return deliverTurnAutoresponse({
+      session, botParticipantId: botParticipant.id, pending, pendingPlain, auto,
+      ownershipVersionAtRunStart,
+    });
   }
 
-  const extras: ReplyExtras = { quickReplies, affordance };
-  const fin = await finalizeReply(session, botParticipant.id, content, extras, pending.id, staleGuard, ownershipVersionAtRunStart);
+  // Typing indicators — portal + widget over WS, and the end user's channel.
+  emitToTenantAgents(session.tenantId, 'typing:indicator', {
+    sessionId: session.id, isTyping: true, participantType: 'bot',
+  });
+  emitToSession(session.tenantId, session.id, 'typing:start', {});
+  void sendChannelTypingIndicator(session.id).catch(() => {});
+
+  const input = await resolveTurnMessageInput(session, pending);
+  const history = await getCoalescedHistory(session.id, pending.id);
+
+  let result: AgentResult;
+  try {
+    result = await agentService!.run(input.messageContent, session, tenant, history, input.images);
+  } finally {
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+  }
+
+  const outcome = await resolveTurnOutcome(session, tenant, aiSettings, result);
+
+  const fin = await finalizeReply(session, botParticipant.id, outcome.content, outcome.extras, pending.id, outcome.staleGuard, ownershipVersionAtRunStart);
   if (fin.status === 'stale') return 'stale';
 
-  await routeBotMessageOutbound(session, fin.savedId, content, extras, result.type === 'response' ? result.offer : undefined);
+  await routeBotMessageOutbound(session, fin.savedId, outcome.content, outcome.extras, result.type === 'response' ? result.offer : undefined);
 
-  if (handoffReason) await handleBotHandoff(session, botParticipant.id, handoffReason);
+  if (outcome.handoffReason) await handleBotHandoff(session, botParticipant.id, outcome.handoffReason);
 
-  if (session.status === 'waiting') {
-    await sessionRepository
-      .createQueryBuilder()
-      .update(ChatSession)
-      .set({ status: 'bot' })
-      .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
-      .execute();
-  }
+  await transitionWaitingToBot(session);
 
   return 'answered';
 }
@@ -1407,7 +1627,7 @@ async function getConversationHistory(
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] })
+    .andWhere(aiVisibleTypesSql('message'))
     .andWhere('message.guardrailFlagged = false');
 
   if (excludeMessageId) {
@@ -1425,11 +1645,14 @@ async function getConversationHistory(
   // re-fetched and shown to the model.
   return messages.reverse().map((msg) => {
     const text = msg.contentEncrypted ? decrypt(msg.content) : msg.content;
-    const content = msg.type === 'image'
-      ? (text ? `[Image] ${text}` : '[Image]')
-      : text;
+    let content = text;
+    if (msg.type === 'image') content = text ? `[Image] ${text}` : '[Image]';
+    else if (msg.type === 'file') {
+      const doc = renderDocumentForContext(msg, 'history');
+      content = text ? `${text}\n\n${doc}` : doc;
+    }
     return {
-      role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
+      role: msg.participant?.type === 'bot' ? ('assistant' as const) : ('user' as const),
       content,
     };
   });

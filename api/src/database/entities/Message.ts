@@ -65,6 +65,17 @@ export class Message {
     editedAt?: Date;
     quickReplies?: (string | { title: string; value?: string })[];
     customData?: Record<string, unknown>;
+    uploadSessionId?: string;
+    extraction?: {
+      status: 'pending' | 'ready' | 'failed' | 'unsupported' | 'infected';
+      text?: string;
+      textEncrypted?: boolean;
+      chars?: number;
+      pages?: number;
+      method?: 'text' | 'vision';
+      failReason?: string;
+      startedAt?: string;
+    };
   };
 
   @Column({

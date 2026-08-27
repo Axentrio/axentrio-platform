@@ -34,6 +34,7 @@ import { getMetaPageAccessToken, getWhatsAppAccessToken } from './credential-uti
 import { FB_GRAPH_API } from './meta/graph-api';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { trimmedName } from '../realtime/conversation-serializer';
+import { enqueueChatDocument } from '../services/chat-documents';
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -45,9 +46,10 @@ export async function processInboundEvent(
   const eventLogRepo = getRepository(WebhookEventLog);
 
   // ── 1. Dedupe check ────────────────────────────────────────────────────
-  const existing = await eventLogRepo.findOne({
+  // `getRepository` erases the entity type, so name the row shape here.
+  const existing = (await eventLogRepo.findOne({
     where: { dedupeKey: event.dedupeKey },
-  });
+  })) as WebhookEventLog | null;
 
   // `skipped` (entitlement-gated) is terminal like `processed` — a provider
   // redelivery of a skipped event must dedupe, not reprocess.
@@ -57,24 +59,7 @@ export async function processInboundEvent(
   }
 
   // ── 2. Mark as processing ──────────────────────────────────────────────
-  let eventLogEntry = existing;
-  if (eventLogEntry) {
-    eventLogEntry.status = 'processing';
-    eventLogEntry.processingAttempts += 1;
-    await eventLogRepo.save(eventLogEntry);
-  } else {
-    console.warn(`[inbound-pipeline] No event log entry found for dedupe key: ${event.dedupeKey}, creating one`);
-    // Create the missing entry
-    const newEntry = eventLogRepo.create({
-      channelConnectionId: connection.id,
-      channel: connection.channel,
-      dedupeKey: event.dedupeKey,
-      eventType: event.rawEventType,
-      rawPayload: {},
-      status: 'received',
-    });
-    eventLogEntry = await eventLogRepo.save(newEntry);
-  }
+  const eventLogEntry = await markEventProcessing(eventLogRepo, existing, event, connection);
 
   // ── 2b. Channel entitlement gate (channels plan D3/D9) ─────────────────
   // The webhook was already ACKed 200 upstream, so provider delivery health
@@ -93,24 +78,12 @@ export async function processInboundEvent(
 
   try {
     // ── 3. Non-message events (delivery receipts, read receipts, reactions) ─
-    if (event.type === 'delivery' || event.type === 'read') {
-      await handleReceiptEvent(event, connection);
-      await markEventProcessed(eventLogRepo, event.dedupeKey);
-      return;
-    }
-
-    if (event.type === 'reaction' || event.type === 'status' || event.type === 'unknown') {
-      // Log and skip for now
-      logger.debug(`[inbound-pipeline] Ignoring ${event.type} event for ${connection.channel}`);
-      await markEventProcessed(eventLogRepo, event.dedupeKey);
+    if (await handleNonMessageEvent(event, connection, eventLogRepo)) {
       return;
     }
 
     // ── 4. Message / postback events ─────────────────────────────────────
-    if (
-      (connection.channel === 'messenger' || connection.channel === 'instagram') &&
-      !trimmedName(event.sender.displayName)
-    ) {
+    if (needsMetaSenderName(event, connection)) {
       event = await attachMetaSenderName(event, connection);
     }
 
@@ -137,42 +110,7 @@ export async function processInboundEvent(
     }
 
     // Hook 1 (leads-across-all-channels): capture a Lead deterministically, no LLM.
-    // Gated by the per-channel auto-capture toggle (default on). Fire-and-forget:
-    // the service logs its own failures and must never block message processing
-    // or the (already-sent) webhook ACK.
-    //
-    // Fires on a new CONTACT (`created`) *or* a new CONVERSATION (`sessionCreated`,
-    // i.e. a returning contact whose previous session had closed). The second case
-    // used to be skipped, which meant a returning customer's later conversations were
-    // never linked and their history was unrecoverable — `chatbot_leads.session_id`
-    // only ever points at the most recent one.
-    //
-    // Widening this guard does NOT duplicate the lead-created webhook or operator
-    // alert: that fan-out is keyed on `row.inserted` inside `upsertLead`, and a
-    // returning contact takes the ON CONFLICT update path. What the extra call does
-    // is link the new conversation — exactly once per conversation, not per message.
-    if ((created || sessionCreated) && (connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads !== false) {
-      // Guardrails: a clearly spam/scam/solicitation first message must not become
-      // a lead (AC17/19). Classify (pure, cheap); only when flagged do we check the
-      // tenant's enforce flag — shadow mode stays behaviour-neutral. See §1A.
-      const firstContent = event.type === 'postback'
-        ? event.postback?.payload || ''
-        : event.message?.content || '';
-      const flagged = classifyMessage(firstContent, connection.channel).category !== 'clean';
-      const suppress = flagged && (await isGuardrailsEnforcing(connection.tenantId));
-      if (!suppress) {
-        void upsertLead({
-          dataSource: AppDataSource,
-          tenantId: connection.tenantId,
-          sessionId: session.id,
-          botId: session.botId ?? null,
-          source: 'channel',
-          channel: connection.channel,
-          externalUserId: binding.externalUserId,
-          name: binding.externalUserName,
-        }).catch(() => {});
-      }
-    }
+    await maybeCaptureInboundLead(event, connection, { session, binding, created, sessionCreated });
 
     // ── 5. Save the message (encrypted) to DB ────────────────────────────
     const messageRepo = getRepository(Message);
@@ -180,56 +118,13 @@ export async function processInboundEvent(
     // Cap to the guardrails scan window (truncate — a channel webhook message is
     // already accepted upstream, so we keep it rather than reject). Keeps the
     // "stored message never exceeds the scan window" invariant on this path too.
-    const content = (event.type === 'postback'
-      ? event.postback?.payload || ''
-      : event.message?.content || '').slice(0, MAX_MESSAGE_CONTENT_CHARS);
+    const content = inboundEventContent(event).slice(0, MAX_MESSAGE_CONTENT_CHARS);
 
-    const messageType = event.type === 'postback'
-      ? 'text'
-      : mapMessageType(event.message?.type);
+    const savedMessage = await messageRepo.save(
+      messageRepo.create(buildInboundMessageData(event, connection, session, participant, content)),
+    ) as Message;
 
-    const encryptedContent = encrypt(content);
-
-    const messageData: DeepPartial<Message> = {
-      sessionId: session.id,
-      tenantId: connection.tenantId,
-      participantId: participant.id,
-      type: messageType,
-      content: encryptedContent,
-      contentEncrypted: true,
-      status: 'sent',
-      sentAt: event.timestamp,
-      // Persist media info whenever the event carries a URL (Messenger/IG) OR
-      // just metadata (WhatsApp/Telegram deliver a media id, not a URL — keep it
-      // in customData so the agent can resolve+download it later for vision).
-      metadata: (event.message?.mediaUrl || event.message?.mediaMetadata)
-        ? {
-            ...(event.message?.mediaUrl ? { fileUrl: event.message.mediaUrl } : {}),
-            customData: event.message?.mediaMetadata as Record<string, unknown> | undefined,
-          }
-        : undefined,
-    };
-
-    const savedMessage = await messageRepo.save(messageRepo.create(messageData)) as Message;
-
-    // Always advance lastInboundAt on every inbound — it's the 24h messaging-window
-    // anchor the HUMAN_AGENT tag decision relies on (Meta events carry no
-    // externalMessageId, so gating this on it left Messenger/IG lastInboundAt null
-    // and human-agent replies stuck on RESPONSE). MONOTONIC (GREATEST) so an
-    // out-of-order/retried event can't move the anchor backward and wrongly tag an
-    // inside-window reply. lastInboundMessageId is set only when the platform gives
-    // us a message id (WhatsApp anchors typing to it).
-    const inboundTs = event.timestamp ?? new Date();
-    await getRepository(ConversationBinding)
-      .createQueryBuilder()
-      .update()
-      .set({
-        lastInboundAt: () => 'GREATEST(COALESCE("lastInboundAt", :inboundTs), :inboundTs)',
-        ...(event.externalMessageId ? { lastInboundMessageId: event.externalMessageId } : {}),
-      })
-      .where('id = :id', { id: binding.id })
-      .setParameter('inboundTs', inboundTs)
-      .execute();
+    await touchInboundBinding(event, binding);
 
     // ── 5b. Ingest inbound media (fire-and-forget) ───────────────────────
     // Download/scan an inbound image into a `ready` upload_session so it
@@ -241,6 +136,20 @@ export async function processInboundEvent(
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+
+    if (
+      savedMessage.type === 'file'
+      && event.message?.type === 'file'
+      && (connection.channel === 'whatsapp' || connection.channel === 'messenger' || connection.channel === 'instagram')
+    ) {
+      void enqueueChatDocument(session, savedMessage, connection.channel).catch((err) =>
+        logger.warn('[inbound] chat document enqueue failed', {
+          sessionId: session.id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
 
     // Update session activity — targeted UPDATE, never save(session): the
     // entity was loaded before this message, and a full-entity write would
@@ -255,39 +164,7 @@ export async function processInboundEvent(
     );
 
     // ── 6. Broadcast to portal agents via WebSocket ──────────────────────
-    emitToSession(connection.tenantId, session.id, 'message:receive', {
-      id: savedMessage.id,
-      type: savedMessage.type,
-      content, // plain text for the portal
-      senderType: 'user',
-      timestamp: savedMessage.sentAt?.toISOString() || new Date().toISOString(),
-    });
-
-    emitToTenantAgents(connection.tenantId, 'message:new', {
-      sessionId: session.id,
-      message: {
-        id: savedMessage.id,
-        type: savedMessage.type,
-        content,
-        senderType: 'user',
-        timestamp: savedMessage.sentAt?.toISOString() || new Date().toISOString(),
-      },
-    });
-
-    // B-PR3a: the normalized events, alongside the legacy pair (additive).
-    // Post-commit: the message save and the counter UPDATE are done above.
-    emitMessageCreated(session, {
-      id: savedMessage.id,
-      sessionId: session.id,
-      type: savedMessage.type,
-      content,
-      senderType: 'user',
-      status: savedMessage.status,
-      createdAt: savedMessage.createdAt,
-    });
-    await emitConversationUpsert(session, {
-      lastMessage: { content, senderType: 'user' },
-    });
+    await broadcastInboundMessage(connection, session, savedMessage, content);
 
     // ── 7. Schedule a (coalesced) agent turn ─────────────────────────────
     // scheduleTurn is fast (Redis write + delayed-job add); the await keeps the
@@ -303,16 +180,239 @@ export async function processInboundEvent(
     await markEventProcessed(eventLogRepo, event.dedupeKey);
   } catch (error) {
     // Mark as failed
-    if (eventLogEntry) {
-      eventLogEntry.status = 'failed';
-      eventLogEntry.error = error instanceof Error ? error.message.slice(0, 500) : 'Unknown error';
-      await eventLogRepo.save(eventLogEntry);
-    }
+    eventLogEntry.status = 'failed';
+    eventLogEntry.error = error instanceof Error ? error.message.slice(0, 500) : 'Unknown error';
+    await eventLogRepo.save(eventLogEntry);
     throw error;
   }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Flip the event log row to `processing`, creating the row when the webhook
+ * receiver never wrote one.
+ */
+async function markEventProcessing(
+  eventLogRepo: ReturnType<typeof getRepository<WebhookEventLog>>,
+  existing: WebhookEventLog | null,
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+): Promise<WebhookEventLog> {
+  if (existing) {
+    existing.status = 'processing';
+    existing.processingAttempts += 1;
+    await eventLogRepo.save(existing);
+    return existing;
+  }
+
+  console.warn(`[inbound-pipeline] No event log entry found for dedupe key: ${event.dedupeKey}, creating one`);
+  // Create the missing entry
+  const newEntry = eventLogRepo.create({
+    channelConnectionId: connection.id,
+    channel: connection.channel,
+    dedupeKey: event.dedupeKey,
+    eventType: event.rawEventType,
+    rawPayload: {},
+    status: 'received',
+  });
+  return (await eventLogRepo.save(newEntry)) as WebhookEventLog;
+}
+
+/**
+ * Handle the non-message event types (receipts, reactions, statuses).
+ * Returns true when the event is fully handled and the pipeline must stop.
+ */
+async function handleNonMessageEvent(
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+  eventLogRepo: ReturnType<typeof getRepository<WebhookEventLog>>,
+): Promise<boolean> {
+  if (event.type === 'delivery' || event.type === 'read') {
+    await handleReceiptEvent(event, connection);
+    await markEventProcessed(eventLogRepo, event.dedupeKey);
+    return true;
+  }
+
+  if (event.type === 'reaction' || event.type === 'status' || event.type === 'unknown') {
+    // Log and skip for now
+    logger.debug(`[inbound-pipeline] Ignoring ${event.type} event for ${connection.channel}`);
+    await markEventProcessed(eventLogRepo, event.dedupeKey);
+    return true;
+  }
+
+  return false;
+}
+
+/** Meta channels deliver no sender name on the event — fetch it once per event. */
+function needsMetaSenderName(event: NormalizedEvent, connection: ChannelConnection): boolean {
+  return (
+    (connection.channel === 'messenger' || connection.channel === 'instagram') &&
+    !trimmedName(event.sender.displayName)
+  );
+}
+
+/** The customer-authored text of a message or postback event. */
+function inboundEventContent(event: NormalizedEvent): string {
+  return event.type === 'postback'
+    ? event.postback?.payload || ''
+    : event.message?.content || '';
+}
+
+/**
+ * Hook 1 (leads-across-all-channels): capture a Lead deterministically, no LLM.
+ * Gated by the per-channel auto-capture toggle (default on). Fire-and-forget:
+ * the service logs its own failures and must never block message processing
+ * or the (already-sent) webhook ACK.
+ *
+ * Fires on a new CONTACT (`created`) *or* a new CONVERSATION (`sessionCreated`,
+ * i.e. a returning contact whose previous session had closed). The second case
+ * used to be skipped, which meant a returning customer's later conversations were
+ * never linked and their history was unrecoverable — `chatbot_leads.session_id`
+ * only ever points at the most recent one.
+ *
+ * Widening this guard does NOT duplicate the lead-created webhook or operator
+ * alert: that fan-out is keyed on `row.inserted` inside `upsertLead`, and a
+ * returning contact takes the ON CONFLICT update path. What the extra call does
+ * is link the new conversation — exactly once per conversation, not per message.
+ */
+async function maybeCaptureInboundLead(
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+  ctx: {
+    session: ChatSession;
+    binding: ConversationBinding;
+    created: boolean;
+    sessionCreated: boolean;
+  },
+): Promise<void> {
+  const { session, binding, created, sessionCreated } = ctx;
+  if (!(created || sessionCreated)) return;
+  if ((connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads === false) return;
+
+  // Guardrails: a clearly spam/scam/solicitation first message must not become
+  // a lead (AC17/19). Classify (pure, cheap); only when flagged do we check the
+  // tenant's enforce flag — shadow mode stays behaviour-neutral. See §1A.
+  const firstContent = inboundEventContent(event);
+  const flagged = classifyMessage(firstContent, connection.channel).category !== 'clean';
+  const suppress = flagged && (await isGuardrailsEnforcing(connection.tenantId));
+  if (!suppress) {
+    void upsertLead({
+      dataSource: AppDataSource,
+      tenantId: connection.tenantId,
+      sessionId: session.id,
+      botId: session.botId ?? null,
+      source: 'channel',
+      channel: connection.channel,
+      externalUserId: binding.externalUserId,
+      name: binding.externalUserName,
+    }).catch(() => {});
+  }
+}
+
+/** Media info to persist: a URL (Messenger/IG) or provider metadata (WhatsApp/Telegram). */
+function inboundMessageMetadata(event: NormalizedEvent): DeepPartial<Message>['metadata'] {
+  // Persist media info whenever the event carries a URL (Messenger/IG) OR
+  // just metadata (WhatsApp/Telegram deliver a media id, not a URL — keep it
+  // in customData so the agent can resolve+download it later for vision).
+  if (!event.message?.mediaUrl && !event.message?.mediaMetadata) return undefined;
+  return {
+    ...(event.message?.mediaUrl ? { fileUrl: event.message.mediaUrl } : {}),
+    customData: event.message?.mediaMetadata as Record<string, unknown> | undefined,
+  };
+}
+
+/** The Message row for an inbound message/postback event. */
+function buildInboundMessageData(
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+  session: ChatSession,
+  participant: Participant,
+  content: string,
+): DeepPartial<Message> {
+  const messageType = event.type === 'postback'
+    ? 'text'
+    : mapMessageType(event.message?.type);
+
+  return {
+    sessionId: session.id,
+    tenantId: connection.tenantId,
+    participantId: participant.id,
+    type: messageType,
+    content: encrypt(content),
+    contentEncrypted: true,
+    status: 'sent',
+    sentAt: event.timestamp,
+    metadata: inboundMessageMetadata(event),
+  };
+}
+
+/**
+ * Always advance lastInboundAt on every inbound — it's the 24h messaging-window
+ * anchor the HUMAN_AGENT tag decision relies on (Meta events carry no
+ * externalMessageId, so gating this on it left Messenger/IG lastInboundAt null
+ * and human-agent replies stuck on RESPONSE). MONOTONIC (GREATEST) so an
+ * out-of-order/retried event can't move the anchor backward and wrongly tag an
+ * inside-window reply. lastInboundMessageId is set only when the platform gives
+ * us a message id (WhatsApp anchors typing to it).
+ */
+async function touchInboundBinding(event: NormalizedEvent, binding: ConversationBinding): Promise<void> {
+  const inboundTs = event.timestamp ?? new Date();
+  await getRepository(ConversationBinding)
+    .createQueryBuilder()
+    .update()
+    .set({
+      lastInboundAt: () => 'GREATEST(COALESCE("lastInboundAt", :inboundTs), :inboundTs)',
+      ...(event.externalMessageId ? { lastInboundMessageId: event.externalMessageId } : {}),
+    })
+    .where('id = :id', { id: binding.id })
+    .setParameter('inboundTs', inboundTs)
+    .execute();
+}
+
+/** Fan the saved inbound message out to the portal (legacy pair + normalized events). */
+async function broadcastInboundMessage(
+  connection: ChannelConnection,
+  session: ChatSession,
+  savedMessage: Message,
+  content: string,
+): Promise<void> {
+  const timestamp = savedMessage.sentAt?.toISOString() || new Date().toISOString();
+
+  emitToSession(connection.tenantId, session.id, 'message:receive', {
+    id: savedMessage.id,
+    type: savedMessage.type,
+    content, // plain text for the portal
+    senderType: 'user',
+    timestamp,
+  });
+
+  emitToTenantAgents(connection.tenantId, 'message:new', {
+    sessionId: session.id,
+    message: {
+      id: savedMessage.id,
+      type: savedMessage.type,
+      content,
+      senderType: 'user',
+      timestamp,
+    },
+  });
+
+  // B-PR3a: the normalized events, alongside the legacy pair (additive).
+  // Post-commit: the message save and the counter UPDATE are done above.
+  emitMessageCreated(session, {
+    id: savedMessage.id,
+    sessionId: session.id,
+    type: savedMessage.type,
+    content,
+    senderType: 'user',
+    status: savedMessage.status,
+    createdAt: savedMessage.createdAt,
+  });
+  await emitConversationUpsert(session, {
+    lastMessage: { content, senderType: 'user' },
+  });
+}
 
 /**
  * Handle delivery / read receipt events by updating MessageDelivery rows.

@@ -38,11 +38,11 @@ const IMAGE_FORMAT_TO_MIME: Record<string, string> = {
 // Best-effort: returns null on any failure so the turn degrades to text-only
 // rather than erroring the whole reply. The sharp import stays lazy so the
 // native dep never lands on this hot module's load path.
-async function downloadImageAsContentPart(
+export async function downloadInboundMediaBytes(
   url: string,
-  label: string,
   authHeader?: Record<string, string>,
-): Promise<AgentImageInput | null> {
+  maxBytes = MAX_IMAGE_BYTES,
+): Promise<Buffer | null> {
   try {
     let current = url;
     let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
@@ -53,8 +53,8 @@ async function downloadImageAsContentPart(
         responseType: 'arraybuffer',
         headers: authHeader,
         timeout: 15_000,
-        maxContentLength: MAX_IMAGE_BYTES,
-        maxBodyLength: MAX_IMAGE_BYTES,
+        maxContentLength: maxBytes,
+        maxBodyLength: maxBytes,
       });
       if (response.status >= 300 && response.status < 400) {
         const location = (response.headers as Record<string, string> | undefined)?.location;
@@ -66,14 +66,29 @@ async function downloadImageAsContentPart(
       break;
     }
     if (!response || response.status < 200 || response.status >= 300) {
-      logger.warn(`${label} image fetch failed (status ${response?.status ?? 'redirect-no-location'}) — answering without vision`);
+      logger.warn(`Inbound media fetch failed (status ${response?.status ?? 'redirect-no-location'})`);
       return null;
     }
     const buf = Buffer.from(response.data as ArrayBuffer);
-    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
-      logger.warn(`${label} image rejected (size ${buf.byteLength}B) — answering without vision`);
+    if (buf.byteLength === 0 || buf.byteLength > maxBytes) {
+      logger.warn(`Inbound media rejected (size ${buf.byteLength}B)`);
       return null;
     }
+    return buf;
+  } catch (error) {
+    logger.warn('Inbound media fetch threw', { error });
+    return null;
+  }
+}
+
+async function downloadImageAsContentPart(
+  url: string,
+  label: string,
+  authHeader?: Record<string, string>,
+): Promise<AgentImageInput | null> {
+  try {
+    const buf = await downloadInboundMediaBytes(url, authHeader, MAX_IMAGE_BYTES);
+    if (!buf) return null;
     // Authoritative format sniff via sharp.
     const sharp = (await import('sharp')).default;
     let format: string | undefined;
@@ -99,19 +114,17 @@ function fetchInboundImageForAgent(url: string): Promise<AgentImageInput | null>
   return downloadImageAsContentPart(url, 'Inbound');
 }
 
-// WhatsApp: the webhook delivers a media *id*, not a URL. Resolve it via the
-// Graph API (`GET /<media-id>`) to a temporary, token-gated download URL, then
-// download the bytes — BOTH requests need the connection's WhatsApp access
-// token as a Bearer header. The token is resolved from the session's bound
-// ChannelConnection.
-async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): Promise<AgentImageInput | null> {
+export async function resolveWhatsAppMediaUrl(
+  sessionId: string,
+  mediaId: string,
+): Promise<{ url: string; authHeader: Record<string, string> } | null> {
   try {
     const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
       where: { sessionId },
       select: { channelConnectionId: true },
     });
     if (!binding) {
-      logger.warn('WhatsApp image: no conversation binding for session — answering without vision');
+      logger.warn('WhatsApp media: no conversation binding for session');
       return null;
     }
     const connection = await AppDataSource.getRepository(ChannelConnection).findOne({
@@ -119,12 +132,10 @@ async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): P
     });
     const accessToken = connection ? getWhatsAppAccessToken(connection.credentials) : null;
     if (!accessToken) {
-      logger.warn('WhatsApp image: no access token on connection — answering without vision');
+      logger.warn('WhatsApp media: no access token on connection');
       return null;
     }
     const authHeader = { Authorization: `Bearer ${accessToken}` };
-
-    // Step 1: media id → temporary download URL (JSON: { url, mime_type, ... }).
     let mediaUrl: string | undefined;
     try {
       const meta = await safeOutboundRequest({
@@ -135,20 +146,24 @@ async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): P
       });
       mediaUrl = (meta.data as { url?: string } | undefined)?.url;
     } catch (error) {
-      logger.warn('WhatsApp image: media-id resolve failed — answering without vision', { error });
+      logger.warn('WhatsApp media: media-id resolve failed', { error });
       return null;
     }
     if (!mediaUrl) {
-      logger.warn('WhatsApp image: media-id resolve returned no url — answering without vision');
+      logger.warn('WhatsApp media: media-id resolve returned no url');
       return null;
     }
-
-    // Step 2: download the bytes (token required, may redirect).
-    return downloadImageAsContentPart(mediaUrl, 'WhatsApp', authHeader);
+    return { url: mediaUrl, authHeader };
   } catch (error) {
-    logger.warn('WhatsApp image fetch threw — answering without vision', { error });
+    logger.warn('WhatsApp media resolve threw', { error });
     return null;
   }
+}
+
+async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): Promise<AgentImageInput | null> {
+  const resolved = await resolveWhatsAppMediaUrl(sessionId, mediaId);
+  if (!resolved) return null;
+  return downloadImageAsContentPart(resolved.url, 'WhatsApp', resolved.authHeader);
 }
 
 // Resolve an inbound image message into a vision content part, picking the right

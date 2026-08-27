@@ -70,6 +70,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       'video/mp4', 'video/quicktime',
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'text/plain',
     ],
     
@@ -3045,6 +3047,37 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           // must not be linkable before it has cleared scanning.
           file: { name: file.name, size: file.size, type: file.type },
         });
+
+        try {
+          const posted = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/message`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + this.token,
+            },
+            body: JSON.stringify({
+              content: '',
+              type: 'file',
+              metadata: {
+                uploadSessionId: upload.sessionId,
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: file.type,
+              },
+            }),
+          }, 15000);
+          if (posted.ok) {
+            const postedBody = await posted.json();
+            const postedId = postedBody && postedBody.data && postedBody.data.message && postedBody.data.message.id;
+            const last = this.messages[this.messages.length - 1];
+            if (postedId && last && last.sender === 'user' && last.file) {
+              last.id = postedId;
+            }
+          }
+        } catch (postErr) {
+          this.log('File message post failed:', postErr);
+        }
+
 
         this.hideProgress();
 

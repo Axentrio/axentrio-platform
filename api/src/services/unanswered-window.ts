@@ -7,6 +7,13 @@ import { AppDataSource } from '../database/data-source';
 import { Message } from '../database/entities/Message';
 import type { ChatSession } from '../database/entities/ChatSession';
 import { decrypt } from '../utils/encryption';
+import { renderDocumentForContext } from './chat-documents';
+
+export function aiVisibleTypesSql(alias: string): string {
+  return `(${alias}.type IN ('text','image') OR (${alias}.type = 'file' AND ${alias}.metadata->'extraction'->>'status' IN ('ready','failed','unsupported','infected')))`;
+}
+
+export const AI_VISIBLE_TYPES_SQL = aiVisibleTypesSql('m');
 
 const messageRepository = AppDataSource.getRepository(Message);
 
@@ -26,7 +33,7 @@ export async function getNewestUnansweredUserMessage(session: ChatSession): Prom
     .innerJoin('m.participant', 'p')
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
-    .andWhere("m.type IN ('text','image')")
+    .andWhere(AI_VISIBLE_TYPES_SQL)
     .andWhere("p.type = 'user'")
     .andWhere('m.guardrailFlagged = false');
   if (session.lastCoalescedAnswerMessageId) {
@@ -61,7 +68,7 @@ export async function getOldestUnansweredUserMessage(
     .innerJoin('m.participant', 'p')
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
-    .andWhere("m.type IN ('text','image')")
+    .andWhere(AI_VISIBLE_TYPES_SQL)
     .andWhere("p.type = 'user'")
     .andWhere('m.guardrailFlagged = false');
   if (session.lastCoalescedAnswerMessageId) {
@@ -130,7 +137,7 @@ export async function getUnansweredBounds(
     .addSelect('MAX(m.created_at)', 'lastat')
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
-    .andWhere("m.type IN ('text','image')")
+    .andWhere(AI_VISIBLE_TYPES_SQL)
     .andWhere("p.type = 'user'")
     .andWhere('m.guardrailFlagged = false');
   if (session.lastCoalescedAnswerMessageId) {
@@ -161,7 +168,7 @@ export async function getCoalescedHistory(
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sid', { sid: sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere("message.type IN ('text','image')")
+    .andWhere(aiVisibleTypesSql('message'))
     .andWhere('message.guardrailFlagged = false')
     .andWhere('message.id != :hwmId', { hwmId })
     .andWhere(
@@ -182,7 +189,12 @@ export async function getCoalescedHistory(
     .reverse()
     .map((msg) => {
       const text = msg.contentEncrypted ? decrypt(msg.content) : msg.content;
-      const content = msg.type === 'image' ? (text ? `[Image] ${text}` : '[Image]') : text;
+      let content = text;
+      if (msg.type === 'image') content = text ? `[Image] ${text}` : '[Image]';
+      else if (msg.type === 'file') {
+        const doc = renderDocumentForContext(msg, 'history');
+        content = text ? `${text}\n\n${doc}` : doc;
+      }
       return {
         role: msg.participant?.type === 'bot' ? ('assistant' as const) : ('user' as const),
         content,
@@ -218,7 +230,7 @@ export async function getUnansweredUserWindow(session: ChatSession, hwmId: strin
     .leftJoinAndSelect('m.participant', 'p')
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
-    .andWhere("m.type IN ('text','image')")
+    .andWhere(AI_VISIBLE_TYPES_SQL)
     .andWhere("p.type = 'user'")
     .andWhere('m.guardrailFlagged = false')
     .andWhere(

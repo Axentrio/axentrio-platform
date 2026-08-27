@@ -9,7 +9,12 @@ const pdfParse = require('pdf-parse');
  */
 const MAX_PDF_PAGES = 1000;
 
-export async function extractPdf(buffer: Buffer): Promise<string> {
+export async function extractPdfDetailed(buffer: Buffer): Promise<{ text: string; pages: number }> {
   const result = await pdfParse(buffer, { max: MAX_PDF_PAGES });
-  return result.text;
+  return { text: result.text ?? '', pages: result.numpages ?? 0 };
+}
+
+export async function extractPdf(buffer: Buffer): Promise<string> {
+  const { text } = await extractPdfDetailed(buffer);
+  return text;
 }

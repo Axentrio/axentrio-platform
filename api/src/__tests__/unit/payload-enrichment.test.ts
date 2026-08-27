@@ -47,6 +47,11 @@ vi.mock('../../n8n/types', () => ({}));
 vi.mock('../../websocket/socket.handler', () => ({ emitToTenantAgents: vi.fn() }));
 vi.mock('../../llm/rag.service', () => ({ generateResponse: vi.fn() }));
 vi.mock('../../channels/outbound-router', () => ({ routeOutboundMessage: vi.fn() }));
+vi.mock('../../services/chat-documents', () => ({
+  hasPendingExtraction: vi.fn(async () => false),
+  renderDocumentForContext: vi.fn(() => ''),
+}));
+
 
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 

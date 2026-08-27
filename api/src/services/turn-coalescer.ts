@@ -362,6 +362,10 @@ export async function coalesceProcessor(job: Job): Promise<void> {
     } else if (status === 'stale') {
       // A newer message arrived (or watermark race) — let it form the next turn.
       await rearmWithBackoff(sessionId, tenantId, attempt, 'stale');
+    } else if (status === 'pending-document') {
+      const { pendingDocumentRearmDelayMs } = await import('./chat-documents');
+      const delay = await pendingDocumentRearmDelayMs(sessionId);
+      await rearm(sessionId, tenantId, delay, 0);
     }
     // 'noop' (paused bot / AI off / no tenant): nothing to clear or re-arm.
   } catch (err) {

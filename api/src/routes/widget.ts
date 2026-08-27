@@ -27,6 +27,7 @@ import {
   assertValidVisitorId,
 } from '../services/widget-session-identity';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
+import { enqueueChatDocument } from '../services/chat-documents';
 import { conversationCommands } from '../services/conversation-command.service';
 import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
 import type { HandoffReason } from '../database/entities/HandoffRequest';
@@ -111,6 +112,41 @@ async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
   }
 }
 
+type WidgetBotSettings = NonNullable<Bot['settings']>;
+
+function buildWidgetAppearance(botSettings: WidgetBotSettings) {
+  const widgetSettings = (botSettings.widget ?? {}) as {
+    avatarUrl?: string | null;
+    launcherPosition?: 'bottom-right' | 'bottom-left';
+    launcherLabel?: string | null;
+  };
+  return {
+    avatarUrl: widgetSettings.avatarUrl || null,
+    launcherPosition: widgetSettings.launcherPosition || 'bottom-right',
+    launcherLabel: widgetSettings.launcherLabel || null,
+  };
+}
+
+function buildWidgetFeatureFlags(botSettings: WidgetBotSettings) {
+  return {
+    fileUploadEnabled: botSettings.features?.fileUploadEnabled ?? false,
+    handoffEnabled: botSettings.features?.handoffEnabled ?? true,
+    aiEnabled: botSettings.ai?.enabled ?? false,
+  };
+}
+
+// Display fact only. The timezone shown is the DERIVED bot value (PR 1a):
+// legacy rows may still store a browser-written timezone the server no
+// longer honours anywhere.
+function buildWidgetBusinessHours(
+  botSettings: WidgetBotSettings,
+  businessTimezone: string | null | undefined,
+) {
+  return botSettings.businessHours
+    ? { ...botSettings.businessHours, timezone: businessTimezone || botSettings.businessHours.timezone }
+    : { enabled: false, timezone: businessTimezone || 'UTC' };
+}
+
 const router = Router();
 
 // ── Stable widget identity (B-PR4a) ─────────────────────────────────────────
@@ -155,16 +191,7 @@ router.get(
     // bot.settings. Tenant is only consulted for tier (entitlement gates)
     // and the LLM-provider apiKey (read elsewhere, not exposed here).
     const botSettings = bot.settings ?? {};
-    const widgetSettings = (botSettings.widget ?? {}) as {
-      avatarUrl?: string | null;
-      launcherPosition?: 'bottom-right' | 'bottom-left';
-      launcherLabel?: string | null;
-    };
-    const appearance = {
-      avatarUrl: widgetSettings.avatarUrl || null,
-      launcherPosition: widgetSettings.launcherPosition || 'bottom-right',
-      launcherLabel: widgetSettings.launcherLabel || null,
-    };
+    const appearance = buildWidgetAppearance(botSettings);
 
     // D33/D34: the "Powered by Axentrio" footer is hidden on Pro+ and
     // shown on Essential. The widget client reads `attribution.hide` and
@@ -190,17 +217,8 @@ router.get(
         backgroundColor: '#ffffff',
         textColor: '#333333',
       },
-      features: {
-        fileUploadEnabled: botSettings.features?.fileUploadEnabled ?? false,
-        handoffEnabled: botSettings.features?.handoffEnabled ?? true,
-        aiEnabled: botSettings.ai?.enabled ?? false,
-      },
-      // Display fact only. The timezone shown is the DERIVED bot value (PR 1a):
-      // legacy rows may still store a browser-written timezone the server no
-      // longer honours anywhere.
-      businessHours: botSettings.businessHours
-        ? { ...botSettings.businessHours, timezone: bot.businessTimezone || botSettings.businessHours.timezone }
-        : { enabled: false, timezone: bot.businessTimezone || 'UTC' },
+      features: buildWidgetFeatureFlags(botSettings),
+      businessHours: buildWidgetBusinessHours(botSettings, bot.businessTimezone),
       appearance,
       attribution: { hide: hideAttribution },
       widgetVersion: widgetVersionHash,
@@ -462,7 +480,7 @@ router.post(
   authenticateWidget,
   asyncHandler(async (req: Request, res: Response) => {
     const { content: plainContent, type = 'text', metadata } = req.body;
-    const content = plainContent;
+    const content = typeof plainContent === 'string' ? plainContent : '';
     const sessionId = req.widget!.sessionId;
     const tenantId = req.widget!.tenantId;
     void req.widget!.visitorId; // visitorId available but not needed here
@@ -471,7 +489,7 @@ router.post(
       throw new ValidationError('Session not initialized');
     }
 
-    if (typeof content !== 'string' || !content) {
+    if (type !== 'file' && !content) {
       throw new ValidationError('Message content is required');
     }
 
@@ -497,6 +515,9 @@ router.post(
     }
 
     const ingested = await ingestWidgetCustomerMessage(session, content, { type, metadata });
+    if (type === 'file' && metadata && typeof metadata.uploadSessionId === 'string') {
+      await enqueueChatDocument(session, ingested.entity, 'widget');
+    }
 
     sendCreated(res, {
       message: {

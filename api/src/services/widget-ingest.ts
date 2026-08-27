@@ -34,6 +34,7 @@ export interface IngestedMessage {
   content: string;
   type: string;
   createdAt: Date;
+  entity: Message;
 }
 
 /**
@@ -139,5 +140,6 @@ export async function ingestWidgetCustomerMessage(
     content,
     type: message.type,
     createdAt: message.createdAt,
+    entity: message,
   };
 }

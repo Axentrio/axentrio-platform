@@ -954,4 +954,22 @@ describe('a service daily cap stays in the auto-book flow', () => {
     expect(p).toMatch(/do NOT capture it with request_appointment/);
     expect(p).toMatch(/next available day/i);
   });
+
+  /**
+   * `CAPACITY_REACHED` is FOUR different refusals: the per-service day cap, the business day
+   * count, the business minute budget, and the minimum gap. Only the first one kills the whole
+   * date. A blanket "do not retry that date" turns a slot refused for sitting 15 minutes from
+   * another job into a lost day, when 16:00 would have booked outright.
+   */
+  it('bans the same date ONLY for the daily maximum, not for every capacity refusal', () => {
+    const p = buildServicesSection([svc({ maxBookingsPerDay: 2 })])!;
+    // The generic recovery survives: another time on the same day is still offerable.
+    expect(p).toMatch(/Offer a different time or the next available day/i);
+    // The same-date ban is conditional, and says so.
+    expect(p).toMatch(/ONE EXCEPTION, and only when the message says this service has reached its maximum bookings for that date/i);
+    expect(p).toMatch(/For every other CAPACITY_REACHED reason a different time on the SAME day is still worth offering/i);
+    expect(p).toMatch(/too close to another appointment is one time, not the whole day/i);
+    // The unscoped sentence that caused the regression must not come back.
+    expect(p).not.toMatch(/Then offer the next available day, and do NOT retry the same date/i);
+  });
 });

@@ -290,8 +290,8 @@ describe('CheckAvailabilityTool', () => {
       slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }],
       timezone: 'Europe/Brussels',
     });
-    // Trailing undefineds: customerAddress, then #149 locationChoice.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined, undefined);
   });
 
   it('tells the model not to re-offer hours when the customer already named a free time', async () => {

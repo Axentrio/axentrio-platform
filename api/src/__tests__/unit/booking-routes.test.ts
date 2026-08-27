@@ -256,12 +256,12 @@ describe('Booking Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
-      // The trailing arguments are serviceId, durationMin and the customer's address. The
-      // last is forwarded even here, so this endpoint cannot become the one entry point a
-      // travel-enabled business is unreachable through.
+      // The trailing arguments are serviceId, durationMin, address, locationChoice, phone.
+      // Address and phone are forwarded even here, so this endpoint cannot become the one
+      // entry point a travel-enabled or phone-required business is unreachable through.
       expect(mockCheckAvailability).toHaveBeenCalledWith(
         'internal-n8n', VALID_UUID, '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z',
-        undefined, undefined, undefined
+        undefined, undefined, undefined, undefined, undefined
       );
     });
 

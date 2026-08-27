@@ -161,8 +161,9 @@ export async function scheduleTurn(session: ChatSession, message: Message): Prom
     await forwardMessageToN8n(session, message);
     return;
   }
-  // Only text/image user turns are coalesced; anything else uses the legacy path.
-  if (message.type !== 'text' && message.type !== 'image') {
+  // File turns join after extraction is terminal. Pending files are hidden from
+  // the unanswered window, so the processor rearms until the extractor writes.
+  if (message.type !== 'text' && message.type !== 'image' && message.type !== 'file') {
     await forwardMessageToN8n(session, message);
     return;
   }
@@ -300,8 +301,17 @@ export async function coalesceProcessor(job: Job): Promise<void> {
     const session = await sessionRepository.findOne({ where: { id: sessionId } });
     if (!session) return;
 
-    const pending = await getNewestUnansweredUserMessage(session);
-    if (!pending) return; // everything answered.
+    let pending = await getNewestUnansweredUserMessage(session);
+    if (!pending) {
+      const { hasPendingExtraction, pendingDocumentRearmDelayMs } = await import('./chat-documents');
+      if (await hasPendingExtraction(sessionId)) {
+        const delay = Math.min(await pendingDocumentRearmDelayMs(sessionId), 2_000);
+        await rearm(sessionId, tenantId, delay, 0);
+        return;
+      }
+      pending = await getNewestUnansweredUserMessage(session);
+      if (!pending) return;
+    }
 
     // Re-check custom-webhook UNDER the lock (FRESH/uncached — an authoritative
     // routing decision must not read a stale cache): a webhook added during the

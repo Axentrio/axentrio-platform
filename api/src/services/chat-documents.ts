@@ -42,6 +42,7 @@ const PENDING_STALE_MS = 3 * 60 * 1000;
 const CHANNEL_MAX_BYTES = 25 * 1024 * 1024;
 const LOCALIZE_DEADLINE_MS = 6_000;
 const ACK_EN = 'One moment - I am reading your file. I will reply shortly.';
+export const DOCUMENT_READING_ACK_KIND = 'document-reading-ack';
 const TERMINAL: Record<string, true> = {
   ready: true,
   failed: true,
@@ -219,7 +220,7 @@ async function sendReadingAck(session: ChatSession, caption: string): Promise<vo
   }
   // Cycle: message-forwarding imports hasPendingExtraction from this module.
   const { sendInformationalBotMessage } = await import('./message-forwarding.service');
-  await sendInformationalBotMessage(session.id, text);
+  await sendInformationalBotMessage(session.id, text, { kind: DOCUMENT_READING_ACK_KIND });
 }
 
 export function createChatDocumentProcessor(): (job: Job<ChatDocumentJob>) => Promise<void> {

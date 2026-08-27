@@ -6,7 +6,7 @@
 import { WatermarkConflictError, getCoalescedHistory, getUnansweredUserTextUpTo, getUnansweredUserWindow, aiVisibleTypesSql } from './unanswered-window';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { resolveInboundImage } from './inbound-images';
-import { hasPendingExtraction, renderDocumentForContext } from './chat-documents';
+import { hasPendingExtraction, renderDocumentForContext, DOCUMENT_READING_ACK_KIND } from './chat-documents';
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock } from './session-lock';
 
 // Facade re-exports: these three moved to unanswered-window.ts but the
@@ -483,6 +483,9 @@ async function getLatestUnansweredUserMessage(sessionId: string): Promise<Messag
     .andWhere('message.isDeleted = false')
     .andWhere(aiVisibleTypesSql('message'))
     .andWhere('message.guardrailFlagged = false')
+    .andWhere(`(message.metadata->>'kind' IS DISTINCT FROM :ackKind)`, {
+      ackKind: DOCUMENT_READING_ACK_KIND,
+    })
     .orderBy('message.createdAt', 'DESC')
     .getOne();
   return latest && latest.participant?.type === 'user' ? latest : null;
@@ -1778,6 +1781,7 @@ async function sendBotMessage(
 export async function sendInformationalBotMessage(
   sessionId: string,
   content: string,
+  extraMetadata?: Record<string, unknown>,
 ): Promise<void> {
   const session = await sessionRepository.findOne({ where: { id: sessionId } });
   if (!session) throw new Error(`Chat session ${sessionId} not found`);
@@ -1795,7 +1799,12 @@ export async function sendInformationalBotMessage(
   }
 
   const botParticipant = await ensureBotParticipant(session, aiSettings);
-  await sendBotMessage(session, botParticipant.id, content);
+  const saved = await sendBotMessage(session, botParticipant.id, content);
+  if (extraMetadata && Object.keys(extraMetadata).length > 0) {
+    const metadata = { ...(saved.metadata ?? {}), ...extraMetadata } as Message['metadata'];
+    saved.metadata = metadata;
+    await messageRepository.update(saved.id, { metadata });
+  }
 }
 
 /**

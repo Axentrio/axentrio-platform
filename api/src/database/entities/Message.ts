@@ -54,6 +54,7 @@ export class Message {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata!: {
+    kind?: string;
     fileName?: string;
     fileSize?: number;
     fileType?: string;

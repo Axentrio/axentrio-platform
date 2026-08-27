@@ -14,7 +14,8 @@ import {
   getNewestUnansweredUserMessage,
   getCoalescedHistory,
 } from '../../services/unanswered-window';
-import { runTurn, initializeAgentService } from '../../services/message-forwarding.service';
+import { runTurn, initializeAgentService, forwardMessageToN8n } from '../../services/message-forwarding.service';
+import { DOCUMENT_READING_ACK_KIND } from '../../services/chat-documents';
 import type { AgentService } from '../../agent/agent.service';
 import { encrypt } from '../../utils/encryption';
 
@@ -163,3 +164,43 @@ describe('runTurn pending extraction hold', () => {
     expect(runMock).toHaveBeenCalled();
   });
 });
+
+describe('reading ack does not consume the file turn', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('keeps a ready file as the unanswered turn after the reading ack', async () => {
+    const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Omzet is 117620' });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const bot = await createTestParticipant(session.id, { type: 'bot', name: 'Bot' });
+    const file = await createTestMessage(session.id, tenant.id, user.id, {
+      type: 'file',
+      content: '',
+      metadata: {
+        fileName: 'balans.pdf',
+        extraction: {
+          status: 'ready',
+          text: encrypt('Omzet 117.620,00'),
+          textEncrypted: true,
+          pages: 1,
+          method: 'text',
+        },
+      },
+    });
+    await createTestMessage(session.id, tenant.id, bot.id, {
+      content: 'One moment - I am reading your file. I will reply shortly.',
+      metadata: { kind: DOCUMENT_READING_ACK_KIND },
+    });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect((await getNewestUnansweredUserMessage(fresh))?.id).toBe(file.id);
+
+    await forwardMessageToN8n(fresh, file);
+    expect(runMock).toHaveBeenCalled();
+  });
+});
+

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateOutput,
+  claimsDatedUnavailability,
   type OutputViolationFamily,
 } from "../../guardrails/output-validation";
 
@@ -291,5 +292,69 @@ describe("guardrails · validateOutput — passes legitimate replies (false posi
     expect(validateOutput(longClean).ok).toBe(true);
     // A leak past the old 8K scan window must still be caught.
     expect(flagged(longClean + " your session_id is 550e8400")).toBe(true);
+  });
+});
+
+/**
+ * A named date declared shut, full, or impossible.
+ *
+ * Production, in Dutch: asked for Wednesday 16 September, an auto-book bot answered that the
+ * date "valt op een sluitingsdag" and offered to submit a manual request. The trace for that
+ * turn holds ZERO tool calls and the day had sixteen free slots. Every other availability guard
+ * reads a `check_availability` result, so a turn that never called it is the one turn none of
+ * them can judge.
+ *
+ * The false-positive half is the harder half and carries most of these cases. Opening hours live
+ * in the prompt, so a bot answering "we are closed on Sundays" is doing its job. Only a specific
+ * CALENDAR DATE needs the tool, because `dateOverrides` exist so one date can differ from its
+ * weekday, and bookings and day caps are invisible to the prompt.
+ */
+describe("guardrails · claimsDatedUnavailability", () => {
+  it("catches the sentence production actually sent", () => {
+    expect(
+      claimsDatedUnavailability(
+        "Woensdag 16 september valt op een sluitingsdag; wil je toch een aanvraag indienen voor 10:00?",
+      ),
+    ).toBe(true);
+  });
+
+  it("catches the same claim in the other phrasings and in English", () => {
+    for (const text of [
+      "Op 16 september zijn we gesloten.",
+      "16 september is helaas volgeboekt.",
+      "3 oktober is niet beschikbaar voor een afspraak.",
+      "We are closed on 16 September.",
+      "September 16 is fully booked.",
+      "There is no availability on 16 September.",
+      "16/09/2026 is niet mogelijk.",
+    ]) {
+      expect(claimsDatedUnavailability(text), text).toBe(true);
+    }
+  });
+
+  it("leaves a generic opening-hours answer alone — the prompt already knows those", () => {
+    for (const text of [
+      "We are closed on Sundays.",
+      "Op zondag zijn we gesloten.",
+      "We zijn open van maandag tot vrijdag, 09:00 tot 17:00.",
+      "We are fully booked at the moment, but I can look at next week.",
+    ]) {
+      expect(claimsDatedUnavailability(text), text).toBe(false);
+    }
+  });
+
+  it("leaves a POSITIVE dated answer alone", () => {
+    for (const text of [
+      "Woensdag 16 september om 10:00 is beschikbaar.",
+      "16 September at 10:00 works, shall I book it?",
+      "Je afspraak is bevestigd voor woensdag 30 september 2026 om 10:00.",
+    ]) {
+      expect(claimsDatedUnavailability(text), text).toBe(false);
+    }
+  });
+
+  it("needs BOTH halves, so neither alone trips it", () => {
+    expect(claimsDatedUnavailability("Woensdag 16 september om 10:00?")).toBe(false);
+    expect(claimsDatedUnavailability("Dat is helaas volgeboekt.")).toBe(false);
   });
 });

@@ -67,6 +67,52 @@ export function claimsBookingDone(text: string): boolean {
   ].some((re) => re.test(t));
 }
 
+/**
+ * A reply that declares a NAMED DATE shut, full, or impossible.
+ *
+ * The availability twin of `claimsBookingDone`, and it exists for the same reason: a sentence
+ * the model had no evidence for. Observed on production - asked for Wednesday 16 September, an
+ * auto-book bot answered that the date "valt op een sluitingsdag" and offered to submit a manual
+ * request. The trace for that turn holds ZERO tool calls, and the day in fact had sixteen free
+ * slots. Every existing availability guard keys off a `check_availability` result, so none of
+ * them can see a turn that never called it.
+ *
+ * A SPECIFIC DATE IS THE WHOLE TRIGGER, and the narrowness is the point. "We are closed on
+ * Sundays" is answerable from the opening hours already in the prompt and must stay legal. A
+ * calendar date is not: `dateOverrides` exist precisely so one date can differ from its weekday,
+ * and bookings and day caps are invisible to the prompt. Nothing but the tool can settle it.
+ *
+ * Both halves must be present, so "Wednesday 16 September at 10:00 works" is untouched and
+ * "we are fully booked at the moment" is untouched. Bilingual because the tenant this was found
+ * on replies in Dutch, and an English-only guard would never have fired.
+ */
+export function claimsDatedUnavailability(text: string): boolean {
+  const t = text.toLowerCase();
+  // A day-of-month paired with a month name, in either order: "16 september", "september 16".
+  const MONTH =
+    '(?:january|february|march|april|may|june|july|august|september|october|november|december' +
+    '|januari|februari|maart|mei|juni|juli|augustus|oktober|december)';
+  const namesADate =
+    new RegExp(`\\b\\d{1,2}\\s+${MONTH}\\b`).test(t) ||
+    new RegExp(`\\b${MONTH}\\s+\\d{1,2}\\b`).test(t) ||
+    /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/.test(t);
+  if (!namesADate) return false;
+  return [
+    // English.
+    /\b(?:is|are|we(?:'re| are)|they(?:'re| are))\s+(?:closed|fully booked|unavailable)\b/,
+    /\bfully booked\b/,
+    /\bclosing day\b/,
+    /\bno (?:availability|slots|times|appointments) (?:on|for|that)\b/,
+    // Dutch. `sluitingsdag` is what production actually said.
+    /\bsluitingsdag\b/,
+    /\b(?:is|zijn)\s+(?:we\s+)?gesloten\b/,
+    /\bgesloten\b.*\b(?:dag|dan|die dag)\b/,
+    /\bvolgeboekt\b/,
+    /\bniet\s+(?:beschikbaar|mogelijk|open)\b/,
+    /\bgeen\s+(?:beschikbaarheid|plek|tijden|afspraken)\b/,
+  ].some((re) => re.test(t));
+}
+
 // Internal markers that have NO legitimate place in a reply to a customer.
 // The fence markers + section headers mirror compose-system-prompt.ts exactly,
 // so a leak of the assembled system prompt is caught verbatim; the tool/id/

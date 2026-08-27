@@ -45,6 +45,7 @@ import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import {
   claimsBookingDone,
+  claimsDatedUnavailability,
   containsCurrencyAmount,
   type OutputValidationContext,
 } from '../guardrails/output-validation';
@@ -369,6 +370,16 @@ async function inCustomerLanguage(
 const BOOKING_CORRECTION_NOTE =
   "(Internal note, not from the customer.) You just implied to the customer that their booking or request was made, but no booking was recorded this turn. If you HAVE a booking tool and already have the service, the customer's name, and a time, call the correct booking tool now (and only claim it's done once the tool succeeds). If a required detail is missing, ask for it. If you do NOT have a booking tool available, do NOT claim, confirm, or imply any booking — instead offer to take the customer's details so the team can follow up, in the customer's language.";
 
+/** Nudge for a reply that declared a named date shut or full without ever looking. */
+const AVAILABILITY_CORRECTION_NOTE =
+  "(Internal note, not from the customer.) You just told the customer a specific date is closed, " +
+  "fully booked, or otherwise not possible, but you did not call check_availability this turn, so " +
+  "you cannot know that. Opening hours in your instructions do NOT settle a particular date: a " +
+  "date override can close a normally open day or open a normally closed one, and bookings and " +
+  "daily limits are invisible to you until you look. Call check_availability for that exact date " +
+  "now. If it returns times, offer them. If it returns none, follow the guidance the tool gives " +
+  "you. Do not offer to submit the appointment as a request, and do not repeat the claim.";
+
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */
 const BOOKING_SAFE_FALLBACK =
@@ -513,6 +524,9 @@ export class AgentService {
       // "I've booked you in" — and BOOKING_CORRECTION_NOTE has a branch for a model
       // holding no booking tool. Deliberately NOT `bookingActive` (see below).
       const bookingClaimGuardArmed = tools.some((t) => t.name === 'create_booking');
+      // The availability twin. Armed on the tool that could have answered the question, so a bot
+      // with no way to check is never scolded for not checking.
+      const availabilityClaimGuardArmed = tools.some((t) => t.name === 'check_availability');
       // Module prompt contributions (e.g. booking's bookable-services catalog).
       // Each active module builds (and loads data for) its own section; the
       // resolver call hits the same per-tenant caches the tool registry used.
@@ -835,6 +849,9 @@ export class AgentService {
       // target = no new effect).
       const sideEffectsInvoked = new Set<string>();
       let correctionAttempted = false;
+      /** Separate from `correctionAttempted`: each guard gets its own single retry, or one
+       *  firing would spend the other's budget and ship the fault it was there to stop. */
+      let availabilityCorrectionAttempted = false;
       let pendingAddressFact: BookingAddressReplyFact | null = null;
       let addressFactConflict = false;
       let addressCorrectionAttempted = false;
@@ -923,6 +940,32 @@ export class AgentService {
             // #82 records two files over: attached only at the last exit, shipped from none of
             // the others.
             return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}), ...(escalationRequested ? { handoffRequested: true } : {}) };
+          }
+          // The availability twin of the guard above: a NAMED DATE declared shut or full when
+          // nothing looked. Observed on production - "woensdag 16 september valt op een
+          // sluitingsdag", offered as a manual request, on a turn with zero tool calls and a day
+          // that had sixteen free slots. Every other availability guard reads a
+          // `check_availability` result, so a turn that never called it is exactly the turn none
+          // of them can judge.
+          //
+          // Nudge only, never a safe fallback. The model is not lying about a mutation it made,
+          // it simply answered too early, and one more iteration with the tool is the whole fix.
+          // A second offence falls through and ships: a clumsy sentence beats a dead end.
+          if (
+            availabilityClaimGuardArmed &&
+            !pendingAvailability &&
+            !bookingRecorded &&
+            claimsDatedUnavailability(finalContent)
+          ) {
+            if (!availabilityCorrectionAttempted && i < MAX_ITERATIONS - 1) {
+              availabilityCorrectionAttempted = true;
+              logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
+                sessionId: session.id,
+              });
+              messages.push({ role: 'assistant', content: finalContent });
+              messages.push({ role: 'user', content: AVAILABILITY_CORRECTION_NOTE });
+              continue; // re-run: the model should call check_availability before answering
+            }
           }
           trace.finishReason = 'completed';
           trace.terminal = { result: 'completed' };

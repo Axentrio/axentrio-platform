@@ -451,6 +451,60 @@ describe('Booking Flow — Full Agent Loop', () => {
     expect(mockCreateBooking).not.toHaveBeenCalled();
   });
 
+  /**
+   * A named date declared shut when nothing looked.
+   *
+   * Production, in Dutch: asked for Wednesday 16 September, the bot answered that the date
+   * "valt op een sluitingsdag" and offered to submit a manual request. The trace for that turn
+   * holds ZERO tool calls, and the day had sixteen free slots. Every other availability guard
+   * reads a `check_availability` result, so a turn that never called it is the one turn none of
+   * them can judge - which is why the sentence shipped.
+   */
+  it('will not ship a dated "we are closed" the model never checked', async () => {
+    mockChat
+      .mockResolvedValueOnce(llmTextResponse(
+        'Woensdag 16 september valt op een sluitingsdag; wil je toch een aanvraag indienen voor 10:00?',
+      ))
+      // The nudge lands: the model looks, and answers from what it found.
+      .mockResolvedValueOnce(llmToolCallResponse([{
+        id: 'call_avail_16',
+        name: 'check_availability',
+        arguments: { startDate: '2026-09-16', endDate: '2026-09-16' },
+      }]))
+      .mockResolvedValueOnce(llmTextResponse('Woensdag 16 september kan om 10:00. Zal ik die vastleggen?'));
+
+    const result = await agent.run(
+      'Ik wil een afspraak op woensdag 16 september 2026 om 10:00.',
+      session as ChatSession,
+      tenant as Tenant,
+      [],
+    );
+
+    // The hallucination is gone, and the reply is the one made after looking.
+    expect((result as any).content).not.toMatch(/sluitingsdag/);
+    expect((result as any).content).toContain('10:00');
+    expect(mockCheckAvailability).toHaveBeenCalled();
+    // The model was told WHY, not merely asked again.
+    const nudged = mockChat.mock.calls[1][0] as Array<{ role: string; content: string }>;
+    expect(nudged.some((m) => /did not call check_availability this turn/.test(String(m.content)))).toBe(true);
+  });
+
+  it('says nothing about a generic opening-hours answer, which needs no tool', async () => {
+    // The false positive that would make the guard unusable: hours live in the prompt, so
+    // answering from them is the bot doing its job. One LLM call, no nudge.
+    mockChat.mockResolvedValueOnce(llmTextResponse('Op zondag zijn we gesloten. Kan ik je op een andere dag helpen?'));
+
+    const result = await agent.run(
+      'Zijn jullie open op zondag?',
+      session as ChatSession,
+      tenant as Tenant,
+      [],
+    );
+
+    expect((result as any).content).toContain('gesloten');
+    expect(mockChat).toHaveBeenCalledOnce();
+  });
+
   it('handles Cal.com API failure gracefully', async () => {
     // check_availability fails (Cal.com is down)
     mockCheckAvailability.mockRejectedValueOnce(new Error('Cal.com is currently unavailable'));

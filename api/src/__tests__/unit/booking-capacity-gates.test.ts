@@ -137,8 +137,12 @@ describe('enforceServiceDayCapacity', () => {
 
   it('rejects at the cap, not one past it', async () => {
     const at = fakeManager([{ n: 3 }]);
-    expect(await reason(() => enforceServiceDayCapacity(at.manager, svc(), window60.start, TZ)))
-      .toBe('CAPACITY_REACHED:No more openings for this service that day');
+    const r = await reason(() => enforceServiceDayCapacity(at.manager, svc(), window60.start, TZ));
+    expect(r).toMatch(/^CAPACITY_REACHED:/);
+    expect(r).toMatch(/maximum number of bookings for that date/i);
+    expect(r).toMatch(/do NOT capture it/i);
+    expect(r).toMatch(/team will come back on it/i);
+    expect(r).toContain('startDate 2026-06-11 and endDate 2026-06-17');
 
     const under = fakeManager([{ n: 2 }]);
     await expect(enforceServiceDayCapacity(under.manager, svc(), window60.start, TZ)).resolves.toBeUndefined();

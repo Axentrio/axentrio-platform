@@ -340,14 +340,20 @@ export class InternalProvider implements BookingProvider {
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
     const availDuration = effectiveDurationForAvailability(service, durationMin);
-    // Day-level ceilings are applied HERE, not only at create: the per-service cap has
-    // always been create-time-only, which is why the prompt has to coach the model through
-    // CAPACITY_REACHED. Offering a slot and then refusing it is the behaviour to avoid.
+    // Day-level ceilings are applied HERE, not only at create. Offering a slot and then
+    // refusing it is the behaviour to avoid - for the business cap AND the per-service cap.
     const business = await loadBusinessRules(ctx.bot.id);
     const dayLedger =
       business.maxBookingsPerDay || business.maxBookedMinutesPerDay
         ? await loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId)
         : undefined;
+    const serviceCap =
+      typeof service.maxBookingsPerDay === 'number' && service.maxBookingsPerDay > 0
+        ? service.maxBookingsPerDay
+        : 0;
+    const serviceDayLedger = serviceCap
+      ? await loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId, service.id)
+      : undefined;
     // ONE instant for the whole computation. The diagnosis below re-runs this engine, and a
     // second `new Date()` would measure its window against a `now` milliseconds later than the
     // one the slots were built from - which at a window edge is a different answer.
@@ -360,11 +366,12 @@ export class InternalProvider implements BookingProvider {
       busy,
       business,
       dayLedger,
+      serviceDayLedger,
     };
     const slots = computeSlots(engineInput);
-    // WHY nothing came back, when the reason is this owner's notice or horizon and not a full
-    // or closed diary. Only on the path that produced nothing, and it costs no query: it re-runs
-    // the pure engine over the busy data already in hand.
+    // WHY nothing came back, when the reason is this owner's notice, horizon, or service
+    // daily cap, and not a full or closed diary. Only on the path that produced nothing, and
+    // it costs no query: it re-runs the pure engine over the busy data already in hand.
     const emptyRange = slots.length === 0 ? diagnoseEmptyRange(engineInput) : null;
     // Travel time filters what the engine produced rather than teaching the engine about it.
     // The engine is pure and DST-critical and expresses everything as busy intervals; this pad
@@ -1773,16 +1780,19 @@ export class InternalProvider implements BookingProvider {
     // Requests deliberately skip slot validation: a request is a preference and the owner
     // decides. That holds for a full day, an out-of-area job, or an unmeasured drive - all
     // times the owner COULD say yes to. It does not hold outside their notice or horizon,
-    // where they have already said no and no decision is left to make.
+    // or once this service has reached maxBookingsPerDay: they have already said no and no
+    // decision is left to make.
     //
     // Seen on production with this fix's other half already deployed: the model skipped
     // check_availability entirely, asked for a name, and captured a request for a date 63 days
     // out against a 60-day horizon. The customer was promised a callback nobody could honour.
-    // The gate has to be here, because the tool the model chose never looked at a slot.
+    // The same skip then captured a request after CAPACITY_REACHED on an auto-book service
+    // with two jobs and a cap of two. The gate has to be here, because the tool the model
+    // chose never looked at a slot.
     //
     // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
     // capturing exactly as before - a request is the RIGHT answer for those - and so does any
-    // time inside the window that is merely taken.
+    // time inside the window that is merely taken. A daily cap is not "merely taken".
     const canAuto =
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
@@ -1798,6 +1808,7 @@ export class InternalProvider implements BookingProvider {
         const { startDate, endDate } = retryRange('too_far', new Date(latestMs).toISOString(), rule.timezone);
         throw new BookingError(requestTooFar(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
+      await enforceServiceDayCapacity(null, service, start, rule.timezone);
     }
 
     // Dedup on the PARSED time (#35): a rapid re-confirm in another turn resolves to

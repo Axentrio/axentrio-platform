@@ -32,6 +32,9 @@ function input(overrides: Partial<SlotEngineInput> & {
     rangeEnd: overrides.rangeEnd ?? '2026-06-11T00:00:00Z',
     now: overrides.now ?? new Date('2026-06-01T00:00:00Z'),
     busy: overrides.busy,
+    business: overrides.business,
+    dayLedger: overrides.dayLedger,
+    serviceDayLedger: overrides.serviceDayLedger,
   };
 }
 
@@ -353,5 +356,93 @@ describe('slot-engine · diagnoseEmptyRange', () => {
     });
     expect(computeSlots(past)).toEqual([]);
     expect(diagnoseEmptyRange(past)).toBeNull();
+  });
+});
+
+/**
+ * A service daily cap is the owner's own policy, not a full diary.
+ *
+ * Report: Auto-book, 30 min, max 2 bookings per day, two confirmed jobs on Wednesday
+ * 21 October 2026, asked for 14:00 that same day. The calendar still had hours left. The
+ * create path refused correctly. The bot then captured a request and told the customer the
+ * team would confirm it - on a service whose owner had chosen automatic booking, with
+ * Thursday sitting empty. `slots: []` cannot tell "this service has hit its cap" from
+ * "the diary is full", and the empty-range advice captured a request.
+ */
+describe('slot-engine · service daily cap', () => {
+  // Two morning jobs on Wednesday 10 June 2026. 09:00-17:00 still has a free 14:00; only
+  // the cap of 2 makes the day empty.
+  const twoMorning = [
+    { start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T07:30:00Z') },
+    { start: new Date('2026-06-10T08:00:00Z'), end: new Date('2026-06-10T08:30:00Z') },
+  ];
+  const capped = input({
+    weeklyHours: { wed: [{ start: '09:00', end: '17:00' }], thu: [{ start: '09:00', end: '17:00' }] },
+    eventType: {
+      durationMin: 30,
+      bufferBeforeMin: 0,
+      bufferAfterMin: 0,
+      minNoticeMin: 0,
+      maxHorizonDays: 60,
+      maxBookingsPerDay: 2,
+    },
+    now: new Date('2026-06-09T00:00:00Z'),
+    rangeStart: '2026-06-09T22:00:00Z', // Wed 10 Jun, 00:00 Brussels
+    rangeEnd: '2026-06-10T22:00:00Z',
+    serviceDayLedger: twoMorning,
+  });
+
+  it('offers nothing on a day already at the service cap', () => {
+    expect(computeSlots(capped)).toEqual([]);
+  });
+
+  it('still offers a day under the cap', () => {
+    const under = computeSlots({ ...capped, serviceDayLedger: twoMorning.slice(0, 1) });
+    expect(under.length).toBeGreaterThan(0);
+    expect(starts(under)).toContain('2026-06-10T12:00:00.000Z'); // 14:00 Brussels
+  });
+
+  it('does not count another service\'s jobs against this cap', () => {
+    // Same two morning jobs as busy time, but they belong to a different service, so the
+    // service ledger is empty. 14:00 is free and must stay offerable.
+    const otherService = computeSlots({ ...capped, serviceDayLedger: [], busy: twoMorning });
+    expect(starts(otherService)).toContain('2026-06-10T12:00:00.000Z');
+  });
+
+  it('reads a service-cap refusal as service_day_full, not as a full diary', () => {
+    expect(diagnoseEmptyRange(capped)).toEqual({
+      reason: 'service_day_full',
+      boundary: '2026-06-10T22:00:00.000Z',
+    });
+  });
+
+  it('and the very next day is bookable, which is what the customer should be offered', () => {
+    const thursday = computeSlots({
+      ...capped,
+      rangeStart: '2026-06-10T22:00:00Z',
+      rangeEnd: '2026-06-11T22:00:00Z',
+      serviceDayLedger: [],
+    });
+    expect(starts(thursday)[0]).toBe('2026-06-11T07:00:00.000Z'); // Thu 11 Jun, 09:00 Brussels
+  });
+
+  it('says nothing when the diary is genuinely full even if a cap is set', () => {
+    // Lifting the cap would still produce nothing, so calling it a cap refusal would send
+    // the customer to another check of the same full day.
+    const full = input({
+      weeklyHours: { wed: [{ start: '09:00', end: '11:00' }] },
+      eventType: {
+        durationMin: 30,
+        bufferBeforeMin: 0,
+        bufferAfterMin: 0,
+        minNoticeMin: 0,
+        maxHorizonDays: 60,
+        maxBookingsPerDay: 2,
+      },
+      busy: [{ start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T09:00:00Z') }],
+      serviceDayLedger: twoMorning.slice(0, 1),
+    });
+    expect(computeSlots(full)).toEqual([]);
+    expect(diagnoseEmptyRange(full)).toBeNull();
   });
 });

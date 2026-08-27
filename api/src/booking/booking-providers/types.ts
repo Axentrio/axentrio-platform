@@ -179,26 +179,33 @@ export interface TravelFilterSummary {
 
 /**
  * WHY an availability range came back with nothing, when the cause is the owner's own
- * notice/horizon policy rather than a full or closed diary.
+ * notice/horizon/daily-cap policy rather than a full or closed diary.
  *
  * The distinction decides where the customer goes next, and conflating the two was a live bug
- * twice. An empty range normally means "ask for their preferred time and capture a request",
- * which is right when the diary is genuinely full. Applied to a time the POLICY ruled out, it
- * drops an auto-book service into a manual-request flow while perfectly bookable times sit a
- * day either side. Observed on a 1440-minute minimum notice, where the whole of the requested
- * day fell inside the notice, and on a 14-day horizon, where the requested day was the
- * fifteenth. Both times the engine was right and the advice that followed it was wrong.
+ * twice for notice/horizon and once for a service daily cap. An empty range normally means
+ * "ask for their preferred time and capture a request", which is right when the diary is
+ * genuinely full. Applied to a time the POLICY ruled out, it drops an auto-book service into
+ * a manual-request flow while perfectly bookable times sit a day either side. Observed on a
+ * 1440-minute minimum notice, on a 14-day horizon, and on an auto-book service with
+ * maxBookingsPerDay = 2 that already had two jobs that day.
  *
- * Absent unless the range missed the window ENTIRELY. A range that holds even one
- * policy-allowed start which something else removed is an ordinary empty range, and the
- * ordinary answer applies.
+ * Absent unless the range missed the window ENTIRELY, or every start in range was removed
+ * only by this service's daily cap. A range that holds even one policy-allowed start which
+ * something else removed is an ordinary empty range, and the ordinary answer applies.
  */
 export interface EmptyRangeDiagnosis {
-  /** `too_soon`: every start in range is inside the minimum notice. `too_far`: past the horizon. */
-  reason: 'too_soon' | 'too_far';
+  /**
+   * `too_soon`: every start in range is inside the minimum notice.
+   * `too_far`: past the horizon.
+   * `service_day_full`: this service has already reached maxBookingsPerDay for the
+   * requested day, and lifting that cap would have produced times.
+   */
+  reason: 'too_soon' | 'too_far' | 'service_day_full';
   /**
    * The bound the range fell outside, as a UTC ISO instant. For `too_soon`, the earliest a
    * booking may start; for `too_far`, the last instant this business takes bookings for.
+   * For `service_day_full`, the exclusive end of the queried range (the next local midnight),
+   * so the retry starts the day after the capped-out one. Never a bookable clock time.
    */
   boundary: string;
 }
@@ -220,8 +227,9 @@ export interface AvailabilityResult {
   /** Absent unless travel time actually ran — which is every bot on the platform today. */
   travel?: TravelFilterSummary;
   /**
-   * Set ONLY when `slots` is empty because of the notice/horizon policy, never when the diary
-   * is merely full or shut. It sends the model back to a bookable range instead of a request.
+   * Set ONLY when `slots` is empty because of notice, horizon, or this service's daily cap,
+   * never when the diary is merely full or shut. It sends the model back to a bookable range
+   * instead of a request.
    */
   emptyRange?: EmptyRangeDiagnosis;
   /**

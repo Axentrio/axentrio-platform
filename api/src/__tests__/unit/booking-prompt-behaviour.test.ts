@@ -259,6 +259,13 @@ describe('check_availability — the empty result carries its own instruction', 
     expect(res.data.guidance).toMatch(/request_appointment/);
   });
 
+  it('does not treat a missing phone number as an unavailable service', async () => {
+    const res = await load([]);
+    expect(res.data.guidance).toMatch(/does NOT mean a listed auto-book service is unavailable/i);
+    expect(res.data.guidance).toMatch(/needs phone/i);
+    expect(res.data.guidance).toMatch(/do not capture a request/i);
+  });
+
 
   it('adds nothing when slots exist', async () => {
     const res = await load([{ start: '2026-08-10T08:00:00.000Z', end: '2026-08-10T08:30:00.000Z' }]);
@@ -683,6 +690,42 @@ describe('travel time — asking for the address before the times', () => {
   });
 });
 
+/**
+ * A Phone call Auto-book is a normal bookable service. The catalog used to omit
+ * where it happens, and the prompt never asked for the required number before
+ * availability — so the model treated it as missing and captured a request.
+ */
+describe('phone-call Auto-book stays in the booking flow', () => {
+  const phone = svc({
+    name: 'Telefonisch advies',
+    locationType: 'phone',
+    customerLocationRequired: true,
+    bookingMode: 'auto',
+    durationMin: 30,
+  });
+
+  it('labels the catalog line as a phone-call auto-book that needs a phone number', () => {
+    const section = buildServicesSection([phone])!;
+    expect(line(section)).toMatch(/phone call/i);
+    expect(line(section)).toMatch(/auto-book/);
+    expect(line(section)).toMatch(/needs phone/);
+  });
+
+  it('asks for the phone number before checking times, not only before the write', () => {
+    const section = buildServicesSection([phone])!;
+    expect(section).toMatch(/BEFORE you call check_availability/i);
+    expect(section).toMatch(/customerPhone/);
+    expect(section).toMatch(/does not make the service unavailable/i);
+    expect(section).toMatch(/PHONE_REQUIRED/);
+    expect(section).toMatch(/Keep any date and time the customer already named/i);
+  });
+
+  it('does not tell a premises-only catalog to collect a phone before availability', () => {
+    const section = buildServicesSection([svc()])!;
+    expect(line(section)).not.toMatch(/phone call/i);
+    expect(section).not.toMatch(/BEFORE you call check_availability/);
+  });
+});
 
 
 describe('#149 — customer chooses location', () => {
@@ -811,5 +854,87 @@ describe('check_availability — a range the policy ruled out is not an empty di
       expect(payload, range.reason).not.toContain('21:02');
       expect(payload, range.reason).not.toContain('19:02');
     }
+  });
+});
+
+/**
+ * A service at its daily cap must stay in the auto-book flow.
+ *
+ * Report: Auto-book, max 2 per day, two bookings already on Wednesday 21 October 2026,
+ * asked for 14:00 that day. The third booking was correctly refused. The bot then said the
+ * request had been forwarded to the team, and explained it needed review because of
+ * location, availability and type of work. It never named the daily limit, and it never
+ * offered Thursday. Same class of bug as the notice/horizon empty-range: `slots: []`
+ * recommended a request when the owner had chosen automatic booking.
+ */
+describe('check_availability — a service at its daily cap is not a request', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-19T08:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const load = async (emptyRange: { reason: string; boundary: string }) => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Gelimiteerde interventie',
+      emptyRange,
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-10-21', endDate: '2026-10-21' },
+      { sessionId: 'cs-1' } as never,
+    );
+    return { success: res.success, data: res.data as Record<string, unknown> };
+  };
+
+  const dayFull = { reason: 'service_day_full', boundary: '2026-10-21T22:00:00.000Z' };
+
+  it('sends the model back to check_availability, never to a request', async () => {
+    const res = await load(dayFull);
+    expect(res.success).toBe(true);
+    expect(res.data.suggestedAction).toBe('check_availability');
+    expect(res.data.guidance).toMatch(/do NOT capture it with request_appointment/);
+    expect(res.data.guidance).not.toMatch(/(?<!do NOT )capture it with request_appointment/);
+  });
+
+  it('names the daily limit, not a team review', async () => {
+    const res = await load(dayFull);
+    expect(res.data.guidance).toMatch(/maximum number of bookings for that date/i);
+    expect(res.data.guidance).toMatch(/books automatically/i);
+    expect(res.data.guidance).toMatch(/confirm the appointment by hand/i);
+    expect(res.data.guidance).not.toMatch(/team will come back/i);
+    expect(res.data.guidance).not.toMatch(/location/i);
+  });
+
+  it('sends the model to a LATER range, without naming a time of its own', async () => {
+    const res = await load(dayFull);
+    expect(res.data.guidance).toContain('startDate 2026-10-22 and endDate 2026-10-28');
+    expect(res.data.guidance).toMatch(/Offer ONLY times that call gives you/);
+    expect(res.data.guidance).not.toContain('14:00');
+  });
+
+  it('never states the bound itself, in the guidance OR on the payload', async () => {
+    const res = await load(dayFull);
+    expect(res.data.emptyRange).toBeUndefined();
+    const payload = JSON.stringify(res.data);
+    expect(payload).not.toMatch(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/);
+    expect(payload).not.toContain('22:00');
+  });
+});
+
+describe('a service daily cap stays in the auto-book flow', () => {
+  it('forbids turning CAPACITY_REACHED into a request', () => {
+    const p = buildServicesSection([svc({ maxBookingsPerDay: 2 })])!;
+    expect(p).toMatch(/CAPACITY_REACHED/);
+    expect(p).toMatch(/do NOT capture it with request_appointment/);
+    expect(p).toMatch(/next available day/i);
   });
 });

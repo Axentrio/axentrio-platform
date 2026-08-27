@@ -84,17 +84,19 @@ const DAY = 'yyyy-MM-dd';
  * documents as the widest a single check may span.
  */
 export function retryRange(
-  reason: 'too_soon' | 'too_far',
+  reason: 'too_soon' | 'too_far' | 'service_day_full',
   boundary: string,
   timezone: string,
 ): { startDate: string; endDate: string } {
   const at = DateTime.fromISO(boundary, { zone: 'utc' }).setZone(timezone);
   // Unparseable can only be a fixture: keep the date rather than lose the correction.
   if (!at.isValid) return { startDate: boundary.slice(0, 10), endDate: boundary.slice(0, 10) };
-  if (reason === 'too_soon') {
-    return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
+  if (reason === 'too_far') {
+    // Backward, but never into the past: a short horizon can leave the bound less than a week off.
+    const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
+    return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
   }
-  // Backward, but never into the past: a short horizon can leave the bound less than a week off.
-  const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
-  return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
+  // too_soon and service_day_full: a week forward from the bound (earliest start, or the
+  // day after the capped-out one).
+  return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
 }

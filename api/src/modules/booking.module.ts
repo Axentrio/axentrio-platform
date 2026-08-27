@@ -411,6 +411,16 @@ If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job 
  */
 const TRAVEL_ADDRESS_FIRST_RULE = `- Where the job is: for a service flagged "needs address", ask for the customer's address BEFORE you call check_availability, and pass it as customerAddress. The times this business can offer depend on where the job is — it travels to customers, so a time is only bookable if the owner can get there from the jobs either side of it. If check_availability returns ADDRESS_REQUIRED, ask for the address and call it again. Some results also carry travel.requestableSlots: those times cannot be auto-confirmed, so if the customer wants one, capture it with request_appointment and say plainly that the business will confirm it.`;
 
+/**
+ * Phone-call Auto-book must stay in the booking flow when the number is missing.
+ *
+ * Address-first (travel) is a different rule: the times themselves depend on where the
+ * job is. A phone number does not change which slots exist, but skipping it and capturing
+ * a request is how an Auto-book Phone call was reported as "unavailable in the booking
+ * system" and forwarded to the team. The model has to ask for the number first, keep the
+ * date already named, then check availability and confirm.
+ */
+const PHONE_FIRST_RULE = `- Phone number: for a service flagged "needs phone", ask for the customer's phone number BEFORE you call check_availability, create_booking, or request_appointment, and pass it as customerPhone. A missing phone number does not make the service unavailable. Never capture a request, never say the service is unavailable in the booking system, and never hand off to the team because the number is still missing. If a booking tool returns PHONE_REQUIRED, ask for the number and retry with it. Keep any date and time the customer already named.`;
 
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
 export function buildServicesSection(
@@ -426,6 +436,7 @@ export function buildServicesSection(
       const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
       // P5a: customerLocationRequired maps to PHONE (callback number), not address.
       const contact = [
+        s.locationType === 'phone' ? 'phone call' : '',
         s.customerChoosesLocation ? 'customer chooses location' : '',
         s.customerAddressRequired ? 'needs address' : '',
         s.customerLocationRequired ? 'needs phone' : '',
@@ -457,6 +468,7 @@ export function buildServicesSection(
   const hasContact = services.some(
     (s) => s.customerAddressRequired || s.customerLocationRequired || s.customerChoosesLocation,
   );
+  const hasPhone = services.some((s) => s.customerLocationRequired);
   const hasChoice = services.some((s) => s.customerChoosesLocation);
   // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
   // emitted for them as well — keyed on per-service caps alone, a bot with only a business
@@ -496,7 +508,7 @@ Then follow these rules IN ORDER:
   }${
     hasCapacity
       ? `
-6. If create_booking returns CAPACITY_REACHED, that time cannot be taken — the day is full, the business has no working time left that day, or the slot sits too close to another appointment. Read the message, offer a different time or the next available day, and do NOT retry the same one. Never tell the customer the business is closed.`
+6. If create_booking returns CAPACITY_REACHED, that time cannot be taken — the day is full, this service has reached its maximum bookings for that date, the business has no working time left that day, or the slot sits too close to another appointment. Read the message, offer a different time or the next available day, and do NOT retry the same one. Never tell the customer the business is closed. For an AUTO-BOOK service this is NOT a request: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off.`
       : ''
   }${
     hasDuration
@@ -507,7 +519,7 @@ Then follow these rules IN ORDER:
   7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
   }
-${travelTimeActive && services.some((s) => s.customerAddressRequired || s.customerChoosesLocation) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${travelTimeActive && services.some((s) => s.customerAddressRequired || s.customerChoosesLocation) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free". A service whose price is not shown has no price to quote — do not infer that it is free.${

@@ -827,6 +827,9 @@ describe('InternalProvider.createBooking', () => {
     await expect(
       provider.createBooking(ctx, 'idem-cap', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+    await expect(
+      provider.createBooking(ctx, 'idem-cap', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toThrow(/do NOT capture it/i);
   });
 
   it('allows the booking when under the daily cap', async () => {
@@ -977,6 +980,37 @@ describe('InternalProvider.createBooking', () => {
     expect(getReadyFileIds).not.toHaveBeenCalled();
   });
 
+  it('throws PHONE_REQUIRED on createBooking for a phone-call Auto-book when the number is missing', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    await expect(
+      provider.createBooking(ctx, 'idem-phone-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }),
+    ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('confirms a phone-call Auto-book once the number is given - never a request', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    const res = await provider.createBooking(
+      ctx, 'idem-phone-ok', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerPhone: '+32470000000' },
+    );
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeFalsy();
+    expect(insertParam(bookingInsertCall(), 'customer_phone')).toBe('+32470000000');
+  });
+
+  it('offers slots for a phone-call Auto-book without an address', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.locationMode).toBe('remote');
+  });
 
 });
 
@@ -2416,5 +2450,98 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
   it('still captures when no calendar can auto-confirm', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(false);
     await expect(ask(BEYOND_HORIZON)).resolves.toMatchObject({ success: true, requested: true });
+  });
+
+  it('refuses an auto-book capture when the service is at its daily cap, and writes nothing', async () => {
+    // The reported failure: Auto-book, max 2, two held jobs on the day, asked for 14:00.
+    // request_appointment used to succeed because requests are uncapped, and the customer
+    // was told the team would come back - on a service that still books automatically.
+    const capped = { ...EVENT_TYPE, maxBookingsPerDay: 2 };
+    eventTypeFindOne.mockResolvedValue(capped);
+    serviceTypeFind.mockResolvedValue([capped]);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      String(sql).includes('count(*)') ? [{ n: 2 }] : []
+    );
+    await expect(ask(INSIDE_WINDOW)).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+    await expect(ask(INSIDE_WINDOW)).rejects.toThrow(/do NOT capture it/i);
+    await expect(ask(INSIDE_WINDOW)).rejects.toThrow(/maximum number of bookings for that date/i);
+    await expect(ask(INSIDE_WINDOW)).rejects.toThrow(/startDate 2026-06-11 and endDate 2026-06-17/);
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('still captures for a REQUEST-ONLY service at the same cap', async () => {
+    const requestOnly = { ...EVENT_TYPE, bookingMode: 'request', maxBookingsPerDay: 2 };
+    eventTypeFindOne.mockResolvedValue(requestOnly);
+    serviceTypeFind.mockResolvedValue([requestOnly]);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      String(sql).includes('INSERT INTO chatbot_bookings')
+        ? [{ id: 'req-1' }]
+        : String(sql).includes('count(*)')
+          ? [{ n: 2 }]
+          : []
+    );
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ success: true, requested: true });
+  });
+});
+
+/**
+ * A service daily cap must not look like an empty diary.
+ *
+ * Same report as the request-path test above. Two 30-minute jobs on a 09:00-17:00
+ * Wednesday leave 14:00 free on the calendar. The cap of 2 is the only reason the
+ * day offers nothing, and Thursday is free. Without a diagnosis the empty-slots
+ * branch captures a request.
+ */
+describe('InternalProvider.checkAvailability · a service at its daily cap', () => {
+  let provider: InternalProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-19T08:00:00Z'));
+    provider = new InternalProvider();
+    bookingFindOne.mockResolvedValue(null);
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const CAPPED = { ...EVENT_TYPE, name: 'Gelimiteerde interventie', maxBookingsPerDay: 2 };
+  const OPEN = {
+    weeklyHours: {
+      wed: [{ start: '09:00', end: '17:00' }],
+      thu: [{ start: '09:00', end: '17:00' }],
+    },
+  };
+  const twoOnWednesday = [
+    { s: '2026-10-21T07:00:00.000Z', e: '2026-10-21T07:30:00.000Z' },
+    { s: '2026-10-21T08:00:00.000Z', e: '2026-10-21T08:30:00.000Z' },
+  ];
+
+  const configured = (): void => {
+    eventTypeFindOne.mockResolvedValue(CAPPED);
+    serviceTypeFind.mockResolvedValue([CAPPED]);
+    ruleFindOne.mockResolvedValue({ ...RULE, ...OPEN });
+    bookingQuery.mockImplementation(async (sql: string) =>
+      String(sql).includes('event_type_id') ? twoOnWednesday : []
+    );
+  };
+
+  it('reads a capped-out day as service_day_full, not as an empty diary', async () => {
+    configured();
+    const res = await provider.checkAvailability(ctx, '2026-10-21', '2026-10-21');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toEqual({ reason: 'service_day_full', boundary: '2026-10-21T22:00:00.000Z' });
+  });
+
+  it('and Thursday, the next working day, was bookable all along', async () => {
+    configured();
+    bookingQuery.mockResolvedValue([]);
+    const res = await provider.checkAvailability(ctx, '2026-10-22', '2026-10-22');
+    expect(res.slots[0]?.start).toBe('2026-10-22T07:00:00.000Z'); // Thu 22 Oct, 09:00 Brussels
+    expect(res.emptyRange).toBeUndefined();
   });
 });

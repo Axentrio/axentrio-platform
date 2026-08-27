@@ -455,11 +455,17 @@ export class CheckAvailabilityTool implements ToolAdapter {
             guidance:
               (outOfWindow.reason === 'too_soon'
                 ? 'That range is too soon: this business needs more notice than that.'
-                : 'That range is further ahead than this business takes bookings.') +
+                : outOfWindow.reason === 'too_far'
+                  ? 'That range is further ahead than this business takes bookings.'
+                  : 'This service already has its maximum number of bookings for that date.') +
               ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
-              ' Checking the same range again returns the same nothing, so do not repeat it.' +
-              ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
-              ' This does NOT mean the business is closed or fully booked, so do not say either.' +
+              (outOfWindow.reason === 'service_day_full'
+                ? ' Checking the same date again returns the same nothing, so do not repeat it.' +
+                  ' Offer ONLY times that call gives you.' +
+                  ' This does NOT mean the business is closed, so do not say that.'
+                : ' Checking the same range again returns the same nothing, so do not repeat it.' +
+                  ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
+                  ' This does NOT mean the business is closed or fully booked, so do not say either.') +
               ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.',
           }),
         };
@@ -483,8 +489,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             noSlotsInRange: true,
             suggestedAction: 'request_appointment',
             guidance:
-              'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked. Do not turn the customer away and do not hand off: ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
-
+              'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked, and it does NOT mean a listed auto-book service is unavailable. Do not turn the customer away and do not hand off. If the chosen service flags "needs phone" and you have no number yet, ask for it, keep the date they named, and do not capture a request. Otherwise ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
           }),
         };
       }

@@ -8,12 +8,14 @@
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
+import { Booking } from '../../database/entities/Booking';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { BookingError } from './types';
 import type { BusinessRules } from './service-timing';
 import type { ItineraryKey } from '../../scheduler/itinerary-key';
 import { normalizeVenue } from '../../contracts/venue-address';
+import { requestServiceDayFull } from './slot-messages';
 
 /**
  * P5b — enforce `maxBookingsPerDay` for a service on the slot's local calendar day.
@@ -22,9 +24,13 @@ import { normalizeVenue } from '../../contracts/venue-address';
  * DST-exact). `null`/`≤0` cap = unlimited (a malformed/legacy row degrades to "no
  * limit", never "no bookings"). Runs inside the caller's advisory-lock transaction so
  * the count-then-write is atomic. `excludeBookingId` skips the row being rescheduled.
+ *
+ * `manager` is required on the create/reschedule path (same connection as the lock).
+ * Pass `null` from `requestAppointment`, which is outside a transaction and must use
+ * the Booking repository so tests and the live pool share one query seam.
  */
 export async function enforceServiceDayCapacity(
-  manager: EntityManager,
+  manager: EntityManager | null,
   service: ServiceType,
   start: Date,
   timezone: string,
@@ -46,9 +52,19 @@ export async function enforceServiceDayCapacity(
     sql += ` AND id <> $4`;
     params.push(excludeBookingId);
   }
-  const rows: Array<{ n: number }> = await manager.query(sql, params);
+  const rows: Array<{ n: number }> = manager
+    ? await manager.query(sql, params)
+    : await AppDataSource.getRepository(Booking).query(sql, params);
   if ((rows[0]?.n ?? 0) >= max) {
-    throw new BookingError('No more openings for this service that day', 'CAPACITY_REACHED', 409);
+    const retryFrom = local.plus({ days: 1 }).startOf('day');
+    throw new BookingError(
+      requestServiceDayFull(
+        retryFrom.toFormat('yyyy-MM-dd'),
+        retryFrom.plus({ days: 6 }).toFormat('yyyy-MM-dd'),
+      ),
+      'CAPACITY_REACHED',
+      409,
+    );
   }
 }
 

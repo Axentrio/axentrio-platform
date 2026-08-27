@@ -108,3 +108,20 @@ export const requestTooFar = (startDate: string, endDate: string): string =>
   `offer the customer the times it returns, and book one outright: this service books ` +
   `automatically. Offer ONLY times that call gives you - the horizon says nothing about opening ` +
   `hours, so do not work out the last date yourself and do not name one to the customer.`;
+
+/**
+ * An auto-book service at its daily cap is not a request.
+ *
+ * Requests skip slot validation on purpose, and they are uncapped: a request-only service
+ * may collect extra demand for the owner to triage. That must not become the fallback when
+ * an AUTO-BOOK service hits maxBookingsPerDay. The owner already set the limit. Observed
+ * on production: two held jobs, cap 2, asked for 14:00 the same day - the create path
+ * refused, then request_appointment wrote a row and the customer was told the team would
+ * confirm it because of location, availability and type of work.
+ */
+export const requestServiceDayFull = (startDate: string, endDate: string): string =>
+  `This service already has its maximum number of bookings for that date, so it cannot be booked OR requested ` +
+  `- the owner has already set that limit, so there is nothing for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ` +
+  `on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
+  `customer the times it returns, and book one outright: this service books automatically. ` +
+  `Offer ONLY times that call gives you. Do not retry the same date.`;

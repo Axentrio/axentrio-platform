@@ -36,25 +36,34 @@ export async function loadBusy(
 }
 
 /**
- * This bot's HELD bookings at their RAW start/end, for business day totals.
+ * This bot's HELD bookings at their RAW start/end, for day totals.
  *
  * Deliberately not derived from `loadAllBusy`: that merges the owner's external calendar
  * events and returns buffer-expanded bounds, so counting it would refuse slots because of
  * a personal appointment and would bill buffers as sold working time.
+ * Pass `serviceId` to count one service (per-service daily cap); omit it for the bot-wide
+ * business ledger.
  */
 export async function loadDayLedger(
   botId: string,
   rangeStartIso: string,
   rangeEndIso: string,
-  excludeId?: string
+  excludeId?: string,
+  serviceId?: string,
 ): Promise<BusyInterval[]> {
-  const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
-    `SELECT start_utc AS s, end_utc AS e
+  const params: unknown[] = [botId, rangeStartIso, rangeEndIso, excludeId ?? null];
+  let sql = `SELECT start_utc AS s, end_utc AS e
        FROM chatbot_bookings
       WHERE bot_id = $1 AND status IN ('pending','confirmed')
         AND start_utc >= $2 AND start_utc < $3
-        AND ($4::uuid IS NULL OR id <> $4::uuid)`,
-    [botId, rangeStartIso, rangeEndIso, excludeId ?? null]
+        AND ($4::uuid IS NULL OR id <> $4::uuid)`;
+  if (serviceId) {
+    sql += ` AND event_type_id = $5`;
+    params.push(serviceId);
+  }
+  const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
+    sql,
+    params,
   );
   return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
 }

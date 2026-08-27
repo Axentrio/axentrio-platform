@@ -34,7 +34,7 @@ export interface SlotEngineInput {
   >;
   eventType: Pick<
     ServiceType,
-    'durationMin' | 'bufferBeforeMin' | 'bufferAfterMin' | 'minNoticeMin' | 'maxHorizonDays'
+    'durationMin' | 'bufferBeforeMin' | 'bufferAfterMin' | 'minNoticeMin' | 'maxHorizonDays' | 'maxBookingsPerDay'
   >;
   /** Query window (ISO UTC). */
   rangeStart: string;
@@ -60,6 +60,15 @@ export interface SlotEngineInput {
    * ledger of what the business actually booked.
    */
   dayLedger?: BusyInterval[];
+  /**
+   * This service's HELD bookings in range, at their raw start/end.
+   *
+   * Separate from `dayLedger` because a per-service cap must not count another
+   * service's jobs, and separate from `busy` for the same reason the business
+   * ledger is: buffers and the owner's personal calendar are not this service's
+   * bookings.
+   */
+  serviceDayLedger?: BusyInterval[];
 }
 
 const WEEKDAY_KEYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -189,6 +198,15 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
       usage.set(key, cur);
     }
   }
+  // Per-service daily cap. Null/0 = unlimited, matching the create-path gate.
+  const serviceMax = input.eventType.maxBookingsPerDay ?? 0;
+  const serviceUsage = new Map<string, number>();
+  if (serviceMax > 0 && input.serviceDayLedger?.length) {
+    for (const b of input.serviceDayLedger) {
+      const key = dayKeyOf(b.start.getTime(), zone);
+      serviceUsage.set(key, (serviceUsage.get(key) ?? 0) + 1);
+    }
+  }
 
   const slots: BookingSlot[] = [];
   const seen = new Set<number>();
@@ -200,6 +218,7 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
     // Whole-day skips: no point walking the windows of a day that is already full.
     if (maxPerDay > 0 && used.count >= maxPerDay) continue;
     if (maxMinutesPerDay > 0 && used.minutes + duration > maxMinutesPerDay) continue;
+    if (serviceMax > 0 && (serviceUsage.get(day.toFormat('yyyy-MM-dd')) ?? 0) >= serviceMax) continue;
 
     for (const window of windowsForDay(rule, day)) {
       const ws = parseHHMM(window.start);
@@ -258,38 +277,68 @@ export function bookableWindow(
 const NO_HORIZON_DAYS = 3650;
 
 /**
- * WHY a range produced nothing, when the answer is the owner's own notice/horizon policy.
+ * WHY a range produced nothing, when the answer is the owner's own notice/horizon/cap policy.
  *
  * An empty range has two very different causes and one of them used to be invisible. A shut or
  * full diary genuinely has nothing to offer. A range the POLICY ruled out is full of times this
  * business would happily take on another day - and told only `slots: []`, the caller advised a
  * manual request, which drops an auto-book service into a flow its owner never chose.
  *
- * THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only the notice and the horizon lifted.
- * Anything that appears is a start the policy removed and nothing else did. It is one pure pass
+ * Notice and horizon: THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only those two lifted.
+ * Service daily cap: the same range with only that cap lifted. Either way it is one pure pass
  * over data the caller has already loaded, so it costs no query, and it cannot disagree with the
- * real pass about opening hours, buffers, busy time or day caps - it runs the same engine.
+ * real pass about opening hours, buffers or busy time - it runs the same engine.
  *
- * Null unless EVERY would-be start falls on one side of the window. A range holding even one
- * policy-allowed start that busy time or a day cap removed is an ordinary empty range, and
- * calling it "too soon" would be false.
+ * Null unless EVERY would-be start falls on one side of the window, or the only thing that
+ * emptied the range is this service's daily cap. A range holding even one policy-allowed start
+ * that busy time removed is an ordinary empty range, and calling it "too soon" would be false.
  */
 export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis | null {
+  const windowReason = (slots: BookingSlot[]): EmptyRangeDiagnosis | null => {
+    if (slots.length === 0) return null;
+    const { earliestMs, latestMs } = bookableWindow(input.eventType, input.now);
+    const starts = slots.map((s) => new Date(s.start).getTime());
+    if (starts.every((ms) => ms < earliestMs)) {
+      return { reason: 'too_soon', boundary: new Date(earliestMs).toISOString() };
+    }
+    if (starts.every((ms) => ms > latestMs)) {
+      return { reason: 'too_far', boundary: new Date(latestMs).toISOString() };
+    }
+    return null;
+  };
+
   const wouldBe = computeSlots({
     ...input,
     eventType: { ...input.eventType, minNoticeMin: 0, maxHorizonDays: NO_HORIZON_DAYS },
   });
-  if (wouldBe.length === 0) return null; // shut, full, or entirely in the past
+  const fromWindow = windowReason(wouldBe);
+  if (fromWindow) return fromWindow;
+  if (wouldBe.length > 0) return null; // mixed, or the range actually has bookable starts
 
-  const { earliestMs, latestMs } = bookableWindow(input.eventType, input.now);
-  const starts = wouldBe.map((s) => new Date(s.start).getTime());
-  if (starts.every((ms) => ms < earliestMs)) {
-    return { reason: 'too_soon', boundary: new Date(earliestMs).toISOString() };
+  const cap = input.eventType.maxBookingsPerDay ?? 0;
+  if (cap > 0) {
+    const uncapped = computeSlots({
+      ...input,
+      eventType: { ...input.eventType, maxBookingsPerDay: 0 },
+    });
+    if (uncapped.length > 0) {
+      return { reason: 'service_day_full', boundary: new Date(input.rangeEnd).toISOString() };
+    }
+    // Cap AND notice/horizon together: prefer the window reason so we do not send the
+    // customer back to a day that is also too soon.
+    return windowReason(
+      computeSlots({
+        ...input,
+        eventType: {
+          ...input.eventType,
+          maxBookingsPerDay: 0,
+          minNoticeMin: 0,
+          maxHorizonDays: NO_HORIZON_DAYS,
+        },
+      }),
+    );
   }
-  if (starts.every((ms) => ms > latestMs)) {
-    return { reason: 'too_far', boundary: new Date(latestMs).toISOString() };
-  }
-  return null;
+  return null; // shut, full, or entirely in the past
 }
 
 /**

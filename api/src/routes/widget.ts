@@ -3,7 +3,7 @@
  * Public endpoints for chat widget integration
  */
 
-import { Router, Request, Response, NextFunction } from 'express';
+import express, { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
@@ -840,9 +840,10 @@ function isS3Configured(): boolean {
  * "something went wrong on our end". The portal path has had this adapter all along.
  */
 async function asUploadApiError(err: unknown): Promise<never> {
-  const { FileValidationError, QuotaExceededError } = await import('../file-handling/upload.service');
+  const { FileValidationError, QuotaExceededError, UploadSessionError } = await import('../file-handling/upload.service');
   if (err instanceof FileValidationError) throw new ApiError(err.message, 400, 'FILE_VALIDATION_FAILED');
   if (err instanceof QuotaExceededError) throw new ApiError(err.message, 429, 'QUOTA_EXCEEDED');
+  if (err instanceof UploadSessionError) throw new NotFoundError(err.message);
   throw err;
 }
 
@@ -881,6 +882,31 @@ router.post(
     });
   })
 );
+
+router.post(
+  '/files/:sessionId/content',
+  widgetRateLimiter,
+  authenticateWidget,
+  express.raw({ type: '*/*', limit: '25mb' }),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const w = req.widget!;
+    if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
+    const { sessionId } = req.params;
+    if (!UPLOAD_UUID_RE.test(sessionId)) throw new ValidationError('Invalid sessionId');
+    await assertUploadEnabledForSession(w.tenantId, w.sessionId);
+    if (!isS3Configured()) {
+      throw new ApiError('File uploads are not available right now', 503, 'STORAGE_UNAVAILABLE');
+    }
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) throw new ValidationError('File body is required');
+    const { getUploadService } = await import('../file-handling/upload.service');
+    await getUploadService()
+      .writeWidgetObject(sessionId, buffer, w.tenantId, w.sessionId)
+      .catch(asUploadApiError);
+    sendSuccess(res, { sessionId, bytes: buffer.length });
+  }),
+);
+
 
 router.post(
   '/files/:sessionId/upload-complete',

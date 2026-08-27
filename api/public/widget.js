@@ -1742,9 +1742,35 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           }
         }
       }
+      this._syncAttachButton();
       // Note: already-rendered message-bubble avatars keep their original
       // render. New bot messages pick up this.appearance.avatarUrl via the
       // message template (line ~1801).
+    }
+
+    _syncAttachButton() {
+      if (!this.container) return;
+      const actions = this.container.querySelector('.cb-input-actions');
+      if (!actions) return;
+      const want = this.config.enableFileUpload && this.serverFileUploadEnabled;
+      let btn = this.attachBtn || actions.querySelector('.cb-btn--attach');
+      if (want && !btn) {
+        btn = document.createElement('button');
+        btn.className = 'cb-btn cb-btn--attach';
+        btn.type = 'button';
+        btn.setAttribute('aria-label', 'Attach file');
+        btn.title = 'Attach file';
+        btn.innerHTML = ICONS.attach;
+        const before = actions.querySelector('.cb-btn--camera') || actions.querySelector('.cb-btn--send');
+        actions.insertBefore(btn, before);
+        btn.addEventListener('click', () => this.openFilePicker());
+        this.attachBtn = btn;
+      } else if (!want && btn) {
+        btn.remove();
+        this.attachBtn = null;
+      } else {
+        this.attachBtn = btn;
+      }
     }
 
 
@@ -3014,9 +3040,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
         const { data } = await response.json();
         const upload = data && data.upload;
-        if (!upload || !upload.uploadUrl || !upload.sessionId) throw new Error('Malformed upload response');
+        if (!upload || !upload.sessionId) throw new Error('Malformed upload response');
 
-        await this.uploadToS3(file, upload.uploadUrl, (progress) => {
+        await this.uploadBytes(file, upload.sessionId, (progress) => {
           this.showProgress(progress);
         });
 
@@ -3088,17 +3114,17 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       }
     }
     
-    uploadToS3(file, url, onProgress) {
+    uploadBytes(file, sessionId, onProgress) {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        
+
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
             const progress = Math.round((e.loaded / e.total) * 100);
             onProgress(progress);
           }
         });
-        
+
         xhr.addEventListener('load', () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve();
@@ -3106,12 +3132,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             reject(new Error(`Upload failed: ${xhr.status}`));
           }
         });
-        
+
         xhr.addEventListener('error', () => reject(new Error('Upload failed')));
         xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-        
-        xhr.open('PUT', url);
-        xhr.setRequestHeader('Content-Type', file.type);
+
+        xhr.open('POST', `${this.config.apiUrl}/api/v1/widget/files/${encodeURIComponent(sessionId)}/content`);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + this.token);
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
         xhr.send(file);
       });
     }

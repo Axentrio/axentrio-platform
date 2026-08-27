@@ -656,6 +656,40 @@ export class UploadService {
   }
 
   /**
+   * Write the visitor's file bytes for a pending widget upload. The browser
+   * cannot PUT to R2 (CORS). The widget posts the body here instead.
+   */
+  async writeWidgetObject(
+    sessionId: string,
+    buffer: Buffer,
+    tenantId: string,
+    chatSessionId: string,
+  ): Promise<void> {
+    const session = await this.getSession(sessionId);
+    if (
+      !session ||
+      session.tenantId !== tenantId ||
+      session.chatSessionId !== chatSessionId
+    ) {
+      throw new UploadSessionError('Upload session not found');
+    }
+    if (session.status !== 'pending') {
+      throw new UploadSessionError('Upload session is not pending');
+    }
+    if (buffer.length !== session.fileSize) {
+      throw new FileValidationError('File size does not match the upload session');
+    }
+    await this.putObjectBuffer(session.fileKey, buffer, session.mimeType, {
+      'tenant-id': session.tenantId,
+      'session-id': session.chatSessionId || '',
+      'original-name': session.originalName,
+      'file-hash': session.fileHash,
+      'content-type': session.mimeType,
+    });
+  }
+
+
+  /**
    * Ready (scanned-clean) upload-session ids for a chat session — how the booking
    * agent attaches a customer's uploaded files to a booking, since the LLM never
    * sees upload ids. Scoped to tenant + chat session; oldest first; capped at 5

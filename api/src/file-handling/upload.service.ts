@@ -223,27 +223,14 @@ export class UploadService {
     const fileKey = this.generateFileKey(request, fileHash);
     const sanitizedFileName = this.sanitizeFileName(request.fileName);
 
-    // Create S3 metadata
-    const metadata: Record<string, string> = {
-      'tenant-id': request.tenantId,
-      'user-id': request.userId,
-      'session-id': request.chatSessionId,
-      'original-name': sanitizedFileName,
-      'file-hash': fileHash,
-      'upload-date': new Date().toISOString(),
-      'gdpr-delete-after': this.calculateGDPRDeleteDate(),
-      'content-type': request.mimeType,
-      ...(request.metadata || {}),
-    };
-
-    // Generate pre-signed URL
+    // Browser PUTs (widget.js) send Content-Type only. Extra signed fields
+    // (SSE, object metadata) make the signature fail. Those values live on
+    // the upload_sessions row instead.
     const command = new PutObjectCommand({
       Bucket: this.config.bucketName,
       Key: fileKey,
       ContentType: request.mimeType,
       ContentLength: request.fileSize,
-      Metadata: metadata,
-      ServerSideEncryption: 'AES256',
     });
 
     const uploadUrl = await getSignedUrl(this.s3Client, command, {

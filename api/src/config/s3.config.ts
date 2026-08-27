@@ -28,6 +28,8 @@ export function createS3Client(): S3Client {
       secretAccessKey: config.s3.secretAccessKey!,
     },
     maxAttempts: 3,
+    // Presigned browser PUTs cannot send the SDK's default CRC32 header.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
   };
 
   // Support S3-compatible services (MinIO, DigitalOcean Spaces, etc.)

@@ -1801,9 +1801,10 @@ export async function sendInformationalBotMessage(
   const botParticipant = await ensureBotParticipant(session, aiSettings);
   const saved = await sendBotMessage(session, botParticipant.id, content);
   if (extraMetadata && Object.keys(extraMetadata).length > 0) {
-    const metadata = { ...(saved.metadata ?? {}), ...extraMetadata } as Message['metadata'];
-    saved.metadata = metadata;
-    await messageRepository.update(saved.id, { metadata });
+    await messageRepository.query(
+      `UPDATE messages SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [saved.id, JSON.stringify(extraMetadata)],
+    );
   }
 }
 

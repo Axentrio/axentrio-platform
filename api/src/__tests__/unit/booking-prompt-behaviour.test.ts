@@ -136,16 +136,21 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     const ai = buildServicesSection([svc({ ...RANGE, durationMode: 'ai' })])!;
     expect(ai).toMatch(/call check_availability with your estimate.*straight away/i);
     expect(ai).toMatch(/never a reason to capture a request/i);
-    expect(ai).toMatch(/never call request_appointment.*before a check_availability result/i);
+    expect(ai).toMatch(/for an AUTO-BOOK service, NEVER call request_appointment before a check_availability result/i);
     expect(ai).toMatch(/only capture a request after check_availability returns no free times/i);
     // The guard must not become a deadlock: a "choose length" customer who cannot name a
     // number can neither be checked (no length) nor asked forever, so ONE gated exit stays.
     const range = buildServicesSection([svc(RANGE)])!;
     expect(range).toMatch(/do not call check_availability without a length/i);
     expect(range).toMatch(/EXCEPTION: if a "choose length" customer cannot or will not give you a number/i);
-    expect(range).toMatch(/that is the ONLY case where a request is allowed with no check_availability result/i);
+    expect(range).toMatch(/that is the ONLY case where a request is allowed with no check_availability result on an auto-book service/i);
     // ...and that exit must never be readable as licence for the ai branch.
     expect(ai).toMatch(/never applies to an "AI-estimated" service/i);
+    // A request-only service with a duration range still gets rule 7 (hasDuration keys on
+    // durationMode), so the auto-book request guard must exempt it or it deadlocks: rule 3
+    // tells it to capture WITHOUT a check, which the guard would otherwise forbid.
+    const reqOnlyAi = buildServicesSection([svc({ ...RANGE, durationMode: 'ai', bookingMode: 'request' })])!;
+    expect(reqOnlyAi).toMatch(/request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability/i);
   });
 
   it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {

@@ -33,8 +33,12 @@ export interface AgentTrace {
    * often" was to grep a log nobody greps - and the answer matters most for the newest guard,
    * whose trigger is a model misbehaviour that cannot be summoned on demand.
    *
-   * Names, not prose, and the array keeps repeats so two firings of one guard are visible as
-   * two. It nests into the existing `trace` jsonb, so there is no column and no migration.
+   * Names, not prose, in the order they fired. AT MOST ONE ENTRY PER GUARD: each sits behind
+   * its own single-shot flag (`addressCorrectionAttempted`, `correctionAttempted`,
+   * `availabilityCorrectionAttempted`), so a guard that fires and is defied again does not get
+   * a second turn and cannot appear twice. Several DIFFERENT guards in one run is the case this
+   * array exists for. It nests into the existing `trace` jsonb, so there is no column and no
+   * migration.
    */
   corrections?: string[];
 }

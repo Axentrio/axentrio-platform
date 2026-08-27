@@ -327,6 +327,9 @@ describe('admin observability — agent traces', () => {
   it('reports which guards corrected the turn, on the LIST', async () => {
     await withCorrections(['availability_unchecked_claim']);
     const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
+    // One row in a tenant of its own, so `traces[0]` is this row and not whichever of several
+    // same-timestamp seeds the sort happened to pick. Asserted, not assumed.
+    expect(res.body.data.traces).toHaveLength(1);
     expect(res.body.data.traces[0].corrections).toEqual(['availability_unchecked_claim']);
   });
 
@@ -334,6 +337,7 @@ describe('admin observability — agent traces', () => {
     // A caller counting firings must be able to read the field on every row.
     await seedTrace();
     const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
+    expect(res.body.data.traces).toHaveLength(1);
     expect(res.body.data.traces[0].corrections).toEqual([]);
   });
 
@@ -347,10 +351,18 @@ describe('admin observability — agent traces', () => {
     expect(res.body.data.traces[0].corrections).toEqual(['availability_unchecked_claim']);
   });
 
-  it('keeps repeats, so two firings of one guard are two', async () => {
-    await withCorrections(['availability_unchecked_claim', 'unrecorded_booking_claim']);
-    const res = await request(app).get(`${LIST}?tenantId=${tenantId}&correction=unrecorded_booking_claim`);
-    expect(res.body.data.traces[0].corrections).toHaveLength(2);
+  it('records EVERY guard that fired, in order, not just the first', async () => {
+    // Named for what it checks. It was called "keeps repeats" and asserted two DIFFERENT names,
+    // which a deduplicating field would also have passed - and repeats cannot happen at all:
+    // each guard sits behind its own single-shot flag, so one name never appears twice. Two
+    // different guards in one run is the real case, and losing the second would hide it.
+    await withCorrections(['booking_address_mismatch', 'availability_unchecked_claim']);
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}&correction=availability_unchecked_claim`);
+    expect(res.body.data.traces).toHaveLength(1);
+    expect(res.body.data.traces[0].corrections).toEqual([
+      'booking_address_mismatch',
+      'availability_unchecked_claim',
+    ]);
   });
 
   it('is super-admin only', async () => {

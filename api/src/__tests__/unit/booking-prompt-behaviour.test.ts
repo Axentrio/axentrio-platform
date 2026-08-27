@@ -127,6 +127,27 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(p).toMatch(/ask for the length instead of answering/i);
   });
 
+  it('forbids capturing a request before a check_availability result, but keeps a choose-length exit', () => {
+    // Reproduced live on v4 (sessions 26f1ed70, 982414dc): an "AI-estimated" service called
+    // request_appointment ALONE and turned a free Wednesday 10:00/11:00 slot into an
+    // unconfirmed request - the reported SRV-06 symptom. 7b's old "proceed immediately" read
+    // as licence to skip the check. The same skip-then-capture is recorded as a production
+    // failure in internal.provider.ts.
+    const ai = buildServicesSection([svc({ ...RANGE, durationMode: 'ai' })])!;
+    expect(ai).toMatch(/call check_availability with your estimate.*straight away/i);
+    expect(ai).toMatch(/never a reason to capture a request/i);
+    expect(ai).toMatch(/never call request_appointment.*before a check_availability result/i);
+    expect(ai).toMatch(/only capture a request after check_availability returns no free times/i);
+    // The guard must not become a deadlock: a "choose length" customer who cannot name a
+    // number can neither be checked (no length) nor asked forever, so ONE gated exit stays.
+    const range = buildServicesSection([svc(RANGE)])!;
+    expect(range).toMatch(/do not call check_availability without a length/i);
+    expect(range).toMatch(/EXCEPTION: if a "choose length" customer cannot or will not give you a number/i);
+    expect(range).toMatch(/that is the ONLY case where a request is allowed with no check_availability result/i);
+    // ...and that exit must never be readable as licence for the ai branch.
+    expect(ai).toMatch(/never applies to an "AI-estimated" service/i);
+  });
+
   it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {
     // create_booking now returns DURATION_REQUIRED when the length is unknown. If the prompt
     // still lumps that with "calendar cannot be reached", the customer hears a technical

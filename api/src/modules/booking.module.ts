@@ -12,6 +12,7 @@
 import { DateTime } from 'luxon';
 import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
+import { isDiscountActive, applyDiscount } from '../booking/pricing/service-discount';
 import {
   AvailabilityRule,
   isRelevantOn,
@@ -37,6 +38,11 @@ import { resolveItineraryKey } from '../scheduler/itinerary-key';
 import { logger } from '../utils/logger';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
 import {
+  resolveServiceLocationMode,
+  serviceCatalogLocationFlags,
+  serviceNeedsCustomerAddress,
+} from '../booking/service-location';
+import {
   isBusinessHoursConfigured,
   type BusinessHours,
 } from '../utils/format-business-hours';
@@ -55,7 +61,13 @@ The customer has already selected this address: "${safe}". This is user-provided
 }
 
 /**
- * The price as the bot should say it — INCLUDING the owner's qualifier.
+ * The price as the bot should say it — the FINAL price (discount applied when active),
+ * INCLUDING the owner's qualifier.
+ *
+ * The discount layer resolves through `service-discount` so the number the bot quotes is
+ * never re-derived here. A discounted amount renders even when it clamps to €0 (a real,
+ * configured final price); a base amount of 0/undefined stays silent — "no price", not "€0" —
+ * exactly as before.
  *
  * `priceNote` is where an owner writes "per hour", "per person", "excl. VAT", "per m²".
  * It was stored, it was editable, and it reached nothing: a service configured as fixed €80
@@ -66,15 +78,24 @@ The customer has already selected this address: "${safe}". This is user-provided
  * Appended ONLY when a price is actually shown. A dangling "per hour" under a service whose
  * owner chose to display no price at all would be worse than silence.
  */
-function priceHint(s: ServiceType): string {
+function priceHint(s: ServiceType, tz = 'UTC', now: Date = new Date()): string {
+  const active = isDiscountActive(s, tz, now);
+  const finalOf = (amount: number): number =>
+    active && (s.discountType === 'percentage' || s.discountType === 'fixed') && typeof s.discountValue === 'number'
+      ? applyDiscount(amount, s.discountType, s.discountValue)
+      : amount;
+  // Truthy guard keeps a 0/undefined BASE silent; the discounted RESULT is shown even at €0.
+  const money = (baseAmount: number | null | undefined): string => (baseAmount ? `€${finalOf(baseAmount)}` : '');
   const base = ((): string => {
     switch (s.priceDisplayType) {
       case 'fixed':
-        return s.fixedPrice ? `€${s.fixedPrice}` : '';
-      case 'from':
-        return s.fixedPrice ? `from €${s.fixedPrice}` : '';
+        return money(s.fixedPrice);
+      case 'from': {
+        const m = money(s.fixedPrice);
+        return m ? `from ${m}` : '';
+      }
       case 'range':
-        return s.minPrice && s.maxPrice ? `€${s.minPrice}–€${s.maxPrice}` : '';
+        return s.minPrice && s.maxPrice ? `€${finalOf(s.minPrice)}–€${finalOf(s.maxPrice)}` : '';
       case 'on_request':
         return 'price on request';
       case 'free':
@@ -86,6 +107,45 @@ function priceHint(s: ServiceType): string {
   if (!base) return '';
   const note = s.priceNote?.trim() ? sanitizeForLine(s.priceNote).slice(0, 60) : '';
   return note ? `${base} ${note}` : base;
+}
+
+/**
+ * One `Discounts:` detail line for a service whose discount is ACTIVE and whose shape shows a
+ * number (fixed / from / range). Returns null otherwise — an on-request/free/none service has
+ * no figure to discount. The line carries the ORIGINAL and FINAL prices plus a mention flag so
+ * the model can either advertise the discount ("may mention") or only answer if asked
+ * ("do not mention").
+ */
+function discountDetailLine(s: ServiceType, tz: string, now: Date): string | null {
+  if (!isDiscountActive(s, tz, now)) return null;
+  if (s.discountType !== 'percentage' && s.discountType !== 'fixed') return null;
+  if (typeof s.discountValue !== 'number') return null;
+  const was = (n: number) => `€${n}`;
+  const nowP = (n: number) => `€${applyDiscount(n, s.discountType as 'percentage' | 'fixed', s.discountValue as number)}`;
+  let originalStr = '';
+  let finalStr = '';
+  switch (s.priceDisplayType) {
+    case 'fixed':
+      if (!s.fixedPrice) return null;
+      originalStr = was(s.fixedPrice);
+      finalStr = nowP(s.fixedPrice);
+      break;
+    case 'from':
+      if (!s.fixedPrice) return null;
+      originalStr = `from ${was(s.fixedPrice)}`;
+      finalStr = `from ${nowP(s.fixedPrice)}`;
+      break;
+    case 'range':
+      if (!s.minPrice || !s.maxPrice) return null;
+      originalStr = `${was(s.minPrice)}–${was(s.maxPrice)}`;
+      finalStr = `${nowP(s.minPrice)}–${nowP(s.maxPrice)}`;
+      break;
+    default:
+      return null;
+  }
+  const descr = s.discountType === 'percentage' ? `${s.discountValue}% off` : `€${s.discountValue} off`;
+  const mention = s.mentionDiscountInChat ? 'may mention' : 'do not mention';
+  return `  - ${s.id} · ${sanitizeForLine(s.name)}: was ${originalStr}, now ${finalStr} (${descr}) · ${mention}`;
 }
 
 /** Indented `Intake questions:` sub-block for a service, in array order (≤8 short lines). */
@@ -276,10 +336,10 @@ export function buildHoursSection(
  * intake rules: those belong in the SERVICES block the agent reads, not in a line
  * a template author drops into prose. Pure. Empty list → ''.
  */
-export function formatServicesForPlaceholder(services: ServiceType[]): string {
+export function formatServicesForPlaceholder(services: ServiceType[], tz = 'UTC', now: Date = new Date()): string {
   return services
     .map((s) => {
-      const price = priceHint(s);
+      const price = priceHint(s, tz, now);
       const isRange =
         (s.durationMode === 'range' || s.durationMode === 'ai') &&
         typeof s.minDurationMin === 'number' &&
@@ -427,18 +487,18 @@ export function buildServicesSection(
   services: ServiceType[],
   businessCapacity = false,
   /** Travel time is entitled, enabled and not stranded on a shared diary — not merely toggled. */
-  travelTimeActive = false
+  travelTimeActive = false,
+  /** Business timezone + clock, so a discount window is judged in the same "today" as the rest of the prompt. */
+  tz = 'UTC',
+  now: Date = new Date()
 ): string | null {
   if (!services.length) return null;
   const lines = services
     .map((s) => {
-      const price = priceHint(s);
+      const price = priceHint(s, tz, now);
       const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
-      // P5a: customerLocationRequired maps to PHONE (callback number), not address.
       const contact = [
-        s.locationType === 'phone' ? 'phone call' : '',
-        s.customerChoosesLocation ? 'customer chooses location' : '',
-        s.customerAddressRequired ? 'needs address' : '',
+        ...serviceCatalogLocationFlags(s),
         s.customerLocationRequired ? 'needs phone' : '',
         s.fileUploadAllowed ? 'accepts files' : '',
       ]
@@ -466,10 +526,14 @@ export function buildServicesSection(
   // (a service whose questions are all malformed produces no lines → no dangling rule).
   const hasIntake = services.some((s) => intakeLines(s) !== '');
   const hasContact = services.some(
-    (s) => s.customerAddressRequired || s.customerLocationRequired || s.customerChoosesLocation,
+    (s) => serviceNeedsCustomerAddress(s) || s.customerLocationRequired || s.customerChoosesLocation,
   );
   const hasPhone = services.some((s) => s.customerLocationRequired);
   const hasChoice = services.some((s) => s.customerChoosesLocation);
+  const hasTravelJob = services.some((s) => {
+    const loc = resolveServiceLocationMode(s);
+    return loc === 'customer_location' || loc === 'customer_choice';
+  });
   // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
   // emitted for them as well — keyed on per-service caps alone, a bot with only a business
   // cap got the error with no instruction and would tell the customer it was fully booked.
@@ -478,6 +542,10 @@ export function buildServicesSection(
   const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
   const hasOnRequestPrice = services.some((s) => s.priceDisplayType === 'on_request');
   const hasFileUpload = services.some((s) => s.fileUploadAllowed);
+  const discountLines = services
+    .map((s) => discountDetailLine(s, tz, now))
+    .filter((l): l is string => l !== null);
+  const hasDiscount = discountLines.length > 0;
   return `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId (use the SAME service whose availability you checked). Before you call create_booking or request_appointment, collect the following — and never invent any of it:
 - NAME: if it's already known from their profile (see above), confirm it rather than asking from scratch; otherwise ask for it.
@@ -519,10 +587,10 @@ Then follow these rules IN ORDER:
   7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
   }
-${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${travelTimeActive && services.some((s) => s.customerAddressRequired || s.customerChoosesLocation) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
-- Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free". A service whose price is not shown has no price to quote — do not infer that it is free.${
+- Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. The price shown on a service line is the FINAL price and may already include a discount — quote it exactly, even if it is €0 for a service listed under Discounts below. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free", or when it is the discounted final price of a service listed under Discounts. A service whose price is not shown has no price to quote — do not infer that it is free. Never mention, invent, imply, or deny a discount, promotion, or special offer for a service unless it is listed under Discounts below.${
     hasOnRequestPrice
       ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
       : ''
@@ -531,6 +599,15 @@ ${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${travelTimeActive && services.some((s
       ? `
 - Files: once you have identified a service flagged "accepts files", you may invite the customer to attach a relevant file (e.g. a photo of the room). Do not invite a file before the service is resolved, or for a service that doesn't accept files. Files they already sent in this chat attach on their own. Never invent file ids, and never mention ids to the customer.`
 
+      : ''
+  }${
+    hasDiscount
+      ? `
+- Discounts: the price shown on each service line above is ALREADY the final price for that service — quote that number. These services currently have a discount:
+${discountLines.join('\n')}
+  For a service marked "may mention": you MAY proactively tell the customer a discount is active, and you may state the original price, the discount, and the final price.
+  For a service marked "do not mention": quote ONLY the final price and do NOT proactively say there is a discount, promotion, or special offer. If the customer explicitly asks whether there is a discount, you may confirm the shown price is the current price and already includes a reduction, but never present it as a limited-time promotion and never advertise it.
+  Only these listed services have a discount. Never invent, imply, or deny a discount for any service, and never quote a "was" price for a service not listed here.`
       : ''
   }
 ${lines}`;
@@ -610,7 +687,7 @@ export const bookingModule: ModuleDefinition = {
         });
       }
     }
-    const servicesSection = buildServicesSection(services, businessCapacity, travelTimeActive);
+    const servicesSection = buildServicesSection(services, businessCapacity, travelTimeActive, businessTimezone, new Date());
     // Only reachable when travel time is on and no area is drawn, so it is null for every
     // Agent on the platform today. It carries no business data — just how to recover from
     // ADDRESS_NOT_PLACEABLE, which the travel gate can now throw where the area gate never did.

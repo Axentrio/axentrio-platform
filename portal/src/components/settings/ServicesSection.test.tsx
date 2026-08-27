@@ -99,58 +99,81 @@ describe('ServicesSection — where does it happen?', () => {
     return (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
   };
 
-  it('offers every location type the engine understands', async () => {
+  it('offers every location type a new service can enter', async () => {
     const select = await openNew();
     const values = [...select.options].map((o) => o.value).sort();
-    // Exactly the LocationType union — a value here the API rejects, or one missing that it
-    // accepts, is how the two drift apart.
-    expect(values).toEqual(['custom', 'google_meet', 'in_person', 'phone']);
+    expect(values).toEqual(['business_location', 'custom', 'customer_location', 'google_meet', 'phone']);
+  });
+
+  it('does not offer In person on a new service', async () => {
+    const select = await openNew();
+    expect([...select.options].map((o) => o.value)).not.toContain('in_person');
   });
 
   it('sends the chosen type when the service is saved', async () => {
     const select = await openNew();
     fireEvent.change(select, { target: { value: 'google_meet' } });
-    // The name input has no htmlFor binding; its placeholder is the stable handle.
     fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Video consult' } });
-    // The dialog's submit button reads "Add service" too — the same text as the trigger
-    // that opened it — so this must be scoped or it matches two elements.
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
     expect(apiPost.mock.calls[0][1]).toMatchObject({ locationType: 'google_meet' });
   });
 
-  it('offers customer-can-choose only for a Both in-person service', async () => {
+  it('offers customer-can-choose only for a Both business-location service', async () => {
     apiGet.mockImplementation((url: string) =>
       url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
     );
     renderUI({ workLocation: 'both' });
     fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
     const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'in_person' } });
+    fireEvent.change(select, { target: { value: 'business_location' } });
     expect(await screen.findByLabelText(/customer can choose/i)).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/customer can choose/i));
     fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Visit' } });
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
-    expect(apiPost.mock.calls[0][1]).toMatchObject({ customerChoosesLocation: true, locationType: 'in_person' });
+    expect(apiPost.mock.calls[0][1]).toMatchObject({ customerChoosesLocation: true, locationType: 'business_location' });
   });
 
   it('hides customer-can-choose when the catalog is not Both', async () => {
     const select = await openNew();
-    fireEvent.change(select, { target: { value: 'in_person' } });
+    fireEvent.change(select, { target: { value: 'business_location' } });
     expect(screen.queryByLabelText(/customer can choose/i)).not.toBeInTheDocument();
   });
 
   it('explains what each choice actually does', async () => {
-    // The two consequences an owner cannot otherwise discover: a video call mints a link,
-    // and an at-premises job needs a venue address set elsewhere.
     const select = await openNew();
     fireEvent.change(select, { target: { value: 'google_meet' } });
     expect(await screen.findByText(/video link is generated/i)).toBeInTheDocument();
-    fireEvent.change(select, { target: { value: 'in_person' } });
+    fireEvent.change(select, { target: { value: 'business_location' } });
     expect(await screen.findByText(/your address goes on the invite/i)).toBeInTheDocument();
+  });
+
+  it('locks the address flag on for customer location', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).toBeChecked();
+    expect(box).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Visit' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][1]).toMatchObject({
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+  });
+
+  it('clears and locks the address flag on business location', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    fireEvent.change(select, { target: { value: 'business_location' } });
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
   });
 });
 
@@ -485,6 +508,25 @@ describe('ServicesSection — clearing an optional field', () => {
     expect(payload.fixedPrice).toBeNull();
     expect(payload.minPrice).toBeNull();
     expect(payload.maxPrice).toBeNull();
+  });
+  it('sends the discount group when the owner enables one', async () => {
+    const dialog = await editExisting();
+    fireEvent.click(within(dialog).getByLabelText(/add a discount/i));
+    fireEvent.change(within(dialog).getByLabelText(/discount \(%\)/i), { target: { value: '20' } });
+    const payload = await save(dialog);
+    expect(payload.discountEnabled).toBe(true);
+    expect(payload.discountType).toBe('percentage');
+    expect(payload.discountValue).toBe(20);
+    expect(payload.mentionDiscountInChat).toBe(false);
+  });
+
+  it('clears the whole discount group to null when disabled', async () => {
+    const dialog = await editExisting({ discountEnabled: true, discountType: 'percentage', discountValue: 20 });
+    fireEvent.click(within(dialog).getByLabelText(/add a discount/i));
+    const payload = await save(dialog);
+    expect(payload.discountEnabled).toBe(false);
+    expect(payload.discountType).toBeNull();
+    expect(payload.discountValue).toBeNull();
   });
 
 });

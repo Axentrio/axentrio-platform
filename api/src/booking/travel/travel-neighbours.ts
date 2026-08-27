@@ -24,6 +24,7 @@ import { AppDataSource } from '../../database/data-source';
 import { Booking } from '../../database/entities/Booking';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import type { LocationType } from '../../database/entities/ServiceType';
+import { isPremisesLocationType } from '../service-location';
 import { isTrustedForTravel, type GeoPoint } from '../../contracts/travel';
 import { formatVenueLine, normalizeVenue } from '../../contracts/venue-address';
 import { logger } from '../../utils/logger';
@@ -196,14 +197,14 @@ async function classify(
   const stored = storedPlace(booking);
   if (stored) return locationFromPlace(stored);
 
-  const isTravelJob = row.customer_address_required === true;
+  const isTravelJob = row.customer_address_required === true || row.location_type === 'customer_location';
   const isPremisesJob =
-    row.has_service && row.customer_address_required === false && row.location_type === 'in_person';
+    row.has_service && !isTravelJob && isPremisesLocationType(row.location_type);
   // A live service that is neither: a phone consultation, a video call, or one the owner marked
   // as putting no location on the invite. The owner could take it from anywhere, so it
-  // constrains nothing — the one case where absent coordinates really do mean absent.
+  // constrains nothing - the one case where absent coordinates really do mean absent.
   const isLocationless =
-    row.has_service && row.customer_address_required === false && row.location_type !== 'in_person';
+    row.has_service && !isTravelJob && !isPremisesLocationType(row.location_type);
   if (isLocationless) return { kind: 'locationless' };
 
   if (isPremisesJob) return venue();

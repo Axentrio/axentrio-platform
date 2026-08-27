@@ -24,22 +24,30 @@ import { Bot } from './Bot';
 /**
  * Where a Service happens, as far as the calendar invite is concerned.
  *
+ * `business_location` and `customer_location` are the explicit physical answers. The
+ * dropdown offers those instead of `in_person`. `in_person` remains only as a review
+ * leftover until the owner picks; it is not a value a new service can enter.
+ *
  * `unset` is the state the column was MISSING, and #71 is what its absence cost. The column
  * shipped defaulting to `custom`, which means "put no location on the invite", and no migration
  * ever backfilled it - so every Service created by hand before the dropdown existed silently
- * said "no location", and a venue the owner had typed into Settings reached nothing: not the
- * calendar event, not the ICS `LOCATION`, not the "Where:" line in the customer's email. The
- * Availability card promised the opposite, unconditionally.
- *
- * A migration could not tell those rows from deliberate ones, because both said `custom` and
- * both are legitimate. Rather than guess, the two are now spelled differently: `unset` means
- * NOBODY WAS EVER ASKED, `custom` means somebody was asked and chose none. The dropdown never
- * offers `unset`, so it is a state rows arrive in and leave, not one an owner can select.
+ * said "no location". Rather than guess, `unset` means NOBODY WAS EVER ASKED, `custom` means
+ * somebody was asked and chose none. The dropdown never offers `unset` or `in_person`.
  */
-export type LocationType = 'google_meet' | 'phone' | 'in_person' | 'custom' | 'unset';
+export type LocationType =
+  | 'google_meet'
+  | 'phone'
+  | 'business_location'
+  | 'customer_location'
+  | 'in_person'
+  | 'custom'
+  | 'unset';
 export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
+
+/** Optional discount layer applied on top of the configured price. */
+export type DiscountType = 'percentage' | 'fixed';
 
 /** P3: a per-service intake question the agent asks before booking/requesting. */
 export type IntakeQuestionType = 'text' | 'choice';
@@ -159,6 +167,38 @@ export class ServiceType {
 
   @Column({ type: 'varchar', length: 255, name: 'price_note', nullable: true })
   priceNote?: string | null;
+
+  /**
+   * Optional discount layer ON TOP of the configured price. `discountEnabled` off (default)
+   * keeps every existing row at its list price. When on with a valid type + value, the
+   * backend computes the final price; `resolveServiceDiscount` is the single source of truth,
+   * never re-derived at a call site. The optional date window is a calendar day range in the
+   * business timezone, inclusive; a null bound is open-ended on that side.
+   */
+  @Column({ type: 'boolean', name: 'discount_enabled', default: false })
+  discountEnabled!: boolean;
+
+  @Column({ type: 'varchar', length: 16, name: 'discount_type', nullable: true })
+  discountType?: DiscountType | null;
+
+  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'discount_value', nullable: true, transformer: numericTransformer })
+  discountValue?: number | null;
+
+  /** Inclusive first day the discount applies, `yyyy-MM-dd` (business-local). Null = no lower bound. */
+  @Column({ type: 'date', name: 'discount_start_on', nullable: true })
+  discountStartOn?: string | null;
+
+  /** Inclusive last day the discount applies, `yyyy-MM-dd` (business-local). Null = no upper bound. */
+  @Column({ type: 'date', name: 'discount_end_on', nullable: true })
+  discountEndOn?: string | null;
+
+  /**
+   * Whether the assistant may present the discount AS a discount. Off (default) = the bot
+   * quotes the final price only and never advertises the reduction; on = the bot may
+   * proactively state the original price, the discount and the final price.
+   */
+  @Column({ type: 'boolean', name: 'mention_discount_in_chat', default: false })
+  mentionDiscountInChat!: boolean;
 
   @Column({ type: 'boolean', name: 'customer_location_required', default: false })
   customerLocationRequired!: boolean;

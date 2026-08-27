@@ -4,6 +4,16 @@ import { MAX_SERVICE_AREA_ENTRIES } from '../contracts/service-area';
 
 const hhmm = z.string().regex(/^([01]?\d|2[0-4]):[0-5]\d$/, 'Expected HH:MM');
 
+/** Writable location types. `unset` is review-only and is never accepted on write. `in_person` is accepted so a leftover row can be saved without forcing a pick. */
+export const writableLocationType = z.enum([
+  'google_meet',
+  'phone',
+  'business_location',
+  'customer_location',
+  'custom',
+  'in_person',
+]);
+
 // Exported so P4 presets can build strict variants over the SAME runtime pieces.
 export const weekday = z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 export const timeWindow = z.object({ start: hhmm, end: hhmm });
@@ -98,7 +108,7 @@ export const eventTypeInputSchema = z.object({
   bufferAfterMin: z.number().int().min(0).max(480).nullable().optional(),
   minNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
   maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
-  locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
+  locationType: writableLocationType.default('custom'),
 });
 
 /**
@@ -198,12 +208,18 @@ export const serviceInputSchema = z.object({
   minPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
   maxPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
   priceNote: z.string().max(255).nullable().optional(),
+  discountEnabled: z.boolean().default(false),
+  discountType: z.enum(['percentage', 'fixed']).nullable().optional(),
+  discountValue: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  discountStartOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected yyyy-MM-dd').nullable().optional(),
+  discountEndOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected yyyy-MM-dd').nullable().optional(),
+  mentionDiscountInChat: z.boolean().default(false),
   customerLocationRequired: z.boolean().default(false),
   customerAddressRequired: z.boolean().default(false),
   customerChoosesLocation: z.boolean().default(false),
   fileUploadAllowed: z.boolean().default(false),
   preparationInstructions: z.string().max(2000).nullable().optional(),
-  locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
+  locationType: writableLocationType.default('custom'),
   sortOrder: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
   intakeQuestions: intakeQuestionsSchema.optional(),
@@ -238,11 +254,51 @@ const durationRangeRefine = (
   }
 };
 
-/** Create payload (full object) with the duration cross-field check. */
-export const serviceCreateSchema = serviceInputSchema.superRefine(durationRangeRefine);
+/**
+ * Discount cross-field rules the PAYLOAD can prove on its own: a percentage never exceeds
+ * 100, enabling a discount in THIS request must carry a type + positive value, and a set
+ * date window must be ordered. The enable-without-type case that only shows on a merged row
+ * (a PUT that flips `discountEnabled` true, or nulls the type, while the stored row keeps the
+ * rest) is caught by `validateDiscountConfig` in the controller after the merge.
+ */
+const discountRefine = (
+  s: {
+    discountEnabled?: boolean;
+    discountType?: 'percentage' | 'fixed' | null;
+    discountValue?: number | null;
+    discountStartOn?: string | null;
+    discountEndOn?: string | null;
+  },
+  ctx: z.RefinementCtx
+) => {
+  const bad = (message: string, path = 'discountValue') =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (s.discountType === 'percentage' && s.discountValue != null && s.discountValue > 100) {
+    bad('a percentage discount cannot be more than 100');
+  }
+  if (s.discountEnabled === true) {
+    if (s.discountType !== 'percentage' && s.discountType !== 'fixed') {
+      bad('an enabled discount needs a type (percentage or fixed)', 'discountType');
+    }
+    if (s.discountValue == null || s.discountValue <= 0) {
+      bad('an enabled discount needs a value greater than 0');
+    }
+  }
+  if (s.discountStartOn && s.discountEndOn && s.discountStartOn > s.discountEndOn) {
+    bad('the discount start date must be on or before the end date', 'discountStartOn');
+  }
+};
 
-/** Partial for PUT — any subset of fields, with the same duration check. */
-export const serviceUpdateSchema = serviceInputSchema.partial().superRefine(durationRangeRefine);
+/** Create payload (full object) with the duration + discount cross-field checks. */
+export const serviceCreateSchema = serviceInputSchema
+  .superRefine(durationRangeRefine)
+  .superRefine(discountRefine);
+
+/** Partial for PUT — any subset of fields, with the same checks. */
+export const serviceUpdateSchema = serviceInputSchema
+  .partial()
+  .superRefine(durationRangeRefine)
+  .superRefine(discountRefine);
 
 /**
  * Environment-robust IANA check (works whether or not Intl.supportedValuesOf exists).

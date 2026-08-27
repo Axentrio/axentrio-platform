@@ -212,7 +212,7 @@ export function BookingsStep({ submit }: StepProps) {
             name: customName.trim(),
             durationMin: customDuration,
             bookingMode: 'auto',
-            locationType: 'in_person',
+            locationType: 'business_location',
             ...(Number.isFinite(price) && price > 0
               ? { priceDisplayType: 'fixed', fixedPrice: price }
               : { priceDisplayType: 'none' }),

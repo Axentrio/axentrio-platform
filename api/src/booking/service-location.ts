@@ -1,23 +1,18 @@
 /**
- * WHO TRAVELS - one answer, derived, never stored (#79, LP1).
+ * WHO TRAVELS - one answer, from locationType, with a legacy fallback.
  *
- * A Service's location is spread across two fields that already contradict each other.
- * `ServiceType.locationType` says video / phone / in-person / custom / unset, and
- * `ServiceType.customerAddressRequired` says the owner goes to the Booking Customer. Nothing can
- * be ranked geographically until one thing answers "who travels", and today every caller that
- * needs to know re-derives it from those two fields with its own precedence rule.
+ * `business_location` and `customer_location` are stored authority. The owner picks them
+ * in the service editor. `customerAddressRequired` is then forced to match, so travel
+ * gates and ADDRESS_REQUIRED keep working without a second source of truth.
  *
- * A RESOLVER, NOT A STORED COLUMN, and the distinction is the whole of this phase. A stored enum
- * would be new authority: a migration, a backfill, compatibility reads and a deprecation path for
- * the two columns that hold the facts today. A resolver is a canonical projection over what
- * already exists, computed in one place. Stored authority can come later, behind an explicit
- * migration plan, and never as a side effect of this.
+ * `in_person` is a review leftover: it still means the premises unless the travel flag
+ * is on. The dropdown no longer offers it. `unset` is still "nobody was asked" (#71).
  *
- * READ-ONLY, and this is not a stylistic preference. `remote` collapses `google_meet`, `phone`
- * and `custom`, which are three different behaviours and one of them mints a meeting link.
- * "Remote" does not say which to persist, so a round trip through this concept would silently
- * lose what the owner set. The remote MODALITY keeps its own control, edited as it is today. A
- * screen may show the two together; nothing may write back through this.
+ * For google_meet / phone / custom, a leftover travel flag still wins, because service-area
+ * gating already refuses those rows on the flag alone. New writes do not create that pair.
+ *
+ * The resolver stays read-only. `remote` still collapses video / phone / custom, so nothing
+ * may write a locationType back through this.
  */
 import type { LocationType } from '../database/entities/ServiceType';
 
@@ -30,7 +25,7 @@ export type ServiceLocationMode =
   | 'customer_choice';
 
 /**
- * The two fields the answer is derived from.
+ * The fields the answer is derived from.
  *
  * Structural rather than `ServiceType`, so this stays usable from a unit test, a projection and
  * the portal contract without dragging the entity graph and a live database connection behind
@@ -41,37 +36,53 @@ export interface ServiceLocationFacts {
   customerAddressRequired?: boolean | null;
   /**
    * Owner-set: this Service can happen at the premises OR at the Booking Customer's
-   * address, and the customer chooses at booking time. A fact, not a stored mode —
+   * address, and the customer chooses at booking time. A fact, not a stored mode -
    * the resolver still projects who travels. Only meaningful for a physical Service
    * in a Both business; ignored when the Service is remote.
    */
   customerChoosesLocation?: boolean | null;
 }
 
+/** Premises jobs: the venue is the location. Includes review leftovers. */
+export function isPremisesLocationType(locationType: string | null | undefined): boolean {
+  return locationType === 'business_location' || locationType === 'in_person' || locationType === 'unset';
+}
+
+/**
+ * Force the address flag to match an explicit location type.
+ *
+ * customer_location cannot exist without an address. business_location cannot require one.
+ * Other types are left alone, including review leftovers.
+ */
+export function locationTypeSideEffects(locationType: string | undefined): {
+  customerAddressRequired?: boolean;
+  customerChoosesLocation?: boolean;
+} {
+  if (locationType === 'customer_location') {
+    return { customerAddressRequired: true, customerChoosesLocation: false };
+  }
+  if (locationType === 'business_location') {
+    return { customerAddressRequired: false };
+  }
+  return {};
+}
+
 /**
  * Who travels for this Service.
  *
- * THE ORDER IS THE CONTRACT, and it is the order `event-location.ts` already applies for invite
- * purposes. `customerAddressRequired` is the stronger statement and wins outright: service-area
- * gating geocodes the Booking Customer's address and REFUSES the booking on that flag alone,
- * without ever reading `locationType`. A Service that is a travel job for that purpose cannot
- * also be "no location at all" for this one. Reading them the other way round is exactly the bug
- * that dropped the customer's own address from invites for every Service still sitting on the
- * `custom` default the column shipped with.
- *
- * `unset` resolves to the BUSINESS LOCATION, not to remote, and the reason is #71. It means
- * nobody was ever asked - the column shipped `NOT NULL DEFAULT 'custom'` with no backfill, so
- * every Service created before the dropdown existed says `custom` without anyone having chosen.
- * `resolveEventLocation` treats those rows as the premises and puts the venue on the invite;
- * folding them into `remote` here would make the same row remote for planning and physical for
- * its invite, which is worse than either answer alone.
+ * Explicit stored types win. `business_location` and `customer_location` do not read the
+ * address flag, so a stale checkbox cannot move the appointment. Legacy values still honour
+ * the flag, because that is how travel jobs were stored before the split.
  */
 export function resolveServiceLocationMode(service: ServiceLocationFacts): ServiceLocationMode {
+  if (service.locationType === 'customer_location') return 'customer_location';
+  if (service.locationType === 'business_location') {
+    if (service.customerChoosesLocation) return 'customer_choice';
+    return 'business_location';
+  }
+  // Legacy / review: the travel flag is still the stronger statement.
   if (service.customerAddressRequired) return 'customer_location';
   if (service.locationType === 'in_person' || service.locationType === 'unset') {
-    // A Both-business Service the owner marked "customer can choose": the Booking
-    // Customer picks business or theirs. Must not collapse into business_location
-    // (no address asked) or customer_location (always travel).
     if (service.customerChoosesLocation) return 'customer_choice';
     return 'business_location';
   }
@@ -104,6 +115,24 @@ export function serviceNeedsCustomerAddress(
   // Unstated choice: an address already given is a strong signal they picked theirs;
   // otherwise fail safe to the business (no invented travel).
   return !!extras?.customerAddress?.trim();
+}
+
+/**
+ * Tokens the SERVICES catalog line shows the model, in order.
+ *
+ * The model must receive the location type explicitly and must not infer it from
+ * "needs address" or from the service name.
+ */
+export function serviceCatalogLocationFlags(service: ServiceLocationFacts): string[] {
+  const flags: string[] = [];
+  if (service.locationType === 'google_meet') flags.push('video call');
+  else if (service.locationType === 'phone') flags.push('phone call');
+  const mode = resolveServiceLocationMode(service);
+  if (mode === 'customer_choice') flags.push('customer chooses location');
+  else if (mode === 'customer_location') flags.push('at customer location');
+  else if (mode === 'business_location') flags.push('at business location');
+  if (mode === 'customer_location') flags.push('needs address');
+  return flags;
 }
 
 /**

@@ -8,7 +8,8 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
-import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
+import { ServiceType, type IntakeQuestion, type DiscountType } from '../database/entities/ServiceType';
+import { validateDiscountConfig } from '../booking/pricing/service-discount';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { Booking } from '../database/entities/Booking';
@@ -21,7 +22,7 @@ import {
 } from '../booking/business-timezone';
 import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
 import { targetBotId } from '../utils/target-bot';
-import { resolveWorkLocation } from '../booking/service-location';
+import { resolveWorkLocation, locationTypeSideEffects } from '../booking/service-location';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
@@ -670,11 +671,29 @@ export async function listServices(req: Request, res: Response): Promise<void> {
  * (not `z.infer<typeof serviceInputSchema>`, whose `.default()` fields are
  * required) so both callers type-check.
  */
-type ServiceRowInput = Omit<z.infer<typeof serviceInputSchema>, 'isActive' | 'sortOrder' | 'intakeQuestions'> & {
+type ServiceRowInput = Omit<
+  z.infer<typeof serviceInputSchema>,
+  'isActive' | 'sortOrder' | 'intakeQuestions' | 'discountEnabled' | 'mentionDiscountInChat'
+> & {
   isActive?: boolean;
   sortOrder?: number;
   intakeQuestions?: IntakeQuestion[] | null;
+  // Defaulted in the schema, so presets (which carry no discount) omit them and rely on the
+  // entity/DB default of off.
+  discountEnabled?: boolean;
+  mentionDiscountInChat?: boolean;
 };
+
+function assertDiscountConfig(c: {
+  discountEnabled?: boolean | null;
+  discountType?: DiscountType | null;
+  discountValue?: number | null;
+  discountStartOn?: string | null;
+  discountEndOn?: string | null;
+}): void {
+  const err = validateDiscountConfig(c);
+  if (err) throw new ApiError(err, 400, 'INVALID_DISCOUNT');
+}
 
 /**
  * Single insert path for a ServiceType row, shared by manual create and preset apply
@@ -688,7 +707,8 @@ async function createServiceRow(
   data: ServiceRowInput
 ): Promise<ServiceType> {
   const repo = manager.getRepository(ServiceType);
-  const svc = repo.create({ tenantId, botId, ...data, slug: await uniqueSlug(repo, botId, data.name) });
+  const constrained = { ...data, ...locationTypeSideEffects(data.locationType) };
+  const svc = repo.create({ tenantId, botId, ...constrained, slug: await uniqueSlug(repo, botId, constrained.name) });
   return repo.save(svc);
 }
 
@@ -718,6 +738,11 @@ export async function updateService(req: Request, res: Response): Promise<void> 
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
   const { intakeQuestions, ...rest } = data;
   Object.assign(svc, rest);
+  Object.assign(svc, locationTypeSideEffects(svc.locationType));
+  // A partial PUT can enable a discount, or null its type, while the rest stays on the stored
+  // row - invalid combinations the payload-only schema refine cannot see. Validate the MERGED
+  // row before save.
+  assertDiscountConfig(svc);
   // Present ⇒ replace (reconciled against the loaded stored set); absent ⇒ unchanged.
   if (intakeQuestions !== undefined) svc.intakeQuestions = reconcileIntakeQuestions(intakeQuestions, svc.intakeQuestions);
   if (data.name) svc.slug = await uniqueSlug(repo, bot.id, data.name, svc.id);

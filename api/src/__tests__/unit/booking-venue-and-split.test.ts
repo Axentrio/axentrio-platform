@@ -181,8 +181,30 @@ describe('resolveEventLocation', () => {
     ).toBe('Grote Markt 1, 9300 Aalst');
   });
 
+  it('sends the venue for explicit business_location', () => {
+    expect(
+      resolveEventLocation({ locationType: 'business_location', customerAddressRequired: false, venue }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('never puts the business address on a customer_location booking', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'customer_location',
+        customerAddressRequired: false,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        venue,
+      }),
+    ).toBe('Kerkstraat 12, 9310 Herdersem');
+  });
+
+  it('omits rather than leaking the venue when a customer_location has no address yet', () => {
+    expect(
+      resolveEventLocation({ locationType: 'customer_location', customerAddressRequired: false, venue }),
+    ).toBeUndefined();
+  });
+
   it('omits rather than inventing a location when no venue is set', () => {
-    // This is the grandfathered state for every existing tenant, and it must be silent.
     expect(
       resolveEventLocation({ locationType: 'in_person', customerAddressRequired: false, venue: null }),
     ).toBeUndefined();

@@ -79,7 +79,7 @@ vi.mock('../../utils/response', () => ({ sendSuccess: (...a: any[]) => sendSucce
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset, reorderServices } from '../../scheduler/scheduler.controller';
-import { serviceInputSchema, serviceUpdateSchema } from '../../schemas/scheduler.schema';
+import { serviceInputSchema, serviceCreateSchema, serviceUpdateSchema } from '../../schemas/scheduler.schema';
 
 /**
  * The config READ tells the screen why travel cannot be switched on.
@@ -395,6 +395,43 @@ describe('intake questions id reconciliation (P3a)', () => {
     expect(ids[0]).toBe('dup');
     expect(ids[1]).toMatch(UUID_RE);
     expect(ids[1]).not.toBe('dup');
+  });
+});
+
+describe('locationType side effects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
+    etFindOne.mockResolvedValue(null);
+  });
+
+  it('forces customer_location to require an address on create', async () => {
+    await createService(
+      {
+        tenantId: 'ten-1',
+        body: { name: 'Visit', durationMin: 60, locationType: 'customer_location', customerAddressRequired: false },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears the address flag for business_location on create', async () => {
+    await createService(
+      {
+        tenantId: 'ten-1',
+        body: { name: 'Cut', durationMin: 30, locationType: 'business_location', customerAddressRequired: true },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'business_location',
+      customerAddressRequired: false,
+    });
   });
 });
 
@@ -932,5 +969,68 @@ describe('scheduler.controller · clearing optional service fields', () => {
     const saved = etSave.mock.calls[0][0];
     expect(saved.description).toBeNull();
     expect(saved.priceNote).toBe('per hour');
+  });
+});
+
+/**
+ * The optional discount layer. The payload-only refine proves what it can (percentage ≤ 100,
+ * enable-with-type-and-value, ordered window); the merged-row check in updateService catches
+ * the partial-PUT combinations the payload cannot see.
+ */
+describe('scheduler.controller · service discount', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
+  });
+
+  const base = { name: 'Repair', durationMin: 30 };
+
+  it('accepts a fully configured discount on create', () => {
+    const r = serviceCreateSchema.safeParse({
+      ...base, discountEnabled: true, discountType: 'percentage', discountValue: 20,
+      discountStartOn: '2026-06-01', discountEndOn: '2026-06-30',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects enabling a discount with no type or value', () => {
+    expect(serviceCreateSchema.safeParse({ ...base, discountEnabled: true }).success).toBe(false);
+    expect(serviceCreateSchema.safeParse({ ...base, discountEnabled: true, discountType: 'fixed' }).success).toBe(false);
+  });
+
+  it('rejects a percentage over 100 even without the enabled flag', () => {
+    expect(serviceUpdateSchema.safeParse({ discountType: 'percentage', discountValue: 150 }).success).toBe(false);
+  });
+
+  it('rejects an inverted date window', () => {
+    const r = serviceCreateSchema.safeParse({
+      ...base, discountEnabled: true, discountType: 'percentage', discountValue: 10,
+      discountStartOn: '2026-06-16', discountEndOn: '2026-06-15',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a merged row that a partial PUT leaves half-configured', async () => {
+    // Stored row is a valid enabled discount; the PUT nulls the type but leaves it enabled.
+    etFindOne.mockResolvedValue({
+      id: 'svc-1', botId: 'bot-1', name: 'Repair',
+      discountEnabled: true, discountType: 'percentage', discountValue: 20,
+    });
+    await expect(
+      updateService({ tenantId: 'ten-1', params: { id: 'svc-1' }, body: { discountType: null } } as any, res),
+    ).rejects.toThrow(/discount/i);
+    expect(etSave).not.toHaveBeenCalled();
+  });
+
+  it('saves a valid discount enabled through a PUT', async () => {
+    etFindOne.mockResolvedValue({ id: 'svc-1', botId: 'bot-1', name: 'Repair', discountEnabled: false });
+    await updateService(
+      { tenantId: 'ten-1', params: { id: 'svc-1' }, body: { discountEnabled: true, discountType: 'fixed', discountValue: 15 } } as any,
+      res,
+    );
+    const saved = etSave.mock.calls[0][0];
+    expect(saved.discountEnabled).toBe(true);
+    expect(saved.discountType).toBe('fixed');
+    expect(saved.discountValue).toBe(15);
   });
 });

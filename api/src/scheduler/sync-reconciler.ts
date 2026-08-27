@@ -18,7 +18,7 @@ import { AppDataSource } from '../database/data-source';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
 import { BookingSettings } from '../database/entities/BookingSettings';
-import { resolveEventLocation } from '../booking/booking-providers/event-location';
+import { resolveBookingEventLocation } from '../booking/booking-providers/event-location';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { logger } from '../utils/logger';
@@ -339,9 +339,7 @@ async function loadEventMeta(
   const settings = await AppDataSource.getRepository(BookingSettings).findOne({
     where: { botId: row.bot_id },
   });
-  const location = resolveEventLocation({
-    locationType: eventType.locationType,
-    customerAddressRequired: !!eventType.customerAddressRequired,
+  const location = resolveBookingEventLocation(eventType, {
     // As on the create path, the Meet URL is not an input to the event.
     meetUrl: null,
     customerAddress: b?.customer_address,

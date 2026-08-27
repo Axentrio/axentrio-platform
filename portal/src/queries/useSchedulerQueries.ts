@@ -49,6 +49,7 @@ export interface SchedulerAvailability {
 export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
+export type DiscountType = 'percentage' | 'fixed';
 
 export type IntakeQuestionType = 'text' | 'choice';
 export interface IntakeQuestion {
@@ -91,6 +92,13 @@ export interface Service {
   minPrice?: number | null;
   maxPrice?: number | null;
   priceNote?: string | null;
+  discountEnabled?: boolean;
+  discountType?: DiscountType | null;
+  discountValue?: number | null;
+  /** `yyyy-MM-dd` (business-local). null = open-ended on that side. */
+  discountStartOn?: string | null;
+  discountEndOn?: string | null;
+  mentionDiscountInChat?: boolean;
   locationType: string;
   preparationInstructions?: string | null;
   customerAddressRequired?: boolean;

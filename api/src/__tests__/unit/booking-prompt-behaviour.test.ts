@@ -355,7 +355,7 @@ describe('price display — free vs no price', () => {
 
 
   it('prints free on the catalog line so the bot can say it', () => {
-    expect(line(priced({ priceDisplayType: 'free' }))).toMatch(/· free$/);
+    expect(line(priced({ priceDisplayType: 'free' }))).toMatch(/· free(?: ·|$)/);
   });
 
   it('appends a note to free the same way as other shown prices', () => {
@@ -390,7 +390,7 @@ describe('price display — free vs no price', () => {
       svc({ id: 'svc-2', name: 'Intro', priceDisplayType: 'free' }),
     ])!;
     expect(line(section, 'svc-1')).not.toMatch(/free/i);
-    expect(line(section, 'svc-2')).toMatch(/· free$/);
+    expect(line(section, 'svc-2')).toMatch(/· free(?: ·|$)/);
   });
 });
 
@@ -740,6 +740,26 @@ describe('#149 — customer chooses location', () => {
   });
 });
 
+describe('explicit location type reaches the catalog', () => {
+  it('labels a business-location service so the model does not infer it', () => {
+    const section = buildServicesSection([svc({ locationType: 'business_location' })])!;
+    expect(line(section)).toMatch(/at business location/);
+    expect(line(section)).not.toMatch(/needs address/);
+  });
+
+  it('labels a customer-location service and requires the address', () => {
+    const section = buildServicesSection([svc({ locationType: 'customer_location' })])!;
+    expect(line(section)).toMatch(/at customer location/);
+    expect(line(section)).toMatch(/needs address/);
+  });
+
+  it('labels a video call without a physical address', () => {
+    const section = buildServicesSection([svc({ locationType: 'google_meet' })])!;
+    expect(line(section)).toMatch(/video call/);
+    expect(line(section)).not.toMatch(/at business location/);
+  });
+});
+
 /**
  * An auto-book service must stay in the auto-book flow when its own policy refuses a day.
  *
@@ -971,5 +991,123 @@ describe('a service daily cap stays in the auto-book flow', () => {
     expect(p).toMatch(/too close to another appointment is one time, not the whole day/i);
     // The unscoped sentence that caused the regression must not come back.
     expect(p).not.toMatch(/Then offer the next available day, and do NOT retry the same date/i);
+  });
+});
+
+/**
+ * The discount layer is prose too: the head line shows the FINAL price, and a gated Discounts
+ * block decides whether the bot may advertise the reduction or only answer if asked. No dates
+ * are set, so the window is open and the discount is active for any `now`.
+ */
+describe('discounts — final price on the line, mention gated by the block', () => {
+  const priced = (over: Record<string, unknown>) => buildServicesSection([svc(over as never)])!;
+
+  it('quotes the discounted final price on the service line, not the original', () => {
+    const p = priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 100,
+      discountEnabled: true,
+      discountType: 'percentage',
+      discountValue: 20,
+      mentionDiscountInChat: true,
+    });
+    expect(line(p)).toContain('€80');
+    expect(line(p)).not.toContain('€100');
+  });
+
+  it('mention ON: the block carries the was/now figures and permits proactive mention', () => {
+    const p = priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 100,
+      discountEnabled: true,
+      discountType: 'percentage',
+      discountValue: 20,
+      mentionDiscountInChat: true,
+    });
+    expect(p).toMatch(/## SERVICES/);
+    expect(p).toContain('was €100, now €80 (20% off)');
+    expect(p).toContain('may mention');
+    expect(p).toMatch(/you MAY proactively tell the customer a discount is active/i);
+  });
+
+  it('mention OFF: the block still carries the figures but forbids advertising', () => {
+    const p = priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 100,
+      discountEnabled: true,
+      discountType: 'fixed',
+      discountValue: 20,
+      mentionDiscountInChat: false,
+    });
+    // The final price is on the line so the bot quotes €80 either way.
+    expect(line(p)).toContain('€80');
+    expect(p).toContain('do not mention');
+    expect(p).toMatch(/do NOT proactively say there is a discount/i);
+    // The explicit-ask rule is present so the bot follows the config, never invents.
+    expect(p).toMatch(/if the customer explicitly asks whether there is a discount/i);
+    // A fixed €20 off reads "€20 off", not a percent.
+    expect(p).toContain('(€20 off)');
+  });
+
+  it('discounts both bounds of a range', () => {
+    const p = priced({
+      priceDisplayType: 'range',
+      minPrice: 80,
+      maxPrice: 120,
+      discountEnabled: true,
+      discountType: 'percentage',
+      discountValue: 25,
+      mentionDiscountInChat: true,
+    });
+    expect(line(p)).toContain('€60–€90');
+    expect(p).toContain('was €80–€120, now €60–€90');
+  });
+
+  it('keeps range bounds ordered (min ≤ max) when a fixed discount clamps the low end to €0', () => {
+    // min 30 − €50 clamps to €0; max 120 − €50 = €70. The result must stay €0–€70, never invert.
+    const p = priced({
+      priceDisplayType: 'range',
+      minPrice: 30,
+      maxPrice: 120,
+      discountEnabled: true,
+      discountType: 'fixed',
+      discountValue: 50,
+      mentionDiscountInChat: true,
+    });
+    expect(line(p)).toContain('€0–€70');
+    expect(p).toContain('was €30–€120, now €0–€70');
+  });
+
+  it('shows a discounted €0 on the line rather than dropping it', () => {
+    const p = priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 50,
+      discountEnabled: true,
+      discountType: 'fixed',
+      discountValue: 80,
+      mentionDiscountInChat: true,
+    });
+    expect(line(p)).toContain('€0');
+    // Decision: a discounted €0 renders as "€0", NEVER the `free` wording — free is a
+    // separate configured concept the owner did not choose here.
+    expect(line(p)).not.toMatch(/free/i);
+    // The Price rule must permit quoting a discounted €0.
+    expect(p).toMatch(/even if it is €0 for a service listed under Discounts/i);
+  });
+
+  it('emits no Discounts block when nothing has an active discount', () => {
+    const p = priced({ priceDisplayType: 'fixed', fixedPrice: 80 });
+    expect(p).not.toMatch(/- Discounts:/);
+  });
+
+  it('ignores a discount on a shape with no number to reduce', () => {
+    const p = priced({
+      priceDisplayType: 'on_request',
+      discountEnabled: true,
+      discountType: 'percentage',
+      discountValue: 20,
+      mentionDiscountInChat: true,
+    });
+    expect(p).not.toMatch(/- Discounts:/);
   });
 });

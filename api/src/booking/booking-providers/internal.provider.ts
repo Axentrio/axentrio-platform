@@ -14,7 +14,7 @@ import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import type { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
-import { resolveEventLocation } from './event-location';
+import { resolveBookingEventLocation } from './event-location';
 import { buildCustomerEventDescription } from './booking-content';
 import { organizerAddressForTenant } from './organizer-address';
 import {
@@ -1460,15 +1460,14 @@ export class InternalProvider implements BookingProvider {
     // Read the venue BEFORE the mirror, not after: the calendar event is created here, so
     // a venue loaded at the email tail arrived too late to reach it at all.
     const { venue } = await loadBusinessRules(ctx.bot.id);
-    const eventLocation = resolveEventLocation({
-      locationType: service.locationType,
-      customerAddressRequired: service.customerAddressRequired,
+    const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
       // an input to it. The physical venue is what the mirror carries; Google renders the
       // Meet link itself from conferenceData.
       meetUrl: null,
       customerAddress: contact.address,
       venue,
+      locationChoice: extras?.locationChoice,
     });
     const meetUrl = await syncCalendarCreate(
       ctx,
@@ -1495,12 +1494,11 @@ export class InternalProvider implements BookingProvider {
       // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
       // which is a modality — it told the customer nothing and occupied the field their
       // calendar would otherwise use for directions. Omitted entirely when unknown.
-      location: resolveEventLocation({
-        locationType: service.locationType,
-        customerAddressRequired: service.customerAddressRequired,
+      location: resolveBookingEventLocation(service, {
         meetUrl,
         customerAddress: contact.address,
         venue,
+        locationChoice: extras?.locationChoice,
       }),
       // The CUSTOMER's copy — what they need, not the owner's operational detail.
       description: buildCustomerEventDescription({
@@ -2184,9 +2182,7 @@ export class InternalProvider implements BookingProvider {
     // Read the venue BEFORE the mirror, not after: the calendar event is created here, so
     // a venue loaded at the email tail arrived too late to reach it at all.
     const { venue } = await loadBusinessRules(ctx.bot.id);
-    const eventLocation = resolveEventLocation({
-      locationType: service.locationType,
-      customerAddressRequired: service.customerAddressRequired,
+    const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
       // an input to it. The physical venue is what the mirror carries; Google renders the
       // Meet link itself from conferenceData.
@@ -2217,9 +2213,7 @@ export class InternalProvider implements BookingProvider {
       // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
       // which is a modality — it told the customer nothing and occupied the field their
       // calendar would otherwise use for directions. Omitted entirely when unknown.
-      location: resolveEventLocation({
-        locationType: service.locationType,
-        customerAddressRequired: service.customerAddressRequired,
+      location: resolveBookingEventLocation(service, {
         meetUrl,
         customerAddress: confirmed.customerAddress,
         venue,
@@ -2830,9 +2824,7 @@ export class InternalProvider implements BookingProvider {
       // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
       // which is a modality — it told the customer nothing and occupied the field their
       // calendar would otherwise use for directions. Omitted entirely when unknown.
-      location: resolveEventLocation({
-        locationType: service.locationType,
-        customerAddressRequired: service.customerAddressRequired,
+      location: resolveBookingEventLocation(service, {
         meetUrl,
         customerAddress: booking.customerAddress,
         venue,
@@ -2891,9 +2883,7 @@ export class InternalProvider implements BookingProvider {
       // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
       // event: Google mints a fresh one from `conferencing` and we store what comes back.
       {
-        location: resolveEventLocation({
-          locationType: service.locationType,
-          customerAddressRequired: service.customerAddressRequired,
+        location: resolveBookingEventLocation(service, {
           meetUrl: null,
           customerAddress: booking.customerAddress,
           venue,

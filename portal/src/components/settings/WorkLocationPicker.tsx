@@ -69,7 +69,7 @@ const ANSWERS: Array<{
     hint: 'Customers come to you.',
     settled: 'Your customers come to you.',
     starters: [
-      { name: 'Appointment', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
+      { name: 'Appointment', durationMin: 60, customerAddressRequired: false, locationType: 'business_location' },
     ],
   },
   {
@@ -78,7 +78,7 @@ const ANSWERS: Array<{
     hint: 'You go to customers. Travel time plans your day around the driving.',
     settled: 'You travel to your customers.',
     starters: [
-      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
+      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'customer_location' },
     ],
   },
   {
@@ -90,8 +90,8 @@ const ANSWERS: Array<{
     // derives to `both`. A picker that said Both and quietly made one would show a different
     // answer than the one that was clicked.
     starters: [
-      { name: 'Appointment at our place', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
-      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
+      { name: 'Appointment at our place', durationMin: 60, customerAddressRequired: false, locationType: 'business_location' },
+      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'customer_location' },
     ],
   },
 ];

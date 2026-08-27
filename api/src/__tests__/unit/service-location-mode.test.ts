@@ -17,24 +17,42 @@ import {
   resolveWorkLocation,
   isPhysical,
   serviceNeedsCustomerAddress,
+  locationTypeSideEffects,
   type ServiceLocationFacts,
 } from '../../booking/service-location';
 import { resolveEventLocation } from '../../booking/booking-providers/event-location';
 import type { LocationType } from '../../database/entities/ServiceType';
 
-const ALL_LOCATION_TYPES: LocationType[] = ['google_meet', 'phone', 'in_person', 'custom', 'unset'];
+const ALL_LOCATION_TYPES: LocationType[] = [
+  'google_meet',
+  'phone',
+  'in_person',
+  'business_location',
+  'customer_location',
+  'custom',
+  'unset',
+];
 const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null };
 
 describe('who travels', () => {
-  it('the customer address wins outright, whatever the modality says', () => {
-    // The stronger statement, and the ordering `event-location.ts` already applies. Service-area
-    // gating refuses a booking on this flag ALONE without ever reading `locationType`, so a
-    // Service that is a travel job for that purpose cannot be "no location" for this one.
-    for (const locationType of ALL_LOCATION_TYPES) {
+  it('the customer address wins on leftover types, whatever the modality says', () => {
+    // Service-area gating refuses a booking on this flag ALONE for google_meet / phone / custom /
+    // in_person / unset, so those rows cannot be "no location" here either.
+    for (const locationType of ['google_meet', 'phone', 'in_person', 'custom', 'unset'] as LocationType[]) {
       expect(resolveServiceLocationMode({ locationType, customerAddressRequired: true })).toBe(
         'customer_location'
       );
     }
+  });
+
+  it('explicit customer_location does not need the travel flag', () => {
+    expect(resolveServiceLocationMode({ locationType: 'customer_location' })).toBe('customer_location');
+  });
+
+  it('explicit business_location ignores a stale travel flag', () => {
+    expect(
+      resolveServiceLocationMode({ locationType: 'business_location', customerAddressRequired: true }),
+    ).toBe('business_location');
   });
 
   it('in_person without a customer address is the premises', () => {
@@ -62,6 +80,15 @@ describe('who travels', () => {
       resolveServiceLocationMode({
         locationType: 'in_person',
         customerAddressRequired: false,
+        customerChoosesLocation: true,
+      }),
+    ).toBe('customer_choice');
+  });
+
+  it('customerChoosesLocation on business_location is still a per-booking pick', () => {
+    expect(
+      resolveServiceLocationMode({
+        locationType: 'business_location',
         customerChoosesLocation: true,
       }),
     ).toBe('customer_choice');
@@ -171,5 +198,31 @@ describe('does THIS booking need the customer address', () => {
 
   it('not when the customer picks the business', () => {
     expect(serviceNeedsCustomerAddress(choose, { locationChoice: 'business' })).toBe(false);
+  });
+
+  it('always, for explicit customer_location, even without the flag', () => {
+    expect(serviceNeedsCustomerAddress({ locationType: 'customer_location' })).toBe(true);
+  });
+
+  it('never, for explicit business_location', () => {
+    expect(serviceNeedsCustomerAddress({ locationType: 'business_location' })).toBe(false);
+  });
+});
+
+describe('locationTypeSideEffects', () => {
+  it('locks customer_location onto a required address', () => {
+    expect(locationTypeSideEffects('customer_location')).toEqual({
+      customerAddressRequired: true,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears the address flag for business_location', () => {
+    expect(locationTypeSideEffects('business_location')).toEqual({ customerAddressRequired: false });
+  });
+
+  it('leaves leftover types alone', () => {
+    expect(locationTypeSideEffects('in_person')).toEqual({});
+    expect(locationTypeSideEffects('google_meet')).toEqual({});
   });
 });

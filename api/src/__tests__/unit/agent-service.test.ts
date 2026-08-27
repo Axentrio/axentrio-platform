@@ -1009,6 +1009,12 @@ describe('AgentService', () => {
       expect(result.content).not.toMatch(/closed|fully booked|volgeboekt|gesloten/i);
       expect(result.quickReplies).toBeUndefined();
       expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
+      // THE RULE ITSELF: the replacement for a promise may not contain a promise. Not "I will
+      // pass this to the business" - `request_appointment` has not run and nothing here runs it -
+      // and not "I will give you the times", which only the next turn can do, and only if the
+      // customer answers. Every sentence on this path ends in a question mark.
+      expect(result.content).not.toMatch(/i will|i'?ll|ik zal|ik ga|je vais/i);
+      expect(result.content.trim().endsWith('?')).toBe(true);
     }
   });
 

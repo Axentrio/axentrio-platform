@@ -434,33 +434,33 @@ const PROMISED_CHECK_NOTE =
 /**
  * Safe reply when the model promises to check a second time.
  *
- * A QUESTION, deliberately. Every other sentence in this file's fallbacks can end a turn safely,
- * but the failure here IS the dead end - so the replacement has to hand the turn back to the
- * customer rather than describe work nobody will do.
+ * A QUESTION AND NOTHING ELSE, like the two below it. The failure being replaced IS a promise of
+ * work nobody performs, so the replacement may not contain one either - not even the mild "and I
+ * will give you the times right away", because the only thing that will actually run is the next
+ * turn, and only if the customer answers.
  */
-const PROMISED_CHECK_FALLBACK =
-  'Which day and time would you like? Tell me and I will give you the available times right away.';
+const PROMISED_CHECK_FALLBACK = 'Which day and time would you like?';
 
 /**
- * Safe reply when the diary could not be read AND the model promised to read it.
+ * Safe reply when the diary COULD NOT BE READ and the model promised to read it.
  *
- * Distinct from the sentence above because the facts are different: there the check never ran and
- * the next turn can still run it, here it ran and returned nothing usable, so promising times
- * would be a second thing nobody can keep. It asks, and it says only what the platform will
- * actually do with the answer.
+ * Used only when the call threw - a paused business, a missing calendar, a request-only service.
+ * A QUESTION AND NOTHING ELSE: this whole guard exists because a promise of future work strands
+ * the customer, so the replacement may not smuggle one back in. "I will pass this to the business"
+ * would be exactly that - `request_appointment` has not run, and nothing here will run it.
  */
 const CHECK_FAILED_FALLBACK =
-  'I cannot see the diary at the moment. Which day and time would suit you? I will pass your preference to the business.';
+  'I cannot see the diary at the moment. Which day and time would suit you?';
 
 /**
  * Safe reply when the diary WAS read, had nothing confirmable, and the model promised to look.
  *
  * Says only what is true: nothing can be confirmed for that period. It must never say "closed" or
  * "fully booked" - `check_availability`'s own guidance forbids that reading of an empty result -
- * and it must ask, because the request path needs the customer's preference to capture.
+ * and, like the sentence above, it asks without promising to do anything with the answer.
  */
 const NO_CONFIRMABLE_TIMES_FALLBACK =
-  'I have no times I can confirm for that period. Which day and time would suit you? I will pass your preference to the business.';
+  'I have no times I can confirm for that period. Which day and time would suit you?';
 
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */

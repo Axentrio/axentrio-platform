@@ -727,7 +727,8 @@ describe('AgentService', () => {
       } as unknown as Parameters<typeof agent.run>[2],
       [],
     );
-    await vi.advanceTimersByTimeAsync(3000);
+    // Past LOCALIZE_DEADLINE_MS, whatever it is sized at; the localizer here never settles.
+    await vi.advanceTimersByTimeAsync(30_000);
     const result = await run;
     vi.useRealTimers();
 

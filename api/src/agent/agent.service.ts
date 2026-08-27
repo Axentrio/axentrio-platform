@@ -399,7 +399,18 @@ const NO_SLOTS_ON_SCREEN_FALLBACK =
  * So it races a deadline. Past it the authored English ships - which is exactly what shipped
  * before localization existed, so the worst case is the old behaviour and never a dead end.
  */
-const LOCALIZE_DEADLINE_MS = 2500;
+/**
+ * MEASURED, not guessed. Production, 2026-08-27 01:16Z: the detection call took 1077ms and the
+ * translation 1438ms, so localization finished in 2515ms and lost a 2500ms race by fifteen
+ * milliseconds - the customer got the English sentence in a Dutch conversation, which is the
+ * defect this whole path exists to fix. The two calls are sequential inside `localizeMessage`.
+ *
+ * Six seconds is that measurement with room either side. It only ever applies on a turn whose
+ * reply is being REPLACED, which is rare, and the fallback is a correct English sentence rather
+ * than silence - so the cost of the ceiling being generous is small and the cost of it being
+ * tight is a wrong-language reply every time the provider is having an average day.
+ */
+const LOCALIZE_DEADLINE_MS = 6000;
 
 async function inCustomerLanguage(
   text: string,

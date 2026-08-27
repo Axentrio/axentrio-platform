@@ -376,6 +376,8 @@ export interface BookingProvider {
     customerAddress?: string,
     /** #149 — for a customer_choice Service: which location they picked. */
     locationChoice?: 'business' | 'customer',
+    /** Required when the service flags needs phone. Agent-only; ignored for admin/reschedule. */
+    customerPhone?: string,
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

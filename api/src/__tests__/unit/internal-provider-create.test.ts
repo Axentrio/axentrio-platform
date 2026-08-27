@@ -1003,14 +1003,54 @@ describe('InternalProvider.createBooking', () => {
     expect(insertParam(bookingInsertCall(), 'customer_phone')).toBe('+32470000000');
   });
 
-  it('offers slots for a phone-call Auto-book without an address', async () => {
+  it('throws PHONE_REQUIRED on checkAvailability for a phone-call Auto-book when the number is missing', async () => {
     const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
     serviceTypeFind.mockResolvedValue([phone]);
     eventTypeFindOne.mockResolvedValue(phone);
-    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11'),
+    ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+  });
+
+  it('does not treat a missing phone as the service being unavailable', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    const err = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11').catch((e) => e);
+    expect(err.message).toMatch(/customerPhone/);
+    expect(err.message).toMatch(/do not tell the customer the service is unavailable/i);
+    expect(err.message).toMatch(/do not capture a request or a lead/i);
+  });
+
+  it('offers slots for a phone-call Auto-book once the number is given, without an address', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, '+32470000000',
+    );
     expect(res.slots.length).toBeGreaterThan(0);
     expect(res.locationMode).toBe('remote');
   });
+
+  it('fills the phone from the WhatsApp session so a WA customer is not asked twice', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    const waCtx = { ...ctx, session: { id: 'sess-1', channel: 'whatsapp', visitorId: '32470000000' } };
+    const res = await provider.checkAvailability(waCtx, '2026-06-10', '2026-06-11');
+    expect(res.slots.length).toBeGreaterThan(0);
+  });
+
+  it('does not demand a phone from an admin availability picker', async () => {
+    const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
+    serviceTypeFind.mockResolvedValue([phone]);
+    eventTypeFindOne.mockResolvedValue(phone);
+    await expect(
+      provider.checkAvailability({ ...ctx, isAdmin: true }, '2026-06-10', '2026-06-11'),
+    ).resolves.toMatchObject({ locationMode: 'remote' });
+  });
+
 
 });
 

@@ -100,7 +100,7 @@ import {
   requestTooFar,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
-import { resolveContactFields } from './contact';
+import { resolveContactFields, assertRequiredPhone } from './contact';
 import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
 import {
   resolveDuration,
@@ -276,6 +276,7 @@ export class InternalProvider implements BookingProvider {
      */
     customerAddress?: string,
     locationChoice?: 'business' | 'customer',
+    customerPhone?: string,
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -288,6 +289,11 @@ export class InternalProvider implements BookingProvider {
         'REQUEST_ONLY_SERVICE',
         400
       );
+    }
+    // Agent path only. The owner filling their diary, and a customer moving an
+    // existing booking, already have a number or do not need one to see times.
+    if (!ctx.isAdmin && !excludeBookingId) {
+      assertRequiredPhone(service, { customerPhone }, ctx.session);
     }
     // A paused business still HELPS — it just stops auto-confirming. Same fork, same
     // capture-don't-refuse machinery as a missing calendar, because the customer's

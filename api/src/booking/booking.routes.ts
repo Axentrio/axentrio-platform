@@ -92,6 +92,7 @@ router.post('/availability', verifyInternalAuth, [
   // those services answers ADDRESS_REQUIRED without it. Forwarded here rather than left out,
   // so this endpoint cannot become the one entry point the feature is unreachable through.
   body('customerAddress').optional().isString(),
+  body('customerPhone').optional().isString(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await checkAvailability(
@@ -101,7 +102,9 @@ router.post('/availability', verifyInternalAuth, [
       req.body.endDate,
       undefined,
       undefined,
-      req.body.customerAddress
+      req.body.customerAddress,
+      undefined,
+      req.body.customerPhone,
     );
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }

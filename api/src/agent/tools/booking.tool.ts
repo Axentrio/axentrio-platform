@@ -258,7 +258,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
       customerAddress: {
         type: 'string',
         description:
-          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depends on where the job is, and calling without it returns ADDRESS_REQUIRED. For a 'customer chooses location' service, only required when locationChoice is 'customer'.",
+          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depend on where the job is, and calling without it returns ADDRESS_REQUIRED. For a 'customer chooses location' service, only required when locationChoice is 'customer'.",
+      },
+      customerPhone: {
+        type: 'string',
+        description:
+          "The customer's contact phone number. Required if the SERVICES entry flags 'needs phone'. Calling without it returns PHONE_REQUIRED: ask for the number and call again. Do not treat that as the service being unavailable.",
       },
     },
     required: ['startDate', 'endDate'],
@@ -288,6 +293,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.durationMin as number | undefined,
         chosen.address,
         locationChoice,
+        args.customerPhone as string | undefined,
       );
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so

@@ -47,6 +47,12 @@ describe('BUSINESS_PRESETS — CI guard (every seed must be valid)', () => {
     expect(findPreset('barber')?.label).toBe('Barber');
     expect(findPreset('nope')).toBeUndefined();
   });
+
+  it('marks the consultant intro call as free, not no-price', () => {
+    const intro = findPreset('consultant')!.services.find((s) => s.name === 'Free intro call');
+    expect(intro?.priceDisplayType).toBe('free');
+  });
+
 });
 
 describe('preset schema rejects malformed seeds (negative fixtures)', () => {
@@ -68,9 +74,11 @@ describe('preset schema rejects malformed seeds (negative fixtures)', () => {
     expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'range', minPrice: 50, maxPrice: 10 })).toThrow(); // min>max
     expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'range', minPrice: 10, maxPrice: 50, fixedPrice: 5 })).toThrow(); // stray fixed
     expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'none', fixedPrice: 5 })).toThrow(); // numeric on none
+    expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'free', fixedPrice: 0 })).toThrow(); // numeric on free
     // valid forms
     expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'fixed', fixedPrice: 10 })).not.toThrow();
     expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'range', minPrice: 10, maxPrice: 50 })).not.toThrow();
+    expect(() => presetServiceSchema.parse({ name: 'a', durationMin: 30, priceDisplayType: 'free' })).not.toThrow();
   });
 
   it('rejects inverted / out-of-range availability windows and bad timezone', () => {

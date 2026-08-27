@@ -477,7 +477,50 @@ describe('ServicesSection — clearing an optional field', () => {
     expect(payload.maxPrice).toBeNull();
     expect(payload.fixedPrice).toBe(80);
   });
+
+  it('clears numeric prices when the display type is free', async () => {
+    const dialog = await editExisting({ priceDisplayType: 'free', fixedPrice: 80, minPrice: 50, maxPrice: 90 });
+    const payload = await save(dialog);
+    expect(payload.priceDisplayType).toBe('free');
+    expect(payload.fixedPrice).toBeNull();
+    expect(payload.minPrice).toBeNull();
+    expect(payload.maxPrice).toBeNull();
+  });
+
 });
+
+describe('ServicesSection — free vs no price on the card', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const catalog = (over: Record<string, unknown> = {}) => ({
+    id: 's1', name: 'Cut', bookingMode: 'auto', durationMin: 30, priceDisplayType: 'none',
+    isActive: true, sortOrder: 0, onlineBookable: true, durationMode: 'fixed',
+    bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0, maxHorizonDays: 60,
+    locationType: 'custom', ...over,
+  });
+
+  it('labels a free service as free', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({ services: [catalog({ name: 'Intro', priceDisplayType: 'free' })] })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    expect(await screen.findByText(/30 min · free/)).toBeInTheDocument();
+  });
+
+  it('does not label a no-price service as free', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({ services: [catalog()] })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    await screen.findByText('Cut');
+    expect(screen.queryByText(/free/i)).not.toBeInTheDocument();
+  });
+});
+
 
 /**
  * "Required" only means anything for a question that is actually asked.

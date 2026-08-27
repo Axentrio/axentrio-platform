@@ -77,6 +77,8 @@ function priceHint(s: ServiceType): string {
         return s.minPrice && s.maxPrice ? `€${s.minPrice}–€${s.maxPrice}` : '';
       case 'on_request':
         return 'price on request';
+      case 'free':
+        return 'free';
       default:
         return '';
     }
@@ -507,7 +509,7 @@ Then follow these rules IN ORDER:
 ${travelTimeActive && services.some((s) => s.customerAddressRequired || s.customerChoosesLocation) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
-- Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${
+- Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free". A service whose price is not shown has no price to quote — do not infer that it is free.${
     hasOnRequestPrice
       ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
       : ''

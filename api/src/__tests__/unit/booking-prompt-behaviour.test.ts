@@ -328,6 +328,56 @@ describe('price quoting includes the owner’s qualifier', () => {
 });
 
 /**
+ * `free` is the only display type that lets the bot say a service costs nothing.
+ * `none` is silence: do not display a price, and do not infer that it is free.
+ */
+describe('price display — free vs no price', () => {
+  const priced = (over: Record<string, unknown>) =>
+    buildServicesSection([svc(over as never)])!;
+
+
+  it('prints free on the catalog line so the bot can say it', () => {
+    expect(line(priced({ priceDisplayType: 'free' }))).toMatch(/· free$/);
+  });
+
+  it('appends a note to free the same way as other shown prices', () => {
+    expect(line(priced({ priceDisplayType: 'free', priceNote: 'for new customers' })))
+      .toContain('free for new customers');
+  });
+
+  it('keeps no-price silent, including a leftover note', () => {
+    const out = line(priced({ priceDisplayType: 'none', priceNote: 'per hour' }));
+    expect(out).not.toMatch(/free/i);
+    expect(out).not.toContain('€0');
+    expect(out).not.toContain('per hour');
+  });
+
+  it('does not treat a zero fixed price as free', () => {
+    const out = line(priced({ priceDisplayType: 'fixed', fixedPrice: 0 }));
+    expect(out).not.toMatch(/free/i);
+    expect(out).not.toContain('€0');
+  });
+
+  it('forbids saying free or €0 except when the line shows free', () => {
+    const section = priced({ priceDisplayType: 'none' });
+    const rule = section.split('\n').find((l) => l.startsWith('- Price:')) ?? '';
+    expect(rule).toMatch(/ONLY when that service's line shows "free"/);
+    expect(rule).toMatch(/do not infer that it is free/);
+    expect(line(section)).not.toMatch(/free/i);
+  });
+
+  it('does not print free on a no-price neighbour of a free service', () => {
+    const section = buildServicesSection([
+      svc({ id: 'svc-1', name: 'Consult', priceDisplayType: 'none' }),
+      svc({ id: 'svc-2', name: 'Intro', priceDisplayType: 'free' }),
+    ])!;
+    expect(line(section, 'svc-1')).not.toMatch(/free/i);
+    expect(line(section, 'svc-2')).toMatch(/· free$/);
+  });
+});
+
+
+/**
  * Intake question authoring, on the two surfaces that consume it.
  *
  * Owners previously had label/type/required and nothing else, so they smuggled instructions

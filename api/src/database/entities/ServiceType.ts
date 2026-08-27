@@ -39,7 +39,7 @@ import { Bot } from './Bot';
 export type LocationType = 'google_meet' | 'phone' | 'in_person' | 'custom' | 'unset';
 export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
-export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
+export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
 
 /** P3: a per-service intake question the agent asks before booking/requesting. */
 export type IntakeQuestionType = 'text' | 'choice';

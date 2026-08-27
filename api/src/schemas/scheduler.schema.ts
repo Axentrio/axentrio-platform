@@ -193,7 +193,7 @@ export const serviceInputSchema = z.object({
   minNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
   maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
   maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
-  priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request']).default('none'),
+  priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request', 'free']).default('none'),
   fixedPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
   minPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
   maxPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),

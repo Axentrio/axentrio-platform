@@ -40,6 +40,7 @@ export const presetServiceSchema = serviceInputSchema
         break;
       case 'none':
       case 'on_request':
+      case 'free':
         if (hasFixed || hasMin || hasMax) err(`${s.priceDisplayType} must not set a numeric price`, 'fixedPrice');
         break;
     }
@@ -130,7 +131,7 @@ export const BUSINESS_PRESETS: BusinessPreset[] = [
     label: 'Consultant',
     description: 'Calls and sessions over video.',
     services: [
-      { name: 'Free intro call', durationMin: 30, bookingMode: 'auto', locationType: 'google_meet', priceDisplayType: 'none' },
+      { name: 'Free intro call', durationMin: 30, bookingMode: 'auto', locationType: 'google_meet', priceDisplayType: 'free' },
       { name: 'Strategy session', durationMin: 60, bookingMode: 'auto', locationType: 'google_meet', priceDisplayType: 'fixed', fixedPrice: 120 },
       { name: 'Project consultation', durationMin: 90, bookingMode: 'request', locationType: 'google_meet', priceDisplayType: 'on_request' },
     ],

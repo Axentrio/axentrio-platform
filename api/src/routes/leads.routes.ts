@@ -157,7 +157,7 @@ function projectFollowUp(l: Record<string, unknown>) {
  *
  * `servicePrice` is the tenant's OWN list price for the requested service, not an
  * estimate — hence `priceBasis`, so the UI can label it honestly ("from €80" is not
- * "€80"). `on_request` and `none` yield no number at all rather than a guess: a
+ * "€80"). `on_request`, `none` and `free` yield no number at all rather than a guess: a
  * fabricated monetary figure attached to a named person is inaccurate personal data
  * the subject could demand be rectified.
  */

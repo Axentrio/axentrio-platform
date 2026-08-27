@@ -49,6 +49,7 @@ import {
   type Service,
   type ServiceInput,
   type IntakeQuestion,
+  type PriceDisplayType,
 } from '../../queries/useSchedulerQueries';
 
 interface FormState {
@@ -66,7 +67,7 @@ interface FormState {
   bufferAfterMin: string;
   minNoticeMin: string;
   maxHorizonDays: string;
-  priceDisplayType: 'none' | 'fixed' | 'from' | 'range' | 'on_request';
+  priceDisplayType: PriceDisplayType;
   fixedPrice: string;
   minPrice: string;
   maxPrice: string;
@@ -238,6 +239,8 @@ function priceLabel(s: Service): string {
       return s.minPrice != null && s.maxPrice != null ? `€${s.minPrice}–€${s.maxPrice}` : '';
     case 'on_request':
       return 'on request';
+    case 'free':
+      return 'free';
     default:
       return '';
   }
@@ -649,6 +652,7 @@ const ServiceEditorDialog: React.FC<{
                       <SelectItem value="from">Starting from</SelectItem>
                       <SelectItem value="range">Range</SelectItem>
                       <SelectItem value="on_request">On request</SelectItem>
+                      <SelectItem value="free">Free</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

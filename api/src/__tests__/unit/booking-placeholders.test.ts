@@ -24,6 +24,14 @@ describe('formatServicesForPlaceholder', () => {
     expect(out).toBe('Repair (30-90 min)');
   });
 
+  it('includes free in the spoken list and omits no-price', () => {
+    expect(formatServicesForPlaceholder([
+      svc({ name: 'Intro', priceDisplayType: 'free' }),
+      svc({ name: 'Consult', priceDisplayType: 'none' }),
+    ])).toBe('Intro (30 min, free), Consult (30 min)');
+  });
+
+
   it('empty catalog → empty string (never a literal placeholder)', () => {
     expect(formatServicesForPlaceholder([])).toBe('');
   });

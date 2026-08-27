@@ -48,7 +48,7 @@ export interface SchedulerAvailability {
 
 export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
-export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
+export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
 
 export type IntakeQuestionType = 'text' | 'choice';
 export interface IntakeQuestion {

@@ -844,6 +844,108 @@ describe('AgentService', () => {
     }
   });
 
+  it.each([
+    ['an invoice', 'Kan ik mijn factuur van vorige maand krijgen?', 'Ik kijk het even na voor je en kom erop terug.'],
+    ['an address change', 'Can you update my address please?', 'Let me check your address on file and I will confirm.'],
+    ['an order', 'Où est ma commande?', 'Je vérifie votre commande tout de suite.'],
+  ])('leaves a promise about %s alone on a booking-enabled bot', async (_label, ask, reply) => {
+    // THE MISFIRE THIS GUARD MUST NOT HAVE. Being armed only means the bot HAS booking tools - a
+    // plumber's bot answers invoices, addresses and orders too. Judged on the promise verb alone,
+    // "Ik kijk het even na" about a FACTUUR would be answered with an internal instruction to go
+    // and check a diary for a date nobody named: a wrong-domain rewrite of somebody else's turn,
+    // worse than the dead end being fixed. The promise must be about the diary.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { slots: [], timezone: 'Europe/Brussels' } }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat).mockResolvedValueOnce({
+      content: reply,
+      usage: { promptTokens: 50, completionTokens: 10 },
+      finishReason: 'stop',
+    });
+
+    const result = await agent.run(
+      ask,
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      // Untouched, and no second model call was needed to get here.
+      expect(result.content).toBe(reply);
+      expect(vi.mocked(mockProvider.chat)).toHaveBeenCalledTimes(1);
+      expect(checkAvailability.execute).not.toHaveBeenCalled();
+    }
+  });
+
+  it('replaces a promise made AFTER the check already failed, without calling again', async () => {
+    // The nastiest corner, and the one where a customer is most likely to be stranded. The call
+    // ran and came back refused - paused business, no calendar, request-only service - so
+    // `pendingAvailability` is null and there is nothing to offer. Nudging would be an instruction
+    // to repeat work that already failed; shipping "ik kijk even" is the same dead end as before.
+    // So: no second call, and no promise either.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: false,
+        error: 'BOOKINGS_PAUSED: capture a request instead',
+        errorSafeForModel: true,
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik kijk even wat er vrij is en de zaak bevestigt je afspraak.',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan het om 09:15 op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toMatch(/ik kijk even/i);
+      expect(result.content).toMatch(/^I cannot see the diary at the moment/);
+      // Two model calls, and exactly ONE tool call: the retry never happened.
+      expect(vi.mocked(mockProvider.chat)).toHaveBeenCalledTimes(2);
+      expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
+      // Said in the customer's language, like every replacement on this path.
+      expect(mockLocalize).toHaveBeenCalledWith(
+        expect.stringMatching(/^I cannot see the diary/),
+        'Kan het om 09:15 op woensdag 2 september 2026?',
+        expect.objectContaining({ id: 's1' }),
+      );
+    }
+  });
+
   it('keeps a reply that names a REQUESTABLE travel time, which no chip carries', async () => {
     // The other half of the same guard. A mixed travel result confirms 10:30 and offers 14:00 as
     // a time the business must be asked about - `check_availability` tells the model in so many

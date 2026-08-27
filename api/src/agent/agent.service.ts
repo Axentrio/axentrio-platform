@@ -144,8 +144,13 @@ function claimsBookingForAgentNudge(text: string): boolean {
   ].some((re) => re.test(t));
 }
 
+/** Diary words, in the three languages this platform serves. Deliberately NOT generic "time": a
+ *  support bot asked about a delivery time is not asking about the diary. */
+const AVAILABILITY_SUBJECT =
+  /\b(?:beschikbaar|beschikbaarheid|vrij|agenda|tijdstip|tijden|slot|slots|afspraak|available|availability|calendar|diary|opening hours|booking|appointment|disponib\w*|cr[eé]neau\w*|horaire\w*|rendez-vous)\b/;
+
 /**
- * A reply that PROMISES to look, on a turn that never looked.
+ * A reply that PROMISES to look at the DIARY, on a turn that never looked.
  *
  * Observed on production 2026-08-26, session 4d3f6473, 18:04:18Z: asked "Kan het om 09:15 op
  * woensdag 2 september 2026?", the bot's final reply was "Ik controleer even of woensdag 2
@@ -154,14 +159,18 @@ function claimsBookingForAgentNudge(text: string): boolean {
  * receives: they wait for an answer that no code path will ever produce.
  *
  * The two guards below it judge a CLAIM the model had no right to make. This one judges the
- * opposite failure: no claim, no answer, and no work either. Narrow on purpose - the trigger is a
- * first-person "I am going to check/look" in the three languages this platform actually serves,
- * and it only fires when nothing was checked, so a reply that promises AND calls the tool is
- * untouched.
+ * opposite failure: no claim, no answer, and no work either.
+ *
+ * TWO CONDITIONS, because the promise verb alone is nowhere near enough. Being armed means the bot
+ * HAS booking tools, not that this turn is about booking - and "Let me check your invoice" on a
+ * plumber's bot would otherwise be answered with an internal instruction to go and check a diary
+ * for a date nobody named, which is a worse failure than the one being fixed. So the promise must
+ * also be ABOUT the diary: either the reply names a diary word or a clock time, or the customer's
+ * own message just did.
  */
-function promisesAvailabilityCheck(text: string): boolean {
+function promisesAvailabilityCheck(text: string, customerText: string): boolean {
   const t = text.toLowerCase();
-  return [
+  const promises = [
     // NL: "ik controleer even", "ik ga even kijken", "ik check het even", "ik kijk snel".
     /\bik (?:ga )?(?:het |dat |even |snel |meteen )*(?:controleer|controleren|kijk|kijken|check|checken|zoek|zoeken)\b/,
     // EN: "let me check", "I'll just look", "I'm going to verify", "one moment while I check".
@@ -169,6 +178,12 @@ function promisesAvailabilityCheck(text: string): boolean {
     // FR: "je vérifie", "je vais regarder".
     /\bje (?:vais )?(?:v[eé]rifie|v[eé]rifier|regarde|regarder|consulte|consulter)\b/,
   ].some((re) => re.test(t));
+  if (!promises) return false;
+  return (
+    AVAILABILITY_SUBJECT.test(t) ||
+    parseClockTimes(text).length > 0 ||
+    parseClockTimes(customerText).length > 0
+  );
 }
 
 interface PendingAvailability {
@@ -425,6 +440,17 @@ const PROMISED_CHECK_NOTE =
  */
 const PROMISED_CHECK_FALLBACK =
   'Which day and time would you like? Tell me and I will give you the available times right away.';
+
+/**
+ * Safe reply when the diary could not be read AND the model promised to read it.
+ *
+ * Distinct from the sentence above because the facts are different: there the check never ran and
+ * the next turn can still run it, here it ran and returned nothing usable, so promising times
+ * would be a second thing nobody can keep. It asks, and it says only what the platform will
+ * actually do with the answer.
+ */
+const CHECK_FAILED_FALLBACK =
+  'I cannot see the diary at the moment. Which day and time would suit you? I will pass your preference to the business.';
 
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */
@@ -900,6 +926,15 @@ export class AgentService {
       let availabilityCorrectionAttempted = false;
       /** Same rule again: the promised-check guard owns its own single retry. */
       let promisedCheckCorrectionAttempted = false;
+      /**
+       * A `check_availability` call HAPPENED this run, whatever it returned.
+       *
+       * Distinct from `pendingAvailability`, which is set only when the call SUCCEEDED and came
+       * back with slots. A call that threw - paused business, no calendar, request-only service -
+       * leaves that null, and a model saying "let me check" on such a turn HAS checked. Nudging it
+       * to call again would be an instruction to repeat work that already failed.
+       */
+      let availabilityChecked = false;
       let pendingAddressFact: BookingAddressReplyFact | null = null;
       let addressFactConflict = false;
       let addressCorrectionAttempted = false;
@@ -954,6 +989,7 @@ export class AgentService {
           } else if (pendingAddressFact && !validAddressReply(finalContent, pendingAddressFact)) {
             if (!addressCorrectionAttempted && i < MAX_ITERATIONS - 1) {
               addressCorrectionAttempted = true;
+              (trace.corrections ??= []).push('booking_address_mismatch');
               addressCorrectionOnly = true;
               logger.warn('[agent] blocked inaccurate booking address reply; requesting correction', {
                 sessionId: session.id,
@@ -972,6 +1008,7 @@ export class AgentService {
           if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingForAgentNudge(finalContent)) {
             if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
               correctionAttempted = true;
+              (trace.corrections ??= []).push('unrecorded_booking_claim');
               logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });
               messages.push({ role: 'assistant', content: finalContent });
               messages.push({ role: 'user', content: BOOKING_CORRECTION_NOTE });
@@ -1007,6 +1044,7 @@ export class AgentService {
           ) {
             if (!availabilityCorrectionAttempted && i < MAX_ITERATIONS - 1) {
               availabilityCorrectionAttempted = true;
+              (trace.corrections ??= []).push('availability_unchecked_claim');
               logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
                 sessionId: session.id,
               });
@@ -1022,36 +1060,57 @@ export class AgentService {
           // no code path will keep. The guards above judge a claim the model had no right to make;
           // this judges a turn that made no claim, gave no answer, and did no work.
           //
-          // A SECOND OFFENCE CANNOT FALL THROUGH here, unlike its siblings: shipping the promise
-          // IS the fault. It is replaced with a question, which hands the turn back to the
-          // customer - the one thing that cannot dead-end.
+          // TWO OUTCOMES, and neither may ship the promise. A promise on a turn that never looked
+          // is a model that answered too early: one nudge fixes it. A promise on a turn where the
+          // call already RAN and came back with nothing - paused business, no calendar,
+          // request-only service - must not be nudged, because that is an instruction to repeat
+          // work that already failed; but it is the same dead end, and the customer is most likely
+          // to be stranded exactly there. So it is replaced instead, with no second call.
           if (
             availabilityClaimGuardArmed &&
-            !pendingAvailability &&
             !bookingRecorded &&
-            promisesAvailabilityCheck(finalContent)
+            promisesAvailabilityCheck(finalContent, message)
           ) {
-            if (!promisedCheckCorrectionAttempted && i < MAX_ITERATIONS - 1) {
-              promisedCheckCorrectionAttempted = true;
-              logger.warn('[agent] reply promised a check nothing ran; nudging model to call it', {
+            if (!availabilityChecked) {
+              if (!promisedCheckCorrectionAttempted && i < MAX_ITERATIONS - 1) {
+                promisedCheckCorrectionAttempted = true;
+                logger.warn('[agent] reply promised a check nothing ran; nudging model to call it', {
+                  sessionId: session.id,
+                });
+                messages.push({ role: 'assistant', content: finalContent });
+                messages.push({ role: 'user', content: PROMISED_CHECK_NOTE });
+                continue; // re-run: call check_availability, or ask for the one missing detail
+              }
+              trace.finishReason = 'completed';
+              trace.terminal = { result: 'completed' };
+              void this.traceLogger.save(trace);
+              logger.warn('[agent] reply promised a check twice; asking the customer instead', {
                 sessionId: session.id,
               });
-              messages.push({ role: 'assistant', content: finalContent });
-              messages.push({ role: 'user', content: PROMISED_CHECK_NOTE });
-              continue; // re-run: call check_availability, or ask for the one missing detail
+              return {
+                type: 'response',
+                content: await inCustomerLanguage(PROMISED_CHECK_FALLBACK, message, session),
+                ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
+                ...(escalationRequested ? { handoffRequested: true } : {}),
+              };
             }
-            trace.finishReason = 'completed';
-            trace.terminal = { result: 'completed' };
-            void this.traceLogger.save(trace);
-            logger.warn('[agent] reply promised a check twice; asking the customer instead', {
-              sessionId: session.id,
-            });
-            return {
-              type: 'response',
-              content: await inCustomerLanguage(PROMISED_CHECK_FALLBACK, message, session),
-              ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
-              ...(escalationRequested ? { handoffRequested: true } : {}),
-            };
+            // The call ran. With slots in hand the chips are already attached, so a clumsy "let me
+            // check" beside them is not a dead end and ships as written. With nothing in hand it
+            // is, and no retry can help.
+            if (!pendingAvailability) {
+              trace.finishReason = 'completed';
+              trace.terminal = { result: 'completed' };
+              void this.traceLogger.save(trace);
+              logger.warn('[agent] reply promised a check after the check had already failed', {
+                sessionId: session.id,
+              });
+              return {
+                type: 'response',
+                content: await inCustomerLanguage(CHECK_FAILED_FALLBACK, message, session),
+                ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
+                ...(escalationRequested ? { handoffRequested: true } : {}),
+              };
+            }
           }
           trace.finishReason = 'completed';
           trace.terminal = { result: 'completed' };
@@ -1282,6 +1341,8 @@ export class AgentService {
             // that wants an affordance work perfectly and ship nothing, which is the failure this
             // whole area keeps producing.
             if (result.affordance) pendingAffordance = result.affordance;
+            // Whatever it returned, the call happened: see `availabilityChecked`.
+            if (tool.name === 'check_availability') availabilityChecked = true;
             // Track offered slots for the chip UI; a booking mutation clears them.
             //
             // OFF `availability`, never off `data`. `data` speaks the business's wall clock now,

@@ -1009,12 +1009,68 @@ describe('AgentService', () => {
       expect(result.content).not.toMatch(/closed|fully booked|volgeboekt|gesloten/i);
       expect(result.quickReplies).toBeUndefined();
       expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
-      // THE RULE ITSELF: the replacement for a promise may not contain a promise. Not "I will
-      // pass this to the business" - `request_appointment` has not run and nothing here runs it -
-      // and not "I will give you the times", which only the next turn can do, and only if the
-      // customer answers. Every sentence on this path ends in a question mark.
-      expect(result.content).not.toMatch(/i will|i'?ll|ik zal|ik ga|je vais/i);
-      expect(result.content.trim().endsWith('?')).toBe(true);
+      // THE RULE, stated as what it actually is: never describe work no code path will do. An
+      // un-triggered claim of work in progress ("I am checking now") is the failure; a conditioned
+      // outcome ("tell me and I will…") is fine, because the customer's answer IS the trigger and
+      // the next turn really does capture it. So the replacement must ASK, and must not claim to be
+      // looking right now.
+      expect(result.content).not.toMatch(/ik kijk|controleer|checking|je v[eé]rifie|let me check/i);
+      expect(result.content).toMatch(/\?/);
+    }
+  });
+
+  it.each([
+    [
+      "a promise to CONFIRM a booking, which is the other guard's business",
+      'Yes, please book that appointment.',
+      "I'll confirm your appointment as soon as I have your email.",
+    ],
+    [
+      'an invoice reply on a turn where the CUSTOMER mentioned a clock time',
+      'Ik belde om 10:00 over mijn factuur van vorige maand.',
+      'Ik kijk je factuur even na en kom erop terug.',
+    ],
+  ])('leaves %s alone', async (_label, ask, reply) => {
+    // TWO SOFT EDGES the first cut of this guard had.
+    //
+    // "confirm" was in the promise verbs, so a reply promising to confirm a BOOKING entered this
+    // path and would have been nudged toward check_availability - the wrong tool, and a job the
+    // booking-claim guard above already owns.
+    //
+    // And a clock time in the CUSTOMER's message counted as diary context on its own, so an
+    // invoice question that happened to mention 10:00 turned an invoice reply into a diary promise.
+    // The reply's own domain settles it.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { slots: [], timezone: 'Europe/Brussels' } }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat).mockResolvedValueOnce({
+      content: reply,
+      usage: { promptTokens: 50, completionTokens: 10 },
+      finishReason: 'stop',
+    });
+
+    const result = await agent.run(
+      ask,
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).toBe(reply);
+      // One model call: no nudge, so no re-run, and the diary was never read.
+      expect(vi.mocked(mockProvider.chat)).toHaveBeenCalledTimes(1);
+      expect(checkAvailability.execute).not.toHaveBeenCalled();
     }
   });
 

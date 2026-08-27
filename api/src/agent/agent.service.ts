@@ -150,6 +150,18 @@ const AVAILABILITY_SUBJECT =
   /\b(?:beschikbaar|beschikbaarheid|vrij|agenda|tijdstip|tijden|slot|slots|afspraak|available|availability|calendar|diary|opening hours|booking|appointment|disponib\w*|cr[eé]neau\w*|horaire\w*|rendez-vous)\b/;
 
 /**
+ * Another domain's nouns. A reply about one of these is not about the diary, whatever clock the
+ * customer happened to mention - "I called at 10:00 about my invoice" must not make "let me check
+ * your invoice" a diary promise.
+ *
+ * ADDRESS IS DELIBERATELY ABSENT. A travelling service asks for the customer's address as part of
+ * booking, so "let me check the times for your address" is a diary promise, and excluding the word
+ * would silence this guard on exactly the services that need it most.
+ */
+const OTHER_DOMAIN_SUBJECT =
+  /\b(?:invoice|factuur|facturen|bill|order|orders|bestelling|commande|delivery|levering|livraison|payment|betaling|paiement|quote|offerte|devis|refund|terugbetaling)\b/;
+
+/**
  * A reply that PROMISES to look at the DIARY, on a turn that never looked.
  *
  * Observed on production 2026-08-26, session 4d3f6473, 18:04:18Z: asked "Kan het om 09:15 op
@@ -161,12 +173,14 @@ const AVAILABILITY_SUBJECT =
  * The two guards below it judge a CLAIM the model had no right to make. This one judges the
  * opposite failure: no claim, no answer, and no work either.
  *
- * TWO CONDITIONS, because the promise verb alone is nowhere near enough. Being armed means the bot
- * HAS booking tools, not that this turn is about booking - and "Let me check your invoice" on a
- * plumber's bot would otherwise be answered with an internal instruction to go and check a diary
- * for a date nobody named, which is a worse failure than the one being fixed. So the promise must
- * also be ABOUT the diary: either the reply names a diary word or a clock time, or the customer's
- * own message just did.
+ * WHAT IT IS NOT ABOUT. Being armed means the bot HAS booking tools, not that this turn is about
+ * booking - a plumber's bot answers invoices and orders too. So a promise only counts when it is
+ * about the diary, and never when the reply is plainly about another domain: an invoice reply
+ * cannot become an instruction to go and read a calendar, whatever clock time the customer's own
+ * message contained.
+ *
+ * "CONFIRM" IS NOT A LOOK. A reply promising to confirm a BOOKING belongs to the guard above, and
+ * nudging it toward `check_availability` would point it at the wrong tool.
  */
 function promisesAvailabilityCheck(text: string, customerText: string): boolean {
   const t = text.toLowerCase();
@@ -174,11 +188,12 @@ function promisesAvailabilityCheck(text: string, customerText: string): boolean 
     // NL: "ik controleer even", "ik ga even kijken", "ik check het even", "ik kijk snel".
     /\bik (?:ga )?(?:het |dat |even |snel |meteen )*(?:controleer|controleren|kijk|kijken|check|checken|zoek|zoeken)\b/,
     // EN: "let me check", "I'll just look", "I'm going to verify", "one moment while I check".
-    /\b(?:let me|i'?ll|i will|i'?m going to|while i)\s+(?:just\s+|quickly\s+)?(?:check|look|see|verify|confirm)\b/,
+    /\b(?:let me|i'?ll|i will|i'?m going to|while i)\s+(?:just\s+|quickly\s+)?(?:check|look|see|verify)\b/,
     // FR: "je vérifie", "je vais regarder".
     /\bje (?:vais )?(?:v[eé]rifie|v[eé]rifier|regarde|regarder|consulte|consulter)\b/,
   ].some((re) => re.test(t));
   if (!promises) return false;
+  if (OTHER_DOMAIN_SUBJECT.test(t)) return false;
   return (
     AVAILABILITY_SUBJECT.test(t) ||
     parseClockTimes(text).length > 0 ||
@@ -434,33 +449,36 @@ const PROMISED_CHECK_NOTE =
 /**
  * Safe reply when the model promises to check a second time.
  *
- * A QUESTION AND NOTHING ELSE, like the two below it. The failure being replaced IS a promise of
- * work nobody performs, so the replacement may not contain one either - not even the mild "and I
- * will give you the times right away", because the only thing that will actually run is the next
- * turn, and only if the customer answers.
+ * THE RULE IS NOT "PROMISE NOTHING", it is never describe work no code path will do. The failure
+ * being replaced is a promise with NO trigger - "I am checking now", and then the turn ends, so
+ * nothing runs unless the customer prods the bot again. A sentence whose trigger IS the customer's
+ * next message is the opposite: they answer, the turn runs, the tool is called. Trimming the
+ * outcome to a bare question read as a dead end of its own and dropped the one thing the tool's
+ * guidance insists on - that the customer is never turned away empty-handed.
  */
-const PROMISED_CHECK_FALLBACK = 'Which day and time would you like?';
+const PROMISED_CHECK_FALLBACK =
+  'Which day and time would you like? Tell me and I will come back with the times.';
 
 /**
  * Safe reply when the diary COULD NOT BE READ and the model promised to read it.
  *
  * Used only when the call threw - a paused business, a missing calendar, a request-only service.
- * A QUESTION AND NOTHING ELSE: this whole guard exists because a promise of future work strands
- * the customer, so the replacement may not smuggle one back in. "I will pass this to the business"
- * would be exactly that - `request_appointment` has not run, and nothing here will run it.
+ * It names the state honestly, asks, and says what happens to the answer: the next turn captures
+ * it as a request, which is exactly what `check_availability`'s error guidance asks for. That is a
+ * conditioned outcome, not the un-triggered promise this guard exists to remove.
  */
 const CHECK_FAILED_FALLBACK =
-  'I cannot see the diary at the moment. Which day and time would suit you?';
+  'I cannot see the diary at the moment. Which day and time would suit you? I will pass your preference to the business.';
 
 /**
  * Safe reply when the diary WAS read, had nothing confirmable, and the model promised to look.
  *
  * Says only what is true: nothing can be confirmed for that period. It must never say "closed" or
  * "fully booked" - `check_availability`'s own guidance forbids that reading of an empty result -
- * and, like the sentence above, it asks without promising to do anything with the answer.
+ * and, like the sentence above, it asks and then names what the answer is for.
  */
 const NO_CONFIRMABLE_TIMES_FALLBACK =
-  'I have no times I can confirm for that period. Which day and time would suit you?';
+  'I have no times I can confirm for that period. Which day and time would suit you? I will pass your preference to the business.';
 
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */

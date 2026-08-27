@@ -946,6 +946,72 @@ describe('AgentService', () => {
     }
   });
 
+  it.each([
+    ['an EMPTY successful check', { slots: [], timezone: 'Europe/Brussels' }, /^I have no times I can confirm/],
+    [
+      'a requestable-only travel result',
+      {
+        slots: [],
+        requestableSlots: [{ start: '2026-09-02T12:00:00.000Z', end: '2026-09-02T12:30:00.000Z' }],
+        timezone: 'Europe/Brussels',
+      },
+      /^I have no times I can confirm/,
+    ],
+  ])('replaces the promise after %s, where no chip can appear', async (_label, availability, expected) => {
+    // `pendingAvailability` is truthy for EVERY successful call, `slots: []` included, so object
+    // truthiness is no evidence that the customer can see a time. `buildSlotQuickReplies` reads the
+    // confirmable array, so with none there are no chips - and "ik kijk even" beside an empty
+    // screen is the same dead end, whether the diary was empty or every time needs the owner's
+    // say-so. The sentence must not claim the diary could not be read: it was.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [], timezone: 'Europe/Brussels' },
+        availability,
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik kijk even wat er vrij is en kom er zo op terug.',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan het om 09:15 op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toMatch(/ik kijk even/i);
+      expect(result.content).toMatch(expected);
+      // The diary WAS read, so the reply must not claim otherwise.
+      expect(result.content).not.toMatch(/cannot see the diary/i);
+      // Never "closed" or "fully booked": the tool's guidance forbids that reading.
+      expect(result.content).not.toMatch(/closed|fully booked|volgeboekt|gesloten/i);
+      expect(result.quickReplies).toBeUndefined();
+      expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('keeps a reply that names a REQUESTABLE travel time, which no chip carries', async () => {
     // The other half of the same guard. A mixed travel result confirms 10:30 and offers 14:00 as
     // a time the business must be asked about - `check_availability` tells the model in so many

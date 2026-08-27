@@ -1123,10 +1123,10 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   if (session.ownership !== 'bot_owned') return 'noop';
   const ownershipVersionAtRunStart = session.ownershipVersion ?? 0;
 
-  // Guardrail pause: a sibling message may have tripped the gate and disabled the
-  // session after this one was scheduled. `session` is loaded fresh by the
-  // coalescer right before this call, so the in-memory flag is current.
-  if (session.aiAutoReplyEnabled === false) return 'noop';
+  // Guardrail pause used to return here. That skipped the inbound gate, so a
+  // follow-up that arrived after bot_loop/phishing paused the session stayed
+  // unflagged and unanswered on a conversation that still showed status=bot.
+  // The gate's already-disabled path flags those messages. Do not bypass it.
 
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
   if (!tenant) {
@@ -1165,23 +1165,31 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   // hwm — or an earlier burst message (e.g. phishing) would enter history
   // ungated. The gate is idempotent per message (guardrail_checked claim), so a
   // 'stale' re-run never double-counts. Placed AFTER config resolution, so
-  // AI-off / no-target sessions (returned above) are never gated. If the hwm is
-  // blocked, or an earlier message disabled the session, drop the turn.
+  // AI-off / no-target sessions (returned above) are never gated.
+  // If any window message is rejected, keep gating the rest so they are flagged
+  // too, then drop the turn. Returning on the first reject left the later live
+  // question unanswered on a paused session that still looked live.
   const windowMsgs = await getUnansweredUserWindow(session, pending.id);
   let guardrailReply: string | undefined;
+  let blockedCategory: string | undefined;
   for (const m of windowMsgs) {
     const c = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
     const g = await runInboundGate({
       session, tenantId: session.tenantId, message: m, content: c, channel: session.channel,
     });
     if (!g.proceed) {
-      // Any rejected window message blocks the whole turn: no rejected content
-      // may reach the agent as either the live message or history.
-      logger.info(`[guardrails] turn blocked for session ${session.id} (${g.category})`);
-      return 'noop';
+      blockedCategory ??= g.category;
+      continue;
     }
-    guardrailReply ??= g.replyOverride;
+    if (!blockedCategory) guardrailReply ??= g.replyOverride;
   }
+  if (blockedCategory) {
+    logger.info(`[guardrails] turn blocked for session ${session.id} (${blockedCategory})`);
+    return 'noop';
+  }
+  // Pause still wins after a clean gate (shadow mode, or the flag was already
+  // off). The loop above is what flags the follow-up; this only stops the agent.
+  if (session.aiAutoReplyEnabled === false) return 'noop';
 
   const botParticipant = await ensureBotParticipant(session, aiSettings);
 

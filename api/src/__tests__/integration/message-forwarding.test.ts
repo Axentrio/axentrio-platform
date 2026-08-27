@@ -106,6 +106,7 @@ import {
   forwardMessageToN8n,
   initializeAgentService,
   runTurn,
+  getNewestUnansweredUserMessage,
 } from '../../services/message-forwarding.service';
 import type { AgentService } from '../../agent/agent.service';
 import { config } from '../../config/environment';
@@ -794,9 +795,13 @@ describe('forwardMessageToN8n', () => {
       // flagged (so it leaves the unanswered window and history) and the session
       // is paused for review, instead of silently dropping one turn.
       expect((await messageRepo.findOneOrFail({ where: { id: msgs[0].id } })).guardrailFlagged).toBe(true);
+      // The later live question in the same window must leave the unanswered set
+      // too. Leaving it unflagged is how a paused session still looks live.
+      expect((await messageRepo.findOneOrFail({ where: { id: msgs[1].id } })).guardrailFlagged).toBe(true);
       const paused = await sessionRepo.findOneOrFail({ where: { id: session.id } });
       expect(paused.aiAutoReplyEnabled).toBe(false);
       expect(paused.guardrailStatus).toBe('phishing');
+      expect(await getNewestUnansweredUserMessage(paused)).toBeNull();
 
       // Once an agent clears the session, the flagged message no longer blocks
       // anything: the next turn is answered. That is the anti-freeze guarantee.
@@ -815,6 +820,45 @@ describe('forwardMessageToN8n', () => {
       expect(await runTurn(cleared, later)).toBe('answered');
       expect(await getBotMessages(session.id)).toEqual(['Answered anyway.']);
     });
+
+    /**
+     * Production: bot_loop paused the session, then the customer sent a real
+     * follow-up. runTurn returned terminal noop before the inbound gate, so the
+     * follow-up was never flagged and never answered. The conversation stayed
+     * status=bot, ownership=bot_owned, with an unflagged user message sitting
+     * past the watermark.
+     */
+    it('flags a follow-up that arrives after the session is already paused', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Must not run' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+        await AppDataSource.getRepository(Tenant).update(tenant.id, {
+          settings: { ai: aiSettings(), guardrails: { enforce: true } } as Tenant['settings'],
+        });
+        const session = await createTestSession(tenant.id, {
+          status: 'bot',
+          aiAutoReplyEnabled: false,
+          guardrailStatus: 'bot_loop',
+        });
+        const participant = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+        const later = await createTestMessage(session.id, tenant.id, participant.id, {
+          content: 'Book 12:00 on that same Wednesday instead.',
+          type: 'text',
+          status: 'sent',
+        });
+        const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+        expect(await runTurn(fresh, later)).toBe('noop');
+        expect(runMock).not.toHaveBeenCalled();
+        expect((await messageRepo.findOneOrFail({ where: { id: later.id } })).guardrailFlagged).toBe(true);
+        expect(await getNewestUnansweredUserMessage(
+          await sessionRepo.findOneOrFail({ where: { id: session.id } }),
+        )).toBeNull();
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
 
     it('drains a message that arrives during the agent run (second turn)', async () => {
       const tenant = await createTestTenant({ settings: { ai: aiSettings() } });

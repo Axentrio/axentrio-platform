@@ -6,7 +6,8 @@
  * cancel + reschedule, backed by the in-house scheduler. (Cal.com is shelved.)
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+
 import { useTranslation } from 'react-i18next';
 import {
   Calendar,
@@ -91,6 +92,68 @@ async function downloadFile(fileSessionId: string): Promise<void> {
     toast.error(extractApiErrorMessage(err) ?? 'File is no longer available');
   }
 }
+
+function isImageFile(file: { fileName: string; mimeType?: string }): boolean {
+  if (file.mimeType && file.mimeType.startsWith('image/')) return true;
+  return /\.(jpe?g|png|gif|webp)$/i.test(file.fileName);
+}
+
+function BookingAttachedFile({
+  file,
+}: {
+  file: { fileSessionId: string; fileName: string; mimeType?: string };
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const image = isImageFile(file);
+
+  useEffect(() => {
+    if (!image) return;
+    let cancelled = false;
+    api
+      .get<{ previewUrl: string }>(`/files/${file.fileSessionId}/preview`)
+      .then((r) => {
+        if (!cancelled) setPreviewUrl(r.previewUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.fileSessionId, image]);
+
+  if (!image || !previewUrl) {
+    return (
+      <button
+        type="button"
+        onClick={() => downloadFile(file.fileSessionId)}
+        className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:border-primary-500 hover:text-text-primary"
+      >
+        <Paperclip className="h-3 w-3" /> {file.fileName}
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block overflow-hidden rounded-md border border-edge hover:border-primary-500"
+      >
+        <img src={previewUrl} alt={file.fileName} className="h-16 w-16 object-cover" />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-3xl p-2">
+          <DialogTitle className="sr-only">{file.fileName}</DialogTitle>
+          <img src={previewUrl} alt={file.fileName} className="max-h-[80vh] w-full object-contain" />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 
@@ -600,14 +663,7 @@ function BookingRow({
         {booking.uploadedFiles && booking.uploadedFiles.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-2">
             {booking.uploadedFiles.map((f) => (
-              <button
-                key={f.fileSessionId}
-                type="button"
-                onClick={() => downloadFile(f.fileSessionId)}
-                className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:border-primary-500 hover:text-text-primary"
-              >
-                <Paperclip className="h-3 w-3" /> {f.fileName}
-              </button>
+              <BookingAttachedFile key={f.fileSessionId} file={f} />
             ))}
           </div>
         )}

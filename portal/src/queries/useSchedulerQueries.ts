@@ -405,7 +405,8 @@ export interface AdminBooking {
     basis: 'distance';
   } | null;
   customerPhone?: string | null;
-  uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
+  uploadedFiles?: Array<{ fileSessionId: string; fileName: string; mimeType?: string }> | null;
+
   /** Whether the booking actually reached the owner's connected calendar. */
   calendarSync?: 'synced' | 'pending' | 'failed' | 'none';
   sourceChannel?: string | null;

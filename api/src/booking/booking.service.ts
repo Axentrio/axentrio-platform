@@ -313,7 +313,8 @@ export interface AdminBookingRow {
   /** What the travel gate DID. Null = it did not apply, which is every booking today. */
   travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;
   /** P5e: attached files (snapshot subset for display/download). */
-  uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
+  uploadedFiles?: Array<{ fileSessionId: string; fileName: string; mimeType?: string }> | null;
+
   /**
    * WHICH AGENT sold this appointment (#87).
    *
@@ -632,7 +633,11 @@ export async function adminListBookings(
       uploadedFiles: Array.isArray(b.uploadedFiles)
         ? (b.uploadedFiles as Array<Record<string, unknown>>)
             .filter((f) => f && typeof f.fileSessionId === 'string' && typeof f.fileName === 'string')
-            .map((f) => ({ fileSessionId: f.fileSessionId as string, fileName: f.fileName as string }))
+            .map((f) => ({
+              fileSessionId: f.fileSessionId as string,
+              fileName: f.fileName as string,
+              ...(typeof f.mimeType === 'string' && f.mimeType ? { mimeType: f.mimeType } : {}),
+            }))
         : null,
     })),
   };

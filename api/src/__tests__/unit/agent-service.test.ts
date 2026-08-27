@@ -739,6 +739,111 @@ describe('AgentService', () => {
     }
   });
 
+  it('will not let a promise to check be the last thing the customer gets', async () => {
+    // PRODUCTION, session 4d3f6473, 18:04:18Z, verbatim. Asked "Kan het om 09:15 op woensdag 2
+    // september 2026?", the bot's FINAL reply was "Ik controleer even of ... beschikbaar is" on a
+    // turn with zero tool calls. Nothing schedules a continuation, so that promise was the last
+    // message the customer ever received - they wait for an answer no code path will produce.
+    const slots = [{ start: '2026-09-02T07:00:00.000Z', end: '2026-09-02T07:30:00.000Z' }];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      // The turn as it happened: a promise, and no tool call.
+      .mockResolvedValueOnce({
+        content: 'Ik controleer even of woensdag 2 september 2026 om 09:15 uur beschikbaar is voor 30 minuten 🔧',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'stop',
+      })
+      // Nudged, the model does the work it promised.
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-02' } }],
+      })
+      .mockResolvedValueOnce({
+        content: '09:15 kan niet. Kies gerust een van de knoppen.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan het om 09:15 op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toMatch(/controleer even/i);
+      // The tool ran on the retry, so the customer gets an answer and the chips to act on.
+      expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
+      expect(result.quickReplies).toHaveLength(1);
+    }
+  });
+
+  it('asks the customer instead when the model promises a check twice', async () => {
+    // One retry, like every other guard here. On the second promise the reply becomes a QUESTION,
+    // because shipping the promise IS the fault: a question cannot dead-end, a promise can.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { slots: [], timezone: 'Europe/Brussels' } }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: 'Ik controleer even of dat kan.',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik kijk het even na voor je.',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan het om 09:15 op woensdag 2 september 2026?',
+      // Partial fixtures, cast once with a reason: `run` reads only the fields set here.
+      { id: 's1', tenantId: 't1', status: 'bot' } as unknown as Parameters<typeof agent.run>[1],
+      {
+        id: 't1',
+        settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } },
+      } as unknown as Parameters<typeof agent.run>[2],
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toMatch(/controleer|kijk het even/i);
+      expect(result.content).toMatch(/^Which day and time would you like\?/);
+      // Said in the customer's language, like every other replacement on this path.
+      expect(mockLocalize).toHaveBeenCalledWith(
+        expect.stringMatching(/^Which day and time/),
+        'Kan het om 09:15 op woensdag 2 september 2026?',
+        expect.objectContaining({ id: 's1' }),
+      );
+    }
+  });
+
   it('keeps a reply that names a REQUESTABLE travel time, which no chip carries', async () => {
     // The other half of the same guard. A mixed travel result confirms 10:30 and offers 14:00 as
     // a time the business must be asked about - `check_availability` tells the model in so many

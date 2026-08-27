@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { apiGet, apiPost, apiPatch, apiDelete } = vi.hoisted(() => ({
   apiGet: vi.fn(),
@@ -211,5 +211,50 @@ describe('BotsList — action menu', () => {
     expect(within(menu).getByText('Pause')).toBeInTheDocument();
     expect(within(menu).getByText('Delete')).toBeInTheDocument();
     expect(within(menu).queryByText('Activate')).not.toBeInTheDocument();
+  });
+});
+
+describe('BotsList — row click', () => {
+  const bot = {
+    id: 'bot-anchor',
+    name: 'Main bot',
+    status: 'active' as const,
+    isDefault: true,
+    publicKey: 'bk_anchor',
+    aiEnabled: false,
+    assistantName: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  function renderWithRoutes(payload: BotsListResponse) {
+    apiGet.mockResolvedValueOnce(payload);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <MemoryRouter initialEntries={['/ai']}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/ai" element={<BotsList />} />
+            <Route path="/ai/bots/:id" element={<div data-testid="bot-detail" />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('opens the bot details page when the row is clicked', async () => {
+    renderWithRoutes({ bots: [bot], used: 1, limit: 2 });
+    await userEvent.click(await screen.findByText('Main bot'));
+    expect(screen.getByTestId('bot-detail')).toBeInTheDocument();
+  });
+
+  it('does not open details when the actions menu is clicked', async () => {
+    renderWithRoutes({ bots: [bot], used: 1, limit: 2 });
+    const trigger = await screen.findByRole('button', { name: /actions for main bot/i });
+    await userEvent.click(trigger);
+    expect(screen.queryByTestId('bot-detail')).not.toBeInTheDocument();
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
   });
 });

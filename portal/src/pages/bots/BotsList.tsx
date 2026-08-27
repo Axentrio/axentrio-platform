@@ -266,7 +266,11 @@ export const BotsList: React.FC = () => {
                 </TableRow>
               ) : (
                 bots.map((bot) => (
-                  <TableRow key={bot.id}>
+                  <TableRow
+                    key={bot.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/ai/bots/${bot.id}`)}
+                  >
                     <TableCell className="font-medium">{bot.name}</TableCell>
                     <TableCell>
                       <Badge variant={bot.status === 'active' ? 'default' : 'secondary'}>
@@ -281,7 +285,7 @@ export const BotsList: React.FC = () => {
                     <TableCell className="text-text-muted">
                       {formatDate(bot.createdAt)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button

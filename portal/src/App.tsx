@@ -10,6 +10,7 @@ import { createQueryClient } from './queries/queryConfig';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
+import { Menu } from 'lucide-react';
 
 // Context Providers
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
@@ -25,6 +26,7 @@ import { afterAuthRedirectPath } from '@auth/afterAuthRedirect';
 // Layout
 import { ErrorBoundary } from '@components/ui/error-boundary';
 import { Sidebar } from '@components/Sidebar';
+import { MobileNavDrawer } from '@components/MobileNavDrawer';
 import { TenantCommandPalette } from '@components/admin/TenantCommandPalette';
 import { TenantImpersonationBanner } from '@components/admin/TenantImpersonationBanner';
 import { useTenantTheme } from '@/hooks/useTenantTheme';
@@ -120,12 +122,12 @@ const ConnectionBanner: React.FC = () => {
   if (!show) return null;
 
   return (
-    <div className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-b border-amber-200 dark:border-amber-800">
+    <div className="flex flex-wrap items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-b border-amber-200 dark:border-amber-800">
       <span className="relative flex h-2 w-2">
         {isConnecting && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />}
         <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
       </span>
-      {isConnecting ? 'Reconnecting to live updates…' : 'Live updates disconnected'}
+      <span className="min-w-0">{isConnecting ? 'Reconnecting to live updates…' : 'Live updates disconnected'}</span>
     </div>
   );
 };
@@ -139,6 +141,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
   const isSuperAdmin = user?.role === 'super_admin';
   const { data: setupStatus } = useSetupStatus();
   const inSetup = !isSuperAdmin && setupStatus != null && !setupStatus.complete;
+  const [navOpen, setNavOpen] = React.useState(false);
 
   // Global keyboard shortcut: Cmd+K / Ctrl+K
   React.useEffect(() => {
@@ -174,6 +177,9 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
           <Sidebar />
         </div>
       )}
+      {!inSetup && (
+        <MobileNavDrawer open={navOpen} onClose={() => setNavOpen(false)} />
+      )}
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between md:hidden">
           <div className="flex items-center gap-2">
@@ -194,6 +200,16 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
               {organization?.name ?? 'Axentrio'}
             </span>
           </div>
+          {!inSetup && (
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open menu"
+              className="p-2.5 -mr-1 text-text-primary md:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+          )}
         </div>
         <TenantImpersonationBanner />
         <ConnectionBanner />
@@ -222,50 +238,88 @@ const WidgetTestRouter: React.FC = () => {
 };
 
 // Clerk provider with theme-aware appearance
+
+/** The nine colours the Clerk appearance map needs, resolved once per theme. */
+interface ClerkPalette {
+  background: string;
+  inputBackground: string;
+  formInputBackground: string;
+  text: string;
+  textSecondary: string;
+  border: string;
+  cardShadow: string;
+  socialHover: string;
+  divider: string;
+}
+
+function clerkPalette(isDark: boolean): ClerkPalette {
+  return isDark
+    ? {
+        background: '#161821',
+        inputBackground: '#1e2030',
+        formInputBackground: '#1e2030',
+        text: '#f1f3f9',
+        textSecondary: '#9ca3bf',
+        border: '1px solid #2a2d3e',
+        cardShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+        socialHover: '#262940',
+        divider: '#2a2d3e',
+      }
+    : {
+        background: '#ffffff',
+        inputBackground: '#f9fafb',
+        formInputBackground: '#ffffff',
+        text: '#111827',
+        textSecondary: '#6b7280',
+        border: '1px solid #e5e7eb',
+        cardShadow: '0 25px 50px -12px rgba(0,0,0,0.1)',
+        socialHover: '#f3f4f6',
+        divider: '#e5e7eb',
+      };
+}
+
 const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === 'dark';
+  const palette = clerkPalette(resolvedTheme === 'dark');
 
   return (
     <ClerkProvider
       publishableKey={CLERK_PUBLISHABLE_KEY}
       appearance={{
         variables: {
-          colorBackground: isDark ? '#161821' : '#ffffff',
-          colorInputBackground: isDark ? '#1e2030' : '#f9fafb',
-          colorText: isDark ? '#f1f3f9' : '#111827',
-          colorTextSecondary: isDark ? '#9ca3bf' : '#6b7280',
+          colorBackground: palette.background,
+          colorInputBackground: palette.inputBackground,
+          colorText: palette.text,
+          colorTextSecondary: palette.textSecondary,
           colorPrimary: '#6366f1',
-          colorInputText: isDark ? '#f1f3f9' : '#111827',
+          colorInputText: palette.text,
           colorDanger: '#f87171',
           colorSuccess: '#34d399',
-          colorNeutral: isDark ? '#9ca3bf' : '#6b7280',
+          colorNeutral: palette.textSecondary,
           borderRadius: '0.75rem',
           fontFamily: "'Plus Jakarta Sans', sans-serif",
         },
         elements: {
           card: {
-            backgroundColor: isDark ? '#161821' : '#ffffff',
-            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
-            boxShadow: isDark
-              ? '0 25px 50px -12px rgba(0,0,0,0.5)'
-              : '0 25px 50px -12px rgba(0,0,0,0.1)',
+            backgroundColor: palette.background,
+            border: palette.border,
+            boxShadow: palette.cardShadow,
           },
-          headerTitle: { color: isDark ? '#f1f3f9' : '#111827' },
-          headerSubtitle: { color: isDark ? '#9ca3bf' : '#6b7280' },
+          headerTitle: { color: palette.text },
+          headerSubtitle: { color: palette.textSecondary },
           socialButtonsBlockButton: {
-            backgroundColor: isDark ? '#1e2030' : '#f9fafb',
-            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
-            color: isDark ? '#f1f3f9' : '#111827',
-            '&:hover': { backgroundColor: isDark ? '#262940' : '#f3f4f6' },
+            backgroundColor: palette.inputBackground,
+            border: palette.border,
+            color: palette.text,
+            '&:hover': { backgroundColor: palette.socialHover },
           },
-          dividerLine: { backgroundColor: isDark ? '#2a2d3e' : '#e5e7eb' },
-          dividerText: { color: isDark ? '#9ca3bf' : '#6b7280' },
-          formFieldLabel: { color: isDark ? '#9ca3bf' : '#6b7280' },
+          dividerLine: { backgroundColor: palette.divider },
+          dividerText: { color: palette.textSecondary },
+          formFieldLabel: { color: palette.textSecondary },
           formFieldInput: {
-            backgroundColor: isDark ? '#1e2030' : '#ffffff',
-            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
-            color: isDark ? '#f1f3f9' : '#111827',
+            backgroundColor: palette.formInputBackground,
+            border: palette.border,
+            color: palette.text,
             '&:focus': {
               borderColor: '#6366f1',
               boxShadow: '0 0 0 3px rgba(99,102,241,0.15)',
@@ -276,16 +330,16 @@ const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children
             '&:hover': { backgroundColor: '#818cf8' },
           },
           footerActionLink: { color: '#818cf8' },
-          footerActionText: { color: isDark ? '#9ca3bf' : '#6b7280' },
+          footerActionText: { color: palette.textSecondary },
           identityPreviewEditButton: { color: '#818cf8' },
           formFieldAction: { color: '#818cf8' },
           otpCodeFieldInput: {
-            backgroundColor: isDark ? '#1e2030' : '#ffffff',
-            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
-            color: isDark ? '#f1f3f9' : '#111827',
+            backgroundColor: palette.formInputBackground,
+            border: palette.border,
+            color: palette.text,
           },
           footer: {
-            '& + div': { color: isDark ? '#9ca3bf' : '#6b7280' },
+            '& + div': { color: palette.textSecondary },
           },
         },
       }}

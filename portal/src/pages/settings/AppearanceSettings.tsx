@@ -65,7 +65,7 @@ const AppearanceSettings: React.FC = () => {
           <p className="text-sm text-text-secondary">{t('settings.appearance.description')}</p>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {themeModes.map((mode) => (
               <button
                 type="button"

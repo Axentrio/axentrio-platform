@@ -112,22 +112,15 @@ function customerLine(name?: string | null, email?: string | null): string | nul
   return null;
 }
 
-/** The `Intake:` block lines (header + one indented line per rendered entry), or
- *  [] when there are no renderable entries. Answer keys are question ids; each is
- *  mapped to its human label via `questions` (raw key kept for deleted/unknown
- *  ids). Sort is on RAW keys for a stable order independent of label normalization. */
-function intakeLines(
-  intakeAnswers: unknown,
-  questions?: ServiceContentInput['intakeQuestions'],
-): string[] {
-  if (!intakeAnswers || typeof intakeAnswers !== 'object' || Array.isArray(intakeAnswers)) {
-    return [];
-  }
-  const obj = intakeAnswers as Record<string, unknown>;
+/** Question metadata the intake block needs: id -> label, plus the ids the owner
+ *  marked as not-for-the-calendar. Their answers are still collected and still
+ *  shown in the portal — they are simply noise in an event body the owner reads
+ *  at a glance on their phone. */
+function intakeQuestionMeta(questions?: ServiceContentInput['intakeQuestions']): {
+  labelById: Map<string, string>;
+  excluded: Set<string>;
+} {
   const labelById = new Map<string, string>();
-  // Questions the owner marked as not-for-the-calendar. Their answers are still collected
-  // and still shown in the portal — they are simply noise in an event body the owner reads
-  // at a glance on their phone.
   const excluded = new Set<string>();
   if (Array.isArray(questions)) {
     for (const q of questions) {
@@ -136,6 +129,14 @@ function intakeLines(
       if (q.includeInCalendar === false) excluded.add(q.id);
     }
   }
+  return { labelById, excluded };
+}
+
+/** Answer keys in the order the body should show them. */
+function orderedIntakeKeys(
+  obj: Record<string, unknown>,
+  questions?: ServiceContentInput['intakeQuestions'],
+): string[] {
   // Authored order, not key order. The answer keys are v4 uuids, so sorting them ordered the
   // owner's calendar body by random bytes — and made the reorder control in the service editor
   // a no-op on this one surface, while the portal's booking detail and Leads (which both walk
@@ -155,7 +156,16 @@ function intakeLines(
   // An answer whose question has since been deleted still belongs in the body — it is a thing
   // the customer told them. Sorted, so at least these have a stable order.
   for (const key of Object.keys(obj).sort()) if (!seen.has(key)) ordered.push(key);
+  return ordered;
+}
 
+/** One indented `  label: value` line per renderable, non-excluded entry. */
+function renderIntakeEntries(
+  obj: Record<string, unknown>,
+  ordered: string[],
+  labelById: Map<string, string>,
+  excluded: Set<string>,
+): string[] {
   const entries: string[] = [];
   for (const key of ordered) {
     if (excluded.has(key)) continue;
@@ -165,6 +175,24 @@ function intakeLines(
     const value = normalizeField(rendered);
     entries.push(`  ${label}: ${value}`);
   }
+  return entries;
+}
+
+/** The `Intake:` block lines (header + one indented line per rendered entry), or
+ *  [] when there are no renderable entries. Answer keys are question ids; each is
+ *  mapped to its human label via `questions` (raw key kept for deleted/unknown
+ *  ids). */
+function intakeLines(
+  intakeAnswers: unknown,
+  questions?: ServiceContentInput['intakeQuestions'],
+): string[] {
+  if (!intakeAnswers || typeof intakeAnswers !== 'object' || Array.isArray(intakeAnswers)) {
+    return [];
+  }
+  const obj = intakeAnswers as Record<string, unknown>;
+  const { labelById, excluded } = intakeQuestionMeta(questions);
+  const ordered = orderedIntakeKeys(obj, questions);
+  const entries = renderIntakeEntries(obj, ordered, labelById, excluded);
   return entries.length ? ['Intake:', ...entries] : [];
 }
 

@@ -131,7 +131,7 @@ const ProfileSettings: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="firstName" className="text-text-secondary">{t('settings.profile.firstName')} <span className="text-red-500">*</span></Label>
                 <Input

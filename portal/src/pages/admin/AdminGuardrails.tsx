@@ -95,7 +95,7 @@ export default function AdminGuardrails() {
 
       {/* #9 incident lookup: jump to ANY conversation's enforcement state + journals */}
       <form
-        className="flex items-center gap-2 max-w-md"
+        className="flex flex-wrap items-center gap-2 max-w-md"
         onSubmit={(e) => {
           e.preventDefault();
           const id = lookupId.trim();
@@ -256,12 +256,12 @@ export default function AdminGuardrails() {
                         {e.enforced ? t('admin.guardrails.enforced') : t('admin.guardrails.shadow')}
                       </Badge>
                     </TableCell>
-                    <TableCell className="flex items-center gap-1">
+                    <TableCell className="flex items-center gap-1 shrink-0">
                       {/* #9: incident-response detail (enforcement state + journals + resume) */}
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-xs text-primary-500"
+                        className="gap-1 text-xs text-primary-500 shrink-0"
                         onClick={() => navigate(`/admin/guardrails/${e.conversationId}`)}
                       >
                         {t('admin.incident.inspect')}
@@ -271,7 +271,7 @@ export default function AdminGuardrails() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1 text-xs text-primary-500"
+                        className="gap-1 text-xs text-primary-500 shrink-0"
                         onClick={() =>
                           switchTenant(
                             { tenantId: e.tenantId, tenantName: tenantLabel(e.tenantId) },

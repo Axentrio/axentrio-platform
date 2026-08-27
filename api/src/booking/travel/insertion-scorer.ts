@@ -103,34 +103,51 @@ export interface ScoreInput {
   deadline: number;
 }
 
+type Candidate = ScoreInput['candidates'][number];
+
+/** A candidate's neighbour on one side, reduced to what a leg lookup needs. */
+type Neighbour = { point: { lat: number; lng: number }; departAt: Date };
+
+function neutralAt(
+  start: Date,
+  neutralReason: NeutralReason,
+  period: HalfDayPeriod | null = null
+): ScoredCandidate {
+  return { start, costMinutes: null, preferred: null, neutralReason, period };
+}
+
 /**
- * Score every candidate. Never throws.
+ * Everything one candidate is scored against, resolved once for the whole call.
  *
- * Returns one entry per candidate in the order given. A caller may reorder its own output from
- * these; this function does not reorder anything.
+ * `legsUsed` is the running spend, so a candidate that priced three legs leaves less budget for
+ * the next one - the budget is per CALL, not per candidate.
  */
-export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidate[]> {
-  const { periods } = input;
-  const neutral = (
-    start: Date,
-    neutralReason: NeutralReason,
-    period: HalfDayPeriod | null = null
-  ): ScoredCandidate => ({ start, costMinutes: null, preferred: null, neutralReason, period });
+interface ScoringContext {
+  input: ScoreInput;
+  periods: DayPeriods | null;
+  byPeriod: Record<HalfDayPeriod, RouteNode[]>;
+  allDayAnchors: RouteNode[];
+  /**
+   * The day's first constraining job, which is the only candidate the Base may precede.
+   *
+   * Start-from-base says the owner leaves home for their FIRST job. It says nothing about the
+   * second, and nothing at all about going home - so the Base is never a `next`, and never a
+   * `prev` for anything but the earliest booking of the whole local day.
+   */
+  earliestAnchor: RouteNode | null;
+  legsUsed: number;
+}
 
-  // NO PERIODS IS ONLY FATAL TO HALF-DAY GROUPING. `resolveDayPeriods` returns null for an
-  // always-open diary, because a day with no opening hours has no clock midpoint to split on -
-  // but a WHOLE day needs no split, so full-day grouping works there and half-day cannot.
-  //
-  // This short-circuit used to run before `groupWholeDay` was read, which made a stored
-  // `full_day` silently inert on exactly the diary shape the feature was meant to answer for.
-  if (!periods && !input.groupWholeDay) {
-    return input.candidates.map((c) => neutral(c.blockedStart, 'no_periods'));
-  }
-
-  // Anchors bucketed once. Chronological within a period is what makes `prev`/`next` meaningful,
-  // and the input order is not guaranteed to be.
+/**
+ * Anchors bucketed once. Chronological within a period is what makes `prev`/`next` meaningful,
+ * and the input order is not guaranteed to be.
+ */
+function bucketAnchors(
+  anchors: RouteNode[],
+  periods: DayPeriods | null
+): Record<HalfDayPeriod, RouteNode[]> {
   const byPeriod: Record<HalfDayPeriod, RouteNode[]> = { morning: [], afternoon: [] };
-  for (const a of input.anchors) {
+  for (const a of anchors) {
     // With no periods every anchor is simply "in the day", which is the only bucket full-day
     // grouping uses. The morning list is that bucket; nothing reads it by name in this mode.
     const p = periods ? periodOf({ start: a.blockedStart, end: a.blockedEnd }, periods) : 'morning';
@@ -141,107 +158,154 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
   for (const p of ['morning', 'afternoon'] as const) {
     byPeriod[p].sort((a, b) => a.blockedStart.getTime() - b.blockedStart.getTime());
   }
+  return byPeriod;
+}
 
-  /**
-   * The day's first constraining job, which is the only candidate the Base may precede.
-   *
-   * Start-from-base says the owner leaves home for their FIRST job. It says nothing about the
-   * second, and nothing at all about going home - so the Base is never a `next`, and never a
-   * `prev` for anything but the earliest booking of the whole local day.
-   */
+function candidateNeighbours(
+  candidate: Candidate,
+  period: HalfDayPeriod | null,
+  ctx: ScoringContext
+): { prev: Neighbour | null; nextAnchor: RouteNode | null } {
+  // Full day compares against every job of the local day; half day against this half only.
+  // `period` is still the candidate's own half, because it labels the SLOT rather than the
+  // comparison, and an afternoon slot is an afternoon slot however widely it was scored.
+  const anchors = ctx.input.groupWholeDay ? ctx.allDayAnchors : ctx.byPeriod[period as HalfDayPeriod];
+  const prevAnchor = [...anchors].reverse().find((a) => a.blockedEnd <= candidate.blockedStart) ?? null;
+  const nextAnchor = anchors.find((a) => a.blockedStart >= candidate.blockedEnd) ?? null;
+
+  // The Base stands in as `prev` only at the very front of the day, and only when nothing else
+  // precedes this candidate.
+  const isDayFirst =
+    !ctx.earliestAnchor || candidate.blockedStart < ctx.earliestAnchor.blockedStart;
+  const prev = prevAnchor
+    ? { point: prevAnchor.point, departAt: prevAnchor.blockedEnd }
+    : ctx.input.base && isDayFirst
+      ? ctx.input.base
+      : null;
+  return { prev, nextAnchor };
+}
+
+/** Spends the legs and turns them into a cost. Never throws. */
+async function measureCandidate(
+  candidate: Candidate,
+  plan: {
+    prev: Neighbour | null;
+    nextAnchor: RouteNode | null;
+    legsNeeded: number;
+    period: HalfDayPeriod | null;
+  },
+  ctx: ScoringContext
+): Promise<ScoredCandidate> {
+  const { input } = ctx;
+  const { prev, nextAnchor, period } = plan;
+  const point = candidate.point as { lat: number; lng: number };
+  try {
+    // DEPARTURE TIMES ARE FIXED, not chosen. Traffic-aware answers are departure-bucketed, so a
+    // scorer free to pick its own departure would score one itinerary differently run to run -
+    // and LP4's whole gate is whether the ranking is stable.
+    const toCandidate = prev ? await input.lookup(prev.point, point, prev.departAt, 'adjacent') : 0;
+    const fromCandidate = nextAnchor
+      ? await input.lookup(point, nextAnchor.point, candidate.blockedEnd, 'adjacent')
+      : 0;
+    // The counterfactual: what the two anchors cost each other with nobody between them. Not a
+    // leg feasibility ever measures, so it is the one the caller may have to pay for.
+    const baseline =
+      prev && nextAnchor ? await input.lookup(prev.point, nextAnchor.point, prev.departAt, 'baseline') : 0;
+    ctx.legsUsed += plan.legsNeeded;
+
+    if (toCandidate === null || fromCandidate === null || baseline === null) {
+      return neutralAt(candidate.blockedStart, 'leg_unmeasured', period);
+    }
+
+    const costMinutes = toCandidate + fromCandidate - baseline;
+    // The threshold bounds the marginal minutes ONE candidate adds. Over it means NOT PREFERRED
+    // and nothing else: the Slot keeps its feasibility class, stays confirmable, is still
+    // offered. `<=` so a candidate exactly at the threshold is preferred.
+    const preferred = input.maxDetourMin === null ? true : costMinutes <= input.maxDetourMin;
+    return { start: candidate.blockedStart, costMinutes, preferred, neutralReason: null, period };
+  } catch (error) {
+    // A scorer that can break a booking is worse than one that says nothing.
+    logger.warn('[grouping] scoring a candidate failed; leaving it neutral', { error });
+    return neutralAt(candidate.blockedStart, 'leg_unmeasured', period);
+  }
+}
+
+async function scoreOneCandidate(
+  candidate: Candidate,
+  ctx: ScoringContext
+): Promise<ScoredCandidate> {
+  const { input, periods } = ctx;
+  if (!candidate.point) {
+    // ADR-0014's rule reaches preference too: a coarse or unresolved position may refuse a
+    // drive and may never clear one, so it certainly cannot call one efficient.
+    return neutralAt(candidate.blockedStart, 'position_not_trusted');
+  }
+
+  // `null` here means the day has no halves to belong to, which is a true statement about an
+  // always-open diary rather than a reason to refuse. Only a day WITH a boundary can straddle it.
+  const period = periods
+    ? periodOf({ start: candidate.blockedStart, end: candidate.blockedEnd }, periods)
+    : null;
+  if (periods && !period) return neutralAt(candidate.blockedStart, 'straddles_boundary');
+
+  const { prev, nextAnchor } = candidateNeighbours(candidate, period, ctx);
+
+  // An unanchored period has nothing to be near. Every Slot in it is neutral - NOT "all equally
+  // preferred", which would rank them above a period that genuinely clusters.
+  if (!prev && !nextAnchor) return neutralAt(candidate.blockedStart, 'unanchored', period);
+
+  // Budget checked BEFORE spending, and the whole candidate goes neutral rather than half-scored.
+  // A partial cost is not a smaller truth, it is a different number.
+  const legsNeeded = (prev ? 1 : 0) + (nextAnchor ? 1 : 0) + (prev && nextAnchor ? 1 : 0);
+  if (ctx.legsUsed + legsNeeded > input.legBudget || Date.now() > input.deadline) {
+    return neutralAt(candidate.blockedStart, 'leg_unmeasured', period);
+  }
+
+  return measureCandidate(candidate, { prev, nextAnchor, legsNeeded, period }, ctx);
+}
+
+/**
+ * Score every candidate. Never throws.
+ *
+ * Returns one entry per candidate in the order given. A caller may reorder its own output from
+ * these; this function does not reorder anything.
+ */
+export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidate[]> {
+  const { periods } = input;
+
+  // NO PERIODS IS ONLY FATAL TO HALF-DAY GROUPING. `resolveDayPeriods` returns null for an
+  // always-open diary, because a day with no opening hours has no clock midpoint to split on -
+  // but a WHOLE day needs no split, so full-day grouping works there and half-day cannot.
+  //
+  // This short-circuit used to run before `groupWholeDay` was read, which made a stored
+  // `full_day` silently inert on exactly the diary shape the feature was meant to answer for.
+  if (!periods && !input.groupWholeDay) {
+    return input.candidates.map((c) => neutralAt(c.blockedStart, 'no_periods'));
+  }
+
+  const byPeriod = bucketAnchors(input.anchors, periods);
+
   // Both halves in one chronological list. Used as the anchor set for full-day grouping, and to
   // find the day's first job - which is the same question either way, so it is computed once.
   const allDayAnchors = [...byPeriod.morning, ...byPeriod.afternoon].sort(
     (a, b) => a.blockedStart.getTime() - b.blockedStart.getTime()
   );
 
-  // The list is already chronological, so the day's first job is its head. This used to re-derive
-  // the same value with a `reduce` directly under a comment claiming it was computed once.
-  const earliestAnchor: RouteNode | null = allDayAnchors[0] ?? null;
+  const ctx: ScoringContext = {
+    input,
+    periods,
+    byPeriod,
+    allDayAnchors,
+    // The list is already chronological, so the day's first job is its head. This used to
+    // re-derive the same value with a `reduce` directly under a comment claiming it was
+    // computed once.
+    earliestAnchor: allDayAnchors[0] ?? null,
+    legsUsed: 0,
+  };
 
-  let legsUsed = 0;
   const out: ScoredCandidate[] = [];
-
   for (const candidate of input.candidates) {
-    if (!candidate.point) {
-      // ADR-0014's rule reaches preference too: a coarse or unresolved position may refuse a
-      // drive and may never clear one, so it certainly cannot call one efficient.
-      out.push(neutral(candidate.blockedStart, 'position_not_trusted'));
-      continue;
-    }
-
-    // `null` here means the day has no halves to belong to, which is a true statement about an
-    // always-open diary rather than a reason to refuse. Only a day WITH a boundary can straddle it.
-    const period = periods
-      ? periodOf({ start: candidate.blockedStart, end: candidate.blockedEnd }, periods)
-      : null;
-    if (periods && !period) {
-      out.push(neutral(candidate.blockedStart, 'straddles_boundary'));
-      continue;
-    }
-
-    // Full day compares against every job of the local day; half day against this half only.
-    // `period` above is still the candidate's own half, because it labels the SLOT rather than
-    // the comparison, and an afternoon slot is an afternoon slot however widely it was scored.
-    const anchors = input.groupWholeDay ? allDayAnchors : byPeriod[period as HalfDayPeriod];
-    const prevAnchor = [...anchors].reverse().find((a) => a.blockedEnd <= candidate.blockedStart) ?? null;
-    const nextAnchor = anchors.find((a) => a.blockedStart >= candidate.blockedEnd) ?? null;
-
-    // The Base stands in as `prev` only at the very front of the day, and only when nothing else
-    // precedes this candidate.
-    const isDayFirst = !earliestAnchor || candidate.blockedStart < earliestAnchor.blockedStart;
-    const prev = prevAnchor
-      ? { point: prevAnchor.point, departAt: prevAnchor.blockedEnd }
-      : input.base && isDayFirst
-        ? input.base
-        : null;
-
-    // An unanchored period has nothing to be near. Every Slot in it is neutral - NOT "all equally
-    // preferred", which would rank them above a period that genuinely clusters.
-    if (!prev && !nextAnchor) {
-      out.push(neutral(candidate.blockedStart, 'unanchored', period));
-      continue;
-    }
-
-    // Budget checked BEFORE spending, and the whole candidate goes neutral rather than half-scored.
-    // A partial cost is not a smaller truth, it is a different number.
-    const legsNeeded = (prev ? 1 : 0) + (nextAnchor ? 1 : 0) + (prev && nextAnchor ? 1 : 0);
-    if (legsUsed + legsNeeded > input.legBudget || Date.now() > input.deadline) {
-      out.push(neutral(candidate.blockedStart, 'leg_unmeasured', period));
-      continue;
-    }
-
-    try {
-      // DEPARTURE TIMES ARE FIXED, not chosen. Traffic-aware answers are departure-bucketed, so a
-      // scorer free to pick its own departure would score one itinerary differently run to run -
-      // and LP4's whole gate is whether the ranking is stable.
-      const toCandidate = prev ? await input.lookup(prev.point, candidate.point, prev.departAt, 'adjacent') : 0;
-      const fromCandidate = nextAnchor
-        ? await input.lookup(candidate.point, nextAnchor.point, candidate.blockedEnd, 'adjacent')
-        : 0;
-      // The counterfactual: what the two anchors cost each other with nobody between them. Not a
-      // leg feasibility ever measures, so it is the one the caller may have to pay for.
-      const baseline =
-        prev && nextAnchor ? await input.lookup(prev.point, nextAnchor.point, prev.departAt, 'baseline') : 0;
-      legsUsed += legsNeeded;
-
-      if (toCandidate === null || fromCandidate === null || baseline === null) {
-        out.push(neutral(candidate.blockedStart, 'leg_unmeasured', period));
-        continue;
-      }
-
-      const costMinutes = toCandidate + fromCandidate - baseline;
-      // The threshold bounds the marginal minutes ONE candidate adds. Over it means NOT PREFERRED
-      // and nothing else: the Slot keeps its feasibility class, stays confirmable, is still
-      // offered. `<=` so a candidate exactly at the threshold is preferred.
-      const preferred = input.maxDetourMin === null ? true : costMinutes <= input.maxDetourMin;
-      out.push({ start: candidate.blockedStart, costMinutes, preferred, neutralReason: null, period });
-    } catch (error) {
-      // A scorer that can break a booking is worse than one that says nothing.
-      logger.warn('[grouping] scoring a candidate failed; leaving it neutral', { error });
-      out.push(neutral(candidate.blockedStart, 'leg_unmeasured', period));
-    }
+    out.push(await scoreOneCandidate(candidate, ctx));
   }
-
   return out;
 }

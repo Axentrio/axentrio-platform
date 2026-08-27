@@ -2,6 +2,58 @@ import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { upsertLead } from '../../leads/lead-capture.service';
 
+/**
+ * The chat session behind this call, or null when it cannot be read.
+ *
+ * Best effort on purpose: a missing session only costs the channel identity, and a lead is
+ * still worth capturing from the contact details the visitor typed.
+ */
+async function loadSession(ctx: ToolContext): Promise<ChatSession | null> {
+  try {
+    return await ctx.dataSource.getRepository(ChatSession).findOne({ where: { id: ctx.sessionId } });
+  } catch {
+    // non-fatal
+    return null;
+  }
+}
+
+/**
+ * On a messaging channel, session.visitorId IS the durable contact handle
+ * (the inbound hook already captured it). Pass it so this UPDATES that
+ * channel-identity lead (dedupe_key `channel:externalUserId`) instead of
+ * forking a row keyed on email/phone — and so a request summary alone is
+ * enough to capture, since customers don't type their number on
+ * WhatsApp/Messenger (mirrors booking captureLeadFromBooking convergence).
+ */
+function channelExternalUserId(session: ChatSession | null): string | null {
+  if (!session?.channel || session.channel === 'widget') return null;
+  return session.visitorId ?? null;
+}
+
+/**
+ * Why this call can capture nothing, or null when it can.
+ */
+function rejectUncapturable(
+  email: string | null,
+  phone: string | null,
+  externalUserId: string | null,
+  summary: string | null,
+): ToolResult | null {
+  // Need a durable identifier: a typed email/phone, or (on a channel) the
+  // implicit channel handle. Anonymous widget chat with neither → nothing to
+  // capture (not an error to the model).
+  if (!email && !phone && !externalUserId) {
+    return { success: false, error: 'Provide at least an email or a phone number.' };
+  }
+  // Channel session with no typed contact: only proceed when there's a
+  // request summary to attach — otherwise it's a no-op re-touch of the
+  // existing channel lead, so nudge the model to gather the request first.
+  if (!email && !phone && !summary) {
+    return { success: false, error: 'Ask what the visitor needs, then capture a short summary of their request.' };
+  }
+  return null;
+}
+
 export class CaptureLeadTool implements ToolAdapter {
   name = 'capture_lead';
   description =
@@ -30,34 +82,11 @@ export class CaptureLeadTool implements ToolAdapter {
 
     try {
       // Channel of origin scopes the dedup identity (widget → email/phone key).
-      let session: ChatSession | null = null;
-      try {
-        session = await ctx.dataSource.getRepository(ChatSession).findOne({ where: { id: ctx.sessionId } });
-      } catch {
-        // non-fatal
-      }
+      const session = await loadSession(ctx);
+      const externalUserId = channelExternalUserId(session);
 
-      // On a messaging channel, session.visitorId IS the durable contact handle
-      // (the inbound hook already captured it). Pass it so this UPDATES that
-      // channel-identity lead (dedupe_key `channel:externalUserId`) instead of
-      // forking a row keyed on email/phone — and so a request summary alone is
-      // enough to capture, since customers don't type their number on
-      // WhatsApp/Messenger (mirrors booking captureLeadFromBooking convergence).
-      const externalUserId =
-        session && session.channel && session.channel !== 'widget' ? (session.visitorId ?? null) : null;
-
-      // Need a durable identifier: a typed email/phone, or (on a channel) the
-      // implicit channel handle. Anonymous widget chat with neither → nothing to
-      // capture (not an error to the model).
-      if (!email && !phone && !externalUserId) {
-        return { success: false, error: 'Provide at least an email or a phone number.' };
-      }
-      // Channel session with no typed contact: only proceed when there's a
-      // request summary to attach — otherwise it's a no-op re-touch of the
-      // existing channel lead, so nudge the model to gather the request first.
-      if (!email && !phone && !summary) {
-        return { success: false, error: 'Ask what the visitor needs, then capture a short summary of their request.' };
-      }
+      const uncapturable = rejectUncapturable(email, phone, externalUserId, summary);
+      if (uncapturable) return uncapturable;
 
       // The single deterministic write path (dedup, entitlement gate, webhook +
       // notification on a new lead). Same service every channel uses.

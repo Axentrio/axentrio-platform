@@ -14,7 +14,7 @@ import { AppDataSource } from '../database/data-source';
 import { Bot } from '../database/entities/Bot';
 import { BotTemplateVersion, type TemplateVariable } from '../database/entities/BotTemplateVersion';
 import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
-import { listAvailableTemplates, resolveBoundTemplates, bindingsOf } from '../templates/template-resolver';
+import { listAvailableTemplates, resolveBoundTemplates, bindingsOf, type AvailableTemplate, type ResolvedTemplate } from '../templates/template-resolver';
 import { listActiveModules, getModule } from '../modules';
 import { computeBotSkillReadiness } from '../modules/bot-skill-readiness';
 import { sendSuccess } from '../utils/response';
@@ -30,6 +30,42 @@ async function loadOwnedBotOr404(botId: string, tenantId: string): Promise<Bot> 
     if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Bot not found');
     throw err;
   }
+}
+
+/**
+ * Composable-templates: the custom {placeholders} the bound template(s) declare,
+ * as a union deduped by key (first declaration wins).
+ */
+function unionTemplateVariables(resolvedList: ResolvedTemplate[]): TemplateVariable[] {
+  const varByKey = new Map<string, TemplateVariable>();
+  for (const r of resolvedList) for (const v of r.variables ?? []) if (!varByKey.has(v.key)) varByKey.set(v.key, v);
+  return [...varByKey.values()];
+}
+
+/** The bot's current filled-in values for those {placeholders} (powers the fill-form). */
+function filledTemplateVariables(bot: Bot): Record<string, string> {
+  const ai = bot.settings?.ai as { templateVariables?: Record<string, string> } | undefined;
+  return ai?.templateVariables ?? {};
+}
+
+/**
+ * Skill id → display name for every skill any available template composes, so the
+ * UI can label the per-template skill pills (and the add-picker preview).
+ */
+function skillDisplayNames(available: AvailableTemplate[]): Record<string, string> {
+  const skillNames: Record<string, string> = {};
+  for (const tpl of available) for (const id of tpl.skills) if (!(id in skillNames)) skillNames[id] = getModule(id)?.displayName ?? id;
+  return skillNames;
+}
+
+/** Back-compat: flattened resolved preview of the PRIMARY binding, for the old UI. */
+function primaryResolvedPreview(primary: ResolvedTemplate | undefined) {
+  return {
+    resolvedVersion: primary?.resolvedVersion ?? null,
+    body: primary?.body ?? '',
+    pinnedButUnavailable: primary?.pinnedButUnavailable ?? false,
+    templateUnavailable: primary?.templateUnavailable ?? false,
+  };
 }
 
 /** Shared response shape for GET and PUT — the full picker view (multi-binding). */
@@ -96,15 +132,9 @@ async function buildView(bot: Bot, tenantId: string) {
   // Composable-templates: the custom {placeholders} the bound template(s) declare
   // (union, deduped by key) + the bot's current filled-in values — powers the
   // tenant fill-form so the tenant can complete their template's blanks.
-  const varByKey = new Map<string, TemplateVariable>();
-  for (const r of resolvedList) for (const v of r.variables ?? []) if (!varByKey.has(v.key)) varByKey.set(v.key, v);
-  const variables = [...varByKey.values()];
-  const templateVariables = ((bot.settings?.ai as { templateVariables?: Record<string, string> } | undefined)?.templateVariables) ?? {};
-
-  // Skill id → display name for every skill any available template composes, so the
-  // UI can label the per-template skill pills (and the add-picker preview).
-  const skillNames: Record<string, string> = {};
-  for (const tpl of available) for (const id of tpl.skills) if (!(id in skillNames)) skillNames[id] = getModule(id)?.displayName ?? id;
+  const variables = unionTemplateVariables(resolvedList);
+  const templateVariables = filledTemplateVariables(bot);
+  const skillNames = skillDisplayNames(available);
 
   return {
     available,
@@ -118,12 +148,7 @@ async function buildView(bot: Bot, tenantId: string) {
     // Back-compat: primary binding + a flattened resolved preview for the old UI.
     binding: { templateId: bot.templateId ?? null, templateVersion: bot.templateVersion },
     publishedVersions: bindingsView[0]?.publishedVersions ?? [],
-    resolved: {
-      resolvedVersion: resolvedList[0]?.resolvedVersion ?? null,
-      body: resolvedList[0]?.body ?? '',
-      pinnedButUnavailable: resolvedList[0]?.pinnedButUnavailable ?? false,
-      templateUnavailable: resolvedList[0]?.templateUnavailable ?? false,
-    },
+    resolved: primaryResolvedPreview(resolvedList[0]),
   };
 }
 

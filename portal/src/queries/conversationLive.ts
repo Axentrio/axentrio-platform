@@ -121,6 +121,42 @@ function sortByActivityDesc(rows: Chat[]): Chat[] {
 // Payload → portal shapes
 // ---------------------------------------------------------------------------
 
+/** Fields describing WHO the conversation belongs to and how it is handled. */
+function copySummaryOwnershipFields(
+  dto: ConversationSummaryPayload,
+  patch: Partial<Chat> & { id: string },
+): void {
+  if (dto.tenantId !== undefined) patch.tenantId = dto.tenantId;
+  if (dto.userName !== undefined) patch.userName = dto.userName;
+  if (dto.aiAutoReplyEnabled !== undefined) patch.aiAutoReplyEnabled = dto.aiAutoReplyEnabled;
+  if (dto.guardrailStatus !== undefined) patch.guardrailStatus = dto.guardrailStatus;
+  if (dto.assignedAgentId !== undefined) patch.assignedAgentId = dto.assignedAgentId;
+  if (dto.assignedAgentName !== undefined) patch.assignedAgentName = dto.assignedAgentName;
+  if (dto.ownership !== undefined) patch.ownership = dto.ownership;
+  if (dto.ownershipVersion !== undefined) patch.ownershipVersion = dto.ownershipVersion;
+  if (dto.humanControlMode !== undefined) patch.humanControlMode = dto.humanControlMode;
+  if (dto.humanControlDurationHours !== undefined) {
+    patch.humanControlDurationHours = dto.humanControlDurationHours;
+  }
+  if (dto.humanControlUntil !== undefined) patch.humanControlUntil = dto.humanControlUntil;
+}
+
+/** Message / timestamp / channel fields of an upsert summary. */
+function copySummaryActivityFields(
+  dto: ConversationSummaryPayload,
+  patch: Partial<Chat> & { id: string },
+): void {
+  if (dto.messageCount !== undefined) patch.messageCount = dto.messageCount;
+  if (dto.lastMessage !== undefined) patch.lastMessage = dto.lastMessage;
+  if (dto.lastMessageSender !== undefined) patch.lastMessageSender = dto.lastMessageSender;
+  if (dto.lastMessageAt !== undefined) patch.lastMessageAt = dto.lastMessageAt ?? undefined;
+  if (dto.lastActivityAt !== undefined) patch.lastActivityAt = dto.lastActivityAt;
+  if (dto.createdAt !== undefined) patch.createdAt = dto.createdAt;
+  if (dto.channel !== undefined) patch.channel = dto.channel;
+  if (dto.botId !== undefined) patch.botId = dto.botId;
+  if (dto.customerThreadId !== undefined) patch.customerThreadId = dto.customerThreadId;
+}
+
 /**
  * Partial Chat patch from an upsert summary: only fields the payload DEFINES,
  * status normalized to the portal vocabulary.
@@ -131,28 +167,8 @@ export function summaryToChatPatch(dto: ConversationSummaryPayload): Partial<Cha
     sessionId: dto.sessionId ?? dto.id,
     status: normalizeChatStatus(dto.status),
   };
-  if (dto.tenantId !== undefined) patch.tenantId = dto.tenantId;
-  if (dto.userName !== undefined) patch.userName = dto.userName;
-  if (dto.aiAutoReplyEnabled !== undefined) patch.aiAutoReplyEnabled = dto.aiAutoReplyEnabled;
-  if (dto.guardrailStatus !== undefined) patch.guardrailStatus = dto.guardrailStatus;
-  if (dto.assignedAgentId !== undefined) patch.assignedAgentId = dto.assignedAgentId;
-  if (dto.assignedAgentName !== undefined) patch.assignedAgentName = dto.assignedAgentName;
-  if (dto.messageCount !== undefined) patch.messageCount = dto.messageCount;
-  if (dto.lastMessage !== undefined) patch.lastMessage = dto.lastMessage;
-  if (dto.lastMessageSender !== undefined) patch.lastMessageSender = dto.lastMessageSender;
-  if (dto.lastMessageAt !== undefined) patch.lastMessageAt = dto.lastMessageAt ?? undefined;
-  if (dto.lastActivityAt !== undefined) patch.lastActivityAt = dto.lastActivityAt;
-  if (dto.createdAt !== undefined) patch.createdAt = dto.createdAt;
-  if (dto.ownership !== undefined) patch.ownership = dto.ownership;
-  if (dto.ownershipVersion !== undefined) patch.ownershipVersion = dto.ownershipVersion;
-  if (dto.channel !== undefined) patch.channel = dto.channel;
-  if (dto.botId !== undefined) patch.botId = dto.botId;
-  if (dto.customerThreadId !== undefined) patch.customerThreadId = dto.customerThreadId;
-  if (dto.humanControlMode !== undefined) patch.humanControlMode = dto.humanControlMode;
-  if (dto.humanControlDurationHours !== undefined) {
-    patch.humanControlDurationHours = dto.humanControlDurationHours;
-  }
-  if (dto.humanControlUntil !== undefined) patch.humanControlUntil = dto.humanControlUntil;
+  copySummaryOwnershipFields(dto, patch);
+  copySummaryActivityFields(dto, patch);
   return patch;
 }
 

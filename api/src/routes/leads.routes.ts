@@ -153,32 +153,43 @@ function projectFollowUp(l: Record<string, unknown>) {
 }
 
 /**
- * Derive the Pro structured fields from the joined booking.
- *
- * `servicePrice` is the tenant's OWN list price for the requested service, not an
- * estimate — hence `priceBasis`, so the UI can label it honestly ("from €80" is not
- * "€80"). `on_request`, `none` and `free` yield no number at all rather than a guess: a
- * fabricated monetary figure attached to a named person is inaccurate personal data
- * the subject could demand be rectified.
+ * The tenant's OWN list price for the requested service, not an estimate — hence
+ * `priceBasis`, so the UI can label it honestly ("from €80" is not "€80"). `on_request`,
+ * `none` and `free` yield no number at all rather than a guess: a fabricated monetary
+ * figure attached to a named person is inaccurate personal data the subject could demand
+ * be rectified.
  */
-function projectBookingFields(l: Record<string, unknown>) {
+function resolvePrice(l: Record<string, unknown>): {
+  servicePrice: number | null;
+  priceBasis: 'fixed' | 'from' | 'range_mid' | 'none';
+} {
   const display = (l.price_display_type as string | null) ?? 'none';
-  let servicePrice: number | null = null;
-  let priceBasis: 'fixed' | 'from' | 'range_mid' | 'none' = 'none';
   if (display === 'fixed') {
-    servicePrice = num(l.fixed_price);
-    priceBasis = servicePrice === null ? 'none' : 'fixed';
-  } else if (display === 'from') {
-    servicePrice = num(l.min_price);
-    priceBasis = servicePrice === null ? 'none' : 'from';
-  } else if (display === 'range') {
+    const servicePrice = num(l.fixed_price);
+    return { servicePrice, priceBasis: servicePrice === null ? 'none' : 'fixed' };
+  }
+  if (display === 'from') {
+    const servicePrice = num(l.min_price);
+    return { servicePrice, priceBasis: servicePrice === null ? 'none' : 'from' };
+  }
+  if (display === 'range') {
     const lo = num(l.min_price);
     const hi = num(l.max_price);
     if (lo !== null && hi !== null) {
-      servicePrice = Math.round(((lo + hi) / 2) * 100) / 100;
-      priceBasis = 'range_mid';
+      return { servicePrice: Math.round(((lo + hi) / 2) * 100) / 100, priceBasis: 'range_mid' };
     }
   }
+  return { servicePrice: null, priceBasis: 'none' };
+}
+
+/** Timestamps go out as ISO strings; an absent one stays absent, never an epoch. */
+function isoOrNull(v: unknown): string | null {
+  return v ? new Date(v as string).toISOString() : null;
+}
+
+/** Derive the Pro structured fields from the joined booking. */
+function projectBookingFields(l: Record<string, unknown>) {
+  const { servicePrice, priceBasis } = resolvePrice(l);
 
   // The customer's answers to the owner-authored intake questions ARE the "reason for
   // contact" Story 3 asks for — already collected at booking time, previously discarded.
@@ -218,7 +229,7 @@ function projectBookingFields(l: Record<string, unknown>) {
     // Booking facts OUTRANK extracted ones, per field. A booking's `start_utc` is a
     // real appointment the customer confirmed; the extractor's reading of "tomorrow"
     // is an inference. Where both exist, the fact wins and the inference is discarded.
-    preferredAt: l.start_utc ? new Date(l.start_utc as string).toISOString() : null,
+    preferredAt: isoOrNull(l.start_utc),
     preferredAtText: l.start_utc ? null : ((l.preferred_at_text as string | null) ?? null),
     address: (l.customer_address as string | null) ?? (l.extracted_address as string | null) ?? null,
     serviceRequested:
@@ -237,12 +248,8 @@ function projectBookingFields(l: Record<string, unknown>) {
     // customer, 3 conversations since March".
     personConversationCount,
     personLeadCount,
-    personFirstSeenAt: l.person_first_seen_at
-      ? new Date(l.person_first_seen_at as string).toISOString()
-      : null,
-    personLastSeenAt: l.person_last_seen_at
-      ? new Date(l.person_last_seen_at as string).toISOString()
-      : null,
+    personFirstSeenAt: isoOrNull(l.person_first_seen_at),
+    personLastSeenAt: isoOrNull(l.person_last_seen_at),
     // Stated once, server-side, so the portal, the readiness score and the follow-up
     // recommendation cannot drift into three different definitions of "returning".
     isRepeatCustomer,

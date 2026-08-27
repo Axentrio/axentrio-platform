@@ -82,11 +82,11 @@ export default function AdminGuardrailConversation() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/admin/guardrails')} className="gap-1">
           <ArrowLeft className="w-4 h-4" /> {t('admin.incident.back')}
         </Button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"

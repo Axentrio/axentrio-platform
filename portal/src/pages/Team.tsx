@@ -381,7 +381,7 @@ const Team: React.FC = () => {
           ) : (
           <Card variant="glass" className="p-6">
             <h3 className="text-lg font-semibold text-text-primary mb-4">{t('team.shifts.weeklySchedule')}</h3>
-            <div className="grid grid-cols-7 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
               {dayKeys.map((dayKey, index) => (
                 <div key={dayKey} className="border border-edge rounded-xl p-4">
                   <h4 className="font-medium text-text-primary mb-3">{t(`team.shifts.days.${dayKey}`)}</h4>
@@ -562,8 +562,8 @@ const OrgMembersPanel: React.FC = () => {
         <Card variant="glass" className="p-6 relative">
           <LoadingOverlay isLoading={inviteMutation.isPending} message={t('team.dialogs.invite.sending')} />
           <h3 className="text-lg font-semibold text-text-primary mb-4">{t('team.dialogs.invite.title')}</h3>
-          <form onSubmit={handleInvite} className="flex items-end gap-3">
-            <div className="flex-1">
+          <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div className="w-full sm:flex-1">
               <Label className="mb-1 text-text-secondary">{t('team.dialogs.invite.emailLabel')}</Label>
               <Input
                 type="email"
@@ -862,7 +862,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={agent ? t('team.dialogs.agent.editTitle') : t('team.dialogs.agent.addTitle')} size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.firstNameLabel')}</Label>
             <Input
@@ -893,7 +893,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.roleLabel')}</Label>
             <Select
@@ -945,7 +945,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
             {formData.skills?.map((skill) => (
               <Badge key={skill} variant="secondary" className="inline-flex items-center gap-1">
                 {skill}
-                <Button variant="ghost" size="icon" type="button" onClick={() => handleRemoveSkill(skill)} className="h-4 w-4 hover:text-primary-300 p-0">
+                <Button variant="ghost" size="icon" type="button" onClick={() => handleRemoveSkill(skill)} className="h-7 w-7 p-1.5 hover:text-primary-300">
                   ×
                 </Button>
               </Badge>

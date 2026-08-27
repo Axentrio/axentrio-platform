@@ -22,6 +22,8 @@ import {
   type Weekday,
   type TimeWindow,
   type VenueAddress,
+  type WorkLocation,
+  type SchedulerConfig,
   type UpdateSchedulerPayload,
 } from '../../queries/useSchedulerQueries';
 import {
@@ -41,6 +43,7 @@ import {
   DAYS,
   DEFAULT_WINDOW,
   type DayRow,
+  type SchedulerFormState,
   overridesFromConfig,
   rowsFromWeeklyHours,
   createSchedulerForm,
@@ -50,6 +53,51 @@ import {
 import { WindowList } from './scheduler/window-list';
 import { SlotPreview } from './scheduler/slot-preview';
 import { OptionalNumberField, NumberField } from './scheduler/number-fields';
+
+/** The useState-shaped setter `makeFieldSetter` returns for one form field. */
+type FormSetter<K extends keyof SchedulerFormState> = (
+  value: SchedulerFormState[K] | ((prev: SchedulerFormState[K]) => SchedulerFormState[K]),
+) => void;
+
+/** The venue fields hydration writes into the form. */
+function venueFromConfig(data: SchedulerConfig): VenueAddress {
+  return {
+    placeId: data.venueAddress?.placeId ?? null,
+    street: data.venueAddress?.street ?? null,
+    postalCode: data.venueAddress?.postalCode ?? null,
+    city: data.venueAddress?.city ?? null,
+    country: data.venueAddress?.country ?? null,
+  };
+}
+
+/** The travel fields hydration writes into the form. */
+function travelFieldsFromConfig(data: SchedulerConfig) {
+  return {
+    enabled: data.travel?.enabled === true,
+    slackMin: data.travel?.slackMin ?? null,
+    startFromBase: data.travel?.startFromBase === true,
+    baseDepartOffsetMin: data.travel?.baseDepartOffsetMin ?? 0,
+    groupingPeriod: data.travel?.groupingPeriod ?? 'none',
+    routePriority: data.travel?.routePriority ?? 'auto',
+    maxDetourMin:
+      data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
+        ? ''
+        : String(data.travel.maxDetourMin),
+  };
+}
+
+/** The business-wide booking rules hydration writes into the form. */
+function rulesFromConfig(data: SchedulerConfig): SchedulerFormState['rules'] {
+  return {
+    maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
+    maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
+    minGapMin: data.bookingRules?.minGapMin ?? null,
+    defaultBufferBeforeMin: data.bookingRules?.defaultBufferBeforeMin ?? null,
+    defaultBufferAfterMin: data.bookingRules?.defaultBufferAfterMin ?? null,
+    defaultMinNoticeMin: data.bookingRules?.defaultMinNoticeMin ?? null,
+    defaultMaxHorizonDays: data.bookingRules?.defaultMaxHorizonDays ?? null,
+  };
+}
 
 
 
@@ -198,57 +246,6 @@ export const SchedulerSettings: React.FC = () => {
     }),
     [],
   );
-  /**
-   * Any hand-edit invalidates a selection, so every field goes through here rather than calling
-   * `setVenue` directly. Four call sites each remembering to null the id is three chances to
-   * forget, and forgetting means the base routes from an address the owner has replaced.
-   */
-  const editVenue = (patch: Partial<VenueAddress>) =>
-    setVenue((v) => ({ ...v, ...patch, placeId: null }));
-
-  /**
-   * Show a location control only where it applies - and NEVER hide one that holds something
-   * (#79, LP1).
-   *
-   * The rule is "hide only when there is nothing stored to hide", and the second half is the
-   * load-bearing one. This form sends `venueAddress` and `serviceArea` on every save, by design:
-   * `[]` is how an owner clears their area and a null field is how they clear an address line. So
-   * a control hidden while its value was non-empty would still round-trip that value today, and
-   * would silently delete it the first time anyone made hiding also reset the state. Refusing to
-   * hide a populated control means that mistake has nowhere to land.
-   *
-   * An empty control on a business the setting cannot apply to is just a question nobody needs to
-   * answer.
-   */
-  const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
-  const showVenue = workLocation !== 'no_location' || hasStoredVenue;
-  const storedVenueSummary = [venue.street, venue.postalCode, venue.city, venue.country]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .map((part) => part.trim())
-    .join(', ') || 'Saved address';
-  /** Does this business go TO its customers? The only shape geographic grouping applies to. */
-  const travelsToCustomers = workLocation === 'on_the_road' || workLocation === 'both';
-  /**
-   * Services nobody was ever asked about, on a business that HAS an address (#71).
-   *
-   * `unset` resolves to the premises, so those services put this address on their invites. That
-   * was the right default - between two wrong invites, an address the owner can remove beats a
-   * customer who does not know where to go - but it is only right until the owner has an address
-   * and one of those services turns out to be a phone or video call.
-   *
-   * Shown only when BOTH are true, because that is exactly when the risk becomes real. With no
-   * address there is nothing to leak; with nothing unset there is nothing to decide. Until now
-   * the only prompt lived inside each service's own editor, which an owner setting their address
-   * has no reason to open.
-   */
-  const neverAsked = (data?.services ?? []).filter((s) => s.isActive && s.locationType === 'unset');
-  const showNeverAskedWarning = hasStoredVenue && neverAsked.length > 0;
-  const hasAddressService = (data?.services ?? []).some((svc) => svc.isActive && svc.customerAddressRequired);
-  const showServiceArea = hasAddressService || serviceArea.length > 0;
-  // NOT state — it is the server's answer to "may this be switched on", refreshed with the
-  // config. Holding it in state would let a stale value keep the switch enabled after a
-  // calendar change made it harmful.
-  const travelBlockedReason = data?.travel?.blockedReason ?? null;
   // travel*, bookingsPaused, rules, showPreview and hydrated now live in `form` above.
 
   useEffect(() => {
@@ -262,33 +259,18 @@ export const SchedulerSettings: React.FC = () => {
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
     setBookingsPaused(data.bookingsPaused === true);
-    setVenue({
-      placeId: data.venueAddress?.placeId ?? null,
-      street: data.venueAddress?.street ?? null,
-      postalCode: data.venueAddress?.postalCode ?? null,
-      city: data.venueAddress?.city ?? null,
-      country: data.venueAddress?.country ?? null,
-    });
-    setTravelEnabled(data.travel?.enabled === true);
-    setTravelSlack(data.travel?.slackMin ?? null);
-    setTravelStartFromBase(data.travel?.startFromBase === true);
-    setTravelBaseDepart(data.travel?.baseDepartOffsetMin ?? 0);
-    setTravelGroupingPeriod(data.travel?.groupingPeriod ?? 'none');
-    setTravelRoutePriority(data.travel?.routePriority ?? 'auto');
-    setTravelMaxDetourMin(
-      data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
-        ? ''
-        : String(data.travel.maxDetourMin)
-    );
-    setRules({
-      maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
-      maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
-      minGapMin: data.bookingRules?.minGapMin ?? null,
-      defaultBufferBeforeMin: data.bookingRules?.defaultBufferBeforeMin ?? null,
-      defaultBufferAfterMin: data.bookingRules?.defaultBufferAfterMin ?? null,
-      defaultMinNoticeMin: data.bookingRules?.defaultMinNoticeMin ?? null,
-      defaultMaxHorizonDays: data.bookingRules?.defaultMaxHorizonDays ?? null,
-    });
+    setVenue(venueFromConfig(data));
+    // Read as one object, then written field by field: the setters are per-field, and the
+    // mapping is what the hydration test pins.
+    const travel = travelFieldsFromConfig(data);
+    setTravelEnabled(travel.enabled);
+    setTravelSlack(travel.slackMin);
+    setTravelStartFromBase(travel.startFromBase);
+    setTravelBaseDepart(travel.baseDepartOffsetMin);
+    setTravelGroupingPeriod(travel.groupingPeriod);
+    setTravelRoutePriority(travel.routePriority);
+    setTravelMaxDetourMin(travel.maxDetourMin);
+    setRules(rulesFromConfig(data));
     setHydrated(true);
   }, [data, hydrated]);
 
@@ -306,8 +288,6 @@ export const SchedulerSettings: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot once per hydration
   }, [hydrated]);
 
-  const setDay = (key: Weekday, patch: Partial<DayRow>) =>
-    setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
   // Inline validation for the availability section (per-service rules live in
   // the service editor). Blocks an invalid availability save.
@@ -448,116 +428,18 @@ export const SchedulerSettings: React.FC = () => {
         ) : (
           <div className="space-y-5">
                 {/* Google Calendar connection (Phase 1) */}
-                <div className="space-y-2 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
-                  {googleStatus.data?.connected && googleStatus.data?.needsReauth ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-status-busy flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        Reconnect needed{googleStatus.data.accountEmail ? ` · ${googleStatus.data.accountEmail}` : ''} — the link to Google has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => connectGoogle.mutate()}
-                        disabled={connectGoogle.isPending}
-                      >
-                        {connectGoogle.isPending ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-                        ) : null}
-                        Reconnect
-                      </Button>
-                    </div>
-                  ) : googleStatus.data?.connected ? (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-text-secondary flex items-center gap-2">
-                        <Check className="w-4 h-4 text-status-online" />
-                        Connected{googleStatus.data.accountEmail ? ` · ${googleStatus.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => disconnectGoogle.mutate()}
-                        disabled={disconnectGoogle.isPending}
-                      >
-                        Disconnect
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-text-muted">
-                        Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => connectGoogle.mutate()}
-                        disabled={connectGoogle.isPending}
-                      >
-                        {connectGoogle.isPending ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-                        ) : null}
-                        Connect Google Calendar
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <GoogleCalendarSection
+                  status={googleStatus}
+                  connect={connectGoogle}
+                  disconnect={disconnectGoogle}
+                />
 
                 {/* Outlook Calendar connection (Phase 6b) */}
-                <div className="space-y-2 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Outlook Calendar</h3>
-                  {outlookStatus.data?.connected && outlookStatus.data?.needsReauth ? (
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-status-busy flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0" />
-                        Reconnect needed{outlookStatus.data.accountEmail ? ` · ${outlookStatus.data.accountEmail}` : ''} — the link to Outlook has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => connectOutlook.mutate()}
-                        disabled={connectOutlook.isPending}
-                      >
-                        {connectOutlook.isPending ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-                        ) : null}
-                        Reconnect
-                      </Button>
-                    </div>
-                  ) : outlookStatus.data?.connected ? (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-text-secondary flex items-center gap-2">
-                        <Check className="w-4 h-4 text-status-online" />
-                        Connected{outlookStatus.data.accountEmail ? ` · ${outlookStatus.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => disconnectOutlook.mutate()}
-                        disabled={disconnectOutlook.isPending}
-                      >
-                        Disconnect
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-text-muted">
-                        Optional: connect Outlook so bookings land on your calendar and respect your existing events.
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => connectOutlook.mutate()}
-                        disabled={connectOutlook.isPending}
-                      >
-                        {connectOutlook.isPending ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-                        ) : null}
-                        Connect Outlook Calendar
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <OutlookCalendarSection
+                  status={outlookStatus}
+                  connect={connectOutlook}
+                  disconnect={disconnectOutlook}
+                />
 
                 {/* Services catalog (multi-service) */}
                 <ServicesSection
@@ -573,155 +455,18 @@ export const SchedulerSettings: React.FC = () => {
                 />
 
                 {/* Availability (shared across all services) */}
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Availability</h3>
-                  <p className="text-xs text-text-muted">
-                    These hours gate bookable slots. They are managed from your AI bot's business hours; changes here may
-                    be overwritten the next time those hours are saved. They never stop the assistant from helping
-                    customers or capturing an out-of-hours request.
-                  </p>
-                  {/* Always-open vs business-hours mode */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {([
-                      { mode: 'business_hours' as const, title: 'Set business hours', desc: 'The assistant offers slots only within the weekly hours below.' },
-                      { mode: 'always_open' as const, title: 'Always open (24/7)', desc: "Bookable around the clock — only your calendar's busy times limit slots." },
-                    ]).map(({ mode, title, desc }) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setAvailabilityMode(mode)}
-                        className={cn(
-                          'rounded-lg border p-3 text-left transition-colors',
-                          availabilityMode === mode
-                            ? 'border-primary-400 bg-primary-400/10'
-                            : 'border-edge hover:border-text-muted',
-                        )}
-                      >
-                        <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                          <span
-                            className={cn(
-                              'flex h-4 w-4 items-center justify-center rounded-full border',
-                              availabilityMode === mode ? 'border-primary-400' : 'border-text-muted',
-                            )}
-                          >
-                            {availabilityMode === mode && <span className="h-2 w-2 rounded-full bg-primary-400" />}
-                          </span>
-                          {title}
-                        </div>
-                        <p className="mt-1 pl-6 text-xs text-text-muted">{desc}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <span className="mb-1 block text-sm text-text-secondary">Timezone</span>
-                      <span className="text-sm text-text-primary">
-                        {data?.availability?.timezone ?? '—'}
-                      </span>
-                    </div>
-                    <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
-                  </div>
-                  {availabilityMode === 'business_hours' ? (
-                    <div className="space-y-2">
-                      <Label className="text-text-secondary block">Weekly hours</Label>
-                      {DAYS.map(({ key, label }) => (
-                        <div key={key} className="flex items-start gap-3">
-                          <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer pt-2">
-                            <Checkbox
-                              checked={days[key].enabled}
-                              onCheckedChange={(c) => setDay(key, { enabled: c === true })}
-                            />
-                            <span className="text-sm text-text-primary">{label}</span>
-                          </label>
-                          <WindowList
-                            windows={days[key].windows}
-                            disabled={!days[key].enabled}
-                            onChange={(windows) => setDay(key, { windows })}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2 text-xs text-text-muted">
-                      Open 24/7 — the assistant can offer any time, limited only by your connected calendar's busy
-                      periods and each service's notice/buffer settings. Use date overrides below to close specific days.
-                    </p>
-                  )}
-                </div>
+                <AvailabilitySection
+                  config={data}
+                  availabilityMode={availabilityMode}
+                  setAvailabilityMode={setAvailabilityMode}
+                  slotGranularityMin={slotGranularityMin}
+                  setSlotGranularityMin={setSlotGranularityMin}
+                  days={days}
+                  setDays={setDays}
+                />
 
                 {/* Booking rules — business-wide ceilings over every service */}
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Booking rules</h3>
-                  <p className="text-xs text-text-muted">
-                    Limits for this bot as a whole, on top of each service's own settings — whichever is stricter wins.
-                    Leave a field empty for no limit.
-                  </p>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <OptionalNumberField
-                      label="Max appointments per day"
-                      hint="Across all services"
-                      value={rules.maxBookingsPerDay}
-                      min={1}
-                      max={100}
-                      onChange={(v) => setRules((r) => ({ ...r, maxBookingsPerDay: v }))}
-                    />
-                    <OptionalNumberField
-                      label="Max booked hours per day"
-                      hint="Total time, not slots"
-                      value={rules.maxBookedMinutesPerDay === null ? null : rules.maxBookedMinutesPerDay / 60}
-                      min={0.25}
-                      max={24}
-                      step={0.25}
-                      onChange={(v) =>
-                        setRules((r) => ({ ...r, maxBookedMinutesPerDay: v === null ? null : Math.round(v * 60) }))
-                      }
-                    />
-                    <OptionalNumberField
-                      label="Minimum gap (min)"
-                      hint="Free time around each appointment"
-                      value={rules.minGapMin}
-                      min={0}
-                      max={480}
-                      onChange={(v) => setRules((r) => ({ ...r, minGapMin: v }))}
-                    />
-                  </div>
-
-                  <p className="pt-2 text-xs text-text-muted">
-                    Defaults for new services. A service that sets its own value keeps it — these
-                    only fill the fields a service leaves blank, so you can change your notice
-                    period or buffers once instead of on every service.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <OptionalNumberField
-                      label="Min notice (min)"
-                      value={rules.defaultMinNoticeMin}
-                      min={0}
-                      max={43200}
-                      onChange={(v) => setRules((r) => ({ ...r, defaultMinNoticeMin: v }))}
-                    />
-                    <OptionalNumberField
-                      label="Max horizon (days)"
-                      value={rules.defaultMaxHorizonDays}
-                      min={1}
-                      max={365}
-                      onChange={(v) => setRules((r) => ({ ...r, defaultMaxHorizonDays: v }))}
-                    />
-                    <OptionalNumberField
-                      label="Buffer before (min)"
-                      value={rules.defaultBufferBeforeMin}
-                      min={0}
-                      max={480}
-                      onChange={(v) => setRules((r) => ({ ...r, defaultBufferBeforeMin: v }))}
-                    />
-                    <OptionalNumberField
-                      label="Buffer after (min)"
-                      value={rules.defaultBufferAfterMin}
-                      min={0}
-                      max={480}
-                      onChange={(v) => setRules((r) => ({ ...r, defaultBufferAfterMin: v }))}
-                    />
-                  </div>
-                </div>
+                <BookingRulesSection rules={rules} setRules={setRules} />
 
                 {/*
                   WHICH Agent this edits. Shown only when the tenant has more than one, so a
@@ -761,17 +506,11 @@ export const SchedulerSettings: React.FC = () => {
                   </div>
                 )}
 
-                {/* Service area — where the business will travel. Hidden only when it is both
-                    inapplicable AND empty; a stored area always stays visible, with the field's
-                    own note explaining that nothing is being enforced against it. */}
-                {showServiceArea && (
-                  <ServiceAreaField
-                    value={serviceArea}
-                    onChange={setServiceArea}
-                    // The area is only enforceable against services that collect an address.
-                    hasAddressService={hasAddressService}
-                  />
-                )}
+                <ServiceAreaBlock
+                  config={data}
+                  serviceArea={serviceArea}
+                  setServiceArea={setServiceArea}
+                />
 
                 {/*
                   Pause. Deliberately at the TOP of this card: it is the thing an owner
@@ -798,451 +537,43 @@ export const SchedulerSettings: React.FC = () => {
                   </label>
                 </div>
 
-                {/* Venue — where customers come TO, and where the van sets out FROM. Never the
-                    VAT/legal address. Hidden only when no Service is physical AND nothing is
-                    stored; a stored address always stays visible, with editing one click away. */}
-                {showVenue && (
-                <div className="space-y-3 border-t border-edge pt-4">
-                  {workLocation === 'no_location' && hasStoredVenue && !reviewingVenue ? (
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="text-sm font-medium text-text-primary">Your address</h3>
-                        <p className="mt-1 truncate text-xs text-text-secondary" title={storedVenueSummary}>
-                          {storedVenueSummary}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          type="button"
-                          onClick={() => setReviewingVenue(true)}
-                        >
-                          Review
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          type="button"
-                          onClick={() =>
-                            setVenue({
-                              street: null,
-                              postalCode: null,
-                              city: null,
-                              country: null,
-                              placeId: null,
-                            })
-                          }
-                        >
-                          Clear
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                  <div>
-                    <h3 className="text-sm font-medium text-text-primary">Your address</h3>
-                    {/* #79 (LP1): this copy used to end "It is not used for jobs where you travel
-                        to the customer", which is exactly what Home Base needs it to be. One
-                        address, two roles - where customers come TO, and where the van sets out
-                        FROM - so what it says now depends on which roles are actually in play.
-                        Derived from the catalog rather than asked as a second question: the
-                        services already say which kinds of work exist. */}
-                    <p className="text-xs text-text-secondary mt-1">
-                      {workLocation === 'on_the_road' ? (
-                        <>
-                          Where your working day starts. Travel time measures the first job of a day
-                          from here, so an early job an hour away is not offered against a start you
-                          could not make — leave it empty and the day's first job is not measured
-                          from anywhere.
-                        </>
-                      ) : workLocation === 'both' ? (
-                        <>
-                          Two jobs for one address: customers come here for the services you do on
-                          site, and it is where your working day starts for the ones you travel to.
-                          It goes on the calendar invite for the first kind — leave it empty and the
-                          invite simply won't mention a place.
-                        </>
-                      ) : workLocation === 'no_location' ? (
-                        <>
-                          None of your services happen anywhere in particular, so nothing here is
-                          used. It is still shown because you have an address stored — clear the
-                          fields if you would rather it went away.
-                        </>
-                      ) : (
-                        <>
-                          Where customers come to you. This goes on the calendar invite so they can
-                          find you — leave it empty and the invite simply won't mention a place.
-                        </>
-                      )}
-                    </p>
-                    {/* Never the VAT or registered address, and never backfilled from one. Said out
-                        loud rather than only enforced in the schema, because an owner filling this
-                        in has no way to know it is a separate field unless it says so. */}
-                    <p className="text-xs text-text-muted mt-1">
-                      This is yours to choose. It is not your registered or VAT address, and nothing
-                      fills it in from one.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <AddressAutocomplete
-                      onSelect={(picked) =>
-                        // Straight to `setVenue`, deliberately NOT `editVenue`: this is the one
-                        // change that CREATES the identity rather than invalidating it.
-                        setVenue({
-                          placeId: picked.placeId,
-                          street: picked.components?.street ?? null,
-                          postalCode: picked.components?.postalCode ?? null,
-                          city: picked.components?.city ?? null,
-                          country: picked.components?.country ?? null,
-                        })
-                      }
-                    />
-                    <div className="sm:col-span-2">
-                      <Label htmlFor="venue-street">Street and number</Label>
-                      <Input
-                        id="venue-street"
-                        value={venue.street ?? ''}
-                        maxLength={200}
-                        placeholder="Grote Markt 1"
-                        onChange={(e) => editVenue({ street: e.target.value || null })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="venue-postal-code">Postcode</Label>
-                      <Input
-                        id="venue-postal-code"
-                        value={venue.postalCode ?? ''}
-                        maxLength={200}
-                        placeholder="9300"
-                        onChange={(e) => editVenue({ postalCode: e.target.value || null })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="venue-city">City</Label>
-                      <Input
-                        id="venue-city"
-                        value={venue.city ?? ''}
-                        maxLength={200}
-                        placeholder="Aalst"
-                        onChange={(e) => editVenue({ city: e.target.value || null })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="venue-country">Country code</Label>
-                      <Input
-                        id="venue-country"
-                        value={venue.country ?? ''}
-                        maxLength={2}
-                        placeholder="BE"
-                        onChange={(e) => editVenue({ country: e.target.value.toUpperCase() || null })}
-                      />
-                    </div>
-                  </div>
+                <VenueSection
+                  config={data}
+                  workLocation={workLocation}
+                  venue={venue}
+                  setVenue={setVenue}
+                  reviewingVenue={reviewingVenue}
+                  setReviewingVenue={setReviewingVenue}
+                />
 
-                  {/* #71: this address is going on invites for services nobody was ever asked
-                      about. Named, not counted - "2 services" sends the owner hunting, and the
-                      whole point is that they can settle it in the time it takes to read this. */}
-                  {showNeverAskedWarning && (
-                    <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-text-secondary">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-                      <span>
-                        This address is going on the invite for{' '}
-                        {neverAsked.map((s) => s.name).join(', ')} — {neverAsked.length === 1 ? 'that service was' : 'those services were'}{' '}
-                        created before we asked where each one happens, so nobody has chosen. If{' '}
-                        {neverAsked.length === 1 ? 'it is' : 'any of them are'} a phone or video
-                        call, open {neverAsked.length === 1 ? 'it' : 'them'} above and pick the
-                        right answer.
-                      </span>
-                    </p>
-                  )}
-                    </>
-                  )}
-                </div>
-                )}
-
-                {/*
-                  Travel time. AFTER the address deliberately: the day's first job is measured
-                  from it, so an owner who has not filled it in is looking at the field this
-                  section depends on. C2: no-location services have no address-to-address journey,
-                  so this preference has nothing to measure and is gated on workLocation alone.
-                */}
-                {workLocation !== 'no_location' && (
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <div>
-                    <h3 className="text-sm font-medium text-text-primary">Travel time</h3>
-                    <p className="text-xs text-text-secondary mt-1">
-                      For jobs at the customer's address, only offer times you can actually drive
-                      between. Times you could not reach are held back rather than confirmed and
-                      then rearranged.
-                    </p>
-                    {/*
-                      The single-driver assumption, stated before the switch rather than after it.
-                      A two-person business that turns this on gets slots stripped for journeys
-                      neither of them makes — the one configuration where the feature makes a
-                      business worse off than not having it.
-                    */}
-                    <p className="text-xs text-text-muted mt-1">
-                      This assumes <strong>one person on the road</strong>. If two of you take jobs
-                      from the same diary, leave it off.
-                    </p>
-                  </div>
-
-                  {travelBlockedReason && (
-                    <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                      {travelBlockedReason === 'shared_itinerary'
-                        ? travelEnabled
-                          ? 'Another Agent now books into the same calendar, so travel time has stopped running. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar, or switch this off.'
-                          : 'Another Agent books into the same calendar, so this cannot be switched on. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar first.'
-                        : travelBlockedReason === 'not_entitled'
-                          ? 'Travel time is not part of your current Tier.'
-                          : 'Travel time is not available on this platform yet.'}
-                    </div>
-                  )}
-
-                  <label htmlFor="travel-enabled" className="flex items-start gap-2 cursor-pointer">
-                    <Checkbox
-                      id="travel-enabled"
-                      checked={travelEnabled}
-                      // Blocks turning it ON, never turning it OFF. A tenant whose diary became
-                      // shared months after enabling travel has it on and cannot fix that from
-                      // the calendar screen alone — disabling the box outright left them unable
-                      // to switch off the one thing making their settings unsaveable.
-                      disabled={!!travelBlockedReason && !travelEnabled}
-                      onCheckedChange={(c) => setTravelEnabled(c === true)}
-                    />
-                    <span className="text-sm text-text-secondary">
-                      Only offer times I can reach
-                      <span className="block text-xs text-text-muted">
-                        Uses the address the customer gives and the jobs either side of the time
-                        they want.
-                      </span>
-                    </span>
-                  </label>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label htmlFor="travel-slack">Extra minutes per journey</Label>
-                      <Input
-                        id="travel-slack"
-                        type="number"
-                        min={0}
-                        max={120}
-                        value={travelSlack ?? ''}
-                        placeholder="0"
-                        disabled={!travelEnabled}
-                        onChange={(e) =>
-                          setTravelSlack(e.target.value === '' ? null : Number(e.target.value))
-                        }
-                      />
-                      <p className="text-xs text-text-muted mt-1">
-                        Parking, the doorstep, a job that runs over. Added to every drive.
-                      </p>
-                    </div>
-                  </div>
-
-                  <label htmlFor="travel-start-from-base" className="flex items-start gap-2 cursor-pointer">
-                    <Checkbox
-                      id="travel-start-from-base"
-                      checked={travelStartFromBase}
-                      disabled={!travelEnabled}
-                      onCheckedChange={(c) => setTravelStartFromBase(c === true)}
-                    />
-                    <span className="text-sm text-text-secondary">
-                      I start the day from my own address
-                      <span className="block text-xs text-text-muted">
-                        The first job of each day is measured from the address above. Fill that
-                        address in, or this has nothing to measure from.
-                      </span>
-                    </span>
-                  </label>
-
-                  <div>
-                    <Label htmlFor="travel-grouping-period">Geographic grouping</Label>
-                    <select
-                      id="travel-grouping-period"
-                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
-                      value={travelGroupingPeriod}
-                      disabled={!travelEnabled || !travelsToCustomers}
-                      onChange={(e) =>
-                        setTravelGroupingPeriod(e.target.value as 'none' | 'half_day' | 'full_day')
-                      }
-                    >
-                      <option value="none">No grouping</option>
-                      <option value="half_day">Group by half day</option>
-                      <option value="full_day">Group by full day</option>
-                    </select>
-                    <p className="text-xs text-text-muted mt-1">
-                      Customers still see every time they could have had, in the same list. Only the
-                      order changes, so the one that saves you the most driving is offered first.
-                      Nothing about your other customers is ever mentioned.
-                      {!travelsToCustomers && travelGroupingPeriod !== 'none' && (
-                        <>
-                          {' '}
-                          Your setting is kept but does nothing right now, because none of your
-                          services send you to a customer. It starts working again if you add one.
-                        </>
-                      )}
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="travel-route-priority">Route priority</Label>
-                    <select
-                      id="travel-route-priority"
-                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
-                      value={travelRoutePriority}
-                      disabled={!travelEnabled || !travelsToCustomers || travelGroupingPeriod === 'none'}
-                      onChange={(e) =>
-                        setTravelRoutePriority(e.target.value as 'auto' | 'nearest' | 'farthest')
-                      }
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="nearest">Nearest first</option>
-                      <option value="farthest">Farthest first</option>
-                    </select>
-                    <p className="text-xs text-text-muted mt-1">
-                      Only the order of times already offered. Auto keeps the grouping preference;
-                      nearest and farthest sort the same already-measured detours the other way.
-                      Times grouping could not score stay where they were.
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="travel-max-detour">Maximum extra travel per appointment (min)</Label>
-                    <Input
-                      id="travel-max-detour"
-                      type="number"
-                      min={0}
-                      max={120}
-                      value={travelMaxDetourMin}
-                      // Gated on GROUPING, not merely on travel. The threshold decides which times
-                      // are suggested FIRST, and that ordering only reaches a customer when
-                      // grouping is on - so offering the field beside "No grouping" would take a
-                      // number and quietly consume nothing.
-                      disabled={!travelEnabled || travelGroupingPeriod === 'none'}
-                      placeholder="No limit"
-                      onChange={(e) => setTravelMaxDetourMin(e.target.value)}
-                    />
-                    <p className="text-xs text-text-muted mt-1">
-                      How much EXTRA driving one appointment may add to your day — not how far away
-                      it is, so a customer an hour away is still offered if you are already going
-                      past. Over this, the time is still bookable; it simply stops being the one
-                      suggested first, so it needs grouping switched on to have any effect. Leave
-                      it empty for no limit.
-                    </p>
-                  </div>
-
-                  {travelStartFromBase && (
-                    <div className="pl-6">
-                      <Label htmlFor="travel-base-depart">Minutes I leave before opening</Label>
-                      <Input
-                        id="travel-base-depart"
-                        type="number"
-                        min={0}
-                        max={240}
-                        value={travelBaseDepart}
-                        disabled={!travelEnabled}
-                        onChange={(e) => setTravelBaseDepart(e.target.value === '' ? 0 : Number(e.target.value))}
-                      />
-                      <p className="text-xs text-text-muted mt-1">
-                        At 0 the van leaves exactly when you open, so a job at opening time is only
-                        bookable if it is next door. Put in how long before opening you actually set
-                        off and the first slot of the day comes back.
-                      </p>
-                    </div>
-                  )}
-                </div>
-                )}
+                <TravelSection
+                  config={data}
+                  workLocation={workLocation}
+                  travelEnabled={travelEnabled}
+                  setTravelEnabled={setTravelEnabled}
+                  travelSlack={travelSlack}
+                  setTravelSlack={setTravelSlack}
+                  travelStartFromBase={travelStartFromBase}
+                  setTravelStartFromBase={setTravelStartFromBase}
+                  travelBaseDepart={travelBaseDepart}
+                  setTravelBaseDepart={setTravelBaseDepart}
+                  travelGroupingPeriod={travelGroupingPeriod}
+                  setTravelGroupingPeriod={setTravelGroupingPeriod}
+                  travelRoutePriority={travelRoutePriority}
+                  setTravelRoutePriority={setTravelRoutePriority}
+                  travelMaxDetourMin={travelMaxDetourMin}
+                  setTravelMaxDetourMin={setTravelMaxDetourMin}
+                />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-text-primary">Date overrides</h3>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      onClick={() =>
-                        setOverrides((prev) => [...prev, { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_WINDOW }] }])
-                      }
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add
-                    </Button>
-                  </div>
-                  {overrides.length === 0 ? (
-                    <p className="text-xs text-text-muted">
-                      Close specific dates (holidays) or set one-off hours that override the weekly schedule.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {overrides.map((o, i) => (
-                        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
-                        <div key={i} className="flex items-center gap-3 flex-wrap">
-                          <DatePicker
-                            value={o.date}
-                            onChange={(v) =>
-                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))
-                            }
-                            className="w-44"
-                          />
-                          {/*
-                            An optional end date, so a fortnight's holiday is ONE row.
-                            Without it an owner date-picked fourteen rows, and only the
-                            first eight upcoming closures ever reach the bot — so from day
-                            nine it went back to quoting the weekly hours.
-                          */}
-                          <span className="text-xs text-text-muted">to</span>
-                          <DatePicker
-                            value={o.endDate}
-                            onChange={(v) =>
-                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))
-                            }
-                            className="w-44"
-                          />
-                          <label htmlFor={`override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
-                            <Checkbox
-                              id={`override-closed-${i}`}
-                              checked={o.closed}
-                              onCheckedChange={(c) =>
-                                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
-                              }
-                            />
-                            <span className="text-sm text-text-secondary">Closed</span>
-                          </label>
-                          {!o.closed && (
-                            <WindowList
-                              windows={o.windows}
-                              onChange={(windows) =>
-                                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, windows } : x)))
-                              }
-                            />
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            type="button"
-                            className="text-red-400 hover:text-red-300"
-                            onClick={() => setOverrides((prev) => prev.filter((_, j) => j !== i))}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <DateOverridesSection overrides={overrides} setOverrides={setOverrides} />
 
                 {/* Live slot preview (reflects the last SAVED config) */}
-                <div className="space-y-2 border-t border-edge pt-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-text-primary">Preview</h3>
-                    <Button variant="outline" size="sm" type="button" onClick={() => setShowPreview((v) => !v)}>
-                      <Eye className="w-3.5 h-3.5" /> {showPreview ? 'Hide' : 'Show'} next 7 days
-                    </Button>
-                  </div>
-                  {showPreview && <SlotPreview timezone={data?.availability?.timezone ?? 'Europe/Brussels'} />}
-                </div>
+                <PreviewSection
+                  config={data}
+                  showPreview={showPreview}
+                  setShowPreview={setShowPreview}
+                />
 
             {errors.length > 0 && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
@@ -1274,3 +605,911 @@ export const SchedulerSettings: React.FC = () => {
   );
 };
 
+
+/** What a calendar row reads off a connection status query and its two mutations.
+ *  Both providers report the same three facts; only the copy around them differs,
+ *  which is why the two rows stay separate. */
+interface CalendarSectionProps {
+  status: { data?: { connected: boolean; accountEmail: string | null; needsReauth?: boolean } };
+  connect: { mutate: () => void; isPending: boolean };
+  disconnect: { mutate: () => void; isPending: boolean };
+}
+
+/** Google Calendar connect / reconnect / disconnect row. Verbatim JSX, lifted out
+ *  of SchedulerSettings so each section stays readable. */
+const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect }) => (
+  <div className="space-y-2 border-t border-edge pt-4">
+    <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
+    {status.data?.connected && status.data?.needsReauth ? (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-status-busy flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — the link to Google has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => connect.mutate()}
+          disabled={connect.isPending}
+        >
+          {connect.isPending ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+          ) : null}
+          Reconnect
+        </Button>
+      </div>
+    ) : status.data?.connected ? (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-text-secondary flex items-center gap-2">
+          <Check className="w-4 h-4 text-status-online" />
+          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => disconnect.mutate()}
+          disabled={disconnect.isPending}
+        >
+          Disconnect
+        </Button>
+      </div>
+    ) : (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-text-muted">
+          Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => connect.mutate()}
+          disabled={connect.isPending}
+        >
+          {connect.isPending ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+          ) : null}
+          Connect Google Calendar
+        </Button>
+      </div>
+    )}
+  </div>
+);
+
+/** Outlook Calendar connect / reconnect / disconnect row. */
+const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect }) => (
+  <div className="space-y-2 border-t border-edge pt-4">
+    <h3 className="text-sm font-medium text-text-primary">Outlook Calendar</h3>
+    {status.data?.connected && status.data?.needsReauth ? (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-status-busy flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — the link to Outlook has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => connect.mutate()}
+          disabled={connect.isPending}
+        >
+          {connect.isPending ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+          ) : null}
+          Reconnect
+        </Button>
+      </div>
+    ) : status.data?.connected ? (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-text-secondary flex items-center gap-2">
+          <Check className="w-4 h-4 text-status-online" />
+          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => disconnect.mutate()}
+          disabled={disconnect.isPending}
+        >
+          Disconnect
+        </Button>
+      </div>
+    ) : (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-text-muted">
+          Optional: connect Outlook so bookings land on your calendar and respect your existing events.
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => connect.mutate()}
+          disabled={connect.isPending}
+        >
+          {connect.isPending ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+          ) : null}
+          Connect Outlook Calendar
+        </Button>
+      </div>
+    )}
+  </div>
+);
+
+/** Availability mode, slot interval and the weekly-hours grid. */
+const AvailabilitySection: React.FC<{
+  config: SchedulerConfig | undefined;
+  availabilityMode: SchedulerFormState['availabilityMode'];
+  setAvailabilityMode: FormSetter<'availabilityMode'>;
+  slotGranularityMin: number;
+  setSlotGranularityMin: FormSetter<'slotGranularityMin'>;
+  days: SchedulerFormState['days'];
+  setDays: FormSetter<'days'>;
+}> = ({
+  config,
+  availabilityMode,
+  setAvailabilityMode,
+  slotGranularityMin,
+  setSlotGranularityMin,
+  days,
+  setDays,
+}) => {
+  const setDay = (key: Weekday, patch: Partial<DayRow>) =>
+    setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  return (
+    <div className="space-y-3 border-t border-edge pt-4">
+      <h3 className="text-sm font-medium text-text-primary">Availability</h3>
+      <p className="text-xs text-text-muted">
+        These hours gate bookable slots. They are managed from your AI bot's business hours; changes here may
+        be overwritten the next time those hours are saved. They never stop the assistant from helping
+        customers or capturing an out-of-hours request.
+      </p>
+      {/* Always-open vs business-hours mode */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {([
+          { mode: 'business_hours' as const, title: 'Set business hours', desc: 'The assistant offers slots only within the weekly hours below.' },
+          { mode: 'always_open' as const, title: 'Always open (24/7)', desc: "Bookable around the clock — only your calendar's busy times limit slots." },
+        ]).map(({ mode, title, desc }) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setAvailabilityMode(mode)}
+            className={cn(
+              'rounded-lg border p-3 text-left transition-colors',
+              availabilityMode === mode
+                ? 'border-primary-400 bg-primary-400/10'
+                : 'border-edge hover:border-text-muted',
+            )}
+          >
+            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+              <span
+                className={cn(
+                  'flex h-4 w-4 items-center justify-center rounded-full border',
+                  availabilityMode === mode ? 'border-primary-400' : 'border-text-muted',
+                )}
+              >
+                {availabilityMode === mode && <span className="h-2 w-2 rounded-full bg-primary-400" />}
+              </span>
+              {title}
+            </div>
+            <p className="mt-1 pl-6 text-xs text-text-muted">{desc}</p>
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <span className="mb-1 block text-sm text-text-secondary">Timezone</span>
+          <span className="text-sm text-text-primary">
+            {config?.availability?.timezone ?? '—'}
+          </span>
+        </div>
+        <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
+      </div>
+      {availabilityMode === 'business_hours' ? (
+        <div className="space-y-2">
+          <Label className="text-text-secondary block">Weekly hours</Label>
+          {DAYS.map(({ key, label }) => (
+            <div key={key} className="flex items-start gap-3">
+              <label className="flex items-center gap-2 w-24 shrink-0 cursor-pointer pt-2">
+                <Checkbox
+                  checked={days[key].enabled}
+                  onCheckedChange={(c) => setDay(key, { enabled: c === true })}
+                />
+                <span className="text-sm text-text-primary">{label}</span>
+              </label>
+              <WindowList
+                windows={days[key].windows}
+                disabled={!days[key].enabled}
+                onChange={(windows) => setDay(key, { windows })}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2 text-xs text-text-muted">
+          Open 24/7 — the assistant can offer any time, limited only by your connected calendar's busy
+          periods and each service's notice/buffer settings. Use date overrides below to close specific days.
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** Business-wide ceilings and the per-service defaults. */
+const BookingRulesSection: React.FC<{
+  rules: SchedulerFormState['rules'];
+  setRules: FormSetter<'rules'>;
+}> = ({ rules, setRules }) => (
+  <div className="space-y-3 border-t border-edge pt-4">
+    <h3 className="text-sm font-medium text-text-primary">Booking rules</h3>
+    <p className="text-xs text-text-muted">
+      Limits for this bot as a whole, on top of each service's own settings — whichever is stricter wins.
+      Leave a field empty for no limit.
+    </p>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <OptionalNumberField
+        label="Max appointments per day"
+        hint="Across all services"
+        value={rules.maxBookingsPerDay}
+        min={1}
+        max={100}
+        onChange={(v) => setRules((r) => ({ ...r, maxBookingsPerDay: v }))}
+      />
+      <OptionalNumberField
+        label="Max booked hours per day"
+        hint="Total time, not slots"
+        value={rules.maxBookedMinutesPerDay === null ? null : rules.maxBookedMinutesPerDay / 60}
+        min={0.25}
+        max={24}
+        step={0.25}
+        onChange={(v) =>
+          setRules((r) => ({ ...r, maxBookedMinutesPerDay: v === null ? null : Math.round(v * 60) }))
+        }
+      />
+      <OptionalNumberField
+        label="Minimum gap (min)"
+        hint="Free time around each appointment"
+        value={rules.minGapMin}
+        min={0}
+        max={480}
+        onChange={(v) => setRules((r) => ({ ...r, minGapMin: v }))}
+      />
+    </div>
+
+    <p className="pt-2 text-xs text-text-muted">
+      Defaults for new services. A service that sets its own value keeps it — these
+      only fill the fields a service leaves blank, so you can change your notice
+      period or buffers once instead of on every service.
+    </p>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <OptionalNumberField
+        label="Min notice (min)"
+        value={rules.defaultMinNoticeMin}
+        min={0}
+        max={43200}
+        onChange={(v) => setRules((r) => ({ ...r, defaultMinNoticeMin: v }))}
+      />
+      <OptionalNumberField
+        label="Max horizon (days)"
+        value={rules.defaultMaxHorizonDays}
+        min={1}
+        max={365}
+        onChange={(v) => setRules((r) => ({ ...r, defaultMaxHorizonDays: v }))}
+      />
+      <OptionalNumberField
+        label="Buffer before (min)"
+        value={rules.defaultBufferBeforeMin}
+        min={0}
+        max={480}
+        onChange={(v) => setRules((r) => ({ ...r, defaultBufferBeforeMin: v }))}
+      />
+      <OptionalNumberField
+        label="Buffer after (min)"
+        value={rules.defaultBufferAfterMin}
+        min={0}
+        max={480}
+        onChange={(v) => setRules((r) => ({ ...r, defaultBufferAfterMin: v }))}
+      />
+    </div>
+  </div>
+);
+
+/** Service area — where the business will travel. Hidden only when it is both
+ *  inapplicable AND empty; a stored area always stays visible, with the field's
+ *  own note explaining that nothing is being enforced against it. */
+const ServiceAreaBlock: React.FC<{
+  config: SchedulerConfig | undefined;
+  serviceArea: SchedulerFormState['serviceArea'];
+  setServiceArea: FormSetter<'serviceArea'>;
+}> = ({ config, serviceArea, setServiceArea }) => {
+  const hasAddressService = (config?.services ?? []).some((svc) => svc.isActive && svc.customerAddressRequired);
+  if (!hasAddressService && serviceArea.length === 0) return null;
+  return (
+    <ServiceAreaField
+      value={serviceArea}
+      onChange={setServiceArea}
+      // The area is only enforceable against services that collect an address.
+      hasAddressService={hasAddressService}
+    />
+  );
+};
+
+/** Which of the two roles this address plays, in the owner's own terms (#79, LP1).
+ *  The copy used to end "It is not used for jobs where you travel to the customer",
+ *  which is exactly what Home Base needs it to be. One address, two roles — where
+ *  customers come TO, and where the van sets out FROM — so what it says depends on
+ *  which roles are actually in play. Derived from the catalog rather than asked as a
+ *  second question: the services already say which kinds of work exist. */
+const VenueRoleCopy: React.FC<{ workLocation: WorkLocation }> = ({ workLocation }) => {
+  if (workLocation === 'on_the_road') {
+    return (
+      <>
+        Where your working day starts. Travel time measures the first job of a day
+        from here, so an early job an hour away is not offered against a start you
+        could not make — leave it empty and the day's first job is not measured
+        from anywhere.
+      </>
+    );
+  }
+  if (workLocation === 'both') {
+    return (
+      <>
+        Two jobs for one address: customers come here for the services you do on
+        site, and it is where your working day starts for the ones you travel to.
+        It goes on the calendar invite for the first kind — leave it empty and the
+        invite simply won't mention a place.
+      </>
+    );
+  }
+  if (workLocation === 'no_location') {
+    return (
+      <>
+        None of your services happen anywhere in particular, so nothing here is
+        used. It is still shown because you have an address stored — clear the
+        fields if you would rather it went away.
+      </>
+    );
+  }
+  return (
+    <>
+      Where customers come to you. This goes on the calendar invite so they can
+      find you — leave it empty and the invite simply won't mention a place.
+    </>
+  );
+};
+
+/** The four editable address lines plus the Google picker. */
+const VenueAddressFields: React.FC<{
+  venue: VenueAddress;
+  setVenue: FormSetter<'venue'>;
+}> = ({ venue, setVenue }) => {
+  /**
+   * Any hand-edit invalidates a selection, so every field goes through here rather than calling
+   * `setVenue` directly. Four call sites each remembering to null the id is three chances to
+   * forget, and forgetting means the base routes from an address the owner has replaced.
+   */
+  const editVenue = (patch: Partial<VenueAddress>) =>
+    setVenue((v) => ({ ...v, ...patch, placeId: null }));
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <AddressAutocomplete
+        onSelect={(picked) =>
+          // Straight to `setVenue`, deliberately NOT `editVenue`: this is the one
+          // change that CREATES the identity rather than invalidating it.
+          setVenue({
+            placeId: picked.placeId,
+            street: picked.components?.street ?? null,
+            postalCode: picked.components?.postalCode ?? null,
+            city: picked.components?.city ?? null,
+            country: picked.components?.country ?? null,
+          })
+        }
+      />
+      <div className="sm:col-span-2">
+        <Label htmlFor="venue-street">Street and number</Label>
+        <Input
+          id="venue-street"
+          value={venue.street ?? ''}
+          maxLength={200}
+          placeholder="Grote Markt 1"
+          onChange={(e) => editVenue({ street: e.target.value || null })}
+        />
+      </div>
+      <div>
+        <Label htmlFor="venue-postal-code">Postcode</Label>
+        <Input
+          id="venue-postal-code"
+          value={venue.postalCode ?? ''}
+          maxLength={200}
+          placeholder="9300"
+          onChange={(e) => editVenue({ postalCode: e.target.value || null })}
+        />
+      </div>
+      <div>
+        <Label htmlFor="venue-city">City</Label>
+        <Input
+          id="venue-city"
+          value={venue.city ?? ''}
+          maxLength={200}
+          placeholder="Aalst"
+          onChange={(e) => editVenue({ city: e.target.value || null })}
+        />
+      </div>
+      <div>
+        <Label htmlFor="venue-country">Country code</Label>
+        <Input
+          id="venue-country"
+          value={venue.country ?? ''}
+          maxLength={2}
+          placeholder="BE"
+          onChange={(e) => editVenue({ country: e.target.value.toUpperCase() || null })}
+        />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Services nobody was ever asked about, on a business that HAS an address (#71).
+ *
+ * `unset` resolves to the premises, so those services put this address on their invites. That
+ * was the right default - between two wrong invites, an address the owner can remove beats a
+ * customer who does not know where to go - but it is only right until the owner has an address
+ * and one of those services turns out to be a phone or video call.
+ *
+ * Named, not counted - "2 services" sends the owner hunting, and the whole point is that they
+ * can settle it in the time it takes to read this.
+ */
+const NeverAskedWarning: React.FC<{ names: string[] }> = ({ names }) => {
+  const one = names.length === 1;
+  return (
+    <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-text-secondary">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+      <span>
+        This address is going on the invite for{' '}
+        {names.join(', ')} — {one ? 'that service was' : 'those services were'}{' '}
+        created before we asked where each one happens, so nobody has chosen. If{' '}
+        {one ? 'it is' : 'any of them are'} a phone or video
+        call, open {one ? 'it' : 'them'} above and pick the
+        right answer.
+      </span>
+    </p>
+  );
+};
+
+/**
+ * Venue — where customers come TO, and where the van sets out FROM. Never the
+ * VAT/legal address.
+ *
+ * Show a location control only where it applies - and NEVER hide one that holds something
+ * (#79, LP1).
+ *
+ * The rule is "hide only when there is nothing stored to hide", and the second half is the
+ * load-bearing one. This form sends `venueAddress` and `serviceArea` on every save, by design:
+ * `[]` is how an owner clears their area and a null field is how they clear an address line. So
+ * a control hidden while its value was non-empty would still round-trip that value today, and
+ * would silently delete it the first time anyone made hiding also reset the state. Refusing to
+ * hide a populated control means that mistake has nowhere to land.
+ *
+ * An empty control on a business the setting cannot apply to is just a question nobody needs to
+ * answer.
+ */
+const VenueSection: React.FC<{
+  config: SchedulerConfig | undefined;
+  workLocation: WorkLocation;
+  venue: VenueAddress;
+  setVenue: FormSetter<'venue'>;
+  reviewingVenue: boolean;
+  setReviewingVenue: FormSetter<'reviewingVenue'>;
+}> = ({ config, workLocation, venue, setVenue, reviewingVenue, setReviewingVenue }) => {
+  const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
+  if (workLocation === 'no_location' && !hasStoredVenue) return null;
+  const storedVenueSummary = [venue.street, venue.postalCode, venue.city, venue.country]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(', ') || 'Saved address';
+  const neverAsked = (config?.services ?? []).filter((s) => s.isActive && s.locationType === 'unset');
+  const collapsed = workLocation === 'no_location' && !reviewingVenue;
+  return (
+    <div className="space-y-3 border-t border-edge pt-4">
+      {collapsed ? (
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-text-primary">Your address</h3>
+            <p className="mt-1 truncate text-xs text-text-secondary" title={storedVenueSummary}>
+              {storedVenueSummary}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => setReviewingVenue(true)}
+            >
+              Review
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() =>
+                setVenue({
+                  street: null,
+                  postalCode: null,
+                  city: null,
+                  country: null,
+                  placeId: null,
+                })
+              }
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div>
+            <h3 className="text-sm font-medium text-text-primary">Your address</h3>
+            <p className="text-xs text-text-secondary mt-1">
+              <VenueRoleCopy workLocation={workLocation} />
+            </p>
+            {/* Never the VAT or registered address, and never backfilled from one. Said out
+                loud rather than only enforced in the schema, because an owner filling this
+                in has no way to know it is a separate field unless it says so. */}
+            <p className="text-xs text-text-muted mt-1">
+              This is yours to choose. It is not your registered or VAT address, and nothing
+              fills it in from one.
+            </p>
+          </div>
+          <VenueAddressFields venue={venue} setVenue={setVenue} />
+
+          {hasStoredVenue && neverAsked.length > 0 && (
+            <NeverAskedWarning names={neverAsked.map((s) => s.name)} />
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+/** Why the travel switch cannot be turned on, in the owner's own terms. */
+function travelBlockedCopy(
+  reason: 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
+  travelEnabled: boolean,
+): string {
+  if (reason === 'shared_itinerary') {
+    return travelEnabled
+      ? 'Another Agent now books into the same calendar, so travel time has stopped running. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar, or switch this off.'
+      : 'Another Agent books into the same calendar, so this cannot be switched on. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar first.';
+  }
+  if (reason === 'not_entitled') return 'Travel time is not part of your current Tier.';
+  return 'Travel time is not available on this platform yet.';
+}
+
+/**
+ * Travel time. AFTER the address deliberately: the day's first job is measured
+ * from it, so an owner who has not filled it in is looking at the field this
+ * section depends on. C2: no-location services have no address-to-address journey,
+ * so this preference has nothing to measure and is gated on workLocation alone.
+ */
+const TravelSection: React.FC<{
+  config: SchedulerConfig | undefined;
+  workLocation: WorkLocation;
+  travelEnabled: boolean;
+  setTravelEnabled: FormSetter<'travelEnabled'>;
+  travelSlack: number | null;
+  setTravelSlack: FormSetter<'travelSlack'>;
+  travelStartFromBase: boolean;
+  setTravelStartFromBase: FormSetter<'travelStartFromBase'>;
+  travelBaseDepart: number;
+  setTravelBaseDepart: FormSetter<'travelBaseDepart'>;
+  travelGroupingPeriod: SchedulerFormState['travelGroupingPeriod'];
+  setTravelGroupingPeriod: FormSetter<'travelGroupingPeriod'>;
+  travelRoutePriority: SchedulerFormState['travelRoutePriority'];
+  setTravelRoutePriority: FormSetter<'travelRoutePriority'>;
+  travelMaxDetourMin: string;
+  setTravelMaxDetourMin: FormSetter<'travelMaxDetourMin'>;
+}> = ({
+  config,
+  workLocation,
+  travelEnabled,
+  setTravelEnabled,
+  travelSlack,
+  setTravelSlack,
+  travelStartFromBase,
+  setTravelStartFromBase,
+  travelBaseDepart,
+  setTravelBaseDepart,
+  travelGroupingPeriod,
+  setTravelGroupingPeriod,
+  travelRoutePriority,
+  setTravelRoutePriority,
+  travelMaxDetourMin,
+  setTravelMaxDetourMin,
+}) => {
+  if (workLocation === 'no_location') return null;
+  /** Does this business go TO its customers? The only shape geographic grouping applies to. */
+  const travelsToCustomers = workLocation === 'on_the_road' || workLocation === 'both';
+  // NOT state — it is the server's answer to "may this be switched on", refreshed with the
+  // config. Holding it in state would let a stale value keep the switch enabled after a
+  // calendar change made it harmful.
+  const travelBlockedReason = config?.travel?.blockedReason ?? null;
+  return (
+    <div className="space-y-3 border-t border-edge pt-4">
+      <div>
+        <h3 className="text-sm font-medium text-text-primary">Travel time</h3>
+        <p className="text-xs text-text-secondary mt-1">
+          For jobs at the customer's address, only offer times you can actually drive
+          between. Times you could not reach are held back rather than confirmed and
+          then rearranged.
+        </p>
+        {/*
+          The single-driver assumption, stated before the switch rather than after it.
+          A two-person business that turns this on gets slots stripped for journeys
+          neither of them makes — the one configuration where the feature makes a
+          business worse off than not having it.
+        */}
+        <p className="text-xs text-text-muted mt-1">
+          This assumes <strong>one person on the road</strong>. If two of you take jobs
+          from the same diary, leave it off.
+        </p>
+      </div>
+
+      {travelBlockedReason && (
+        <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+          {travelBlockedCopy(travelBlockedReason, travelEnabled)}
+        </div>
+      )}
+
+      <label htmlFor="travel-enabled" className="flex items-start gap-2 cursor-pointer">
+        <Checkbox
+          id="travel-enabled"
+          checked={travelEnabled}
+          // Blocks turning it ON, never turning it OFF. A tenant whose diary became
+          // shared months after enabling travel has it on and cannot fix that from
+          // the calendar screen alone — disabling the box outright left them unable
+          // to switch off the one thing making their settings unsaveable.
+          disabled={!!travelBlockedReason && !travelEnabled}
+          onCheckedChange={(c) => setTravelEnabled(c === true)}
+        />
+        <span className="text-sm text-text-secondary">
+          Only offer times I can reach
+          <span className="block text-xs text-text-muted">
+            Uses the address the customer gives and the jobs either side of the time
+            they want.
+          </span>
+        </span>
+      </label>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="travel-slack">Extra minutes per journey</Label>
+          <Input
+            id="travel-slack"
+            type="number"
+            min={0}
+            max={120}
+            value={travelSlack ?? ''}
+            placeholder="0"
+            disabled={!travelEnabled}
+            onChange={(e) =>
+              setTravelSlack(e.target.value === '' ? null : Number(e.target.value))
+            }
+          />
+          <p className="text-xs text-text-muted mt-1">
+            Parking, the doorstep, a job that runs over. Added to every drive.
+          </p>
+        </div>
+      </div>
+
+      <label htmlFor="travel-start-from-base" className="flex items-start gap-2 cursor-pointer">
+        <Checkbox
+          id="travel-start-from-base"
+          checked={travelStartFromBase}
+          disabled={!travelEnabled}
+          onCheckedChange={(c) => setTravelStartFromBase(c === true)}
+        />
+        <span className="text-sm text-text-secondary">
+          I start the day from my own address
+          <span className="block text-xs text-text-muted">
+            The first job of each day is measured from the address above. Fill that
+            address in, or this has nothing to measure from.
+          </span>
+        </span>
+      </label>
+
+      <div>
+        <Label htmlFor="travel-grouping-period">Geographic grouping</Label>
+        <select
+          id="travel-grouping-period"
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
+          value={travelGroupingPeriod}
+          disabled={!travelEnabled || !travelsToCustomers}
+          onChange={(e) =>
+            setTravelGroupingPeriod(e.target.value as 'none' | 'half_day' | 'full_day')
+          }
+        >
+          <option value="none">No grouping</option>
+          <option value="half_day">Group by half day</option>
+          <option value="full_day">Group by full day</option>
+        </select>
+        <p className="text-xs text-text-muted mt-1">
+          Customers still see every time they could have had, in the same list. Only the
+          order changes, so the one that saves you the most driving is offered first.
+          Nothing about your other customers is ever mentioned.
+          {!travelsToCustomers && travelGroupingPeriod !== 'none' && (
+            <>
+              {' '}
+              Your setting is kept but does nothing right now, because none of your
+              services send you to a customer. It starts working again if you add one.
+            </>
+          )}
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="travel-route-priority">Route priority</Label>
+        <select
+          id="travel-route-priority"
+          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
+          value={travelRoutePriority}
+          disabled={!travelEnabled || !travelsToCustomers || travelGroupingPeriod === 'none'}
+          onChange={(e) =>
+            setTravelRoutePriority(e.target.value as 'auto' | 'nearest' | 'farthest')
+          }
+        >
+          <option value="auto">Auto</option>
+          <option value="nearest">Nearest first</option>
+          <option value="farthest">Farthest first</option>
+        </select>
+        <p className="text-xs text-text-muted mt-1">
+          Only the order of times already offered. Auto keeps the grouping preference;
+          nearest and farthest sort the same already-measured detours the other way.
+          Times grouping could not score stay where they were.
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="travel-max-detour">Maximum extra travel per appointment (min)</Label>
+        <Input
+          id="travel-max-detour"
+          type="number"
+          min={0}
+          max={120}
+          value={travelMaxDetourMin}
+          // Gated on GROUPING, not merely on travel. The threshold decides which times
+          // are suggested FIRST, and that ordering only reaches a customer when
+          // grouping is on - so offering the field beside "No grouping" would take a
+          // number and quietly consume nothing.
+          disabled={!travelEnabled || travelGroupingPeriod === 'none'}
+          placeholder="No limit"
+          onChange={(e) => setTravelMaxDetourMin(e.target.value)}
+        />
+        <p className="text-xs text-text-muted mt-1">
+          How much EXTRA driving one appointment may add to your day — not how far away
+          it is, so a customer an hour away is still offered if you are already going
+          past. Over this, the time is still bookable; it simply stops being the one
+          suggested first, so it needs grouping switched on to have any effect. Leave
+          it empty for no limit.
+        </p>
+      </div>
+
+      {travelStartFromBase && (
+        <div className="pl-6">
+          <Label htmlFor="travel-base-depart">Minutes I leave before opening</Label>
+          <Input
+            id="travel-base-depart"
+            type="number"
+            min={0}
+            max={240}
+            value={travelBaseDepart}
+            disabled={!travelEnabled}
+            onChange={(e) => setTravelBaseDepart(e.target.value === '' ? 0 : Number(e.target.value))}
+          />
+          <p className="text-xs text-text-muted mt-1">
+            At 0 the van leaves exactly when you open, so a job at opening time is only
+            bookable if it is next door. Put in how long before opening you actually set
+            off and the first slot of the day comes back.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Date overrides — holidays, closures and one-off hours. */
+const DateOverridesSection: React.FC<{
+  overrides: SchedulerFormState['overrides'];
+  setOverrides: FormSetter<'overrides'>;
+}> = ({ overrides, setOverrides }) => (
+  <div className="space-y-3 border-t border-edge pt-4">
+    <div className="flex items-center justify-between">
+      <h3 className="text-sm font-medium text-text-primary">Date overrides</h3>
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        onClick={() =>
+          setOverrides((prev) => [...prev, { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_WINDOW }] }])
+        }
+      >
+        <Plus className="w-3.5 h-3.5" /> Add
+      </Button>
+    </div>
+    {overrides.length === 0 ? (
+      <p className="text-xs text-text-muted">
+        Close specific dates (holidays) or set one-off hours that override the weekly schedule.
+      </p>
+    ) : (
+      <div className="space-y-2">
+        {overrides.map((o, i) => (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
+          <div key={i} className="flex items-center gap-3 flex-wrap">
+            <DatePicker
+              value={o.date}
+              onChange={(v) =>
+                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))
+              }
+              className="w-full sm:w-44"
+            />
+            {/*
+              An optional end date, so a fortnight's holiday is ONE row.
+              Without it an owner date-picked fourteen rows, and only the
+              first eight upcoming closures ever reach the bot — so from day
+              nine it went back to quoting the weekly hours.
+            */}
+            <span className="text-xs text-text-muted">to</span>
+            <DatePicker
+              value={o.endDate}
+              onChange={(v) =>
+                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))
+              }
+              className="w-full sm:w-44"
+            />
+            <label htmlFor={`override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                id={`override-closed-${i}`}
+                checked={o.closed}
+                onCheckedChange={(c) =>
+                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
+                }
+              />
+              <span className="text-sm text-text-secondary">Closed</span>
+            </label>
+            {!o.closed && (
+              <WindowList
+                windows={o.windows}
+                onChange={(windows) =>
+                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, windows } : x)))
+                }
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="text-red-400 hover:text-red-300"
+              onClick={() => setOverrides((prev) => prev.filter((_, j) => j !== i))}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+/** Live slot preview (reflects the last SAVED config). */
+const PreviewSection: React.FC<{
+  config: SchedulerConfig | undefined;
+  showPreview: boolean;
+  setShowPreview: FormSetter<'showPreview'>;
+}> = ({ config, showPreview, setShowPreview }) => (
+  <div className="space-y-2 border-t border-edge pt-4">
+    <div className="flex items-center justify-between">
+      <h3 className="text-sm font-medium text-text-primary">Preview</h3>
+      <Button variant="outline" size="sm" type="button" onClick={() => setShowPreview((v) => !v)}>
+        <Eye className="w-3.5 h-3.5" /> {showPreview ? 'Hide' : 'Show'} next 7 days
+      </Button>
+    </div>
+    {showPreview && <SlotPreview timezone={config?.availability?.timezone ?? 'Europe/Brussels'} />}
+  </div>
+);

@@ -5,6 +5,7 @@
  * External channel sessions → Platform API via adapter + WebSocket for portal
  */
 
+import type { Repository } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -14,7 +15,13 @@ import { triggerHealthCheckDebounced } from './health-check.service';
 import { ResponsePayload } from './response.types';
 import { getChannelAdapter } from './channel-registry';
 import { isChannelEntitled } from './channel-entitlement';
-import { formatResponseForChannel, DeliveryResult } from './types';
+import {
+  formatResponseForChannel,
+  DeliveryResult,
+  ChannelAdapter,
+  ChannelCapabilities,
+  OutboundChannelMessage,
+} from './types';
 import { emitToSession } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 
@@ -56,30 +63,7 @@ export async function routeOutboundMessage(
 
   // Widget channel — WebSocket emission above is sufficient
   if (session.channel === 'widget' || !session.channelConnectionId) {
-    // #80 (LP3): the widget has NO durable delivery acknowledgement - the reply goes out over a
-    // socket or in the HTTP response and nothing records whether it arrived. So it is recorded as
-    // `widget_assumed` rather than as an acknowledged delivery, and any analysis can exclude it.
-    // The canonical baseline includes it, because excluding most of the traffic would be a worse
-    // distortion than admitting the weaker evidence.
-    //
-    // No truncation here either: the widget renders the chips as composed, so what the agent
-    // produced IS what was delivered. That is why the titles are rebuilt from the same instants
-    // rather than read off a channel-formatted payload that this path never builds.
-    if (response.offer?.slotStarts.length && response.quickReplies?.length) {
-      const titles = response.quickReplies.map((qr) => (typeof qr === 'string' ? qr : qr.title));
-      void import('../booking/offer-record.service')
-        .then((m) =>
-          m.recordDeliveredOffer({
-            tenantId: context.tenantId,
-            sessionId: context.sessionId,
-            channel: session.channel ?? 'widget',
-            offer: response.offer!,
-            deliveredTitles: titles,
-            deliveryBasis: 'widget_assumed',
-          })
-        )
-        .catch(() => undefined);
-    }
+    recordWidgetOffer(response, context, session);
     return { success: true };
   }
 
@@ -134,82 +118,173 @@ export async function routeOutboundMessage(
   const capabilities = adapter.outboundTransport.getCapabilities();
   const channelMessages = formatResponseForChannel(response, capabilities);
 
-  // A human-agent reply needs Meta's HUMAN_AGENT tag ONLY once the standard
-  // messaging window has closed (using RESPONSE inside the window is the norm and
-  // avoids tag-abuse review flags). Fail-safe to RESPONSE when lastInboundAt is
-  // unknown. Bot replies (humanAgent !== true) are never tagged.
-  const windowMs = (capabilities.messagingWindowHours ?? 24) * 60 * 60 * 1000;
-  const outsideWindow =
-    !!binding.lastInboundAt && Date.now() - binding.lastInboundAt.getTime() > windowMs;
-  const useHumanAgentTag = options?.humanAgent === true && outsideWindow;
+  // Meta's HUMAN_AGENT tag: only a human reply outside the messaging window.
+  const useHumanAgentTag = shouldUseHumanAgentTag(options, binding, capabilities);
 
   for (const msg of channelMessages) {
-    if (msg.type === 'typing') {
-      await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection);
-      continue;
-    }
-
-    if (useHumanAgentTag) msg.humanAgent = true;
-
-    const result = await adapter.outboundTransport.send(
-      msg,
-      binding.externalThreadId,
+    const failure = await deliverChannelMessage(msg, {
+      adapter,
+      binding,
       connection,
-    );
-
-    // Track delivery
-    const delivery = deliveryRepository.create({
-      internalMessageId: context.messageId,
-      channelConnectionId: connection.id,
-      channel: connection.channel,
-      platformMessageId: result.platformMessageId || null,
-      status: result.success ? 'sent' : 'failed',
-      attempts: 1,
-      error: result.error || null,
+      context,
+      response,
+      useHumanAgentTag,
+      deliveryRepository,
     });
-    await deliveryRepository.save(delivery);
-
-    // #80 (LP3): the baseline records what the CHANNEL sent, which is why this is here and not
-    // where the slots were composed. `msg.quickReplies` has already been through
-    // `capabilities.maxQuickReplies` and the supports-quick-replies gate, so it is the delivered
-    // truth; `response.offer.slotStarts` carries the canonical instants the rendered chips lost.
-    // Fire-and-forget and never awaited: a measurement row must not delay or fail a reply.
-    if (response.offer && msg.quickReplies?.length) {
-      const titles = msg.quickReplies.map((qr) => qr.title);
-      void import('../booking/offer-record.service')
-        .then((m) =>
-          m.recordDeliveredOffer({
-            tenantId: context.tenantId,
-            sessionId: context.sessionId,
-            channel: connection.channel,
-            offer: response.offer!,
-            deliveredTitles: titles,
-            // What the transport actually said, rather than an assumption. A rejected send is
-            // recorded as such and excluded from every delivered denominator.
-            deliveryBasis: result.success ? 'provider_accepted' : 'provider_rejected',
-          })
-        )
-        .catch(() => undefined);
-    }
-
-    if (!result.success) {
-      logger.error(`Channel delivery failed for message ${context.messageId}`, {
-        channel: connection.channel,
-        error: result.error,
-      });
-      // A delivery failure can mean the channel itself broke (token expired, page
-      // disconnected, WhatsApp permission/window). If the connection still looks
-      // active, probe it (debounced, fire-and-forget) so it flips to 'error' +
-      // notifies the operator instead of silently staying green — without blocking
-      // the reply path or storming the provider on a burst of failures.
-      if (connection.status === 'active') {
-        void triggerHealthCheckDebounced(connection.id);
-      }
-      return result;
-    }
+    if (failure) return failure;
   }
 
   return { success: true };
+}
+
+/**
+ * #80 (LP3): the widget has NO durable delivery acknowledgement - the reply goes out over a
+ * socket or in the HTTP response and nothing records whether it arrived. So it is recorded as
+ * `widget_assumed` rather than as an acknowledged delivery, and any analysis can exclude it.
+ * The canonical baseline includes it, because excluding most of the traffic would be a worse
+ * distortion than admitting the weaker evidence.
+ *
+ * No truncation here either: the widget renders the chips as composed, so what the agent
+ * produced IS what was delivered. That is why the titles are rebuilt from the same instants
+ * rather than read off a channel-formatted payload that this path never builds.
+ */
+function recordWidgetOffer(
+  response: ResponsePayload,
+  context: OutboundContext,
+  session: ChatSession,
+): void {
+  if (!response.offer?.slotStarts.length || !response.quickReplies?.length) return;
+
+  const titles = response.quickReplies.map((qr) => (typeof qr === 'string' ? qr : qr.title));
+  void import('../booking/offer-record.service')
+    .then((m) =>
+      m.recordDeliveredOffer({
+        tenantId: context.tenantId,
+        sessionId: context.sessionId,
+        channel: session.channel ?? 'widget',
+        offer: response.offer!,
+        deliveredTitles: titles,
+        deliveryBasis: 'widget_assumed',
+      })
+    )
+    .catch(() => undefined);
+}
+
+/**
+ * A human-agent reply needs Meta's HUMAN_AGENT tag ONLY once the standard
+ * messaging window has closed (using RESPONSE inside the window is the norm and
+ * avoids tag-abuse review flags). Fail-safe to RESPONSE when lastInboundAt is
+ * unknown. Bot replies (humanAgent !== true) are never tagged.
+ */
+function shouldUseHumanAgentTag(
+  options: { humanAgent?: boolean } | undefined,
+  binding: ConversationBinding,
+  capabilities: ChannelCapabilities,
+): boolean {
+  const windowMs = (capabilities.messagingWindowHours ?? 24) * 60 * 60 * 1000;
+  const outsideWindow =
+    !!binding.lastInboundAt && Date.now() - binding.lastInboundAt.getTime() > windowMs;
+  return options?.humanAgent === true && outsideWindow;
+}
+
+/**
+ * Send one formatted message to the channel and record its delivery.
+ * Returns the failed DeliveryResult when the send stops the loop, else null.
+ */
+async function deliverChannelMessage(
+  msg: OutboundChannelMessage,
+  ctx: {
+    adapter: ChannelAdapter;
+    binding: ConversationBinding;
+    connection: ChannelConnection;
+    context: OutboundContext;
+    response: ResponsePayload;
+    useHumanAgentTag: boolean;
+    deliveryRepository: Repository<MessageDelivery>;
+  },
+): Promise<DeliveryResult | null> {
+  const { adapter, binding, connection, context, deliveryRepository } = ctx;
+
+  if (msg.type === 'typing') {
+    await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection);
+    return null;
+  }
+
+  if (ctx.useHumanAgentTag) msg.humanAgent = true;
+
+  const result = await adapter.outboundTransport.send(
+    msg,
+    binding.externalThreadId,
+    connection,
+  );
+
+  // Track delivery
+  const delivery = deliveryRepository.create({
+    internalMessageId: context.messageId,
+    channelConnectionId: connection.id,
+    channel: connection.channel,
+    platformMessageId: result.platformMessageId || null,
+    status: result.success ? 'sent' : 'failed',
+    attempts: 1,
+    error: result.error || null,
+  });
+  await deliveryRepository.save(delivery);
+
+  recordChannelOffer(msg, result, ctx);
+
+  if (!result.success) {
+    logger.error(`Channel delivery failed for message ${context.messageId}`, {
+      channel: connection.channel,
+      error: result.error,
+    });
+    // A delivery failure can mean the channel itself broke (token expired, page
+    // disconnected, WhatsApp permission/window). If the connection still looks
+    // active, probe it (debounced, fire-and-forget) so it flips to 'error' +
+    // notifies the operator instead of silently staying green — without blocking
+    // the reply path or storming the provider on a burst of failures.
+    if (connection.status === 'active') {
+      void triggerHealthCheckDebounced(connection.id);
+    }
+    return result;
+  }
+
+  return null;
+}
+
+/**
+ * #80 (LP3): the baseline records what the CHANNEL sent, which is why this is here and not
+ * where the slots were composed. `msg.quickReplies` has already been through
+ * `capabilities.maxQuickReplies` and the supports-quick-replies gate, so it is the delivered
+ * truth; `response.offer.slotStarts` carries the canonical instants the rendered chips lost.
+ * Fire-and-forget and never awaited: a measurement row must not delay or fail a reply.
+ */
+function recordChannelOffer(
+  msg: OutboundChannelMessage,
+  result: DeliveryResult,
+  ctx: {
+    connection: ChannelConnection;
+    context: OutboundContext;
+    response: ResponsePayload;
+  },
+): void {
+  const { connection, context, response } = ctx;
+  if (!response.offer || !msg.quickReplies?.length) return;
+
+  const titles = msg.quickReplies.map((qr) => qr.title);
+  void import('../booking/offer-record.service')
+    .then((m) =>
+      m.recordDeliveredOffer({
+        tenantId: context.tenantId,
+        sessionId: context.sessionId,
+        channel: connection.channel,
+        offer: response.offer!,
+        deliveredTitles: titles,
+        // What the transport actually said, rather than an assumption. A rejected send is
+        // recorded as such and excluded from every delivered denominator.
+        deliveryBasis: result.success ? 'provider_accepted' : 'provider_rejected',
+      })
+    )
+    .catch(() => undefined);
 }
 
 /**

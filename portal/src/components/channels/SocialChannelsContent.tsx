@@ -49,7 +49,9 @@ import {
   useUpdateChannelBot,
   useUpdateChannelAutoCapture,
 } from '../../queries/useChannelQueries';
+import type { ChannelConnection } from '../../queries/useChannelQueries';
 import { useBots } from '@/queries/useBotsQueries';
+import type { BotListItem } from '@/queries/useBotsQueries';
 import { useIsEntitled, useHasFeature } from '../../queries/useEntitlementsQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { useQueryClient } from '@tanstack/react-query';
@@ -74,6 +76,493 @@ const STATUS_TEXT: Record<string, string> = {
   disconnected: 'text-zinc-400',
   pending_setup: 'text-amber-400',
 };
+
+/** Plan state of one channel: in-plan ceiling, switched off, usable now. */
+interface ChannelGate {
+  entitled: boolean;
+  off: boolean;
+  available: boolean;
+}
+
+/** Prefix icon of a gated connect button: locked (upgrade) or switched off. */
+function GateIcon({ gate }: { gate: ChannelGate }) {
+  if (!gate.entitled) return <Lock className="h-3 w-3 mr-1" />;
+  if (gate.off) return <PowerOff className="h-3 w-3 mr-1" />;
+  return null;
+}
+
+interface ChannelConnectButtonsProps {
+  metaGate: ChannelGate;
+  whatsappGate: ChannelGate;
+  lockedHint: string;
+  offHint: string;
+  onConnectFacebook: () => void;
+  isFacebookPending: boolean;
+  onConnectWhatsApp: () => void;
+  isWhatsAppPending: boolean;
+}
+
+function ChannelConnectButtons({
+  metaGate,
+  whatsappGate,
+  lockedHint,
+  offHint,
+  onConnectFacebook,
+  isFacebookPending,
+  onConnectWhatsApp,
+  isWhatsAppPending,
+}: ChannelConnectButtonsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onConnectFacebook}
+        disabled={isFacebookPending || !metaGate.available}
+        title={!metaGate.entitled ? lockedHint : metaGate.off ? offHint : undefined}
+      >
+        <GateIcon gate={metaGate} />
+        {isFacebookPending
+          ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          : <SiFacebook className="h-4 w-4 mr-1" />}
+        {isFacebookPending
+          ? t('ai.social.facebook.connecting', { defaultValue: 'Connecting…' })
+          : t('ai.social.facebook.title')}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onConnectWhatsApp}
+        disabled={!whatsappGate.available || isWhatsAppPending}
+        title={!whatsappGate.entitled ? lockedHint : whatsappGate.off ? offHint : undefined}
+      >
+        <GateIcon gate={whatsappGate} />
+        {isWhatsAppPending
+          ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          : <SiWhatsapp className="h-4 w-4 mr-1" />}
+        {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
+      </Button>
+    </div>
+  );
+}
+
+/** Page row of the Meta OAuth session (the endpoint returns untyped JSON). */
+interface MetaOAuthPage {
+  id: string;
+  name: string;
+  instagramAccount?: { username: string } | null;
+}
+
+interface MetaPageSelectionCardProps {
+  pages: MetaOAuthPage[] | undefined;
+  selectedPageIds: string[];
+  setSelectedPageIds: React.Dispatch<React.SetStateAction<string[]>>;
+  messengerEntitled: boolean;
+  instagramEntitled: boolean;
+  onConnect: () => void;
+  isConnecting: boolean;
+  onCancel: () => void;
+}
+
+/** Meta OAuth page selection (shown after the OAuth redirect). */
+function MetaPageSelectionCard({
+  pages,
+  selectedPageIds,
+  setSelectedPageIds,
+  messengerEntitled,
+  instagramEntitled,
+  onConnect,
+  isConnecting,
+  onCancel,
+}: MetaPageSelectionCardProps) {
+  const { t } = useTranslation();
+  if (!pages || pages.length === 0) return null;
+  return (
+    <Card variant="glass">
+      <CardHeader>
+        <h3 className="text-sm font-medium text-white">{t('ai.social.metaPages.title')}</h3>
+        <p className="text-xs text-zinc-400">{t('ai.social.metaPages.description')}</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {pages.map((page) => (
+          <label key={page.id} className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+            <Checkbox
+              checked={selectedPageIds.includes(page.id)}
+              onCheckedChange={(checked) => {
+                setSelectedPageIds((prev) =>
+                  checked ? [...prev, page.id] : prev.filter((id: string) => id !== page.id),
+                );
+              }}
+            />
+            <span className="text-sm text-white">{page.name}</span>
+            {!messengerEntitled && (
+              <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/40">
+                <Lock className="h-3 w-3 mr-1" />
+                {t('ai.social.metaPages.messengerLocked', { defaultValue: 'Messenger locked on your plan' })}
+              </Badge>
+            )}
+            {page.instagramAccount && (
+              <Badge
+                variant="outline"
+                className={`text-xs ${!instagramEntitled ? 'text-amber-400 border-amber-400/40' : ''}`}
+              >
+                {!instagramEntitled && <Lock className="h-3 w-3 mr-1" />}
+                <SiInstagram className="h-3 w-3 mr-1" />
+                @{page.instagramAccount.username}
+                {!instagramEntitled &&
+                  ` — ${t('ai.social.metaPages.igLocked', { defaultValue: 'locked on your plan' })}`}
+              </Badge>
+            )}
+          </label>
+        ))}
+        <div className="flex gap-2 pt-2">
+          <Button onClick={onConnect} disabled={selectedPageIds.length === 0 || isConnecting}>
+            {isConnecting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {isConnecting ? t('ai.social.metaPages.connecting') : t('ai.social.metaPages.connectSelected')}
+          </Button>
+          <Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Left side of a connection row: icon, label, plan lock, activity. */
+function ConnectionRowIdentity({
+  conn,
+  planLocked,
+  activityParts,
+}: {
+  conn: ChannelConnection;
+  planLocked: boolean;
+  activityParts: string[];
+}) {
+  const { t } = useTranslation();
+  const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
+  return (
+    <div className="flex items-center gap-3 min-w-0">
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-white/10 text-zinc-400'}`}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-white truncate">
+          {conn.label || conn.platformAccountId}
+          {planLocked && (
+            <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/40">
+              <Lock className="h-3 w-3 mr-1" />
+              {t('ai.social.planLocked', { defaultValue: 'Plan locked — upgrade to reactivate' })}
+            </Badge>
+          )}
+        </p>
+        <p className="text-xs text-zinc-500 truncate">
+          {CHANNEL_LABELS[conn.channel] || conn.channel}
+          {conn.lastHealthCheckAt && (
+            <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
+              {t('ai.social.activity.checked', { time: timeAgo(conn.lastHealthCheckAt) })}
+            </span>
+          )}
+        </p>
+        {activityParts.length > 0 && (
+          <p className="text-xs text-zinc-600 mt-0.5 truncate">{activityParts.join(' · ')}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ConnectionRowControlsProps {
+  conn: ChannelConnection;
+  bots: BotListItem[];
+  /** Connection whose health check is in flight, if any. */
+  checkingConnectionId?: string;
+  isAutoCapturePending: boolean;
+  onAutoCaptureChange: (connectionId: string, enabled: boolean) => void;
+  onBotChange: (connectionId: string, botId: string | null) => void;
+  onHealthCheck: (connectionId: string) => void;
+  onDisconnect: (connectionId: string) => void;
+}
+
+/** Right side of a connection row: lead capture, bot, status, actions. */
+function ConnectionRowControls({
+  conn,
+  bots,
+  checkingConnectionId,
+  isAutoCapturePending,
+  onAutoCaptureChange,
+  onBotChange,
+  onHealthCheck,
+  onDisconnect,
+}: ConnectionRowControlsProps) {
+  const { t } = useTranslation();
+  const checkingThis = checkingConnectionId === conn.id;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {conn.channel !== 'widget' && (
+        <label
+          className="flex items-center gap-1.5 text-xs text-zinc-400"
+          title={t('ai.social.autoCapture.hint', { defaultValue: 'Auto-create a lead from each new conversation on this channel' })}
+        >
+          <Switch
+            checked={conn.config?.autoCaptureLeads !== false}
+            disabled={isAutoCapturePending}
+            onCheckedChange={(c) => onAutoCaptureChange(conn.id, c)}
+            aria-label={t('ai.social.autoCapture.aria', { defaultValue: 'Auto-capture leads' })}
+          />
+          {t('ai.social.autoCapture.label', { defaultValue: 'Capture leads' })}
+        </label>
+      )}
+      {conn.channel !== 'widget' && (
+        <Select
+          value={conn.botId ?? '__default__'}
+          onValueChange={(v) => onBotChange(conn.id, v === '__default__' ? null : v)}
+        >
+          <SelectTrigger
+            className="h-8 w-44"
+            aria-label={t('ai.social.botPicker.aria', { defaultValue: 'Bot for this channel' })}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__default__">
+              {t('ai.social.botPicker.default', { defaultValue: 'Default bot' })}
+            </SelectItem>
+            {bots.flatMap((b) =>
+              b.status === 'active'
+                ? [
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}
+                      {b.isDefault
+                        ? ` ${t('ai.social.botPicker.defaultSuffix', { defaultValue: '(default)' })}`
+                        : ''}
+                    </SelectItem>,
+                  ]
+                : [],
+            )}
+          </SelectContent>
+        </Select>
+      )}
+      {conn.lastError && (
+        <span className="text-xs text-red-400 max-w-full truncate" title={conn.lastError}>
+          <AlertCircle className="h-3 w-3 inline mr-1" />
+          {conn.lastError}
+        </span>
+      )}
+      <span className="flex items-center gap-1.5">
+        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[conn.status] || 'bg-zinc-500'}`} />
+        <span className={`text-xs font-medium capitalize ${STATUS_TEXT[conn.status] || 'text-zinc-400'}`}>
+          {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
+        </span>
+      </span>
+      <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+        <Button
+          size="sm"
+          variant="ghost"
+          title={t('ai.social.actions.checkHealth')}
+          disabled={checkingThis}
+          onClick={() => onHealthCheck(conn.id)}
+        >
+          <RefreshCw className={`h-4 w-4 ${checkingThis ? 'animate-spin' : ''}`} />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-red-400 hover:text-red-300"
+          onClick={() => onDisconnect(conn.id)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** One connected channel. Plan-locked rows keep their credentials (plan D4):
+ *  everything reactivates on upgrade, so they read as quiet, not broken. */
+function ConnectionRow({
+  conn,
+  channelEntitled,
+  ...controls
+}: Omit<ConnectionRowControlsProps, 'conn'> & {
+  conn: ChannelConnection;
+  channelEntitled: Record<string, boolean>;
+}) {
+  const { t } = useTranslation();
+  const planLocked = conn.channel !== 'widget' && channelEntitled[conn.channel] === false;
+  const activityParts: string[] = [];
+  if (conn.lastInboundAt) activityParts.push(t('ai.social.activity.received', { time: timeAgo(conn.lastInboundAt) }));
+  if (conn.lastOutboundAt) activityParts.push(t('ai.social.activity.sent', { time: timeAgo(conn.lastOutboundAt) }));
+  return (
+    <div
+      className={`group flex flex-col gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors ${planLocked ? 'opacity-70' : ''}`}
+    >
+      <ConnectionRowIdentity conn={conn} planLocked={planLocked} activityParts={activityParts} />
+      <ConnectionRowControls conn={conn} {...controls} />
+    </div>
+  );
+}
+
+interface WhatsAppConnectModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  phoneNumberId: string;
+  setPhoneNumberId: (value: string) => void;
+  accessToken: string;
+  setAccessToken: (value: string) => void;
+  wabaId: string;
+  setWabaId: (value: string) => void;
+  isPending: boolean;
+  onConnect: () => void;
+}
+
+/** Manual WhatsApp Cloud API credentials modal. */
+function WhatsAppConnectModal({
+  open,
+  onOpenChange,
+  phoneNumberId,
+  setPhoneNumberId,
+  accessToken,
+  setAccessToken,
+  wabaId,
+  setWabaId,
+  isPending,
+  onConnect,
+}: WhatsAppConnectModalProps) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t('ai.social.whatsapp.modal.title', { defaultValue: 'Connect WhatsApp' })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('ai.social.whatsapp.modal.description', {
+              defaultValue:
+                'Connect a WhatsApp Cloud API number using its Phone Number ID and a permanent access token from Meta Business.',
+            })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
+          <summary className="cursor-pointer select-none text-zinc-300">
+            {t('ai.social.whatsapp.modal.help.summary', { defaultValue: 'Where do I find these?' })}
+          </summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            <li>
+              {t('ai.social.whatsapp.modal.help.step1', {
+                defaultValue: 'In the Meta App Dashboard, open WhatsApp → API Setup.',
+              })}
+            </li>
+            <li>
+              {t('ai.social.whatsapp.modal.help.step2', {
+                defaultValue: 'Copy the Phone number ID and your System User access token.',
+              })}
+            </li>
+            <li>
+              {t('ai.social.whatsapp.modal.help.step3', {
+                defaultValue:
+                  'Optionally add the WhatsApp Business Account ID so we can subscribe webhooks for you.',
+              })}
+            </li>
+          </ol>
+        </details>
+        <div className="space-y-3 py-4">
+          <div>
+            <Label htmlFor="waPhoneNumberId">
+              {t('ai.social.whatsapp.modal.phoneNumberIdLabel', { defaultValue: 'Phone Number ID' })}
+            </Label>
+            <Input
+              id="waPhoneNumberId"
+              placeholder="123456789012345"
+              value={phoneNumberId}
+              onChange={(e) => setPhoneNumberId(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="waAccessToken">
+              {t('ai.social.whatsapp.modal.accessTokenLabel', { defaultValue: 'Access Token' })}
+            </Label>
+            <Input
+              id="waAccessToken"
+              type="password"
+              placeholder="EAAG..."
+              value={accessToken}
+              onChange={(e) => setAccessToken(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="waWabaId">
+              {t('ai.social.whatsapp.modal.wabaIdLabel', {
+                defaultValue: 'Business Account ID (optional)',
+              })}
+            </Label>
+            <Input
+              id="waWabaId"
+              placeholder="WABA ID"
+              value={wabaId}
+              onChange={(e) => setWabaId(e.target.value)}
+            />
+          </div>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => { e.preventDefault(); onConnect(); }}
+            disabled={!phoneNumberId.trim() || !accessToken.trim() || isPending}
+          >
+            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {isPending
+              ? t('ai.social.whatsapp.modal.connecting', { defaultValue: 'Connecting…' })
+              : t('ai.social.whatsapp.modal.connect', { defaultValue: 'Connect' })}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/** Disconnect confirmation. Stays open on failure so the operator can retry. */
+function DisconnectConfirmDialog({
+  target,
+  isPending,
+  onDismiss,
+  onConfirm,
+}: {
+  target: string | null;
+  isPending: boolean;
+  onDismiss: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog
+      open={!!target}
+      onOpenChange={(open) => { if (!open && !isPending) onDismiss(); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('ai.social.disconnect.title')}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('ai.social.disconnect.description')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isPending}>{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 hover:bg-red-700"
+            disabled={isPending}
+            onClick={(e) => { e.preventDefault(); onConfirm(); }}
+          >
+            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {isPending
+              ? t('ai.social.disconnect.disconnecting', { defaultValue: 'Disconnecting…' })
+              : t('ai.social.disconnect.confirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 export function SocialChannelsContent() {
   const { t } = useTranslation();
@@ -125,6 +614,16 @@ export function SocialChannelsContent() {
   // Hint copy shared by the connect buttons.
   const offHint = t('ai.social.offHint', { defaultValue: 'Turned off — enable in Settings → Features' });
   const lockedHint = t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' });
+  const metaGate: ChannelGate = {
+    entitled: anyMetaEntitled,
+    off: anyMetaOff,
+    available: anyMetaAvailable,
+  };
+  const whatsappGate: ChannelGate = {
+    entitled: channelEntitled.whatsapp,
+    off: channelOff('whatsapp'),
+    available: channelAvailable('whatsapp'),
+  };
 
   // WhatsApp connect state
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -262,6 +761,26 @@ export function SocialChannelsContent() {
     }
   };
 
+  // Embedded signup when the app is configured for it; manual credentials
+  // modal otherwise.
+  const handleWhatsAppButtonClick = () => {
+    if (whatsappEsEnabled) {
+      void handleConnectWhatsAppEmbedded();
+      return;
+    }
+    setShowWhatsAppModal(true);
+  };
+
+  const handleConfirmDisconnect = async () => {
+    if (!disconnectTarget) return;
+    try {
+      await disconnectMutation.mutateAsync(disconnectTarget);
+      setDisconnectTarget(null);
+    } catch {
+      // error surfaced via the mutation's toast; keep dialog open to retry
+    }
+  };
+
   if (isLoading) {
     return <div className="p-6 text-zinc-400">{t('ai.social.loading')}</div>;
   }
@@ -278,104 +797,36 @@ export function SocialChannelsContent() {
       </div>
 
       {/* Meta OAuth page selection (shown after OAuth redirect) */}
-      {metaPages && metaPages.length > 0 && (
-        <Card variant="glass">
-          <CardHeader>
-            <h3 className="text-sm font-medium text-white">{t('ai.social.metaPages.title')}</h3>
-            <p className="text-xs text-zinc-400">{t('ai.social.metaPages.description')}</p>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {metaPages.map((page: Any) => (
-              <label key={page.id} className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
-                <Checkbox
-                  checked={selectedPageIds.includes(page.id)}
-                  onCheckedChange={(checked) => {
-                    setSelectedPageIds((prev) =>
-                      checked ? [...prev, page.id] : prev.filter((id: string) => id !== page.id),
-                    );
-                  }}
-                />
-                <span className="text-sm text-white">{page.name}</span>
-                {!channelEntitled.messenger && (
-                  <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/40">
-                    <Lock className="h-3 w-3 mr-1" />
-                    {t('ai.social.metaPages.messengerLocked', { defaultValue: 'Messenger locked on your plan' })}
-                  </Badge>
-                )}
-                {page.instagramAccount && (
-                  <Badge
-                    variant="outline"
-                    className={`text-xs ${!channelEntitled.instagram ? 'text-amber-400 border-amber-400/40' : ''}`}
-                  >
-                    {!channelEntitled.instagram && <Lock className="h-3 w-3 mr-1" />}
-                    <SiInstagram className="h-3 w-3 mr-1" />
-                    @{page.instagramAccount.username}
-                    {!channelEntitled.instagram &&
-                      ` — ${t('ai.social.metaPages.igLocked', { defaultValue: 'locked on your plan' })}`}
-                  </Badge>
-                )}
-              </label>
-            ))}
-            <div className="flex gap-2 pt-2">
-              <Button onClick={handleConnectMetaPages} disabled={selectedPageIds.length === 0 || connectMeta.isPending}>
-                {connectMeta.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {connectMeta.isPending ? t('ai.social.metaPages.connecting') : t('ai.social.metaPages.connectSelected')}
-              </Button>
-              <Button variant="ghost" onClick={() => setSearchParams({})}>{t('common.cancel')}</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <MetaPageSelectionCard
+        pages={metaPages}
+        selectedPageIds={selectedPageIds}
+        setSelectedPageIds={setSelectedPageIds}
+        messengerEntitled={channelEntitled.messenger}
+        instagramEntitled={channelEntitled.instagram}
+        onConnect={handleConnectMetaPages}
+        isConnecting={connectMeta.isPending}
+        onCancel={() => setSearchParams({})}
+      />
 
       {/* Connected channels list */}
       <Card variant="glass">
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-sm font-medium text-white">{t('ai.social.connected.title')}</h3>
             <p className="text-xs text-zinc-400">
               {t('ai.social.connected.count', { count: connectionCount })}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleConnectFacebook}
-              disabled={metaOAuthUrl.isPending || !anyMetaAvailable}
-              title={!anyMetaEntitled ? lockedHint : anyMetaOff ? offHint : undefined}
-            >
-              {!anyMetaEntitled
-                ? <Lock className="h-3 w-3 mr-1" />
-                : anyMetaOff && <PowerOff className="h-3 w-3 mr-1" />}
-              {metaOAuthUrl.isPending
-                ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                : <SiFacebook className="h-4 w-4 mr-1" />}
-              {metaOAuthUrl.isPending
-                ? t('ai.social.facebook.connecting', { defaultValue: 'Connecting…' })
-                : t('ai.social.facebook.title')}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (whatsappEsEnabled) {
-                  void handleConnectWhatsAppEmbedded();
-                  return;
-                }
-                setShowWhatsAppModal(true);
-              }}
-              disabled={!channelAvailable('whatsapp') || completeWhatsAppEs.isPending}
-              title={!channelEntitled.whatsapp ? lockedHint : channelOff('whatsapp') ? offHint : undefined}
-            >
-              {!channelEntitled.whatsapp
-                ? <Lock className="h-3 w-3 mr-1" />
-                : channelOff('whatsapp') && <PowerOff className="h-3 w-3 mr-1" />}
-              {(completeWhatsAppEs.isPending)
-                ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                : <SiWhatsapp className="h-4 w-4 mr-1" />}
-              {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
-            </Button>
-          </div>
+          <ChannelConnectButtons
+            metaGate={metaGate}
+            whatsappGate={whatsappGate}
+            lockedHint={lockedHint}
+            offHint={offHint}
+            onConnectFacebook={handleConnectFacebook}
+            isFacebookPending={metaOAuthUrl.isPending}
+            onConnectWhatsApp={handleWhatsAppButtonClick}
+            isWhatsAppPending={completeWhatsAppEs.isPending}
+          />
         </CardHeader>
         <CardContent>
           {!connections || connections.length === 0 ? (
@@ -386,265 +837,52 @@ export function SocialChannelsContent() {
             </div>
           ) : (
             <div className="space-y-2">
-              {connections.map((conn) => {
-                const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
-                // Connected but plan-locked (channels plan D4): credentials are
-                // preserved and everything reactivates on upgrade — show WHY it
-                // went quiet, not an error state.
-                const planLocked = conn.channel !== 'widget' && channelEntitled[conn.channel] === false;
-                const activityParts: string[] = [];
-                if (conn.lastInboundAt) activityParts.push(t('ai.social.activity.received', { time: timeAgo(conn.lastInboundAt) }));
-                if (conn.lastOutboundAt) activityParts.push(t('ai.social.activity.sent', { time: timeAgo(conn.lastOutboundAt) }));
-                const checkingThis =
-                  healthCheckMutation.isPending && healthCheckMutation.variables === conn.id;
-                return (
-                  <div
-                    key={conn.id}
-                    className={`group flex items-center justify-between gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors ${planLocked ? 'opacity-70' : ''}`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-white/10 text-zinc-400'}`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-white truncate">
-                          {conn.label || conn.platformAccountId}
-                          {planLocked && (
-                            <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/40">
-                              <Lock className="h-3 w-3 mr-1" />
-                              {t('ai.social.planLocked', { defaultValue: 'Plan locked — upgrade to reactivate' })}
-                            </Badge>
-                          )}
-                        </p>
-                        <p className="text-xs text-zinc-500 truncate">
-                          {CHANNEL_LABELS[conn.channel] || conn.channel}
-                          {conn.lastHealthCheckAt && (
-                            <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
-                              {t('ai.social.activity.checked', { time: timeAgo(conn.lastHealthCheckAt) })}
-                            </span>
-                          )}
-                        </p>
-                        {activityParts.length > 0 && (
-                          <p className="text-xs text-zinc-600 mt-0.5 truncate">{activityParts.join(' · ')}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {conn.channel !== 'widget' && (
-                        <label
-                          className="flex items-center gap-1.5 text-xs text-zinc-400"
-                          title={t('ai.social.autoCapture.hint', { defaultValue: 'Auto-create a lead from each new conversation on this channel' })}
-                        >
-                          <Switch
-                            checked={(conn.config as Any)?.autoCaptureLeads !== false}
-                            disabled={updateAutoCapture.isPending}
-                            onCheckedChange={(c) => updateAutoCapture.mutate({ connectionId: conn.id, enabled: c })}
-                            aria-label={t('ai.social.autoCapture.aria', { defaultValue: 'Auto-capture leads' })}
-                          />
-                          {t('ai.social.autoCapture.label', { defaultValue: 'Capture leads' })}
-                        </label>
-                      )}
-                      {conn.channel !== 'widget' && (
-                        <Select
-                          value={conn.botId ?? '__default__'}
-                          onValueChange={(v) =>
-                            updateChannelBot.mutate({
-                              connectionId: conn.id,
-                              botId: v === '__default__' ? null : v,
-                            })
-                          }
-                        >
-                          <SelectTrigger
-                            className="h-8 w-44"
-                            aria-label={t('ai.social.botPicker.aria', { defaultValue: 'Bot for this channel' })}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__default__">
-                              {t('ai.social.botPicker.default', { defaultValue: 'Default bot' })}
-                            </SelectItem>
-                            {bots.flatMap((b) =>
-                              b.status === 'active'
-                                ? [
-                                    <SelectItem key={b.id} value={b.id}>
-                                      {b.name}
-                                      {b.isDefault
-                                        ? ` ${t('ai.social.botPicker.defaultSuffix', { defaultValue: '(default)' })}`
-                                        : ''}
-                                    </SelectItem>,
-                                  ]
-                                : [],
-                            )}
-                          </SelectContent>
-                        </Select>
-                      )}
-                      {conn.lastError && (
-                        <span className="text-xs text-red-400 max-w-[200px] truncate" title={conn.lastError}>
-                          <AlertCircle className="h-3 w-3 inline mr-1" />
-                          {conn.lastError}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[conn.status] || 'bg-zinc-500'}`} />
-                        <span className={`text-xs font-medium capitalize ${STATUS_TEXT[conn.status] || 'text-zinc-400'}`}>
-                          {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
-                        </span>
-                      </span>
-                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          title={t('ai.social.actions.checkHealth')}
-                          disabled={checkingThis}
-                          onClick={() => healthCheckMutation.mutate(conn.id)}
-                        >
-                          <RefreshCw className={`h-4 w-4 ${checkingThis ? 'animate-spin' : ''}`} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-400 hover:text-red-300"
-                          onClick={() => setDisconnectTarget(conn.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {connections.map((conn) => (
+                <ConnectionRow
+                  key={conn.id}
+                  conn={conn}
+                  channelEntitled={channelEntitled}
+                  bots={bots}
+                  checkingConnectionId={
+                    healthCheckMutation.isPending ? healthCheckMutation.variables : undefined
+                  }
+                  isAutoCapturePending={updateAutoCapture.isPending}
+                  onAutoCaptureChange={(connectionId, enabled) =>
+                    updateAutoCapture.mutate({ connectionId, enabled })
+                  }
+                  onBotChange={(connectionId, botId) =>
+                    updateChannelBot.mutate({ connectionId, botId })
+                  }
+                  onHealthCheck={(connectionId) => healthCheckMutation.mutate(connectionId)}
+                  onDisconnect={setDisconnectTarget}
+                />
+              ))}
             </div>
           )}
         </CardContent>
       </Card>
 
       {/* WhatsApp connect modal */}
-      <AlertDialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('ai.social.whatsapp.modal.title', { defaultValue: 'Connect WhatsApp' })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('ai.social.whatsapp.modal.description', {
-                defaultValue:
-                  'Connect a WhatsApp Cloud API number using its Phone Number ID and a permanent access token from Meta Business.',
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
-            <summary className="cursor-pointer select-none text-zinc-300">
-              {t('ai.social.whatsapp.modal.help.summary', { defaultValue: 'Where do I find these?' })}
-            </summary>
-            <ol className="mt-2 list-decimal space-y-1 pl-5">
-              <li>
-                {t('ai.social.whatsapp.modal.help.step1', {
-                  defaultValue: 'In the Meta App Dashboard, open WhatsApp → API Setup.',
-                })}
-              </li>
-              <li>
-                {t('ai.social.whatsapp.modal.help.step2', {
-                  defaultValue: 'Copy the Phone number ID and your System User access token.',
-                })}
-              </li>
-              <li>
-                {t('ai.social.whatsapp.modal.help.step3', {
-                  defaultValue:
-                    'Optionally add the WhatsApp Business Account ID so we can subscribe webhooks for you.',
-                })}
-              </li>
-            </ol>
-          </details>
-          <div className="space-y-3 py-4">
-            <div>
-              <Label htmlFor="waPhoneNumberId">
-                {t('ai.social.whatsapp.modal.phoneNumberIdLabel', { defaultValue: 'Phone Number ID' })}
-              </Label>
-              <Input
-                id="waPhoneNumberId"
-                placeholder="123456789012345"
-                value={waPhoneNumberId}
-                onChange={(e) => setWaPhoneNumberId(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="waAccessToken">
-                {t('ai.social.whatsapp.modal.accessTokenLabel', { defaultValue: 'Access Token' })}
-              </Label>
-              <Input
-                id="waAccessToken"
-                type="password"
-                placeholder="EAAG..."
-                value={waAccessToken}
-                onChange={(e) => setWaAccessToken(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="waWabaId">
-                {t('ai.social.whatsapp.modal.wabaIdLabel', {
-                  defaultValue: 'Business Account ID (optional)',
-                })}
-              </Label>
-              <Input
-                id="waWabaId"
-                placeholder="WABA ID"
-                value={waWabaId}
-                onChange={(e) => setWaWabaId(e.target.value)}
-              />
-            </div>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); handleConnectWhatsApp(); }}
-              disabled={!waPhoneNumberId.trim() || !waAccessToken.trim() || connectWhatsApp.isPending}
-            >
-              {connectWhatsApp.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {connectWhatsApp.isPending
-                ? t('ai.social.whatsapp.modal.connecting', { defaultValue: 'Connecting…' })
-                : t('ai.social.whatsapp.modal.connect', { defaultValue: 'Connect' })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <WhatsAppConnectModal
+        open={showWhatsAppModal}
+        onOpenChange={setShowWhatsAppModal}
+        phoneNumberId={waPhoneNumberId}
+        setPhoneNumberId={setWaPhoneNumberId}
+        accessToken={waAccessToken}
+        setAccessToken={setWaAccessToken}
+        wabaId={waWabaId}
+        setWabaId={setWaWabaId}
+        isPending={connectWhatsApp.isPending}
+        onConnect={handleConnectWhatsApp}
+      />
 
       {/* Disconnect confirmation */}
-      <AlertDialog
-        open={!!disconnectTarget}
-        onOpenChange={(open) => { if (!open && !disconnectMutation.isPending) setDisconnectTarget(null); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('ai.social.disconnect.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('ai.social.disconnect.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={disconnectMutation.isPending}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
-              disabled={disconnectMutation.isPending}
-              onClick={async (e) => {
-                e.preventDefault();
-                if (!disconnectTarget) return;
-                try {
-                  await disconnectMutation.mutateAsync(disconnectTarget);
-                  setDisconnectTarget(null);
-                } catch {
-                  // error surfaced via the mutation's toast; keep dialog open to retry
-                }
-              }}
-            >
-              {disconnectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {disconnectMutation.isPending
-                ? t('ai.social.disconnect.disconnecting', { defaultValue: 'Disconnecting…' })
-                : t('ai.social.disconnect.confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DisconnectConfirmDialog
+        target={disconnectTarget}
+        isPending={disconnectMutation.isPending}
+        onDismiss={() => setDisconnectTarget(null)}
+        onConfirm={handleConfirmDisconnect}
+      />
     </div>
   );
 }

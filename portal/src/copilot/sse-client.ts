@@ -101,30 +101,7 @@ export async function* streamCopilotMessages(
   });
 
   // --- Phase 1: status check ---
-  if (!response.ok) {
-    let body: { error?: { code?: string; message?: string; details?: Record<string, unknown> } } = {};
-    try {
-      body = (await response.json()) as typeof body;
-    } catch {
-      // Non-JSON body (HTML 502 from edge, etc) — fall through with empty body.
-    }
-    const code = body.error?.code ?? 'unknown_error';
-    const message = body.error?.message ?? `Copilot request failed (HTTP ${response.status})`;
-
-    if (response.status === 402 && code === 'plan_limit_platform_assistant') {
-      throw new CopilotPlanGateError(body);
-    }
-    if (response.status === 429) {
-      const retryAfterHeader = response.headers.get('Retry-After');
-      const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : 60;
-      const narrowedCode =
-        code === 'copilot_daily_cap_exceeded' || code === 'copilot_rate_limit_exceeded'
-          ? code
-          : 'copilot_rate_limit_exceeded';
-      throw new CopilotRateLimitedError(narrowedCode, message, retryAfter || 60, body);
-    }
-    throw new CopilotApiError(response.status, code, message, body);
-  }
+  if (!response.ok) await raiseCopilotError(response);
 
   // --- Phase 2: stream parse ---
   if (!response.body) {
@@ -158,6 +135,35 @@ export async function* streamCopilotMessages(
       /* already released */
     }
   }
+}
+
+/**
+ * Map a non-2xx Copilot response onto the typed error classes above. Always
+ * throws; the JSON body is best-effort because edges return HTML on 502.
+ */
+async function raiseCopilotError(response: Response): Promise<never> {
+  let body: { error?: { code?: string; message?: string; details?: Record<string, unknown> } } = {};
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    // Non-JSON body (HTML 502 from edge, etc) — fall through with empty body.
+  }
+  const code = body.error?.code ?? 'unknown_error';
+  const message = body.error?.message ?? `Copilot request failed (HTTP ${response.status})`;
+
+  if (response.status === 402 && code === 'plan_limit_platform_assistant') {
+    throw new CopilotPlanGateError(body);
+  }
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get('Retry-After');
+    const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : 60;
+    const narrowedCode =
+      code === 'copilot_daily_cap_exceeded' || code === 'copilot_rate_limit_exceeded'
+        ? code
+        : 'copilot_rate_limit_exceeded';
+    throw new CopilotRateLimitedError(narrowedCode, message, retryAfter || 60, body);
+  }
+  throw new CopilotApiError(response.status, code, message, body);
 }
 
 function parseSseFrame(frame: string): CopilotSseEvent | null {

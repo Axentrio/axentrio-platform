@@ -95,6 +95,119 @@ async function syncAvailabilityFromBusinessHours(
   }
 }
 
+/** Body shape of the keys PATCH /tenants/me accepts under `settings`. */
+interface TenantSettingsBody {
+  ai?: unknown;
+  skills?: unknown;
+  automations?: unknown;
+  theme?: BotSettings["theme"];
+  widget?: BotSettings["widget"];
+  features?: BotSettings["features"];
+  integrations?: BotSettings["integrations"];
+  businessHours?: Record<string, unknown>;
+  inbox?: { defaultTakeoverHours?: unknown };
+}
+
+/**
+ * The tenant name IS the business name shown to customers and used by the AI
+ * ({businessName}); a rename must also propagate to the Clerk organization so
+ * the two never drift. Sync FIRST, then persist locally — if Clerk rejects it,
+ * fail the request rather than leave the two out of sync.
+ */
+async function applyTenantRename(tenant: Tenant, name: string): Promise<void> {
+  if (tenant.clerkOrgId) {
+    const synced = await updateClerkOrganization(tenant.clerkOrgId, { name });
+    if (!synced) {
+      throw new ApiError(
+        "Could not rename the organization right now. Please try again.",
+        502,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
+    }
+  }
+  tenant.name = name;
+}
+
+/**
+ * The webhook URL is the legacy external-n8n escape hatch: setting it routes the
+ * whole bot to an external endpoint (losing booking/chips/guardrails). Callers
+ * gate on super_admin before reaching here.
+ */
+function applyWebhookUrl(tenant: Tenant, webhookUrl: string): void {
+  // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
+  // string clears the webhook (preserved).
+  if (webhookUrl) {
+    try {
+      assertSafeOutboundUrl(webhookUrl);
+    } catch {
+      throw new BadRequestError("Webhook URL must be a public https:// URL");
+    }
+  }
+  tenant.webhookUrl = webhookUrl;
+  // Auto-generate webhook secret on first webhookUrl save
+  if (webhookUrl && !tenant.webhookSecret) {
+    tenant.webhookSecret = crypto.randomBytes(32).toString("hex");
+  }
+}
+
+/** Sections that own dedicated endpoints are rejected on the generic PATCH. */
+function rejectDelegatedSettingsSections(settings?: TenantSettingsBody): void {
+  if (settings?.ai !== undefined) {
+    throw new BadRequestError(
+      "AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.",
+    );
+  }
+
+  if (settings?.skills !== undefined) {
+    throw new BadRequestError(
+      "Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.",
+    );
+  }
+
+  if (settings?.automations !== undefined) {
+    throw new BadRequestError(
+      "Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.",
+    );
+  }
+}
+
+function applyInboxPrefs(tenant: Tenant, settings: TenantSettingsBody): void {
+  const parsed = parseDefaultTakeoverHours(settings.inbox?.defaultTakeoverHours);
+  if (parsed === null) {
+    throw new BadRequestError(
+      'defaultTakeoverHours must be an integer 1–24 or "indefinite"',
+    );
+  }
+  tenant.settings = {
+    ...(tenant.settings ?? {}),
+    inbox: { defaultTakeoverHours: parsed },
+  };
+}
+
+/**
+ * Multi-bot Phase 4 (#16d): per-bot config (theme/widget/features/
+ * integrations/etc.) now lives on Bot.settings. Build a patch with only the
+ * moved keys present in the request body; ai/skills/automations are rejected
+ * by rejectDelegatedSettingsSections and never relayed here.
+ */
+async function buildAnchorBotPatch(
+  settings: TenantSettingsBody,
+  withDerivedTimezone: (
+    bh: Record<string, unknown>,
+  ) => Promise<BotSettings["businessHours"]>,
+): Promise<Partial<BotSettings>> {
+  const botPatch: Partial<BotSettings> = {};
+  if (settings.theme !== undefined) botPatch.theme = settings.theme;
+  if (settings.widget !== undefined) botPatch.widget = settings.widget;
+  if (settings.features !== undefined) botPatch.features = settings.features;
+  if (settings.integrations !== undefined)
+    botPatch.integrations = settings.integrations;
+  if (settings.businessHours !== undefined) {
+    botPatch.businessHours = await withDerivedTimezone(settings.businessHours);
+  }
+  return botPatch;
+}
+
 const router = Router();
 
 /**
@@ -192,66 +305,17 @@ router.patch(
       throw new NotFoundError("Tenant not found");
     }
 
-    // Update fields. The tenant name IS the business name shown to customers and
-    // used by the AI ({businessName}); a rename must also propagate to the Clerk
-    // organization so the two never drift. Sync FIRST, then persist locally — if
-    // Clerk rejects it, fail the request rather than leave the two out of sync.
     if (name && name !== tenant.name) {
-      if (tenant.clerkOrgId) {
-        const synced = await updateClerkOrganization(tenant.clerkOrgId, {
-          name,
-        });
-        if (!synced) {
-          throw new ApiError(
-            "Could not rename the organization right now. Please try again.",
-            502,
-            ERROR_CODES.UPSTREAM_FAILED,
-          );
-        }
-      }
-      tenant.name = name;
+      await applyTenantRename(tenant, name);
     }
-    // The webhook URL is the legacy external-n8n escape hatch: setting it routes the
-    // whole bot to an external endpoint (losing booking/chips/guardrails). It is NOT a
-    // tenant self-service control — only super_admin may set it. A non-super_admin PATCH
-    // carrying webhookUrl is silently ignored (the portal hides the field for them too).
+    // Only super_admin may set the webhook URL. A non-super_admin PATCH
+    // carrying webhookUrl is silently ignored (the portal hides the field for
+    // them too).
     if (webhookUrl !== undefined && req.user!.role === "super_admin") {
-      // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
-      // string clears the webhook (preserved).
-      if (webhookUrl) {
-        try {
-          assertSafeOutboundUrl(webhookUrl);
-        } catch {
-          throw new BadRequestError(
-            "Webhook URL must be a public https:// URL",
-          );
-        }
-      }
-      tenant.webhookUrl = webhookUrl;
-      // Auto-generate webhook secret on first webhookUrl save
-      if (webhookUrl && !tenant.webhookSecret) {
-        tenant.webhookSecret = crypto.randomBytes(32).toString("hex");
-      }
+      applyWebhookUrl(tenant, webhookUrl);
     }
 
-    // Reject AI settings updates via this endpoint
-    if (settings?.ai !== undefined) {
-      throw new BadRequestError(
-        "AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.",
-      );
-    }
-
-    if (settings?.skills !== undefined) {
-      throw new BadRequestError(
-        "Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.",
-      );
-    }
-
-    if (settings?.automations !== undefined) {
-      throw new BadRequestError(
-        "Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.",
-      );
-    }
+    rejectDelegatedSettingsSections(settings);
 
     // Plan-gate. Custom widget appearance (color/title/avatar) lives under
     // `settings.theme` (primaryColor / logoUrl / customCss). Only enforce
@@ -267,11 +331,9 @@ router.patch(
       );
     }
 
-    // Multi-bot Phase 4 (#16d): per-bot config (theme/widget/features/
-    // integrations/etc.) now lives on Bot.settings. Build a patch with only
-    // the moved keys present in the request body and apply via the writer.
-    // Section-level deep merge happens inside updateAnchorBotSettings — so
-    // e.g. `settings.theme.primaryColor` won't wipe `settings.theme.logoUrl`.
+    // Apply the moved per-bot keys via the writer. Section-level deep merge
+    // happens inside updateAnchorBotSettings — so e.g.
+    // `settings.theme.primaryColor` won't wipe `settings.theme.logoUrl`.
     // Tolerant cutover (PR 1a, server-owned Business Time): any client-sent
     // `businessHours.timezone` is ACCEPTED but IGNORED — the stored value is
     // always the anchor bot's canonical, server-owned `businessTimezone`, so a
@@ -301,35 +363,11 @@ router.patch(
     };
 
     if (settings?.inbox !== undefined) {
-      const parsed = parseDefaultTakeoverHours(
-        settings.inbox?.defaultTakeoverHours,
-      );
-      if (parsed === null) {
-        throw new BadRequestError(
-          'defaultTakeoverHours must be an integer 1–24 or "indefinite"',
-        );
-      }
-      tenant.settings = {
-        ...(tenant.settings ?? {}),
-        inbox: { defaultTakeoverHours: parsed },
-      };
+      applyInboxPrefs(tenant, settings);
     }
 
     if (settings) {
-      const botPatch: Partial<BotSettings> = {};
-      if (settings.theme !== undefined) botPatch.theme = settings.theme;
-      if (settings.widget !== undefined) botPatch.widget = settings.widget;
-      if (settings.features !== undefined)
-        botPatch.features = settings.features;
-      if (settings.integrations !== undefined)
-        botPatch.integrations = settings.integrations;
-      if (settings.businessHours !== undefined) {
-        botPatch.businessHours = await withDerivedTimezone(
-          settings.businessHours,
-        );
-      }
-      // ai/skills/automations are rejected above — not relayed here.
-
+      const botPatch = await buildAnchorBotPatch(settings, withDerivedTimezone);
       if (Object.keys(botPatch).length > 0) {
         await updateAnchorBotSettings(tenantId, botPatch);
       }

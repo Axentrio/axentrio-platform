@@ -21,6 +21,7 @@
  * an LLM failure freezes it at the failed session so the next run retries,
  * while later sessions are still attempted for throughput.
  */
+import { Repository } from "typeorm";
 import { AppDataSource } from "../database/data-source";
 import { Tenant } from "../database/entities/Tenant";
 import { ChatSession } from "../database/entities/ChatSession";
@@ -31,10 +32,15 @@ import { getEntitlements } from "../billing/entitlements";
 import { analysisPolicyFor } from "./analysis-policy";
 import {
   judgeTranscript,
+  type JudgeVerdict,
   type TranscriptMessage,
   type UsageTally,
 } from "./judge.service";
-import { prefilterTranscript, emptyPrefilterTally } from "./prefilter";
+import {
+  prefilterTranscript,
+  emptyPrefilterTally,
+  type PrefilterTally,
+} from "./prefilter";
 import { canonicalizeTopic } from "./topics.service";
 import { canonicalizeSentimentTheme } from "./sentiment-themes.service";
 import { aggregateSentiment } from "./sentiment-aggregation.service";
@@ -151,155 +157,197 @@ async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
   });
 }
 
-/** Refresh one tenant. Exported for tests and manual (admin) triggering. */
-export async function refreshTenantInsights(
+interface JudgeFeatureFlags {
+  withSentiment: boolean;
+  withSentimentThemes: boolean;
+}
+
+/** Per-verdict outcome of ADR-0009 topic validation + registry contact. */
+interface TopicResolution {
+  canonicalTopicId: string | null;
+  rejectedTopic: string | null;
+  rejectReason: string | null;
+}
+
+async function resolveTopic(
   tenantId: string,
-  now = new Date(),
-  options: { generateDigest?: boolean; digestAt?: Date } = {},
-): Promise<void> {
-  const { features } = await getEntitlements(tenantId);
-  // Fail closed here as well as in callers: manual/admin runs must not bypass
-  // a tenant's disabled Success Meter feature.
-  if (!features.gapInsights) return;
-
-  const stateRepo = AppDataSource.getRepository(InsightsRefreshState);
-  const judgmentRepo = AppDataSource.getRepository(Judgment);
-
-  const withSentiment = features.gapInsights;
-  const withSentimentThemes = features.aiBusinessInsights;
-
-  let state = await stateRepo.findOne({ where: { tenantId } });
-  if (!state) {
-    state = stateRepo.create({ tenantId, lastRefreshedAt: null });
+  verdict: JudgeVerdict,
+  tally: UsageTally,
+): Promise<TopicResolution> {
+  if (!verdict.hadQuestion || !verdict.topicPhrase) {
+    return { canonicalTopicId: null, rejectedTopic: null, rejectReason: null };
   }
+  const canon = await canonicalizeTopic(
+    tenantId,
+    verdict.topicPhrase,
+    verdict.evidenceMessageIds,
+    tally,
+  );
+  if (canon.ok) {
+    return {
+      canonicalTopicId: canon.canonicalTopicId,
+      rejectedTopic: null,
+      rejectReason: null,
+    };
+  }
+  // ADR-0009 layer 3: unmapped diagnostics, no Gap contribution.
+  return {
+    canonicalTopicId: null,
+    rejectedTopic: verdict.topicPhrase.slice(0, 200),
+    rejectReason: canon.rejectReason,
+  };
+}
 
-  const since =
-    state.lastRefreshedAt ??
-    new Date(now.getTime() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
-  const sessions = await loadEligibleSessions(tenantId, since, BACKFILL_CAP);
-  const alreadyIds = await loadExistingJudgmentSessionIds(sessions.map((s) => s.id));
+/**
+ * Sentiment theme (Enterprise-only, D5). Forward-only; a reject just
+ * stores no theme on this judgment.
+ */
+async function resolveSentimentThemeId(
+  tenantId: string,
+  verdict: JudgeVerdict,
+  withSentimentThemes: boolean,
+): Promise<string | null> {
+  if (!withSentimentThemes || !verdict.sentiment || !verdict.sentimentTheme) {
+    return null;
+  }
+  const theme = await canonicalizeSentimentTheme(
+    tenantId,
+    verdict.sentimentTheme,
+    verdict.sentiment,
+  );
+  return theme.ok ? theme.themeId : null;
+}
 
-  let watermark: Date | null = null;
-  let watermarkFrozen = false;
-  let judged = 0;
-  let failed = 0;
-  const tally: UsageTally = { promptTokens: 0, completionTokens: 0, calls: 0 };
-  const layer1 = emptyPrefilterTally();
+/** Judge one session and write its single Judgment row. */
+async function judgeAndPersistSession(
+  judgmentRepo: Repository<Judgment>,
+  tenantId: string,
+  session: EligibleSession,
+  flags: JudgeFeatureFlags,
+  tally: UsageTally,
+  layer1: PrefilterTally,
+): Promise<void> {
+  const transcript = await loadTranscript(session.id);
+
+  // Layer 1 (cheap, no model): when a conversation cannot possibly yield a topic,
+  // the verdict is knowable without paying for one. The judgment is still WRITTEN —
+  // completeness is judged/eligible, so dropping these would make the UI announce
+  // "Insights incomplete" for conversations that were correctly found empty.
+  const gate = prefilterTranscript({
+    messages: transcript,
+    isHandoff: session.status === "handoff",
+  });
+  if (!gate.judge) {
+    layer1.skipped += 1;
+    layer1.byReason[gate.reason] += 1;
+    await judgmentRepo.save(
+      judgmentRepo.create({
+        tenantId,
+        sessionId: session.id,
+        visitorId: session.visitorId,
+        sessionStartedAt: session.startedAt,
+        hadQuestion: false,
+        // Deliberately null, not false: `satisfied` answers "was their question
+        // answered", and there was no question. False would read as a failure.
+        satisfied: null,
+        evidenceMessageIds: [],
+        reasoning: gate.note,
+      }),
+    );
+    return;
+  }
+  layer1.judged += 1;
+
+  const verdict = await judgeTranscript(
+    transcript,
+    session.status === "handoff",
+    tally,
+    {
+      withSentiment: flags.withSentiment,
+      withSentimentThemes: flags.withSentimentThemes,
+    },
+  );
+
+  const topic = await resolveTopic(tenantId, verdict, tally);
+  const sentimentThemeId = await resolveSentimentThemeId(
+    tenantId,
+    verdict,
+    flags.withSentimentThemes,
+  );
+
+  await judgmentRepo.save(
+    judgmentRepo.create({
+      tenantId,
+      sessionId: session.id,
+      visitorId: session.visitorId,
+      sessionStartedAt: session.startedAt,
+      hadQuestion: verdict.hadQuestion,
+      satisfied: verdict.satisfied,
+      topicPhrase: verdict.topicPhrase,
+      canonicalTopicId: topic.canonicalTopicId,
+      rejectedTopic: topic.rejectedTopic,
+      rejectReason: topic.rejectReason,
+      evidenceMessageIds: verdict.evidenceMessageIds,
+      reasoning: verdict.reasoning,
+      sentiment: verdict.sentiment,
+      sentimentThemeId,
+    }),
+  );
+}
+
+interface JudgePassResult {
+  /** Last consecutively-judged session end; null when nothing advanced. */
+  watermark: Date | null;
+  watermarkFrozen: boolean;
+  judged: number;
+  failed: number;
+}
+
+async function judgeSessions(
+  judgmentRepo: Repository<Judgment>,
+  tenantId: string,
+  sessions: EligibleSession[],
+  alreadyIds: Set<string>,
+  flags: JudgeFeatureFlags,
+  tally: UsageTally,
+  layer1: PrefilterTally,
+): Promise<JudgePassResult> {
+  const pass: JudgePassResult = {
+    watermark: null,
+    watermarkFrozen: false,
+    judged: 0,
+    failed: 0,
+  };
 
   for (const session of sessions) {
     // Unique(session_id) makes re-judging a no-op risk; skip cheaply instead.
     if (alreadyIds.has(session.id)) {
-      if (!watermarkFrozen) watermark = session.effectiveEndedAt;
+      if (!pass.watermarkFrozen) pass.watermark = session.effectiveEndedAt;
       continue;
     }
 
     try {
-      const transcript = await loadTranscript(session.id);
-
-      // Layer 1 (cheap, no model): when a conversation cannot possibly yield a topic,
-      // the verdict is knowable without paying for one. The judgment is still WRITTEN —
-      // completeness is judged/eligible, so dropping these would make the UI announce
-      // "Insights incomplete" for conversations that were correctly found empty.
-      const gate = prefilterTranscript({
-        messages: transcript,
-        isHandoff: session.status === "handoff",
-      });
-      if (!gate.judge) {
-        layer1.skipped += 1;
-        layer1.byReason[gate.reason] += 1;
-        await judgmentRepo.save(
-          judgmentRepo.create({
-            tenantId,
-            sessionId: session.id,
-            visitorId: session.visitorId,
-            sessionStartedAt: session.startedAt,
-            hadQuestion: false,
-            // Deliberately null, not false: `satisfied` answers "was their question
-            // answered", and there was no question. False would read as a failure.
-            satisfied: null,
-            evidenceMessageIds: [],
-            reasoning: gate.note,
-          }),
-        );
-        judged += 1;
-        if (!watermarkFrozen) watermark = session.effectiveEndedAt;
-        continue;
-      }
-      layer1.judged += 1;
-
-      const verdict = await judgeTranscript(
-        transcript,
-        session.status === "handoff",
+      await judgeAndPersistSession(
+        judgmentRepo,
+        tenantId,
+        session,
+        flags,
         tally,
-        {
-          withSentiment,
-          withSentimentThemes,
-        },
+        layer1,
       );
-
-      let canonicalTopicId: string | null = null;
-      let rejectedTopic: string | null = null;
-      let rejectReason: string | null = null;
-
-      if (verdict.hadQuestion && verdict.topicPhrase) {
-        const canon = await canonicalizeTopic(
-          tenantId,
-          verdict.topicPhrase,
-          verdict.evidenceMessageIds,
-          tally,
-        );
-        if (canon.ok) {
-          canonicalTopicId = canon.canonicalTopicId;
-        } else {
-          // ADR-0009 layer 3: unmapped diagnostics, no Gap contribution.
-          rejectedTopic = verdict.topicPhrase.slice(0, 200);
-          rejectReason = canon.rejectReason;
-        }
-      }
-
-      // Sentiment theme (Enterprise-only, D5). Forward-only; a reject just
-      // stores no theme on this judgment.
-      let sentimentThemeId: string | null = null;
-      if (withSentimentThemes && verdict.sentiment && verdict.sentimentTheme) {
-        const theme = await canonicalizeSentimentTheme(
-          tenantId,
-          verdict.sentimentTheme,
-          verdict.sentiment,
-        );
-        if (theme.ok) sentimentThemeId = theme.themeId;
-      }
-
-      await judgmentRepo.save(
-        judgmentRepo.create({
-          tenantId,
-          sessionId: session.id,
-          visitorId: session.visitorId,
-          sessionStartedAt: session.startedAt,
-          hadQuestion: verdict.hadQuestion,
-          satisfied: verdict.satisfied,
-          topicPhrase: verdict.topicPhrase,
-          canonicalTopicId,
-          rejectedTopic,
-          rejectReason,
-          evidenceMessageIds: verdict.evidenceMessageIds,
-          reasoning: verdict.reasoning,
-          sentiment: verdict.sentiment,
-          sentimentThemeId,
-        }),
-      );
-      judged += 1;
-      if (!watermarkFrozen) watermark = session.effectiveEndedAt;
+      pass.judged += 1;
+      if (!pass.watermarkFrozen) pass.watermark = session.effectiveEndedAt;
     } catch (err) {
       const message = err instanceof Error ? err.message : "unknown";
       // A concurrent run (manual ops script vs the nightly pass) may have
       // judged this session between our pre-check and insert — that's a
       // skip, not a failure: the judgment exists, the watermark can advance.
       if (message.includes("uq_judgments_session")) {
-        if (!watermarkFrozen) watermark = session.effectiveEndedAt;
+        if (!pass.watermarkFrozen) pass.watermark = session.effectiveEndedAt;
         continue;
       }
-      failed += 1;
-      watermarkFrozen = true; // failed session retries next run
+      pass.failed += 1;
+      pass.watermarkFrozen = true; // failed session retries next run
       logger.warn("[insights-refresh] judge failed for session", {
         tenantId,
         sessionId: session.id,
@@ -308,10 +356,14 @@ export async function refreshTenantInsights(
     }
   }
 
-  // Completeness over the rolling 7-day window (ADR-0006).
-  const windowStart = new Date(
-    now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
-  );
+  return pass;
+}
+
+/** Completeness over the rolling 7-day window (ADR-0006). */
+async function judgmentsCompleteness(
+  tenantId: string,
+  windowStart: Date,
+): Promise<number> {
   // pi-lens-ignore: no-sql-in-code
   const [{ eligible }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS eligible FROM chat_sessions s
@@ -339,14 +391,62 @@ export async function refreshTenantInsights(
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );
-  const completeness = eligible > 0 ? judgedInWindow / eligible : 1;
+  return eligible > 0 ? judgedInWindow / eligible : 1;
+}
+
+/** Refresh one tenant. Exported for tests and manual (admin) triggering. */
+export async function refreshTenantInsights(
+  tenantId: string,
+  now = new Date(),
+  options: { generateDigest?: boolean; digestAt?: Date } = {},
+): Promise<void> {
+  const { features } = await getEntitlements(tenantId);
+  // Fail closed here as well as in callers: manual/admin runs must not bypass
+  // a tenant's disabled Success Meter feature.
+  if (!features.gapInsights) return;
+
+  const stateRepo = AppDataSource.getRepository(InsightsRefreshState);
+  const judgmentRepo = AppDataSource.getRepository(Judgment);
+
+  const flags: JudgeFeatureFlags = {
+    withSentiment: features.gapInsights,
+    withSentimentThemes: features.aiBusinessInsights,
+  };
+
+  let state = await stateRepo.findOne({ where: { tenantId } });
+  if (!state) {
+    state = stateRepo.create({ tenantId, lastRefreshedAt: null });
+  }
+
+  const since =
+    state.lastRefreshedAt ??
+    new Date(now.getTime() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
+  const sessions = await loadEligibleSessions(tenantId, since, BACKFILL_CAP);
+  const alreadyIds = await loadExistingJudgmentSessionIds(sessions.map((s) => s.id));
+
+  const tally: UsageTally = { promptTokens: 0, completionTokens: 0, calls: 0 };
+  const layer1 = emptyPrefilterTally();
+  const pass = await judgeSessions(
+    judgmentRepo,
+    tenantId,
+    sessions,
+    alreadyIds,
+    flags,
+    tally,
+    layer1,
+  );
+
+  const windowStart = new Date(
+    now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
+  const completeness = await judgmentsCompleteness(tenantId, windowStart);
 
   await aggregateGaps(tenantId, now);
   if (features.gapEvidence) {
     await generateGapRecommendations(tenantId, tally, now);
   }
   // Enterprise-only experiment aggregation (P3). Gated by the flag, not tier.
-  if (withSentimentThemes) {
+  if (flags.withSentimentThemes) {
     await notifyHighPriorityGaps(tenantId, now);
     await aggregateSentiment(tenantId, now);
     await aggregateCorrelations(tenantId, now);
@@ -361,16 +461,16 @@ export async function refreshTenantInsights(
     await generateDigest(tenantId, digestAt);
   }
 
-  state.lastRefreshedAt = watermarkFrozen ? watermark : now;
+  state.lastRefreshedAt = pass.watermarkFrozen ? pass.watermark : now;
   state.judgmentsCompleteness = completeness.toFixed(4);
   state.lastRunError =
-    failed > 0 ? `${failed} session(s) failed judging` : null;
+    pass.failed > 0 ? `${pass.failed} session(s) failed judging` : null;
   await stateRepo.save(state);
 
   logger.info("[insights-refresh] tenant refreshed", {
     tenantId,
-    judged,
-    failed,
+    judged: pass.judged,
+    failed: pass.failed,
     completeness: Number(completeness.toFixed(3)),
     llm: tally, // per-tenant token telemetry (ADR-0006 cost monitoring)
     // Layer 1's actual effect, per run. Logged rather than asserted: the share of
@@ -388,107 +488,113 @@ export async function refreshTenantInsights(
   });
 }
 
-async function runAutomaticInsightsPass(
+interface DeferredNightlyPass {
+  id: string;
+  digestAt: Date;
+  automatic: boolean;
+}
+
+/**
+ * Digest work is DERIVED from the missing weekly digest row, not from
+ * process-local state: a restart after a failed Monday generation still
+ * retries on the next pass (review round 3, finding 2).
+ */
+async function weeklyDigestMissing(
+  tenantId: string,
+  now: Date,
+): Promise<boolean> {
+  const weekStartStr = weekStartFor(now);
+  return !(await AppDataSource.getRepository(InsightDigest).findOne({
+    where: { tenantId, weekStart: weekStartStr },
+  }));
+}
+
+/**
+ * Essential and Pro have a button instead of a schedule, and that button is the only
+ * thing that ever ran for them - so on production every one of those tenants sat months
+ * out of date with a hundred unjudged conversations, and the feature they pay for was
+ * silently switched off. A control nobody remembers to press is not a control.
+ *
+ * So the schedule now runs their analysis too, but ONLY when their OWN button would be
+ * allowed to right now: the same minimum-conversations gate and the same cooldown
+ * (analysis-policy.ts). That spends exactly what a diligent owner pressing it would
+ * spend and never more - at most one run a day on Pro, one in three days on Essential,
+ * and nothing at all for a tenant with no new chats. `claimAnalysisRun` stamps the same
+ * clock the button reads, so the two share one cooldown instead of racing each other.
+ */
+async function runOnDemandTenantPass(
+  id: string,
   now: Date,
   nightly: boolean,
+  digestAt: Date | undefined,
+  deferredNightly: DeferredNightlyPass[],
 ): Promise<void> {
-  const deferredNightly: Array<{
-    id: string;
-    digestAt: Date;
-    automatic: boolean;
-  }> = [];
-  const tenants: Array<{ id: string }> = await AppDataSource.getRepository(
-    Tenant,
-  )
-    .createQueryBuilder("t")
-    .select("t.id", "id")
-    .where("t.status = 'active'")
-    .getRawMany();
-
-  // Digest work is DERIVED from the missing weekly digest row, not from
-  // process-local state: a restart after a failed Monday generation still
-  // retries on the next pass (review round 3, finding 2).
-  const weeklyDigestMissing = async (tenantId: string): Promise<boolean> => {
-    const weekStartStr = weekStartFor(now);
-    return !(await AppDataSource.getRepository(InsightDigest).findOne({
-      where: { tenantId, weekStart: weekStartStr },
-    }));
-  };
-
-  for (const { id } of tenants) {
-    try {
-      const entitlements = await getEntitlements(id);
-      const automatic = analysisPolicyFor(entitlements.features).automatic;
-      const digestDue =
-        entitlements.features.gapEvidence && (await weeklyDigestMissing(id));
-      const digestAt = digestDue ? now : undefined;
-      // Enterprise analyses continuously. Essential and Pro have a button instead, and
-      // that button is the only thing that ever ran for them - so on production every
-      // one of those tenants sat months out of date with a hundred unjudged
-      // conversations, and the feature they pay for was silently switched off. A control
-      // nobody remembers to press is not a control.
-      //
-      // So the schedule now runs their analysis too, but ONLY when their OWN button
-      // would be allowed to right now: the same minimum-conversations gate and the same
-      // cooldown (analysis-policy.ts). That spends exactly what a diligent owner
-      // pressing it would spend and never more - at most one run a day on Pro, one in
-      // three days on Essential, and nothing at all for a tenant with no new chats.
-      // `claimAnalysisRun` stamps the same clock the button reads, so the two share one
-      // cooldown instead of racing each other.
-      if (!automatic) {
-        const scheduled = (await getAnalysisStatus(id, now)).eligible;
-        if (!scheduled) {
-          // Not due. Fall through to the digest-only path, which reads existing
-          // aggregates and spends no LLM budget.
-          if (!digestAt) {
-            continue;
-          }
-          if (!(await claimInsightsLease(id, now))) {
-            if (nightly) deferredNightly.push({ id, digestAt, automatic: false });
-            continue;
-          }
-          try {
-            await generateDigest(id, digestAt);
-          } finally {
-            await releaseAnalysisRun(id);
-          }
-          continue;
-        }
-        if (!(await claimAnalysisRun(id, now))) {
-          if (nightly && digestAt) deferredNightly.push({ id, digestAt, automatic: false });
-          continue;
-        }
-        try {
-          await refreshTenantInsights(id, now, {
-            generateDigest: digestAt !== undefined,
-            digestAt,
-          });
-        } finally {
-          await releaseAnalysisRun(id);
-        }
-        continue;
-      }
-      if (!(await claimInsightsLease(id, now))) {
-        if (nightly && digestAt)
-          deferredNightly.push({ id, digestAt, automatic: true });
-        continue;
-      }
-      try {
-        await refreshTenantInsights(id, now, {
-          generateDigest: digestAt !== undefined,
-          digestAt,
-        });
-      } finally {
-        await releaseAnalysisRun(id);
-      }
-    } catch (err) {
-      logger.error("[insights-refresh] tenant pass failed", {
-        tenantId: id,
-        error: err instanceof Error ? err.message : "unknown",
-      });
+  const scheduled = (await getAnalysisStatus(id, now)).eligible;
+  if (!scheduled) {
+    // Not due. Fall through to the digest-only path, which reads existing
+    // aggregates and spends no LLM budget.
+    if (!digestAt) return;
+    if (!(await claimInsightsLease(id, now))) {
+      if (nightly) deferredNightly.push({ id, digestAt, automatic: false });
+      return;
     }
+    try {
+      await generateDigest(id, digestAt);
+    } finally {
+      await releaseAnalysisRun(id);
+    }
+    return;
   }
+  if (!(await claimAnalysisRun(id, now))) {
+    if (nightly && digestAt) deferredNightly.push({ id, digestAt, automatic: false });
+    return;
+  }
+  try {
+    await refreshTenantInsights(id, now, {
+      generateDigest: digestAt !== undefined,
+      digestAt,
+    });
+  } finally {
+    await releaseAnalysisRun(id);
+  }
+}
 
+async function runTenantPass(
+  id: string,
+  now: Date,
+  nightly: boolean,
+  deferredNightly: DeferredNightlyPass[],
+): Promise<void> {
+  const entitlements = await getEntitlements(id);
+  const automatic = analysisPolicyFor(entitlements.features).automatic;
+  const digestDue =
+    entitlements.features.gapEvidence && (await weeklyDigestMissing(id, now));
+  const digestAt = digestDue ? now : undefined;
+  // Enterprise analyses continuously; everyone else goes through the
+  // button-equivalent gates in runOnDemandTenantPass.
+  if (!automatic) {
+    await runOnDemandTenantPass(id, now, nightly, digestAt, deferredNightly);
+    return;
+  }
+  if (!(await claimInsightsLease(id, now))) {
+    if (nightly && digestAt)
+      deferredNightly.push({ id, digestAt, automatic: true });
+    return;
+  }
+  try {
+    await refreshTenantInsights(id, now, {
+      generateDigest: digestAt !== undefined,
+      digestAt,
+    });
+  } finally {
+    await releaseAnalysisRun(id);
+  }
+}
+
+async function runDeferredNightlyPasses(
+  deferredNightly: DeferredNightlyPass[],
+  now: Date,
+): Promise<void> {
   for (const { id, digestAt, automatic } of deferredNightly) {
     try {
       if (!(await claimInsightsLease(id, now))) continue;
@@ -511,6 +617,33 @@ async function runAutomaticInsightsPass(
       });
     }
   }
+}
+
+async function runAutomaticInsightsPass(
+  now: Date,
+  nightly: boolean,
+): Promise<void> {
+  const deferredNightly: DeferredNightlyPass[] = [];
+  const tenants: Array<{ id: string }> = await AppDataSource.getRepository(
+    Tenant,
+  )
+    .createQueryBuilder("t")
+    .select("t.id", "id")
+    .where("t.status = 'active'")
+    .getRawMany();
+
+  for (const { id } of tenants) {
+    try {
+      await runTenantPass(id, now, nightly, deferredNightly);
+    } catch (err) {
+      logger.error("[insights-refresh] tenant pass failed", {
+        tenantId: id,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+    }
+  }
+
+  await runDeferredNightlyPasses(deferredNightly, now);
 
   if (!nightly) return;
 

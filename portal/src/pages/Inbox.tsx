@@ -155,6 +155,528 @@ const getReasonIcon = (reason: HandoffRequest['reason']) => {
 };
 
 // ---------------------------------------------------------------------------
+// Left panel: handoff queue + conversation stream
+// ---------------------------------------------------------------------------
+
+interface InboxListPanelProps {
+  activeTab: InboxTab;
+  pendingCount: number;
+  handoffs: HandoffRequest[];
+  tenants: React.ComponentProps<typeof ChatStream>['tenants'];
+  /** Mobile: the list hides while a conversation is open. */
+  isChatSelected: boolean;
+  selectedChatId?: string;
+  onChatSelect: (chat: Chat) => void;
+  onTakeover: (chatId: string) => void;
+  onAcceptHandoff: (handoff: HandoffRequest) => void;
+  onDeclineHandoff: (handoff: HandoffRequest) => void;
+  isAcceptPending: boolean;
+  isDeclinePending: boolean;
+}
+
+const InboxListPanel: React.FC<InboxListPanelProps> = ({
+  activeTab,
+  pendingCount,
+  handoffs,
+  tenants,
+  isChatSelected,
+  selectedChatId,
+  onChatSelect,
+  onTakeover,
+  onAcceptHandoff,
+  onDeclineHandoff,
+  isAcceptPending,
+  isDeclinePending,
+}) => {
+  const { t } = useTranslation();
+
+  const getReasonLabel = (reason?: HandoffRequest['reason']) => {
+    if (!reason) return t('inbox.handoff.reason.user_request');
+    const key = `inbox.handoff.reason.${reason}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+    return reason.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
+  return (
+    <div className={cn(
+      'w-full md:w-[400px] md:min-w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col',
+      isChatSelected && 'hidden md:flex'
+    )}>
+      {activeTab === 'handsoff' && pendingCount === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-text-muted">
+          <CheckCircle className="w-10 h-10 mb-3 text-green-500/50" />
+          <p className="text-sm font-medium">{t('inbox.handoff.empty.title')}</p>
+          <p className="text-xs mt-1">{t('inbox.handoff.empty.subtitle')}</p>
+        </div>
+      ) : activeTab === 'handsoff' && pendingCount > 0 ? (
+        /* Handoff queue cards */
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="text-sm text-text-muted mb-2">
+            {t('inbox.handoff.pendingCount', { count: pendingCount })}
+          </div>
+          {handoffs.map((handoff) => (
+            <Card
+              key={handoff.id}
+              variant="glass"
+              className={cn(
+                'overflow-hidden border cursor-pointer transition-colors hover:bg-surface-3',
+                handoff.priority === 'urgent' && 'border-red-500/30 bg-red-500/5',
+                handoff.priority === 'high' && 'border-accent-500/30 bg-accent-500/5',
+                handoff.priority === 'medium' && 'border-accent-300/20',
+                handoff.priority === 'low' && 'border-edge',
+              )}
+            >
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Headphones className={cn(
+                        'w-4 h-4 flex-shrink-0',
+                        handoff.priority === 'urgent' && 'text-red-400',
+                        handoff.priority === 'high' && 'text-accent-400',
+                        handoff.priority === 'medium' && 'text-accent-300',
+                        handoff.priority === 'low' && 'text-text-secondary',
+                      )} />
+                      <span className="font-medium text-text-primary truncate">
+                        {handoff.userName || t('inbox.chat.anonymousUser')}
+                      </span>
+                      <PriorityBadge status={handoff.priority} size="sm" />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-text-muted mt-1">
+                      <span className="flex items-center gap-1">
+                        {getReasonIcon(handoff.reason)}
+                        {getReasonLabel(handoff.reason)}
+                      </span>
+                      <span>-</span>
+                      <span className="font-mono">{formatWaitTime(handoff.waitTime)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeclineHandoff(handoff);
+                      }}
+                      disabled={isDeclinePending || isAcceptPending}
+                      className="text-xs h-9 px-3"
+                    >
+                      {isDeclinePending ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : t('inbox.handoff.decline')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAcceptHandoff(handoff);
+                      }}
+                      disabled={isAcceptPending || isDeclinePending}
+                      className="text-xs h-9 px-3"
+                    >
+                      {isAcceptPending ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : t('inbox.handoff.accept')}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+
+          {/* Also show the ChatStream below for handsoff-status chats */}
+          <div className="pt-2 border-t border-edge mt-4">
+            <p className="text-xs text-text-muted mb-2">{t('inbox.handoff.handoffChats')}</p>
+            <ChatStream
+              tenants={tenants}
+              onChatSelect={onChatSelect}
+              onTakeover={onTakeover}
+              selectedChatId={selectedChatId}
+              initialStatusFilter="handsoff"
+              className="h-[50dvh] md:h-[400px]"
+            />
+          </div>
+        </div>
+      ) : (
+        /* Normal ChatStream with status filter from active tab */
+        <ChatStream
+          key={activeTab}
+          tenants={tenants}
+          onChatSelect={onChatSelect}
+          onTakeover={onTakeover}
+          selectedChatId={selectedChatId}
+          initialStatusFilter={tabStatusMap[activeTab]}
+          className="h-full"
+        />
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Right panel: the selected conversation
+// ---------------------------------------------------------------------------
+
+/** Everything the conversation pane calls back into the Inbox for. */
+interface ChatPaneActions {
+  onBack: () => void;
+  onRenamed: (userName: string) => void;
+  onResumeAI: () => void;
+  onTakeover: (chatId: string, policy?: TakeoverPolicy) => void;
+  onChangeDuration: (policy: TakeoverPolicy) => void;
+  onOpenTransfer: () => void;
+  onReturnToBot: () => void;
+  onRequestReset: () => void;
+  onRequestClose: () => void;
+  onOpenSession: (sessionId: string) => void;
+}
+
+interface ChatPaneProps {
+  chat: Chat;
+  isSuperAdmin: boolean;
+  isClosing: boolean;
+  isTakeoverPending: boolean;
+  defaultTakeoverPolicy: TakeoverPolicy;
+  actions: ChatPaneActions;
+}
+
+/** Status line under the conversation name: badges, tenant, assignee. */
+const SelectedChatMeta: React.FC<{
+  chat: Chat;
+  isGuardrailPaused: boolean;
+  isHumanOwned: boolean;
+}> = ({ chat, isGuardrailPaused, isHumanOwned }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2 text-sm text-text-secondary">
+      <ChatStatusBadge status={chat.status} size="sm" />
+      {isGuardrailPaused && (
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600"
+          title={t('inbox.guardrail.pausedTooltip')}
+        >
+          <ShieldAlert className="w-3 h-3" />
+          {t('inbox.guardrail.paused', { reason: chat.guardrailStatus || 'flagged' })}
+        </span>
+      )}
+      {isHumanOwned && (
+        <HumanControlBadge
+          mode={chat.humanControlMode}
+          until={chat.humanControlUntil}
+        />
+      )}
+      {chat.tenantName && (
+        <>
+          <span>-</span>
+          <span>{chat.tenantName}</span>
+        </>
+      )}
+      {chat.assignedAgentName && (
+        <>
+          <span>-</span>
+          <span>{t('inbox.window.header.assignedTo', { name: chat.assignedAgentName })}</span>
+        </>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Action buttons for the open conversation.
+ *
+ * B-PR5b: OWNERSHIP is the authoritative gate for the human controls. A real
+ * takeover is ownership:'human_owned' with backend status 'handoff'
+ * (deriveStatusFromOwnership) — portal status 'handsoff' — so a
+ * status==='human' gate would never fire for a taken-over chat.
+ */
+const SelectedChatActions: React.FC<
+  Omit<ChatPaneProps, 'actions'> & {
+    actions: ChatPaneActions;
+    isGuardrailPaused: boolean;
+    isHumanOwned: boolean;
+  }
+> = ({
+  chat,
+  isSuperAdmin,
+  isClosing,
+  isTakeoverPending,
+  defaultTakeoverPolicy,
+  actions,
+  isGuardrailPaused,
+  isHumanOwned,
+}) => {
+  const { t } = useTranslation();
+  // Super-admin testing reset: close a conversation so the next inbound
+  // message starts a NEW session. Scoped to the EXTERNAL channels (WhatsApp,
+  // Messenger, …) per the approved plan: the widget already has its own
+  // New-conversation button, and widget.js has no closed-session recovery, so
+  // a server-side close there would strand an open visitor until reload.
+  const canReset =
+    isSuperAdmin &&
+    chat.status !== 'closed' &&
+    !isHumanOwned &&
+    !!chat.channel &&
+    chat.channel !== 'widget';
+  // Take Over on any chat the AI still owns (bot or handoff), not only during
+  // handoff. Closed sessions have nothing to claim. Unknown ownership still
+  // offers the control — a same-owner re-claim is harmless.
+  const canTakeOver = chat.ownership !== 'human_owned' && chat.status !== 'closed';
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {isGuardrailPaused && (
+        <Button
+          onClick={actions.onResumeAI}
+          size="sm"
+          className="gap-2 rounded-xl"
+        >
+          <ShieldCheck className="w-4 h-4" />
+          {t('inbox.guardrail.resumeButton')}
+        </Button>
+      )}
+      {canTakeOver && (
+        <TakeoverMenu
+          defaultPolicy={defaultTakeoverPolicy}
+          onSelect={(policy) =>
+            // The initial indefinite pick keeps the modeless
+            // legacy body — only timed picks carry a policy.
+            actions.onTakeover(
+              chat.id,
+              policy.mode === 'indefinite' ? undefined : policy,
+            )
+          }
+          trigger={
+            <Button size="sm" disabled={isTakeoverPending} className="gap-2 rounded-xl">
+              <UserCheck className="w-4 h-4" />
+              {t('inbox.takeover.button')}
+              <ChevronDown className="w-3.5 h-3.5" />
+            </Button>
+          }
+        />
+      )}
+      {canReset && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={actions.onRequestReset}
+          disabled={isClosing}
+          className="gap-2 rounded-xl"
+          title={t('inbox.resetDialog.description')}
+        >
+          <RotateCcw className="w-4 h-4" />
+          {isClosing ? t('inbox.actions.resetting') : t('inbox.actions.reset')}
+        </Button>
+      )}
+      {isHumanOwned && (
+        <>
+          <TakeoverMenu
+            defaultPolicy={defaultTakeoverPolicy}
+            onSelect={actions.onChangeDuration}
+            trigger={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isTakeoverPending}
+                className="gap-1.5 rounded-xl"
+              >
+                <Timer className="w-3.5 h-3.5" />
+                {t('inbox.takeover.changeDuration')}
+                <ChevronDown className="w-3 h-3" />
+              </Button>
+            }
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={actions.onOpenTransfer}
+            className="gap-2 rounded-xl"
+          >
+            <Users className="w-4 h-4" />
+            {t('inbox.actions.transfer')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={actions.onReturnToBot}
+            className="gap-1.5 rounded-xl"
+          >
+            <Bot className="w-3.5 h-3.5" />
+            {t('inbox.actions.returnToBot')}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={actions.onRequestClose}
+            disabled={isClosing}
+            className="gap-2 rounded-xl"
+          >
+            <X className="w-4 h-4" />
+            {isClosing ? t('inbox.actions.closing') : t('inbox.actions.close')}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+};
+
+/** Action bar above the thread: identity, badges, controls. */
+const ChatActionBar: React.FC<ChatPaneProps> = (props) => {
+  const { chat, actions } = props;
+  const { t } = useTranslation();
+  const isHumanOwned = chat.ownership === 'human_owned';
+  // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
+  const isGuardrailPaused = chat.aiAutoReplyEnabled === false;
+
+  return (
+    <div className="px-4 py-3 border-b border-edge bg-surface-2 flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="md:hidden p-2 rounded-lg hover:bg-surface-3 transition-colors"
+          onClick={actions.onBack}
+          aria-label={t('inbox.window.backToList')}
+        >
+          <ArrowLeft className="w-5 h-5 text-text-secondary" />
+        </button>
+        <div>
+          <ConversationName
+            chat={chat}
+            heading="h2"
+            onRenamed={actions.onRenamed}
+          />
+          <SelectedChatMeta
+            chat={chat}
+            isGuardrailPaused={isGuardrailPaused}
+            isHumanOwned={isHumanOwned}
+          />
+        </div>
+      </div>
+
+      <SelectedChatActions
+        {...props}
+        isGuardrailPaused={isGuardrailPaused}
+        isHumanOwned={isHumanOwned}
+      />
+    </div>
+  );
+};
+
+/** Right pane: the open conversation, or the empty state. */
+const InboxDetailPanel: React.FC<Omit<ChatPaneProps, 'chat'> & { chat: Chat | null }> = ({
+  chat,
+  actions,
+  ...rest
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className={cn(
+      'flex-1 flex flex-col overflow-hidden',
+      !chat && 'hidden md:flex'
+    )}>
+      {chat ? (
+        <>
+          {/* Action bar */}
+          <ChatActionBar chat={chat} actions={actions} {...rest} />
+
+          {/* Chat window */}
+          <div className="flex-1 overflow-hidden">
+            <ChatWindow
+              chat={chat}
+              onTransfer={actions.onOpenTransfer}
+              onOpenSession={actions.onOpenSession}
+              className="h-full rounded-none border-0 shadow-none"
+            />
+          </div>
+        </>
+      ) : (
+        /* Empty state */
+        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary">
+          <MessageSquare className="w-16 h-16 mb-4 text-text-muted" />
+          <p className="text-lg font-medium">{t('inbox.detail.empty.title')}</p>
+          <p className="text-sm text-text-muted mt-1">
+            {t('inbox.detail.empty.subtitle')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Transfer modal
+// ---------------------------------------------------------------------------
+
+const TransferAgentsModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  isLoadingAgents: boolean;
+  agents: Agent[];
+  onSelectAgent: (agentId: string) => void;
+}> = ({ isOpen, onClose, isLoadingAgents, agents, onSelectAgent }) => {
+  const { t } = useTranslation();
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('inbox.transferModal.title')}
+      size="md"
+    >
+      <div className="space-y-4">
+        <p className="text-text-secondary">
+          {t('inbox.transferModal.prompt')}
+        </p>
+        {isLoadingAgents ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+          </div>
+        ) : agents.length === 0 ? (
+          <div className="flex flex-col items-center text-center py-8 px-4">
+            <Users className="w-8 h-8 mb-2 text-text-muted" />
+            <p className="text-sm text-text-secondary">
+              {t('inbox.transferModal.noAgents')}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <button
+                type="button"
+                key={agent.id}
+                onClick={() => onSelectAgent(agent.id)}
+                className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-4 rounded-xl transition-colors text-left"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary-400">
+                    {agent.firstName[0]}{agent.lastName[0]}
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-text-primary">
+                    {agent.firstName} {agent.lastName}
+                  </p>
+                  <p className="text-sm text-text-secondary">
+                    {t('inbox.transferModal.agentStats', { current: agent.currentChats, max: agent.maxConcurrentChats, status: agent.status })}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  {agent.skills.map((skill) => (
+                    <Badge key={skill} variant="secondary">
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -169,14 +691,6 @@ const Inbox: React.FC = () => {
     typeof defaultTakeoverHours === 'number'
       ? { mode: 'timed', hours: defaultTakeoverHours }
       : { mode: 'indefinite' };
-
-  const getReasonLabel = (reason?: HandoffRequest['reason']) => {
-    if (!reason) return t('inbox.handoff.reason.user_request');
-    const key = `inbox.handoff.reason.${reason}`;
-    const translated = t(key);
-    if (translated !== key) return translated;
-    return reason.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-  };
 
   // Query params for deep-linking from redirects
   const [searchParams] = useSearchParams();
@@ -474,36 +988,25 @@ const Inbox: React.FC = () => {
   // Render
   // -----------------------------------------------------------------------
 
-  // B-PR5b: OWNERSHIP is the authoritative gate for the human controls. A
-  // real takeover is ownership:'human_owned' with backend status 'handoff'
-  // (deriveStatusFromOwnership) — portal status 'handsoff' — so a
-  // status==='human' gate would never fire for a taken-over chat.
-  const isHumanOwned = selectedChat?.ownership === 'human_owned';
-  // Super-admin testing reset: close a conversation so the next inbound
-  // message starts a NEW session. Scoped to the EXTERNAL channels (WhatsApp,
-  // Messenger, …) per the approved plan: the widget already has its own
-  // New-conversation button, and widget.js has no closed-session recovery, so
-  // a server-side close there would strand an open visitor until reload.
-  const canReset =
-    isSuperAdmin &&
-    !!selectedChat &&
-    selectedChat.status !== 'closed' &&
-    !isHumanOwned &&
-    !!selectedChat.channel &&
-    selectedChat.channel !== 'widget';
-  // Take Over on any chat the AI still owns (bot or handoff), not only during
-  // handoff. Closed sessions have nothing to claim. Unknown ownership still
-  // offers the control — a same-owner re-claim is harmless.
-  const canTakeOver =
-    !!selectedChat && selectedChat.ownership !== 'human_owned' && selectedChat.status !== 'closed';
-  // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
-  const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
+  const paneActions: ChatPaneActions = {
+    onBack: () => setSelectedChat(null),
+    onRenamed: (userName) =>
+      setSelectedChat((prev) => (prev ? mergeDefined(prev, { userName }) : prev)),
+    onResumeAI: handleResumeAI,
+    onTakeover: handleTakeover,
+    onChangeDuration: handleChangeDuration,
+    onOpenTransfer: () => setIsTransferModalOpen(true),
+    onReturnToBot: handleReturnToBot,
+    onRequestReset: () => setConfirmReset(true),
+    onRequestClose: () => setConfirmClose(true),
+    onOpenSession: handleOpenSessionById,
+  };
 
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="px-6 py-4 border-b border-edge bg-surface-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">{t('nav.inbox')}</h1>
             <p className="text-text-secondary">{t('inbox.header.subtitle')}</p>
@@ -514,14 +1017,14 @@ const Inbox: React.FC = () => {
         </div>
 
         {/* Filter tabs */}
-        <div className="flex items-center gap-1 mt-4">
+        <div className="flex items-center gap-1 mt-4 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               type="button"
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                'px-4 py-2 text-sm font-medium rounded-lg transition-colors relative',
+                'shrink-0 px-4 py-2 text-sm font-medium rounded-lg transition-colors relative',
                 activeTab === tab.key
                   ? 'bg-primary-600/20 text-primary-400'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-3',
@@ -541,295 +1044,30 @@ const Inbox: React.FC = () => {
       {/* Split pane content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: Chat list / Handoff queue */}
-        <div className={cn(
-          'w-full md:w-[400px] md:min-w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col',
-          selectedChat && 'hidden md:flex'
-        )}>
-          {activeTab === 'handsoff' && pendingCount === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-text-muted">
-              <CheckCircle className="w-10 h-10 mb-3 text-green-500/50" />
-              <p className="text-sm font-medium">{t('inbox.handoff.empty.title')}</p>
-              <p className="text-xs mt-1">{t('inbox.handoff.empty.subtitle')}</p>
-            </div>
-          ) : activeTab === 'handsoff' && pendingCount > 0 ? (
-            /* Handoff queue cards */
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="text-sm text-text-muted mb-2">
-                {t('inbox.handoff.pendingCount', { count: pendingCount })}
-              </div>
-              {handoffs.map((handoff) => (
-                <Card
-                  key={handoff.id}
-                  variant="glass"
-                  className={cn(
-                    'overflow-hidden border cursor-pointer transition-colors hover:bg-surface-3',
-                    handoff.priority === 'urgent' && 'border-red-500/30 bg-red-500/5',
-                    handoff.priority === 'high' && 'border-accent-500/30 bg-accent-500/5',
-                    handoff.priority === 'medium' && 'border-accent-300/20',
-                    handoff.priority === 'low' && 'border-edge',
-                  )}
-                >
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Headphones className={cn(
-                            'w-4 h-4 flex-shrink-0',
-                            handoff.priority === 'urgent' && 'text-red-400',
-                            handoff.priority === 'high' && 'text-accent-400',
-                            handoff.priority === 'medium' && 'text-accent-300',
-                            handoff.priority === 'low' && 'text-text-secondary',
-                          )} />
-                          <span className="font-medium text-text-primary truncate">
-                            {handoff.userName || t('inbox.chat.anonymousUser')}
-                          </span>
-                          <PriorityBadge status={handoff.priority} size="sm" />
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-text-muted mt-1">
-                          <span className="flex items-center gap-1">
-                            {getReasonIcon(handoff.reason)}
-                            {getReasonLabel(handoff.reason)}
-                          </span>
-                          <span>-</span>
-                          <span className="font-mono">{formatWaitTime(handoff.waitTime)}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeclineHandoff(handoff);
-                          }}
-                          disabled={rejectHandoffMutation.isPending || acceptHandoffMutation.isPending}
-                          className="text-xs h-7 px-2"
-                        >
-                          {rejectHandoffMutation.isPending ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : t('inbox.handoff.decline')}
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAcceptHandoff(handoff);
-                          }}
-                          disabled={acceptHandoffMutation.isPending || rejectHandoffMutation.isPending}
-                          className="text-xs h-7 px-2"
-                        >
-                          {acceptHandoffMutation.isPending ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : t('inbox.handoff.accept')}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-
-              {/* Also show the ChatStream below for handsoff-status chats */}
-              <div className="pt-2 border-t border-edge mt-4">
-                <p className="text-xs text-text-muted mb-2">{t('inbox.handoff.handoffChats')}</p>
-                <ChatStream
-                  tenants={tenants}
-                  onChatSelect={handleChatSelect}
-                  onTakeover={handleTakeover}
-                  selectedChatId={selectedChat?.id}
-                  initialStatusFilter="handsoff"
-                  className="h-[400px]"
-                />
-              </div>
-            </div>
-          ) : (
-            /* Normal ChatStream with status filter from active tab */
-            <ChatStream
-              key={activeTab}
-              tenants={tenants}
-              onChatSelect={handleChatSelect}
-              onTakeover={handleTakeover}
-              selectedChatId={selectedChat?.id}
-              initialStatusFilter={tabStatusMap[activeTab]}
-              className="h-full"
-            />
-          )}
-        </div>
+        <InboxListPanel
+          activeTab={activeTab}
+          pendingCount={pendingCount}
+          handoffs={handoffs}
+          tenants={tenants}
+          isChatSelected={!!selectedChat}
+          selectedChatId={selectedChat?.id}
+          onChatSelect={handleChatSelect}
+          onTakeover={handleTakeover}
+          onAcceptHandoff={handleAcceptHandoff}
+          onDeclineHandoff={handleDeclineHandoff}
+          isAcceptPending={acceptHandoffMutation.isPending}
+          isDeclinePending={rejectHandoffMutation.isPending}
+        />
 
         {/* Right panel: Chat detail */}
-        <div className={cn(
-          'flex-1 flex flex-col overflow-hidden',
-          !selectedChat && 'hidden md:flex'
-        )}>
-          {selectedChat ? (
-            <>
-              {/* Action bar */}
-              <div className="px-4 py-3 border-b border-edge bg-surface-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="md:hidden p-1 rounded-lg hover:bg-surface-3 transition-colors"
-                    onClick={() => setSelectedChat(null)}
-                    aria-label={t('inbox.window.backToList')}
-                  >
-                    <ArrowLeft className="w-5 h-5 text-text-secondary" />
-                  </button>
-                  <div>
-                    <ConversationName
-                      chat={selectedChat}
-                      heading="h2"
-                      onRenamed={(userName) =>
-                        setSelectedChat((prev) => (prev ? mergeDefined(prev, { userName }) : prev))
-                      }
-                    />
-                    <div className="flex items-center gap-2 text-sm text-text-secondary">
-                      <ChatStatusBadge status={selectedChat.status} size="sm" />
-                      {isGuardrailPaused && (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600"
-                          title={t('inbox.guardrail.pausedTooltip')}
-                        >
-                          <ShieldAlert className="w-3 h-3" />
-                          {t('inbox.guardrail.paused', { reason: selectedChat.guardrailStatus || 'flagged' })}
-                        </span>
-                      )}
-                      {isHumanOwned && (
-                        <HumanControlBadge
-                          mode={selectedChat.humanControlMode}
-                          until={selectedChat.humanControlUntil}
-                        />
-                      )}
-                      {selectedChat.tenantName && (
-                        <>
-                          <span>-</span>
-                          <span>{selectedChat.tenantName}</span>
-                        </>
-                      )}
-                      {selectedChat.assignedAgentName && (
-                        <>
-                          <span>-</span>
-                          <span>{t('inbox.window.header.assignedTo', { name: selectedChat.assignedAgentName })}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isGuardrailPaused && (
-                    <Button
-                      onClick={handleResumeAI}
-                      size="sm"
-                      className="gap-2 rounded-xl"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      {t('inbox.guardrail.resumeButton')}
-                    </Button>
-                  )}
-                  {canTakeOver && (
-                    <TakeoverMenu
-                      defaultPolicy={defaultTakeoverPolicy}
-                      onSelect={(policy) =>
-                        // The initial indefinite pick keeps the modeless
-                        // legacy body — only timed picks carry a policy.
-                        handleTakeover(
-                          selectedChat.id,
-                          policy.mode === 'indefinite' ? undefined : policy,
-                        )
-                      }
-                      trigger={
-                        <Button size="sm" disabled={isTakeoverPending} className="gap-2 rounded-xl">
-                          <UserCheck className="w-4 h-4" />
-                          {t('inbox.takeover.button')}
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </Button>
-                      }
-                    />
-                  )}
-                  {canReset && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setConfirmReset(true)}
-                      disabled={isClosing}
-                      className="gap-2 rounded-xl"
-                      title={t('inbox.resetDialog.description')}
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      {isClosing ? t('inbox.actions.resetting') : t('inbox.actions.reset')}
-                    </Button>
-                  )}
-                  {isHumanOwned && (
-                    <>
-                      <TakeoverMenu
-                        defaultPolicy={defaultTakeoverPolicy}
-                        onSelect={handleChangeDuration}
-                        trigger={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isTakeoverPending}
-                            className="gap-1.5 rounded-xl"
-                          >
-                            <Timer className="w-3.5 h-3.5" />
-                            {t('inbox.takeover.changeDuration')}
-                            <ChevronDown className="w-3 h-3" />
-                          </Button>
-                        }
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsTransferModalOpen(true)}
-                        className="gap-2 rounded-xl"
-                      >
-                        <Users className="w-4 h-4" />
-                        {t('inbox.actions.transfer')}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleReturnToBot}
-                        className="gap-1.5 rounded-xl"
-                      >
-                        <Bot className="w-3.5 h-3.5" />
-                        {t('inbox.actions.returnToBot')}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => setConfirmClose(true)}
-                        disabled={isClosing}
-                        className="gap-2 rounded-xl"
-                      >
-                        <X className="w-4 h-4" />
-                        {isClosing ? t('inbox.actions.closing') : t('inbox.actions.close')}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Chat window */}
-              <div className="flex-1 overflow-hidden">
-                <ChatWindow
-                  chat={selectedChat}
-                  onTransfer={() => setIsTransferModalOpen(true)}
-                  onOpenSession={handleOpenSessionById}
-                  className="h-full rounded-none border-0 shadow-none"
-                />
-              </div>
-            </>
-          ) : (
-            /* Empty state */
-            <div className="flex-1 flex flex-col items-center justify-center text-text-secondary">
-              <MessageSquare className="w-16 h-16 mb-4 text-text-muted" />
-              <p className="text-lg font-medium">{t('inbox.detail.empty.title')}</p>
-              <p className="text-sm text-text-muted mt-1">
-                {t('inbox.detail.empty.subtitle')}
-              </p>
-            </div>
-          )}
-        </div>
+        <InboxDetailPanel
+          chat={selectedChat}
+          isSuperAdmin={isSuperAdmin}
+          isClosing={isClosing}
+          isTakeoverPending={isTakeoverPending}
+          defaultTakeoverPolicy={defaultTakeoverPolicy}
+          actions={paneActions}
+        />
       </div>
 
       {/* Confirm Close Dialog */}
@@ -861,62 +1099,13 @@ const Inbox: React.FC = () => {
       </AlertDialog>
 
       {/* Transfer Modal */}
-      <Modal
+      <TransferAgentsModal
         isOpen={isTransferModalOpen}
         onClose={() => setIsTransferModalOpen(false)}
-        title={t('inbox.transferModal.title')}
-        size="md"
-      >
-        <div className="space-y-4">
-          <p className="text-text-secondary">
-            {t('inbox.transferModal.prompt')}
-          </p>
-          {isLoadingAgents ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
-            </div>
-          ) : agents.length === 0 ? (
-            <div className="flex flex-col items-center text-center py-8 px-4">
-              <Users className="w-8 h-8 mb-2 text-text-muted" />
-              <p className="text-sm text-text-secondary">
-                {t('inbox.transferModal.noAgents')}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {agents.map((agent) => (
-                <button
-                  type="button"
-                  key={agent.id}
-                  onClick={() => handleTransfer(agent.id)}
-                  className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-4 rounded-xl transition-colors text-left"
-                >
-                  <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
-                    <span className="text-sm font-medium text-primary-400">
-                      {agent.firstName[0]}{agent.lastName[0]}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-text-primary">
-                      {agent.firstName} {agent.lastName}
-                    </p>
-                    <p className="text-sm text-text-secondary">
-                      {t('inbox.transferModal.agentStats', { current: agent.currentChats, max: agent.maxConcurrentChats, status: agent.status })}
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
-                    {agent.skills.map((skill) => (
-                      <Badge key={skill} variant="secondary">
-                        {skill}
-                      </Badge>
-                    ))}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </Modal>
+        isLoadingAgents={isLoadingAgents}
+        agents={agents}
+        onSelectAgent={handleTransfer}
+      />
     </div>
   );
 };

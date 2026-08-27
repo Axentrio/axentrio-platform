@@ -13,12 +13,13 @@ import { buildPromptTrace } from '../llm/block-ledger';
 import { localizeMessage } from '../llm/localize';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvider, type LLMOptions, type LLMResponse } from '../llm/llm.types';
+import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvider, type LLMOptions, type LLMResponse, type ToolCall } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
+import type { Bot, BotSettings } from '../database/entities/Bot';
 import { getEntitlements } from '../billing/entitlements';
 import type { FeatureKey } from '../billing/types';
 import { shouldAskForContact } from '../leads/proactive/should-ask';
-import type { ToolAdapter, Affordance, BookingAddressReplyFact } from './tool-adapter';
+import type { ToolAdapter, Affordance, BookingAddressReplyFact, ToolResult } from './tool-adapter';
 import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
@@ -35,7 +36,7 @@ import { resolveSkillStates, dropUnreadySkillTools } from '../modules/skill-stat
 import { readinessRefinement } from '../llm/skill-readiness';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, effectiveSkillIds } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, effectiveSkillIds, type ResolvedTemplate } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { buildBoundAddressSection, formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { getBoundAddress } from '../booking/travel/address-binding';
@@ -564,6 +565,267 @@ async function callProviderWithRetry(
   }
 }
 
+/**
+ * The account address {venueLine} falls back to when the bot has no quoted address
+ * and no booking venue is set.
+ */
+function accountAddressOf(tenant: Tenant) {
+  const company = tenant.settings?.onboarding?.company;
+  return (
+    tenant.invoiceAddress ?? {
+      street: company?.street,
+      postalCode: company?.postalCode,
+      city: company?.city,
+      country: 'BE',
+    }
+  );
+}
+
+/** The line for {venueLine}: the bot's quoted address, else the booking venue. */
+function resolveVenueLine(
+  tenant: Tenant,
+  effBotSettings: BotSettings,
+  bookingSettings: BookingSettings | null,
+): string | undefined {
+  return (
+    resolveQuotedAddress({
+      botAddressEnabled: true,
+      botAddress: effBotSettings.quotedAddress ?? null,
+      accountAddress: accountAddressOf(tenant),
+    }) ??
+    formatVenueLine({
+      street: bookingSettings?.venueStreet,
+      postalCode: bookingSettings?.venuePostalCode,
+      city: bookingSettings?.venueCity,
+      country: bookingSettings?.venueCountry,
+    }) ??
+    undefined
+  );
+}
+
+/** Everything one iteration of the agent loop reads and never changes. */
+interface RunLoopContext {
+  message: string;
+  session: ChatSession;
+  tenant: Tenant;
+  conversationHistory: ChatMessage[];
+  runId: string;
+  botId: string;
+  provider: LLMProvider;
+  model: string;
+  tools: ToolAdapter[];
+  trace: AgentTrace;
+  aiSettings: BotSettings['ai'];
+  /**
+   * Armed from the ENTITLED (pre-gate) tool list — see `prepareRun`. A bot with no
+   * way to book or to check is never scolded for not doing either.
+   */
+  bookingClaimGuardArmed: boolean;
+  availabilityClaimGuardArmed: boolean;
+  specialtyTerms: string[];
+  sessionBotOwned: boolean;
+}
+
+/** Everything one iteration of the agent loop may change. */
+interface RunLoopState {
+  messages: ChatMessage[];
+  toolsCalled: string[];
+  /**
+   * Latest availability offered this run — surfaced as slot chips on the
+   * reply, unless a booking mutation later consumes/invalidates the offer.
+   */
+  pendingAvailability: PendingAvailability | null;
+  /** #80: the availability call these slots came from, so a surfaced call can be told from a
+   *  discarded one. Null when the row could not be written - a missing link, never a fault. */
+  pendingAvailabilityCallId: string | null;
+  /**
+   * A control a tool asked the CLIENT to offer, carried past the model rather than through it.
+   *
+   * A run-local, following `pendingAvailability` - which is the only existing way anything
+   * reaches the reply without the model's involvement, and it exists because the model must
+   * not be the one deciding what appears on screen. The whole address design rests on that
+   * rule: only a server-observed event may move the binding, so only the server may put the
+   * control that produces one in front of the customer.
+   *
+   * Last writer wins. Two tools raising an affordance in one run is one screen and one
+   * customer, and the later call is the better-informed one.
+   */
+  pendingAffordance: Affordance | null;
+  /** Egress guard state: was a booking/request actually recorded this run? */
+  bookingRecorded: boolean;
+  /**
+   * #7: per-run guard — a side-effecting tool must not execute twice with
+   * identical args within one agent run (a model re-emitting the same call).
+   * Cross-run re-invocation (the coalescer re-arming a turn) is already
+   * neutralised by the booking provider's idempotency window + DB constraints
+   * for create/request; reschedule/cancel re-runs are self-idempotent (same
+   * target = no new effect).
+   */
+  sideEffectsInvoked: Set<string>;
+  /** Have we already nudged the model once for claiming a booking that wasn't recorded? */
+  correctionAttempted: boolean;
+  /** Separate from `correctionAttempted`: each guard gets its own single retry, or one
+   *  firing would spend the other's budget and ship the fault it was there to stop. */
+  availabilityCorrectionAttempted: boolean;
+  /** Same rule again: the promised-check guard owns its own single retry. */
+  promisedCheckCorrectionAttempted: boolean;
+  /**
+   * A `check_availability` call HAPPENED this run, whatever it returned.
+   *
+   * Distinct from `pendingAvailability`, which is set only when the call SUCCEEDED and came
+   * back with slots. A call that threw - paused business, no calendar, request-only service -
+   * leaves that null, and a model saying "let me check" on such a turn HAS checked. Nudging it
+   * to call again would be an instruction to repeat work that already failed.
+   */
+  availabilityChecked: boolean;
+  pendingAddressFact: BookingAddressReplyFact | null;
+  addressFactConflict: boolean;
+  addressCorrectionAttempted: boolean;
+  addressCorrectionOnly: boolean;
+  /** True once `escalate_to_human` executed SUCCESSFULLY this run. Latched, never reset. */
+  escalationRequested: boolean;
+  priceContextLoaded: boolean;
+}
+
+function newRunLoopState(): RunLoopState {
+  return {
+    messages: [],
+    toolsCalled: [],
+    pendingAvailability: null,
+    pendingAvailabilityCallId: null,
+    pendingAffordance: null,
+    bookingRecorded: false,
+    sideEffectsInvoked: new Set<string>(),
+    correctionAttempted: false,
+    availabilityCorrectionAttempted: false,
+    promisedCheckCorrectionAttempted: false,
+    availabilityChecked: false,
+    pendingAddressFact: null,
+    addressFactConflict: false,
+    addressCorrectionAttempted: false,
+    addressCorrectionOnly: false,
+    escalationRequested: false,
+    priceContextLoaded: false,
+  };
+}
+
+/** Whether the loop owes the model another iteration, or the run is finished. */
+type IterationOutcome = { kind: 'continue' } | { kind: 'done'; result: AgentResult };
+
+const CONTINUE_ITERATION: IterationOutcome = { kind: 'continue' };
+
+/**
+ * What a reply guard decided: ship this (possibly replaced) content, re-run the
+ * loop with a nudge appended, or end the run with a prepared result.
+ */
+type GuardVerdict =
+  | { kind: 'content'; content: string }
+  | { kind: 'retry' }
+  | { kind: 'result'; result: AgentResult };
+
+/** The verdicts a guard that can only pass or ask for one more iteration returns. */
+type ContentOrRetry = Exclude<GuardVerdict, { kind: 'result' }>;
+
+/**
+ * Everything the chips and the reply guards need from one availability offer.
+ *
+ * Kept together because each set answers a different question about the same offer: what the
+ * channel delivered, what the tool told the model to offer in prose, and what create_booking
+ * would still accept.
+ */
+interface OfferedTimes {
+  /** The 8-chip window in local wall-clock time — what the channel was handed. */
+  offeredLocal: string[] | null;
+  /**
+   * TIMES WITH NO CHIP. A requestable travel time is one the tool told the model to offer
+   * in prose and capture with request_appointment, so naming it is doing as it was asked.
+   * Both guards must count it as offered, or a mixed result answers a perfectly good
+   * sentence with "that time is not available".
+   */
+  requestableLocal: string[];
+  /** What the CHANNEL delivered, plus the prose-only times: the enumeration guard's set. */
+  deliverableLocal: string[] | null;
+  /**
+   * EVERY time the customer may take, delivered or not. Only the single-time guard uses
+   * it: a slot further down the list is one create_booking accepts, so a reply confirming
+   * it is right, while a time nobody offered is an invention whatever the channel showed.
+   */
+  everyOfferableLocal: string[] | null;
+  /**
+   * Every CONFIRMABLE hour, not the 8-chip prefix: 10:00 further down the day is still the
+   * time they named. Compared with the chip window, an intake answer that names no clock
+   * time re-attached 00:00 / 00:30 / 01:00 above a confirmation of 10:00. Requestable
+   * travel times stay out: naming one is not a reason to hide the chip for a time they can
+   * actually book.
+   */
+  confirmableLocal: string[] | null;
+  /**
+   * HOW LONG AN APPOINTMENT IS HERE, so a confirmation that says the whole span
+   * ("16:00 tot 17:00") is read as the one time it names, while a range that is not an
+   * appointment ("we are open 9:00 tot 17:00") stays two readings and is left alone.
+   */
+  slotLengthsMin: number[];
+}
+
+function offeredTimeSets(av: PendingAvailability | null): OfferedTimes {
+  if (!av) {
+    return {
+      offeredLocal: null,
+      requestableLocal: [],
+      deliverableLocal: null,
+      everyOfferableLocal: null,
+      confirmableLocal: null,
+      slotLengthsMin: [],
+    };
+  }
+  const offeredLocal = localClockTimes(av.slots.slice(0, 8), av.timezone);
+  const requestableLocal = localClockTimes(av.requestableSlots, av.timezone) ?? [];
+  const confirmableLocal = localClockTimes(av.slots, av.timezone);
+  return {
+    offeredLocal,
+    requestableLocal,
+    deliverableLocal: offeredLocal ? [...offeredLocal, ...requestableLocal] : null,
+    everyOfferableLocal: [...(confirmableLocal ?? []), ...requestableLocal],
+    confirmableLocal,
+    slotLengthsMin: [
+      ...new Set(
+        [...av.slots, ...av.requestableSlots]
+          .map((s) => Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60_000))
+          .filter((min) => min > 0),
+      ),
+    ],
+  };
+}
+
+/** #80 (LP3): the offer record dispatch consumes, built from the surfaced chips. */
+function buildOfferPayload(
+  botId: string,
+  av: PendingAvailability,
+  availabilityCallId: string | null,
+  chipCount: number,
+): OfferMeasurement {
+  return {
+    botId,
+    serviceId: av.serviceId ?? null,
+    availabilityCallId,
+    locationMode: av.locationMode ?? null,
+    slotStarts: av.slots.slice(0, chipCount).map((s) => s.start),
+    // #81 (LP4): the whole scoring, not the delivered prefix of it. What was
+    // truncated is decided at dispatch, and the counterfactual order is a
+    // statement about the list the scorer saw.
+    ...(av.grouping ? { scoring: av.grouping } : {}),
+    ...(av.groupingPilot ? { groupingPilot: true } : {}),
+    ...(av.grouped ? { grouped: av.grouped } : {}),
+    ...(av.groupingPreviousOrder ? { groupingPreviousOrder: av.groupingPreviousOrder } : {}),
+  };
+}
+
+/** The model's copy of a tool result, capped so one big payload cannot crowd out the turn. */
+function truncateToolPayload(payload: unknown): string {
+  const json = JSON.stringify(payload);
+  return json.length > 4000 ? json.substring(0, 4000) + '...[truncated]' : json;
+}
+
 export class AgentService {
   constructor(
     private toolRegistry: ToolRegistry,
@@ -589,10 +851,92 @@ export class AgentService {
     // builder's skills/brandVoice), the AI behavioural slice, and the tenant
     // LLM key — all from a single bot+tenant lookup.
     const { bot, botSettings, botAiSettings, apiKey } = await getLlmRuntimeConfigForSession(session);
-    // Tone + policy guardrails come from the bound template (effectiveBotConfig),
-    // not the bot. Override the AI slice once so every downstream read (prompt
-    // builder, fallback messages) uses the effective values; escalationKeywords
-    // and other operational fields are preserved. One resolve → body + config.
+    const { resolvedTemplates, templateBody, aiSettings, effBotSettings } = await this.resolveRunConfig(
+      bot,
+      tenant,
+      botSettings,
+      botAiSettings,
+    );
+    const trace: AgentTrace = {
+      sessionId: session.id,
+      tenantId: tenant.id,
+      iterations: [],
+      finishReason: 'completed',
+    };
+    // The mutable run state (including `escalationRequested`, true once
+    // `escalate_to_human` executed SUCCESSFULLY this run) is created outside the
+    // try, because the promise must survive the run's own failure: a provider
+    // error AFTER the tool succeeded still returns `handoffRequested: true` from
+    // the catch below.
+    const state = newRunLoopState();
+    // Same gate message-forwarding uses to run the bot. Missing ownership
+    // (tests / older rows) defaults to bot_owned, matching the DB default.
+    const sessionBotOwned =
+      (session.ownership ?? 'bot_owned') === 'bot_owned' &&
+      (session.status === 'bot' || session.status === 'waiting');
+
+    try {
+      const prepared = await this.prepareRun({
+        message, session, tenant, conversationHistory, images,
+        bot, botSettings, effBotSettings, aiSettings, resolvedTemplates, templateBody, trace,
+      });
+      state.messages = prepared.messages;
+      state.priceContextLoaded = prepared.priceContextLoaded;
+      const ctx: RunLoopContext = {
+        message,
+        session,
+        tenant,
+        conversationHistory,
+        runId,
+        botId: bot.id,
+        // Model/provider are platform-standardised — always the platform default,
+        // never per-bot/tenant (see llm/defaults).
+        provider: getProvider(DEFAULT_PROVIDER, apiKey ?? undefined),
+        model: DEFAULT_MODEL,
+        tools: prepared.tools,
+        trace,
+        aiSettings,
+        bookingClaimGuardArmed: prepared.bookingClaimGuardArmed,
+        availabilityClaimGuardArmed: prepared.availabilityClaimGuardArmed,
+        specialtyTerms: prepared.specialtyTerms,
+        sessionBotOwned,
+      };
+
+      for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const outcome = await this.runIteration(i, ctx, state);
+        if (outcome.kind === 'done') return outcome.result;
+      }
+
+      // Max iterations reached
+      trace.finishReason = 'max_iterations';
+      trace.terminal = { result: 'max_iterations' };
+      void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
+      return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent.", ...(state.escalationRequested ? { handoffRequested: true } : {}) };
+
+    } catch (error) {
+      return this.terminalErrorResult(error, {
+        trace,
+        session,
+        aiSettings,
+        escalationRequested: state.escalationRequested,
+      });
+    }
+  }
+
+  /**
+   * Bound templates + the effective AI slice for this run.
+   *
+   * Tone + policy guardrails come from the bound template (effectiveBotConfig),
+   * not the bot. Override the AI slice once so every downstream read (prompt
+   * builder, fallback messages) uses the effective values; escalationKeywords
+   * and other operational fields are preserved. One resolve → body + config.
+   */
+  private async resolveRunConfig(
+    bot: Bot,
+    tenant: Tenant,
+    botSettings: BotSettings,
+    botAiSettings: BotSettings['ai'],
+  ) {
     const resolvedTemplates = await resolveBoundTemplates(bot);
     // AC4: surface "the missing vertical" — a bound template that resolved to a
     // fallback (archived/missing/unpublished) is invisible otherwise. Log it with
@@ -610,956 +954,1068 @@ export class AgentService {
     const templateBody = composeTemplateBodies(resolvedTemplates, bot.templateMode ?? 'or');
     const eff = effectiveConfigFromList(resolvedTemplates);
     const aiSettings = botAiSettings ? withEffectiveConfig(botAiSettings, eff) : botAiSettings;
-    const effBotSettings = { ...botSettings, ai: aiSettings };
-    const trace: AgentTrace = {
-      sessionId: session.id,
-      tenantId: tenant.id,
-      iterations: [],
-      finishReason: 'completed',
+    return {
+      resolvedTemplates,
+      templateBody,
+      aiSettings,
+      effBotSettings: { ...botSettings, ai: aiSettings },
     };
-    // True once `escalate_to_human` executed SUCCESSFULLY this run. Declared
-    // outside the try, because the promise must survive the run's own failure:
-    // a provider error AFTER the tool succeeded still returns
-    // `handoffRequested: true` from the catch below.
-    let escalationRequested = false;
-    // Same gate message-forwarding uses to run the bot. Missing ownership
-    // (tests / older rows) defaults to bot_owned, matching the DB default.
-    const sessionBotOwned =
-      (session.ownership ?? 'bot_owned') === 'bot_owned' &&
-      (session.status === 'bot' || session.status === 'waiting');
+  }
+
+  /**
+   * Everything the agent loop needs, resolved once: the gated tool list, the
+   * system prompt, and the opening message stack.
+   *
+   * Runs inside `run`'s try, exactly as this work always has, so a lookup that
+   * throws still lands on the terminal-error exit.
+   */
+  private async prepareRun(args: {
+    message: string;
+    session: ChatSession;
+    tenant: Tenant;
+    conversationHistory: ChatMessage[];
+    images?: AgentImageInput[];
+    bot: Bot;
+    botSettings: BotSettings;
+    effBotSettings: BotSettings;
+    aiSettings: BotSettings['ai'];
+    resolvedTemplates: ResolvedTemplate[];
+    templateBody: string;
+    trace: AgentTrace;
+  }) {
+    const { message, session, tenant, conversationHistory, images } = args;
+    const { bot, botSettings, effBotSettings, aiSettings, resolvedTemplates, templateBody, trace } = args;
+    const entitledTools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
+    // Armed from the ENTITLED (pre-gate) tool list, because a template-gated
+    // booking bot is exactly the one most likely to be pushed into hallucinating
+    // "I've booked you in" — and BOOKING_CORRECTION_NOTE has a branch for a model
+    // holding no booking tool. Deliberately NOT `bookingActive` (see below).
+    const bookingClaimGuardArmed = entitledTools.some((t) => t.name === 'create_booking');
+    // The availability twin. Armed on the tool that could have answered the question, so a bot
+    // with no way to check is never scolded for not checking.
+    const availabilityClaimGuardArmed = entitledTools.some((t) => t.name === 'check_availability');
+    const expectedModuleIds = resolvedTemplates[0]?.expectedModules;
+    const selection = await this.resolveSkillSelection(tenant.id, resolvedTemplates, entitledTools);
+    let tools = selection.tools;
+    // Whether the bot can ACTUALLY book — read from the GATED tools. Drives the
+    // {openingHours}/{services} sources: a bot that can't book must never quote a
+    // booking availability rule it has no skill to use, nor advertise its services.
+    const bookingActive = tools.some((t) => t.name === 'create_booking');
+    const moduleSections = await this.buildModuleSections({
+      tenant,
+      bot,
+      session,
+      activeModules: selection.activeModules,
+      selectedSkillIds: selection.selectedSkillIds,
+      composableEnabled: selection.composableEnabled,
+      bookingActive,
+    });
+    const customerName = await this.resolveCustomerName(session);
+    const booking = await this.loadBookingRuleContext(bot, tenant, effBotSettings, bookingActive);
+    const { serviceArea, venueLine } = await this.loadVenueContext(bot, tenant, effBotSettings);
+    // Template body (layer 2) + effective tone/guardrails both come from the
+    // one resolve above (effBotSettings carries the effective AI slice).
+    // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
+    // resolve the bot's effective specialties, and pass them to the composer so a
+    // requiresSpecialPrompt specialty injects its exception block.
+    const vertical = resolvedTemplates[0]?.category ?? null;
+    const selectedSpecialtyDefs = effectiveSelectedSpecialties(effBotSettings.ai?.selectedSpecialties, vertical);
+    const specialties = resolveSpecialties(selectedSpecialtyDefs);
+    const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
+    // Resolve each selected/active skill's STATE for the trace; the tool drop below
+    // then removes a non-ready skill's tools (no phantom bookings).
+    const skillStates = resolveSkillStates({
+      selected: selection.selectedSkillIds,
+      active: selection.activeModuleIds,
+      gateKind: (id) => getModule(id)?.gate.kind,
+      readiness: (id) => readinessRefinement(id, { bookingConfigured: booking.bookingConfigured }),
+    });
+    // (The template tool-gate ran above, before `bookingActive` was read.)
+    const skillProse = this.buildSkillProse(
+      resolvedTemplates,
+      selection.selectedSkillIds,
+      skillStates,
+      selection.composableEnabled,
+    );
+    this.applyTemplateVariables(aiSettings, resolvedTemplates);
+    // Skill-state tool drop - ON by default. A non-ready (entitled but
+    // UNCONFIGURED) skill's tools are removed before the model sees them, so an
+    // unconfigured booking bot physically cannot call create_booking (no phantom
+    // bookings). The tool-driven composer then renders "BOOKING (NOT AVAILABLE)"
+    // (compose-system-prompt.ts:613, which records `toolAbsent` at :618).
+    //
+    // SKILL_STATE_ENABLED=false is the break-glass that restores the old
+    // prompt-only gating (same pattern as GUARDRAILS_KILL_SWITCH): no deploy
+    // needed, the prompt keeps driving off bookingConfigured.
+    //
+    // The drop only fires for skills PRESENT in `skillStates`, i.e. when the
+    // module is entitlement-active. A legacy tenant with no active modules gets
+    // an empty state map and dropUnreadySkillTools returns the same array
+    // (pinned by skill-state.test.ts "drops nothing for an empty state map").
+    if (process.env.SKILL_STATE_ENABLED !== 'false') {
+      tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
+    }
+    const proactiveAsk = await this.mayAskForContact(session, tools);
+    const kbContext = await this.prefetchKbContext({
+      message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
+    });
+    // Currently outside opening hours: the composer adds the AVAILABILITY fact so
+    // the bot keeps helping and never announces "closed" as a reason to disengage.
+    const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
+    const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, booking.bookingTimezone, booking.bookingConfigured, session.channel, specialties, skillProse, { services: booking.bookingServices, openingHours: booking.openingHours, bookingHours: booking.bookingHours, serviceArea, venueLine, hasTravelServices: booking.hasTravelServices }, { proactiveAsk, outsideBusinessHours });
+    const priceContextLoaded = containsCurrencyAmount(
+      [systemPrompt, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
+    );
+    // Merge the composer's block ledger with agent.service's module knowledge
+    // (the composer can't name modules) onto the trace — nests in trace.jsonb,
+    // no migration. Persisted on every fire-and-forget save below.
+    trace.prompt = buildPromptTrace(ledger, {
+      activeModuleIds: selection.activeModuleIds,
+      expectedModuleIds,
+      skillStates,
+      resolvedTemplateId: resolvedTemplates[0]?.templateId,
+      resolvedTemplateVersion: resolvedTemplates[0]?.resolvedVersion,
+    });
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory,
+      { role: 'user', content: buildUserContent(message, images) },
+    ];
+    return { tools, bookingClaimGuardArmed, availabilityClaimGuardArmed, specialtyTerms, priceContextLoaded, messages };
+  }
+
+  /**
+   * Which skills this bot composes, and the tool list that survives the gate.
+   *
+   * Composable-templates: a skill influences the LLM — its TOOLS *and* its PROMPT
+   * section — iff its template selected it. Resolve the selection up-front so the
+   * module prompt sections are gated in LOCKSTEP with the tools gated here.
+   * Otherwise a no-booking bot still gets booking's "SERVICES (bookable)" catalog +
+   * "you MUST call create_booking" text with no tool behind it (LEAK-1). See
+   * gatedToolNames — same predicate, applied to the prompt surface.
+   *
+   * Templates are the SOLE source of skills: the bot's skills are exactly what
+   * its template composes (∩ entitlements). A Dental template that binds {booking}
+   * won't also offer handoff just because the plan allows it; and NO template (or
+   * one gone unavailable) → selectedSkillIds is empty → no skills, matching the
+   * "answers from your knowledge base only" empty-state. Flag-gated (OFF → legacy,
+   * entitlement-only).
+   *
+   * This runs BEFORE anything reads the gated list, because `bookingActive` is
+   * derived from it: gating late let an entitled-but-unselected booking skill
+   * pull the AvailabilityRule into {openingHours} and silently discard the
+   * tenant's businessHours (which the pre-AI off-hours gate *does* honour, so
+   * the two contradicted each other).
+   */
+  private async resolveSkillSelection(
+    tenantId: string,
+    resolvedTemplates: ResolvedTemplate[],
+    tools: ToolAdapter[],
+  ) {
+    const composableEnabled = process.env.COMPOSABLE_TEMPLATES_ENABLED === 'true';
+    // Resolved BEFORE the skill selection, because an `inherit_entitled` template (#103) takes
+    // its skills from exactly this list. `listActiveModules` is already entitlement- and
+    // preference-filtered, so nothing here can hand a bot a tool its plan does not include.
+    const activeModules = await listActiveModules(tenantId);
+    const activeModuleIds = activeModules.map((a) => a.module.id);
+    const activeFeatures = new Set(
+      activeModules
+        .map((a) => a.module.gate)
+        .filter((g): g is { kind: 'feature'; feature: FeatureKey } => g.kind === 'feature')
+        .map((g) => g.feature),
+    );
+    // Flag OFF is the legacy path: skills come from `expectedModules` alone and nothing
+    // inherits, exactly as before. Normalised here rather than inside the shared resolver, so
+    // the one function every surface calls stays free of a runtime-only flag.
+    const templatesForSkills = composableEnabled
+      ? resolvedTemplates
+      : resolvedTemplates.map((rt) => ({ ...rt, selectedSkillIds: null, skillPolicy: 'explicit' as const }));
+    const selectedSkillIds = effectiveSkillIds(
+      templatesForSkills,
+      composableEnabled ? featureGatedSkillIds((f) => activeFeatures.has(f)) : [],
+    );
+    let gated = tools;
+    if (composableEnabled) {
+      const drop = gatedToolNames(selectedSkillIds, activeModuleIds);
+      if (drop.size) gated = gated.filter((tl) => !drop.has(tl.name));
+    }
+    return { composableEnabled, activeModules, activeModuleIds, selectedSkillIds, tools: gated };
+  }
+
+  /**
+   * Module prompt contributions (e.g. booking's bookable-services catalog).
+   *
+   * Each active module builds (and loads data for) its own section; the
+   * resolver call hits the same per-tenant caches the tool registry used.
+   */
+  private async buildModuleSections(args: {
+    tenant: Tenant;
+    bot: Bot;
+    session: ChatSession;
+    activeModules: Awaited<ReturnType<typeof listActiveModules>>;
+    selectedSkillIds: string[];
+    composableEnabled: boolean;
+    bookingActive: boolean;
+  }): Promise<string[]> {
+    const { tenant, bot, session, activeModules, selectedSkillIds, composableEnabled, bookingActive } = args;
+    const moduleSections: string[] = [];
+    for (const active of activeModules) {
+      if (!active.module.buildPromptSection) continue;
+      // Prompt gate: skip the section of an active skill the template didn't select.
+      if (!skillPromptAllowed(active.module.id, selectedSkillIds, composableEnabled)) continue;
+      try {
+        const section = await active.module.buildPromptSection({
+          tenantId: tenant.id,
+          botId: bot.id,
+          config: active.config,
+        });
+        if (section) moduleSections.push(section);
+      } catch (error) {
+        logger.warn(`Module prompt section failed for ${active.module.id} — skipped`, {
+          tenantId: tenant.id,
+          error,
+        });
+      }
+    }
+    if (bookingActive) {
+      const boundAddress = await getBoundAddress(session.id);
+      if (boundAddress?.formattedAddress) {
+        moduleSections.push(buildBoundAddressSection(boundAddress.formattedAddress));
+      }
+    }
+    return moduleSections;
+  }
+
+  /**
+   * Pre-fill the customer's name from their messaging-channel profile (channel
+   * sessions only) so the agent can confirm it rather than ask cold. Widget
+   * sessions have no binding/profile name.
+   */
+  private async resolveCustomerName(session: ChatSession): Promise<string | undefined> {
+    if (!session.channel || session.channel === 'widget') return undefined;
+    const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
+      where: { sessionId: session.id },
+      select: { externalUserName: true },
+    });
+    return binding?.externalUserName ?? undefined;
+  }
+
+  /**
+   * The booking facts the prompt quotes: {services}, {openingHours}, {bookingHours}.
+   *
+   * Anchor "Today is …" to the bot's canonical timezone for EVERY bot. Booking
+   * used to be the only path that passed it, so a non-booking bot mixed UTC/server
+   * dates and could answer "were you open yesterday?" against the wrong weekday.
+   *
+   * Spoken hours prefer the operational Bot.settings.businessHours (what the
+   * owner set in the bot form). The booking AvailabilityRule is only a fallback
+   * for the placeholder — it still solely governs which slots are bookable.
+   */
+  private async loadBookingRuleContext(
+    bot: Bot,
+    tenant: Tenant,
+    effBotSettings: BotSettings,
+    bookingActive: boolean,
+  ) {
+    const operationalHoursConfigured = isBusinessHoursConfigured(effBotSettings.businessHours);
+    let openingHours = operationalHoursConfigured
+      ? formatBusinessHoursForPlaceholder(
+          effBotSettings.businessHours,
+          new Date(),
+          bot.businessTimezone,
+        )
+      : '';
+    let bookingTimezone: string | undefined = bot.businessTimezone;
+    let bookingConfigured = false;
+    // Any bookable service carried out at the customer's address → travel-caveat
+    // wording on ## OUR ADDRESS (and no come-in-person invite).
+    let hasTravelServices = false;
+    let bookingServices = '';
+    let bookingHours = '';
+    if (!bookingActive) {
+      return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours };
+    }
+    try {
+      // Full row: the placeholder formatter needs availabilityMode/weeklyHours,
+      // not just the timezone.
+      const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
+        where: { botId: bot.id },
+      });
+      // Canonical, server-owned business timezone (PR 1a): the bot value is
+      // authoritative; the rule's denormalized copy is never consulted —
+      // including inside the placeholder formatter, which derives "today"
+      // (closure relevance) from rule.timezone.
+      bookingTimezone = bot.businessTimezone || rule?.timezone || undefined;
+      if (rule && bot.businessTimezone) rule.timezone = bot.businessTimezone;
+      // Operational hours stay authoritative even when the formatted string is
+      // empty (enabled but all-closed). Only fall back when they are not set.
+      if (!operationalHoursConfigured) openingHours = formatHoursForPlaceholder(rule);
+      // {bookingHours} always uses the AvailabilityRule. Empty when there is no
+      // rule. Gated later: a bot that cannot book must not quote these hours.
+      bookingHours = formatHoursForPlaceholder(rule);
+      // ponytail: rule existence is treated as "hours set up". A rule with empty
+      // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
+      // case we target (no rule at all); tighten later if empty-hours configs appear.
+      // "Bookable online" = active AND online-bookable; an inactive or
+      // phone-only service must not flip this true (it isn't bookable via
+      // the chat). isActive matches the catalog's own filter.
+      // Full rows: the placeholder formatter needs name/duration/price. These are
+      // the genuinely bookable services (active + online-bookable), which is what
+      // {services} should advertise.
+      const services = await AppDataSource.getRepository(ServiceType).find({
+        where: { botId: bot.id, isActive: true, onlineBookable: true },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      });
+      bookingConfigured = isBookingConfigured(services, !!rule);
+      bookingServices = formatServicesForPlaceholder(services, bookingTimezone, new Date());
+      hasTravelServices = services.some((s) => s.customerAddressRequired);
+    } catch (error) {
+      // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
+      // must not falsely decline a CONFIGURED tenant. Worst case is the prior
+      // behavior (unconfigured tenant may still over-offer), never a regression.
+      logger.warn('booking config check failed — treating booking as usable', { tenantId: tenant.id, error });
+      bookingConfigured = true;
+    }
+    return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours };
+  }
+
+  /**
+   * Where the business travels, for {serviceArea}. Loaded for EVERY bot, not just
+   * booking ones: like opening hours this is a business fact a template author may
+   * want to state, and it is one indexed lookup that returns nothing for the bots
+   * (the overwhelming majority) with no area configured. Fails open to ''.
+   *
+   * The venue address (where the business receives customers) comes from the SAME
+   * BookingSettings row — no new query. Gates the come-in-person invite in the
+   * BOOKING (NOT AVAILABLE) block; stays undefined for a mobile-only business.
+   */
+  private async loadVenueContext(
+    bot: Bot,
+    tenant: Tenant,
+    effBotSettings: BotSettings,
+  ): Promise<{ serviceArea: string; venueLine?: string }> {
+    const out: { serviceArea: string; venueLine?: string } = { serviceArea: '' };
+    try {
+      const bookingSettings = await AppDataSource.getRepository(BookingSettings).findOne({
+        where: { botId: bot.id },
+      });
+      out.serviceArea = describeServiceArea(
+        Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
+      );
+      const quotedAddressEnabled = effBotSettings.quotedAddress?.enabled !== false;
+      out.venueLine = quotedAddressEnabled ? resolveVenueLine(tenant, effBotSettings, bookingSettings) : undefined;
+    } catch (error) {
+      logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
+    }
+    return out;
+  }
+
+  /**
+   * Per-template skill prose: the version's OVERRIDE if set, else the skill's
+   * code-default (defaultProse). Only for skills that resolved `ready`, so an
+   * unconfigured skill contributes no prose. Behind the flag (OFF → unchanged).
+   *
+   * H6: merge prose overrides across all bound templates (primary wins on conflict —
+   * it's applied last), so a secondary template's skill still gets its authored prose.
+   */
+  private buildSkillProse(
+    resolvedTemplates: ResolvedTemplate[],
+    selectedSkillIds: string[],
+    skillStates: ReturnType<typeof resolveSkillStates>,
+    composableEnabled: boolean,
+  ): Array<{ id: string; prose: string }> {
+    if (!composableEnabled) return [];
+    const skillProseOverrides = Object.assign(
+      {},
+      ...[...resolvedTemplates].reverse().map((rt) => rt.skillProse ?? {}),
+    ) as Record<string, string>;
+    return selectedSkillIds
+      .filter((id) => skillStates[id] === 'ready')
+      .map((id) => ({ id, prose: (skillProseOverrides?.[id] ?? getModule(id)?.defaultProse ?? '').trim() }))
+      .filter((sp) => sp.prose.length > 0);
+  }
+
+  /**
+   * Template variables — apply the bound template's declared DEFAULTS under the
+   * bot's own tenant-filled values (bot value wins), so a declared {placeholder}
+   * with a default substitutes even before a tenant fills it in.
+   *
+   * Every DECLARED variable resolves to a value — its default, else empty — so an
+   * unfilled one renders as blank rather than leaking a literal {key} to the model.
+   */
+  private applyTemplateVariables(aiSettings: BotSettings['ai'], resolvedTemplates: ResolvedTemplate[]): void {
+    const varDefaults: Record<string, string> = {};
+    for (const v of resolvedTemplates[0]?.variables ?? []) {
+      varDefaults[v.key] = typeof v.default === 'string' ? v.default : '';
+    }
+    if (aiSettings && Object.keys(varDefaults).length) {
+      const av = aiSettings as { templateVariables?: Record<string, string> };
+      av.templateVariables = { ...varDefaults, ...(av.templateVariables ?? {}) };
+    }
+  }
+
+  /** One turn of the agent loop: budget, provider call, then tools or the reply. */
+  private async runIteration(i: number, ctx: RunLoopContext, state: RunLoopState): Promise<IterationOutcome> {
+    // Budget check
+    if (await this.metering.isOverBudget(ctx.tenant.id, (ctx.aiSettings as any)?.dailyTokenBudget)) {
+      return { kind: 'done', result: this.budgetExceededResult(ctx, state) };
+    }
+
+    // Build tool definitions for LLM
+    const toolDefs: ToolDefinition[] | undefined = !state.addressCorrectionOnly && ctx.tools.length > 0
+      ? ctx.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
+      : undefined;
+
+    // Call LLM (one retry on a transient upstream failure — see callProviderWithRetry).
+    const startMs = Date.now();
+    const response = await callProviderWithRetry(
+      ctx.provider,
+      state.messages,
+      { model: ctx.model, maxTokens: 1000, temperature: 0.3, jsonMode: false, tools: toolDefs },
+      ctx.session.id,
+    );
+    const latencyMs = Date.now() - startMs;
+
+    // Record metering
+    await this.metering.record(ctx.tenant.id, response.usage);
+
+    // Build trace entry
+    const traceEntry: AgentTrace['iterations'][0] = {
+      llmCall: { model: ctx.model, ...response.usage, latencyMs },
+      toolCalls: [],
+    };
+
+    // No tool calls — final response
+    if (response.finishReason === 'stop' || !response.toolCalls?.length || state.addressCorrectionOnly) {
+      ctx.trace.iterations.push(traceEntry);
+      return this.finalizeIteration(i, ctx, state, response.content ?? '');
+    }
+
+    // Process tool calls
+    // Append assistant message WITH toolCalls BEFORE processing tool results
+    state.messages.push({ role: 'assistant', content: response.content || '', toolCalls: response.toolCalls });
+
+    for (const toolCall of response.toolCalls) {
+      await this.executeToolCall(toolCall, traceEntry, ctx, state);
+    }
+
+    ctx.trace.iterations.push(traceEntry);
+    return CONTINUE_ITERATION;
+  }
+
+  private budgetExceededResult(ctx: RunLoopContext, state: RunLoopState): AgentResult {
+    ctx.trace.finishReason = 'budget_exceeded';
+    ctx.trace.terminal = { result: 'budget_exceeded' };
+    void this.traceLogger.save(ctx.trace); // fire-and-forget: keeps the trace write off the response path
+    return {
+      type: 'budget_exceeded',
+      fallbackMessage: ctx.aiSettings?.guardrails?.fallbackMessage || 'I apologize, but I am temporarily unavailable.',
+      ...(state.escalationRequested ? { handoffRequested: true } : {}),
+    };
+  }
+
+  /**
+   * The reply guards, in the order they have always run.
+   *
+   * Each one either passes the (possibly replaced) content on, asks for one more
+   * iteration with a nudge appended, or ends the run with a prepared result.
+   */
+  private async finalizeIteration(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): Promise<IterationOutcome> {
+    const address = this.applyAddressGuard(i, ctx, state, content);
+    if (address.kind === 'retry') return CONTINUE_ITERATION;
+    const booking = this.applyBookingClaimGuard(i, ctx, state, address.content);
+    if (booking.kind === 'retry') return CONTINUE_ITERATION;
+    if (booking.kind === 'result') return { kind: 'done', result: booking.result };
+    if (this.applyAvailabilityClaimGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
+    const promised = await this.applyPromisedCheckGuard(i, ctx, state, booking.content);
+    if (promised.kind === 'retry') return CONTINUE_ITERATION;
+    if (promised.kind === 'result') return { kind: 'done', result: promised.result };
+    return { kind: 'done', result: await this.buildFinalResult(ctx, state, promised.content) };
+  }
+
+  /** A reply that states an address the booking was NOT made for. */
+  private applyAddressGuard(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): ContentOrRetry {
+    if (state.addressFactConflict) {
+      logger.warn('[agent] conflicting authoritative booking addresses in one run; returning safe fallback', {
+        sessionId: ctx.session.id,
+      });
+      return { kind: 'content', content: ADDRESS_CONFLICT_FALLBACK };
+    }
+    const fact = state.pendingAddressFact;
+    if (!fact || validAddressReply(content, fact)) return { kind: 'content', content };
+    if (!state.addressCorrectionAttempted && i < MAX_ITERATIONS - 1) {
+      state.addressCorrectionAttempted = true;
+      (ctx.trace.corrections ??= []).push('booking_address_mismatch');
+      state.addressCorrectionOnly = true;
+      logger.warn('[agent] blocked inaccurate booking address reply; requesting correction', {
+        sessionId: ctx.session.id,
+      });
+      state.messages.push({ role: 'assistant', content });
+      state.messages.push({ role: 'user', content: addressCorrectionNote(fact) });
+      return { kind: 'retry' };
+    }
+    logger.warn('[agent] persistent inaccurate booking address reply; returning safe fallback', {
+      sessionId: ctx.session.id,
+    });
+    return { kind: 'content', content: addressSafeFallback(fact) };
+  }
+
+  /**
+   * Egress guard (issue #35): never let the model tell the customer a
+   * booking/request happened unless one was actually recorded this run.
+   */
+  private applyBookingClaimGuard(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): GuardVerdict {
+    if (!ctx.bookingClaimGuardArmed || state.bookingRecorded || !claimsBookingForAgentNudge(content)) {
+      return { kind: 'content', content };
+    }
+    if (!state.correctionAttempted && i < MAX_ITERATIONS - 1) {
+      state.correctionAttempted = true;
+      (ctx.trace.corrections ??= []).push('unrecorded_booking_claim');
+      logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: ctx.session.id });
+      state.messages.push({ role: 'assistant', content });
+      state.messages.push({ role: 'user', content: BOOKING_CORRECTION_NOTE });
+      return { kind: 'retry' }; // re-run: model should call the tool or ask for the missing detail
+    }
+    ctx.trace.finishReason = 'completed';
+    ctx.trace.terminal = { result: 'completed' };
+    void this.traceLogger.save(ctx.trace);
+    logger.warn('[agent] persistent unrecorded booking claim; returning safe fallback', { sessionId: ctx.session.id });
+    // The affordance rides even the safe fallback. This branch fires when the model kept
+    // claiming a booking nobody recorded, so the content is thrown away - but whether the
+    // customer's address needs verifying is a fact about the conversation, not about the
+    // sentence, and it is still true. Dropping it in the early return is the exact shape
+    // #82 records two files over: attached only at the last exit, shipped from none of
+    // the others.
+    return {
+      kind: 'result',
+      result: {
+        type: 'response',
+        content: BOOKING_SAFE_FALLBACK,
+        ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
+        ...(state.escalationRequested ? { handoffRequested: true } : {}),
+      },
+    };
+  }
+
+  /**
+   * The availability twin of the guard above: a NAMED DATE declared shut or full when
+   * nothing looked. Observed on production - "woensdag 16 september valt op een
+   * sluitingsdag", offered as a manual request, on a turn with zero tool calls and a day
+   * that had sixteen free slots. Every other availability guard reads a
+   * `check_availability` result, so a turn that never called it is exactly the turn none
+   * of them can judge.
+   *
+   * Nudge only, never a safe fallback. The model is not lying about a mutation it made,
+   * it simply answered too early, and one more iteration with the tool is the whole fix.
+   * A second offence falls through and ships: a clumsy sentence beats a dead end.
+   *
+   * Returns true when the run owes the model one more iteration.
+   */
+  private applyAvailabilityClaimGuard(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): boolean {
+    if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.bookingRecorded) return false;
+    if (!claimsDatedUnavailability(content)) return false;
+    if (state.availabilityCorrectionAttempted || i >= MAX_ITERATIONS - 1) return false;
+    state.availabilityCorrectionAttempted = true;
+    (ctx.trace.corrections ??= []).push('availability_unchecked_claim');
+    logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
+      sessionId: ctx.session.id,
+    });
+    state.messages.push({ role: 'assistant', content });
+    state.messages.push({ role: 'user', content: AVAILABILITY_CORRECTION_NOTE });
+    return true; // re-run: the model should call check_availability before answering
+  }
+
+  /**
+   * THE DEAD-END PROMISE, and the one failure in this family that ends with no answer at
+   * all. Production, session 4d3f6473, 18:04:18Z: "Ik controleer even of woensdag 2
+   * september 2026 om 09:15 uur beschikbaar is voor 30 minuten" - zero tool calls that
+   * turn, and nothing schedules a continuation, so the customer is left holding a promise
+   * no code path will keep. The guards above judge a claim the model had no right to make;
+   * this judges a turn that made no claim, gave no answer, and did no work.
+   *
+   * TWO OUTCOMES, and neither may ship the promise. A promise on a turn that never looked
+   * is a model that answered too early: one nudge fixes it. A promise on a turn where the
+   * call already RAN and came back with nothing - paused business, no calendar,
+   * request-only service - must not be nudged, because that is an instruction to repeat
+   * work that already failed; but it is the same dead end, and the customer is most likely
+   * to be stranded exactly there. So it is replaced instead, with no second call.
+   */
+  private async applyPromisedCheckGuard(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): Promise<GuardVerdict> {
+    const pass: GuardVerdict = { kind: 'content', content };
+    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded) return pass;
+    if (!promisesAvailabilityCheck(content, ctx.message)) return pass;
+    if (!state.availabilityChecked) return this.promisedCheckNothingRan(i, ctx, state, content);
+    // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the
+    // tool sets `availability` for every success, `slots: []` included - so object
+    // truthiness says nothing about whether the customer can see a time. What decides that
+    // is the CONFIRMABLE array, because `buildSlotQuickReplies` reads exactly that: with
+    // one slot the chips are on screen and a clumsy "let me check" beside them is not a
+    // dead end. With none - an empty diary, or a travel result where every time needs the
+    // owner's say-so - there is nothing on screen and the promise is the dead end again.
+    if (state.pendingAvailability && state.pendingAvailability.slots.length > 0) return pass;
+    ctx.trace.finishReason = 'completed';
+    ctx.trace.terminal = { result: 'completed' };
+    void this.traceLogger.save(ctx.trace);
+    // TWO DIFFERENT FACTS, so two sentences. A call that THREW means the diary could not
+    // be read; a call that succeeded with nothing confirmable means it was read and had
+    // nothing to offer. Saying "I cannot see the diary" about a diary we just read would
+    // be a fresh lie, and neither sentence may say "closed" or "fully booked" - the
+    // tool's own guidance forbids exactly that.
+    const promiseReplacement = state.pendingAvailability
+      ? NO_CONFIRMABLE_TIMES_FALLBACK
+      : CHECK_FAILED_FALLBACK;
+    logger.warn('[agent] reply promised a check with nothing to offer; replacing it', {
+      sessionId: ctx.session.id,
+      checked: true,
+      succeeded: !!state.pendingAvailability,
+    });
+    return {
+      kind: 'result',
+      result: {
+        type: 'response',
+        content: await inCustomerLanguage(promiseReplacement, ctx.message, ctx.session),
+        ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
+        ...(state.escalationRequested ? { handoffRequested: true } : {}),
+      },
+    };
+  }
+
+  /** A promise to look at the diary on a turn where nothing looked: nudge once, then ask. */
+  private async promisedCheckNothingRan(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): Promise<GuardVerdict> {
+    if (!state.promisedCheckCorrectionAttempted && i < MAX_ITERATIONS - 1) {
+      state.promisedCheckCorrectionAttempted = true;
+      logger.warn('[agent] reply promised a check nothing ran; nudging model to call it', {
+        sessionId: ctx.session.id,
+      });
+      state.messages.push({ role: 'assistant', content });
+      state.messages.push({ role: 'user', content: PROMISED_CHECK_NOTE });
+      return { kind: 'retry' }; // re-run: call check_availability, or ask for the one missing detail
+    }
+    ctx.trace.finishReason = 'completed';
+    ctx.trace.terminal = { result: 'completed' };
+    void this.traceLogger.save(ctx.trace);
+    logger.warn('[agent] reply promised a check twice; asking the customer instead', {
+      sessionId: ctx.session.id,
+    });
+    return {
+      kind: 'result',
+      result: {
+        type: 'response',
+        content: await inCustomerLanguage(PROMISED_CHECK_FALLBACK, ctx.message, ctx.session),
+        ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
+        ...(state.escalationRequested ? { handoffRequested: true } : {}),
+      },
+    };
+  }
+
+  /** The reply that ships: chips, the invented-time guard, and the #80 offer record. */
+  private async buildFinalResult(
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    finalContent: string,
+  ): Promise<AgentResult> {
+    ctx.trace.finishReason = 'completed';
+    ctx.trace.terminal = { result: 'completed' };
+    void this.traceLogger.save(ctx.trace); // fire-and-forget: keeps the trace write off the response path
+    const av = state.pendingAvailability;
+    const times = offeredTimeSets(av);
+    // THE HOUR THE CUSTOMER THEMSELVES NAMED. Never an allowance - a reply may not confirm
+    // it just because they asked ("09:15 is vrij, net als 09:00 en 09:30" is three times, so
+    // the single-time guard stands down and the enumeration guard is the only thing left).
+    // It only decides WHICH replacement is true: their own hour being unavailable is a
+    // sharper sentence than a bare pointer at the list.
+    const customerTimeText = latestCustomerTimeText([
+      ...ctx.conversationHistory.map((m) => ({
+        role: m.role,
+        text: contentToText(m.content),
+      })),
+      { role: 'user', text: ctx.message },
+    ]);
+    // Chips exist to pick a time. If the customer already named one that we can actually
+    // book, or the reply is confirming that one time, attaching hours again is how the
+    // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
+    const alreadyChoseTime = !!(
+      times.confirmableLocal &&
+      (namesSingleOfferedTime(customerTimeText, times.confirmableLocal) ||
+        namesSingleOfferedTime(finalContent, times.confirmableLocal))
+    );
+    const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(av);
+    const safeContent = await this.safeReplyContent({
+      ctx, finalContent, av, times, customerTimeText, onScreen: !!slotChips?.length,
+    });
+
+    return {
+      type: 'response',
+      content: safeContent,
+      quickReplies: slotChips,
+      validationContext: { bookingRecorded: state.bookingRecorded, priceContextLoaded: state.priceContextLoaded },
+      ...(state.escalationRequested ? { handoffRequested: true } : {}),
+      ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
+      // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
+      // delivered. It cannot be measured here - channels truncate quick replies and drop
+      // them where unsupported - and dispatch knows none of this context on its own.
+      ...(slotChips?.length && av
+        ? { offer: buildOfferPayload(ctx.botId, av, state.pendingAvailabilityCallId, slotChips.length) }
+        : {}),
+    };
+  }
+
+  /**
+   * A reply that NAMES a time nobody can book is the availability twin of a false
+   * confirmation, and it reaches the customer as plain prose - above perfectly correct
+   * chips, or above nothing at all. An ENUMERATION is compared against what was actually
+   * delivered, not the whole slot list: a time truncated away by the channel is one the
+   * customer cannot take.
+   *
+   * GATED ON THE AVAILABILITY, NOT ON THE CHIPS. A requestable-only result has no chip by
+   * design, and that is the turn where an invented time is most dangerous - the tool has
+   * just asked the model to read times out in prose, and nothing on screen contradicts it.
+   * Skipped only when this call offered NOTHING: with no ground truth every named time
+   * reads as invented, including the request-capture flow's job of repeating the time the
+   * customer themselves asked for.
+   */
+  private async safeReplyContent(args: {
+    ctx: RunLoopContext;
+    finalContent: string;
+    av: PendingAvailability | null;
+    times: OfferedTimes;
+    customerTimeText: string;
+    onScreen: boolean;
+  }): Promise<string> {
+    const { ctx, finalContent, av, times, customerTimeText, onScreen } = args;
+    if (!av || !times.deliverableLocal?.length) return finalContent;
+    const judged = collapseAppointmentSpans(finalContent, times.slotLengthsMin);
+    // THE ENUMERATION GUARD STAYS ON CHIPPED TURNS, which is the only place its rule makes
+    // sense: it compares a list against what the channel delivered, and a time truncated
+    // away is one the customer cannot tap. With nothing on screen there is no delivered
+    // list to contradict, and its 2-or-more floor makes it the wrong instrument anyway.
+    const bogus = onScreen ? unofferedTimesIn(judged, times.deliverableLocal) : [];
+    // ONE named time is not a stray item in a list, it is the whole recommendation, so it
+    // is judged on EVERY turn a time was offered. That exemption shipped "the next valid
+    // time is 08:30" - the first slot's UTC instant read as a wall clock - above chips
+    // that said 10:30, and shipped it again where no chip existed to contradict it.
+    const invented = bogus.length
+      ? null
+      : unofferedSingleTimeIn(judged, times.everyOfferableLocal ?? times.deliverableLocal);
+    const flagged = bogus.length ? bogus : invented ? [invented] : [];
+    if (!flagged.length) return finalContent;
+    // WHICH SENTENCE IS TRUE. When one of the flagged hours is the one the CUSTOMER
+    // named, "that time is not available" answers them; a bare pointer at the list reads
+    // as if their question was never heard. Their hour never buys the reply a pass - it
+    // only chooses the wording.
+    const named = new Set(parseClockTimes(customerTimeText).map((t) => t.key));
+    const theirs = flagged.some((w) => parseClockTimes(w).some((t) => named.has(t.key)));
+    const replacement = !onScreen
+      ? NO_SLOTS_ON_SCREEN_FALLBACK
+      : theirs || invented
+        ? UNBOOKABLE_TIME_FALLBACK
+        : AVAILABILITY_SAFE_FALLBACK;
+    logger.warn('[agent] reply named a time nobody offered; replacing it', {
+      sessionId: ctx.session.id,
+      named: flagged.slice(0, 6),
+      offered: times.everyOfferableLocal ?? times.deliverableLocal,
+      chips: onScreen,
+      customerNamed: theirs,
+    });
+    // IN THE CUSTOMER'S LANGUAGE. These three are authored in English and they replace a
+    // reply the model wrote in the customer's, so shipping them raw answers a Dutch
+    // question in English - seen on production on 2026-08-26, driving the real widget.
+    // `localizeMessage` fails open: anything it cannot do returns the original.
+    return inCustomerLanguage(replacement, ctx.message, ctx.session);
+  }
+
+  /** One tool call: preconditions, the per-run side-effect dedupe, then execution. */
+  private async executeToolCall(
+    toolCall: ToolCall,
+    traceEntry: AgentTrace['iterations'][0],
+    ctx: RunLoopContext,
+    state: RunLoopState,
+  ): Promise<void> {
+    const tool = ctx.tools.find((t) => t.name === toolCall.name);
+    const toolStartMs = Date.now();
+
+    if (!tool) {
+      state.messages.push({ role: 'tool', content: JSON.stringify({ error: `Unknown tool: ${toolCall.name}` }), toolCallId: toolCall.id });
+      return;
+    }
+
+    // Precondition check
+    if (tool.preconditions?.toolsCalled) {
+      const missing = tool.preconditions.toolsCalled.filter((t) => !state.toolsCalled.includes(t));
+      if (missing.length > 0) {
+        const errorMsg = `Must call ${missing.join(', ')} before ${tool.name}`;
+        state.messages.push({ role: 'tool', content: JSON.stringify({ error: errorMsg }), toolCallId: toolCall.id });
+        traceEntry.toolCalls.push({ name: tool.name, args: toolCall.arguments, result: { success: false, error: errorMsg }, latencyMs: 0 });
+        return;
+      }
+    }
+
+    // #7: dedupe side-effecting tools within this run — an identical (tool,
+    // args) call a second time, AFTER it already succeeded, does NOT re-execute;
+    // the model is told it was already performed. Marked only on success (below)
+    // so a failed first attempt can still be retried. (Cross-run dedupe is the
+    // provider's idempotency job.)
+    const sideEffectSig = tool.hasSideEffects
+      ? `${tool.name}:${JSON.stringify(toolCall.arguments)}`
+      : null;
+    if (sideEffectSig && state.sideEffectsInvoked.has(sideEffectSig)) {
+      state.messages.push({ role: 'tool', content: JSON.stringify({ note: 'already_performed', tool: tool.name }), toolCallId: toolCall.id });
+      traceEntry.toolCalls.push({ name: tool.name, args: toolCall.arguments, result: { success: true }, latencyMs: 0 });
+      return;
+    }
+
+    // Execute tool
+    const toolCtx: ToolContext = {
+      tenantId: ctx.tenant.id,
+      sessionId: ctx.session.id,
+      runId: ctx.runId,
+      channel: ctx.session.channel ?? 'widget',
+      toolsCalledThisTurn: state.toolsCalled,
+      dataSource: AppDataSource,
+      conversationHistory: state.messages,
+      specialtyTerms: ctx.specialtyTerms.length ? ctx.specialtyTerms : undefined,
+      botOwned: ctx.sessionBotOwned,
+    };
 
     try {
-      let tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
-      // Armed from the ENTITLED (pre-gate) tool list, because a template-gated
-      // booking bot is exactly the one most likely to be pushed into hallucinating
-      // "I've booked you in" — and BOOKING_CORRECTION_NOTE has a branch for a model
-      // holding no booking tool. Deliberately NOT `bookingActive` (see below).
-      const bookingClaimGuardArmed = tools.some((t) => t.name === 'create_booking');
-      // The availability twin. Armed on the tool that could have answered the question, so a bot
-      // with no way to check is never scolded for not checking.
-      const availabilityClaimGuardArmed = tools.some((t) => t.name === 'check_availability');
-      // Module prompt contributions (e.g. booking's bookable-services catalog).
-      // Each active module builds (and loads data for) its own section; the
-      // resolver call hits the same per-tenant caches the tool registry used.
-      // Composable-templates: a skill influences the LLM — its TOOLS *and* its PROMPT
-      // section — iff its template selected it. Resolve the selection up-front so the
-      // module prompt sections below are gated in LOCKSTEP with the tools gated later.
-      // Otherwise a no-booking bot still gets booking's "SERVICES (bookable)" catalog +
-      // "you MUST call create_booking" text with no tool behind it (LEAK-1). See
-      // gatedToolNames — same predicate, applied to the prompt surface.
-      const composableEnabled = process.env.COMPOSABLE_TEMPLATES_ENABLED === 'true';
-      const expectedModuleIds = resolvedTemplates[0]?.expectedModules;
-      // H6: skills come from ALL bound templates (composeTemplateBodies already unions
-      // their prompt bodies), not just the primary — else a secondary template's skills
-      // silently don't take effect. Union each binding's effective skills.
-      const moduleSections: string[] = [];
-      // Resolved BEFORE the skill selection, because an `inherit_entitled` template (#103) takes
-      // its skills from exactly this list. `listActiveModules` is already entitlement- and
-      // preference-filtered, so nothing here can hand a bot a tool its plan does not include.
-      const activeModules = await listActiveModules(tenant.id);
-      const activeModuleIds = activeModules.map((a) => a.module.id);
-      const activeFeatures = new Set(
-        activeModules
-          .map((a) => a.module.gate)
-          .filter((g): g is { kind: 'feature'; feature: FeatureKey } => g.kind === 'feature')
-          .map((g) => g.feature),
-      );
-      // Flag OFF is the legacy path: skills come from `expectedModules` alone and nothing
-      // inherits, exactly as before. Normalised here rather than inside the shared resolver, so
-      // the one function every surface calls stays free of a runtime-only flag.
-      const templatesForSkills = composableEnabled
-        ? resolvedTemplates
-        : resolvedTemplates.map((rt) => ({ ...rt, selectedSkillIds: null, skillPolicy: 'explicit' as const }));
-      const selectedSkillIds = effectiveSkillIds(
-        templatesForSkills,
-        composableEnabled ? featureGatedSkillIds((f) => activeFeatures.has(f)) : [],
-      );
-      // Templates are the SOLE source of skills: the bot's skills are exactly what
-      // its template composes (∩ entitlements). A Dental template that binds {booking}
-      // won't also offer handoff just because the plan allows it; and NO template (or
-      // one gone unavailable) → selectedSkillIds is empty → no skills, matching the
-      // "answers from your knowledge base only" empty-state. Drop every active skill's
-      // tools the template didn't select. Flag-gated (OFF → legacy, entitlement-only).
-      //
-      // This runs BEFORE anything reads `tools`, because `bookingActive` below is
-      // derived from it: gating late let an entitled-but-unselected booking skill
-      // pull the AvailabilityRule into {openingHours} and silently discard the
-      // tenant's businessHours (which the pre-AI off-hours gate *does* honour, so
-      // the two contradicted each other).
-      if (composableEnabled) {
-        const drop = gatedToolNames(selectedSkillIds, activeModuleIds);
-        if (drop.size) tools = tools.filter((tl) => !drop.has(tl.name));
-      }
-      // Whether the bot can ACTUALLY book — read from the GATED tools. Drives the
-      // {openingHours}/{services} sources: a bot that can't book must never quote a
-      // booking availability rule it has no skill to use, nor advertise its services.
-      const bookingActive = tools.some((t) => t.name === 'create_booking');
-      for (const active of activeModules) {
-        if (!active.module.buildPromptSection) continue;
-        // Prompt gate: skip the section of an active skill the template didn't select.
-        if (!skillPromptAllowed(active.module.id, selectedSkillIds, composableEnabled)) continue;
-        try {
-          const section = await active.module.buildPromptSection({
-            tenantId: tenant.id,
-            botId: bot.id,
-            config: active.config,
-          });
-          if (section) moduleSections.push(section);
-        } catch (error) {
-          logger.warn(`Module prompt section failed for ${active.module.id} — skipped`, {
-            tenantId: tenant.id,
-            error,
-          });
-        }
-      }
-      if (bookingActive) {
-        const boundAddress = await getBoundAddress(session.id);
-        if (boundAddress?.formattedAddress) {
-          moduleSections.push(buildBoundAddressSection(boundAddress.formattedAddress));
-        }
-      }
-      // Pre-fill the customer's name from their messaging-channel profile (channel
-      // sessions only) so the agent can confirm it rather than ask cold. Widget
-      // sessions have no binding/profile name.
-      let customerName: string | undefined;
-      if (session.channel && session.channel !== 'widget') {
-        const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
-          where: { sessionId: session.id },
-          select: { externalUserName: true },
-        });
-        customerName = binding?.externalUserName ?? undefined;
-      }
-      // Anchor "Today is …" to the bot's canonical timezone for EVERY bot. Booking
-      // used to be the only path that passed it, so a non-booking bot mixed UTC/server
-      // dates and could answer "were you open yesterday?" against the wrong weekday.
-      let bookingTimezone: string | undefined = bot.businessTimezone;
-      let bookingConfigured = false;
-      // Rendered values for the {services} / {openingHours} / {bookingHours} placeholders.
-      // Built from the SAME rows this block already loads (no extra queries).
-      let bookingServices = '';
-      let bookingHours = '';
-      // Any bookable service carried out at the customer's address → travel-caveat
-      // wording on ## OUR ADDRESS (and no come-in-person invite).
-      let hasTravelServices = false;
-      // Spoken hours prefer the operational Bot.settings.businessHours (what the
-      // owner set in the bot form). The booking AvailabilityRule is only a fallback
-      // for the placeholder — it still solely governs which slots are bookable.
-      const operationalHoursConfigured = isBusinessHoursConfigured(effBotSettings.businessHours);
-      let openingHours = operationalHoursConfigured
-        ? formatBusinessHoursForPlaceholder(
-            effBotSettings.businessHours,
-            new Date(),
-            bot.businessTimezone,
-          )
-        : '';
-      if (bookingActive) {
-        try {
-          // Full row: the placeholder formatter needs availabilityMode/weeklyHours,
-          // not just the timezone.
-          const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
-            where: { botId: bot.id },
-          });
-          // Canonical, server-owned business timezone (PR 1a): the bot value is
-          // authoritative; the rule's denormalized copy is never consulted —
-          // including inside the placeholder formatter, which derives "today"
-          // (closure relevance) from rule.timezone.
-          bookingTimezone = bot.businessTimezone || rule?.timezone || undefined;
-          if (rule && bot.businessTimezone) rule.timezone = bot.businessTimezone;
-          // Operational hours stay authoritative even when the formatted string is
-          // empty (enabled but all-closed). Only fall back when they are not set.
-          if (!operationalHoursConfigured) openingHours = formatHoursForPlaceholder(rule);
-          // {bookingHours} always uses the AvailabilityRule. Empty when there is no
-          // rule. Gated later: a bot that cannot book must not quote these hours.
-          bookingHours = formatHoursForPlaceholder(rule);
-          // ponytail: rule existence is treated as "hours set up". A rule with empty
-          // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
-          // case we target (no rule at all); tighten later if empty-hours configs appear.
-          // "Bookable online" = active AND online-bookable; an inactive or
-          // phone-only service must not flip this true (it isn't bookable via
-          // the chat). isActive matches the catalog's own filter.
-          // Full rows: the placeholder formatter needs name/duration/price. These are
-          // the genuinely bookable services (active + online-bookable), which is what
-          // {services} should advertise.
-          const services = await AppDataSource.getRepository(ServiceType).find({
-            where: { botId: bot.id, isActive: true, onlineBookable: true },
-            order: { sortOrder: 'ASC', createdAt: 'ASC' },
-          });
-          bookingConfigured = isBookingConfigured(services, !!rule);
-          bookingServices = formatServicesForPlaceholder(services);
-          hasTravelServices = services.some((s) => s.customerAddressRequired);
-        } catch (error) {
-          // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
-          // must not falsely decline a CONFIGURED tenant. Worst case is the prior
-          // behavior (unconfigured tenant may still over-offer), never a regression.
-          logger.warn('booking config check failed — treating booking as usable', { tenantId: tenant.id, error });
-          bookingConfigured = true;
-        }
-      }
-      // Where the business travels, for {serviceArea}. Loaded for EVERY bot, not just
-      // booking ones: like opening hours this is a business fact a template author may
-      // want to state, and it is one indexed lookup that returns nothing for the bots
-      // (the overwhelming majority) with no area configured. Fails open to ''.
-      let serviceArea = '';
-      // The venue address (where the business receives customers), from the SAME
-      // BookingSettings row — no new query. Gates the come-in-person invite in the
-      // BOOKING (NOT AVAILABLE) block; stays undefined for a mobile-only business.
-      let venueLine: string | undefined;
-      try {
-        const bookingSettings = await AppDataSource.getRepository(BookingSettings).findOne({
-          where: { botId: bot.id },
-        });
-        serviceArea = describeServiceArea(
-          Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
-        );
-        const accountAddress = tenant.invoiceAddress ?? {
-          street: tenant.settings?.onboarding?.company?.street,
-          postalCode: tenant.settings?.onboarding?.company?.postalCode,
-          city: tenant.settings?.onboarding?.company?.city,
-          country: 'BE',
-        };
-        const quotedAddressEnabled = effBotSettings.quotedAddress?.enabled !== false;
-        venueLine = quotedAddressEnabled
-          ? resolveQuotedAddress({
-              botAddressEnabled: true,
-              botAddress: effBotSettings.quotedAddress ?? null,
-              accountAddress,
-            }) ??
-            formatVenueLine({
-              street: bookingSettings?.venueStreet,
-              postalCode: bookingSettings?.venuePostalCode,
-              city: bookingSettings?.venueCity,
-              country: bookingSettings?.venueCountry,
-            }) ??
-            undefined
-          : undefined;
-      } catch (error) {
-        logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
-      }
-      // Template body (layer 2) + effective tone/guardrails both come from the
-      // one resolve above (effBotSettings carries the effective AI slice).
-      // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
-      // resolve the bot's effective specialties, and pass them to the composer so a
-      // requiresSpecialPrompt specialty injects its exception block.
-      const vertical = resolvedTemplates[0]?.category ?? null;
-      const selectedSpecialtyDefs = effectiveSelectedSpecialties(effBotSettings.ai?.selectedSpecialties, vertical);
-      const specialties = resolveSpecialties(selectedSpecialtyDefs);
-      const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
-      // composableEnabled / boundSkillIds / expectedModuleIds / selectedSkillIds are
-      // hoisted above (so the module prompt sections are gated in lockstep with tools).
-      // Resolve each selected/active skill's STATE for the trace; the tool drop below
-      // then removes a non-ready skill's tools (no phantom bookings).
-      const skillStates = resolveSkillStates({
-        selected: selectedSkillIds,
-        active: activeModuleIds,
-        gateKind: (id) => getModule(id)?.gate.kind,
-        readiness: (id) => readinessRefinement(id, { bookingConfigured }),
+      const result = await tool.execute(toolCall.arguments, toolCtx);
+      state.toolsCalled.push(tool.name);
+      // #7: only now (post-success) is the side-effect "performed" — a failed
+      // attempt stays retryable.
+      if (sideEffectSig && result.success) state.sideEffectsInvoked.add(sideEffectSig);
+      this.absorbToolResult(tool, toolCall, result, ctx, state);
+      const resultJson = truncateToolPayload(this.modelPayloadFor(tool, result, ctx, state));
+      state.messages.push({
+        role: 'tool',
+        content: resultJson,
+        toolCallId: toolCall.id,
       });
-      // (The template tool-gate ran above, before `bookingActive` was read.)
-      // Per-template skill prose: the version's OVERRIDE if set, else the skill's
-      // code-default (defaultProse). Only for skills that resolved `ready`, so an
-      // unconfigured skill contributes no prose. Behind the flag (OFF → unchanged).
-      // H6: merge prose overrides across all bound templates (primary wins on conflict —
-      // it's applied last), so a secondary template's skill still gets its authored prose.
-      const skillProseOverrides = Object.assign({}, ...[...resolvedTemplates].reverse().map((rt) => rt.skillProse ?? {})) as Record<string, string>;
-      const skillProse = composableEnabled
-        ? selectedSkillIds
-            .filter((id) => skillStates[id] === 'ready')
-            .map((id) => ({ id, prose: (skillProseOverrides?.[id] ?? getModule(id)?.defaultProse ?? '').trim() }))
-            .filter((sp) => sp.prose.length > 0)
-        : [];
-      // Template variables — apply the bound template's declared DEFAULTS under the
-      // bot's own tenant-filled values (bot value wins), so a declared {placeholder}
-      // with a default substitutes even before a tenant fills it in.
-      // Every DECLARED variable resolves to a value — its default, else empty — so an
-      // unfilled one renders as blank rather than leaking a literal {key} to the model.
-      const varDefaults: Record<string, string> = {};
-      for (const v of resolvedTemplates[0]?.variables ?? []) {
-        varDefaults[v.key] = typeof v.default === 'string' ? v.default : '';
-      }
-      if (aiSettings && Object.keys(varDefaults).length) {
-        const av = aiSettings as { templateVariables?: Record<string, string> };
-        av.templateVariables = { ...varDefaults, ...(av.templateVariables ?? {}) };
-      }
-      // Skill-state tool drop - ON by default. A non-ready (entitled but
-      // UNCONFIGURED) skill's tools are removed before the model sees them, so an
-      // unconfigured booking bot physically cannot call create_booking (no phantom
-      // bookings). The tool-driven composer then renders "BOOKING (NOT AVAILABLE)"
-      // (compose-system-prompt.ts:613, which records `toolAbsent` at :618).
-      //
-      // SKILL_STATE_ENABLED=false is the break-glass that restores the old
-      // prompt-only gating (same pattern as GUARDRAILS_KILL_SWITCH): no deploy
-      // needed, the prompt keeps driving off bookingConfigured.
-      //
-      // The drop only fires for skills PRESENT in `skillStates`, i.e. when the
-      // module is entitlement-active. A legacy tenant with no active modules gets
-      // an empty state map and dropUnreadySkillTools returns the same array
-      // (pinned by skill-state.test.ts "drops nothing for an empty state map").
-      if (process.env.SKILL_STATE_ENABLED !== 'false') {
-        tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
-      }
-      const proactiveAsk = await this.mayAskForContact(session, tools);
-      const kbContext = await this.prefetchKbContext({
-        message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
+      // The affordance is a client control, not an audit fact. `options[].text` is Google
+      // Content (ADR-0014) and `query` is the customer's typed address, which "must never
+      // reach a log". Strip it from the trace exactly as replyFact is stripped, so
+      // `agent_traces` keeps neither. See #98.
+      const { replyFact: _replyFact, affordance: _affordance, ...traceResult } = result;
+      traceEntry.toolCalls.push({
+        name: tool.name,
+        args: toolCall.arguments,
+        result: traceResult,
+        latencyMs: Date.now() - toolStartMs,
       });
-      // Currently outside opening hours: the composer adds the AVAILABILITY fact so
-      // the bot keeps helping and never announces "closed" as a reason to disengage.
-      const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, bookingHours, serviceArea, venueLine, hasTravelServices }, { proactiveAsk, outsideBusinessHours });
-      let priceContextLoaded = containsCurrencyAmount(
-        [systemPrompt, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
-      );
-      // Merge the composer's block ledger with agent.service's module knowledge
-      // (the composer can't name modules) onto the trace — nests in trace.jsonb,
-      // no migration. Persisted on every fire-and-forget save below.
-      trace.prompt = buildPromptTrace(ledger, {
-        activeModuleIds,
-        expectedModuleIds,
-        skillStates,
-        resolvedTemplateId: resolvedTemplates[0]?.templateId,
-        resolvedTemplateVersion: resolvedTemplates[0]?.resolvedVersion,
-      });
-      // Model/provider are platform-standardised — always the platform default,
-      // never per-bot/tenant (see llm/defaults).
-      const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);
-      const model = DEFAULT_MODEL;
-
-      const messages: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...conversationHistory,
-        { role: 'user', content: buildUserContent(message, images) },
-      ];
-
-      const toolsCalled: string[] = [];
-      // Latest availability offered this run — surfaced as slot chips on the
-      // reply, unless a booking mutation later consumes/invalidates the offer.
-      let pendingAvailability: PendingAvailability | null = null;
-      /** #80: the availability call these slots came from, so a surfaced call can be told from a
-       *  discarded one. Null when the row could not be written - a missing link, never a fault. */
-      let pendingAvailabilityCallId: string | null = null;
-      /**
-       * A control a tool asked the CLIENT to offer, carried past the model rather than through it.
-       *
-       * A run-local, following `pendingAvailability` - which is the only existing way anything
-       * reaches the reply without the model's involvement, and it exists because the model must
-       * not be the one deciding what appears on screen. The whole address design rests on that
-       * rule: only a server-observed event may move the binding, so only the server may put the
-       * control that produces one in front of the customer.
-       *
-       * Last writer wins. Two tools raising an affordance in one run is one screen and one
-       * customer, and the later call is the better-informed one.
-       */
-      let pendingAffordance: Affordance | null = null;
-      // Egress guard state: was a booking/request actually recorded this run, and
-      // have we already nudged the model once for claiming one that wasn't?
-      let bookingRecorded = false;
-      // #7: per-run guard — a side-effecting tool must not execute twice with
-      // identical args within one agent run (a model re-emitting the same call).
-      // Cross-run re-invocation (the coalescer re-arming a turn) is already
-      // neutralised by the booking provider's idempotency window + DB constraints
-      // for create/request; reschedule/cancel re-runs are self-idempotent (same
-      // target = no new effect).
-      const sideEffectsInvoked = new Set<string>();
-      let correctionAttempted = false;
-      /** Separate from `correctionAttempted`: each guard gets its own single retry, or one
-       *  firing would spend the other's budget and ship the fault it was there to stop. */
-      let availabilityCorrectionAttempted = false;
-      /** Same rule again: the promised-check guard owns its own single retry. */
-      let promisedCheckCorrectionAttempted = false;
-      /**
-       * A `check_availability` call HAPPENED this run, whatever it returned.
-       *
-       * Distinct from `pendingAvailability`, which is set only when the call SUCCEEDED and came
-       * back with slots. A call that threw - paused business, no calendar, request-only service -
-       * leaves that null, and a model saying "let me check" on such a turn HAS checked. Nudging it
-       * to call again would be an instruction to repeat work that already failed.
-       */
-      let availabilityChecked = false;
-      let pendingAddressFact: BookingAddressReplyFact | null = null;
-      let addressFactConflict = false;
-      let addressCorrectionAttempted = false;
-      let addressCorrectionOnly = false;
-
-      for (let i = 0; i < MAX_ITERATIONS; i++) {
-        // Budget check
-        if (await this.metering.isOverBudget(tenant.id, (aiSettings as any)?.dailyTokenBudget)) {
-          trace.finishReason = 'budget_exceeded';
-          trace.terminal = { result: 'budget_exceeded' };
-          void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-          return {
-            type: 'budget_exceeded',
-            fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'I apologize, but I am temporarily unavailable.',
-            ...(escalationRequested ? { handoffRequested: true } : {}),
-          };
-        }
-
-        // Build tool definitions for LLM
-        const toolDefs: ToolDefinition[] | undefined = !addressCorrectionOnly && tools.length > 0
-          ? tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
-          : undefined;
-
-        // Call LLM (one retry on a transient upstream failure — see callProviderWithRetry).
-        const startMs = Date.now();
-        const response = await callProviderWithRetry(
-          provider,
-          messages,
-          { model, maxTokens: 1000, temperature: 0.3, jsonMode: false, tools: toolDefs },
-          session.id,
-        );
-        const latencyMs = Date.now() - startMs;
-
-        // Record metering
-        await this.metering.record(tenant.id, response.usage);
-
-        // Build trace entry
-        const traceEntry: AgentTrace['iterations'][0] = {
-          llmCall: { model, ...response.usage, latencyMs },
-          toolCalls: [],
-        };
-
-        // No tool calls — final response
-        if (response.finishReason === 'stop' || !response.toolCalls?.length || addressCorrectionOnly) {
-          trace.iterations.push(traceEntry);
-          let finalContent = response.content ?? '';
-          if (addressFactConflict) {
-            logger.warn('[agent] conflicting authoritative booking addresses in one run; returning safe fallback', {
-              sessionId: session.id,
-            });
-            finalContent = ADDRESS_CONFLICT_FALLBACK;
-          } else if (pendingAddressFact && !validAddressReply(finalContent, pendingAddressFact)) {
-            if (!addressCorrectionAttempted && i < MAX_ITERATIONS - 1) {
-              addressCorrectionAttempted = true;
-              (trace.corrections ??= []).push('booking_address_mismatch');
-              addressCorrectionOnly = true;
-              logger.warn('[agent] blocked inaccurate booking address reply; requesting correction', {
-                sessionId: session.id,
-              });
-              messages.push({ role: 'assistant', content: finalContent });
-              messages.push({ role: 'user', content: addressCorrectionNote(pendingAddressFact) });
-              continue;
-            }
-            logger.warn('[agent] persistent inaccurate booking address reply; returning safe fallback', {
-              sessionId: session.id,
-            });
-            finalContent = addressSafeFallback(pendingAddressFact);
-          }
-          // Egress guard (issue #35): never let the model tell the customer a
-          // booking/request happened unless one was actually recorded this run.
-          if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingForAgentNudge(finalContent)) {
-            if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
-              correctionAttempted = true;
-              (trace.corrections ??= []).push('unrecorded_booking_claim');
-              logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });
-              messages.push({ role: 'assistant', content: finalContent });
-              messages.push({ role: 'user', content: BOOKING_CORRECTION_NOTE });
-              continue; // re-run: model should call the tool or ask for the missing detail
-            }
-            trace.finishReason = 'completed';
-            trace.terminal = { result: 'completed' };
-            void this.traceLogger.save(trace);
-            logger.warn('[agent] persistent unrecorded booking claim; returning safe fallback', { sessionId: session.id });
-            // The affordance rides even the safe fallback. This branch fires when the model kept
-            // claiming a booking nobody recorded, so the content is thrown away - but whether the
-            // customer's address needs verifying is a fact about the conversation, not about the
-            // sentence, and it is still true. Dropping it in the early return is the exact shape
-            // #82 records two files over: attached only at the last exit, shipped from none of
-            // the others.
-            return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}), ...(escalationRequested ? { handoffRequested: true } : {}) };
-          }
-          // The availability twin of the guard above: a NAMED DATE declared shut or full when
-          // nothing looked. Observed on production - "woensdag 16 september valt op een
-          // sluitingsdag", offered as a manual request, on a turn with zero tool calls and a day
-          // that had sixteen free slots. Every other availability guard reads a
-          // `check_availability` result, so a turn that never called it is exactly the turn none
-          // of them can judge.
-          //
-          // Nudge only, never a safe fallback. The model is not lying about a mutation it made,
-          // it simply answered too early, and one more iteration with the tool is the whole fix.
-          // A second offence falls through and ships: a clumsy sentence beats a dead end.
-          if (
-            availabilityClaimGuardArmed &&
-            !pendingAvailability &&
-            !bookingRecorded &&
-            claimsDatedUnavailability(finalContent)
-          ) {
-            if (!availabilityCorrectionAttempted && i < MAX_ITERATIONS - 1) {
-              availabilityCorrectionAttempted = true;
-              (trace.corrections ??= []).push('availability_unchecked_claim');
-              logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
-                sessionId: session.id,
-              });
-              messages.push({ role: 'assistant', content: finalContent });
-              messages.push({ role: 'user', content: AVAILABILITY_CORRECTION_NOTE });
-              continue; // re-run: the model should call check_availability before answering
-            }
-          }
-          // THE DEAD-END PROMISE, and the one failure in this family that ends with no answer at
-          // all. Production, session 4d3f6473, 18:04:18Z: "Ik controleer even of woensdag 2
-          // september 2026 om 09:15 uur beschikbaar is voor 30 minuten" - zero tool calls that
-          // turn, and nothing schedules a continuation, so the customer is left holding a promise
-          // no code path will keep. The guards above judge a claim the model had no right to make;
-          // this judges a turn that made no claim, gave no answer, and did no work.
-          //
-          // TWO OUTCOMES, and neither may ship the promise. A promise on a turn that never looked
-          // is a model that answered too early: one nudge fixes it. A promise on a turn where the
-          // call already RAN and came back with nothing - paused business, no calendar,
-          // request-only service - must not be nudged, because that is an instruction to repeat
-          // work that already failed; but it is the same dead end, and the customer is most likely
-          // to be stranded exactly there. So it is replaced instead, with no second call.
-          if (
-            availabilityClaimGuardArmed &&
-            !bookingRecorded &&
-            promisesAvailabilityCheck(finalContent, message)
-          ) {
-            if (!availabilityChecked) {
-              if (!promisedCheckCorrectionAttempted && i < MAX_ITERATIONS - 1) {
-                promisedCheckCorrectionAttempted = true;
-                logger.warn('[agent] reply promised a check nothing ran; nudging model to call it', {
-                  sessionId: session.id,
-                });
-                messages.push({ role: 'assistant', content: finalContent });
-                messages.push({ role: 'user', content: PROMISED_CHECK_NOTE });
-                continue; // re-run: call check_availability, or ask for the one missing detail
-              }
-              trace.finishReason = 'completed';
-              trace.terminal = { result: 'completed' };
-              void this.traceLogger.save(trace);
-              logger.warn('[agent] reply promised a check twice; asking the customer instead', {
-                sessionId: session.id,
-              });
-              return {
-                type: 'response',
-                content: await inCustomerLanguage(PROMISED_CHECK_FALLBACK, message, session),
-                ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
-                ...(escalationRequested ? { handoffRequested: true } : {}),
-              };
-            }
-            // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the
-            // tool sets `availability` for every success, `slots: []` included - so object
-            // truthiness says nothing about whether the customer can see a time. What decides that
-            // is the CONFIRMABLE array, because `buildSlotQuickReplies` reads exactly that: with
-            // one slot the chips are on screen and a clumsy "let me check" beside them is not a
-            // dead end. With none - an empty diary, or a travel result where every time needs the
-            // owner's say-so - there is nothing on screen and the promise is the dead end again.
-            if (!pendingAvailability || pendingAvailability.slots.length === 0) {
-              trace.finishReason = 'completed';
-              trace.terminal = { result: 'completed' };
-              void this.traceLogger.save(trace);
-              // TWO DIFFERENT FACTS, so two sentences. A call that THREW means the diary could not
-              // be read; a call that succeeded with nothing confirmable means it was read and had
-              // nothing to offer. Saying "I cannot see the diary" about a diary we just read would
-              // be a fresh lie, and neither sentence may say "closed" or "fully booked" - the
-              // tool's own guidance forbids exactly that.
-              const promiseReplacement = pendingAvailability
-                ? NO_CONFIRMABLE_TIMES_FALLBACK
-                : CHECK_FAILED_FALLBACK;
-              logger.warn('[agent] reply promised a check with nothing to offer; replacing it', {
-                sessionId: session.id,
-                checked: true,
-                succeeded: !!pendingAvailability,
-              });
-              return {
-                type: 'response',
-                content: await inCustomerLanguage(promiseReplacement, message, session),
-                ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
-                ...(escalationRequested ? { handoffRequested: true } : {}),
-              };
-            }
-          }
-          trace.finishReason = 'completed';
-          trace.terminal = { result: 'completed' };
-          void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-          // Chips exist to pick a time. If the customer already named one that we can actually
-          // book, or the reply is confirming that one time, attaching hours again is how the
-          // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
-          const chipWindow = pendingAvailability ? pendingAvailability.slots.slice(0, 8) : [];
-          const offeredLocal = pendingAvailability
-            ? localClockTimes(chipWindow, pendingAvailability.timezone)
-            : null;
-          // TIMES WITH NO CHIP. A requestable travel time is one the tool told the model to offer
-          // in prose and capture with request_appointment, so naming it is doing as it was asked.
-          // Both guards below must count it as offered, or a mixed result answers a perfectly
-          // good sentence with "that time is not available".
-          const requestableLocal = pendingAvailability
-            ? localClockTimes(pendingAvailability.requestableSlots, pendingAvailability.timezone) ?? []
-            : [];
-          // What the CHANNEL delivered, plus the prose-only times: the enumeration guard's set.
-          const deliverableLocal = offeredLocal ? [...offeredLocal, ...requestableLocal] : null;
-          // THE HOUR THE CUSTOMER THEMSELVES NAMED. Never an allowance - a reply may not confirm
-          // it just because they asked ("09:15 is vrij, net als 09:00 en 09:30" is three times, so
-          // the single-time guard stands down and the enumeration guard is the only thing left).
-          // It only decides WHICH replacement is true: their own hour being unavailable is a
-          // sharper sentence than a bare pointer at the list.
-          const customerTimeText = latestCustomerTimeText([
-            ...conversationHistory.map((m) => ({
-              role: m.role,
-              text: contentToText(m.content),
-            })),
-            { role: 'user', text: message },
-          ]);
-          const customerNamedLocal = parseClockTimes(customerTimeText).map((t) => t.key);
-          // EVERY time the customer may take, delivered or not. Only the single-time guard uses
-          // it: a slot further down the list is one create_booking accepts, so a reply confirming
-          // it is right, while a time nobody offered is an invention whatever the channel showed.
-          const everyOfferableLocal = pendingAvailability
-            ? [
-                ...(localClockTimes(pendingAvailability.slots, pendingAvailability.timezone) ?? []),
-                ...requestableLocal,
-              ]
-            : null;
-          // HOW LONG AN APPOINTMENT IS HERE, so a confirmation that says the whole span
-          // ("16:00 tot 17:00") is read as the one time it names, while a range that is not an
-          // appointment ("we are open 9:00 tot 17:00") stays two readings and is left alone.
-          const slotLengthsMin = pendingAvailability
-            ? [
-                ...new Set(
-                  [...pendingAvailability.slots, ...pendingAvailability.requestableSlots]
-                    .map((s) => Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60_000))
-                    .filter((min) => min > 0),
-                ),
-              ]
-            : [];
-          // Against EVERY confirmable hour, not the 8-chip prefix: 10:00 further down the day is
-          // still the time they named. Compared with the chip window, an intake answer that
-          // names no clock time re-attached 00:00 / 00:30 / 01:00 above a confirmation of 10:00.
-          // Requestable travel times stay out: naming one is not a reason to hide the chip for a
-          // time they can actually book.
-          const confirmableLocal =
-            pendingAvailability
-              ? localClockTimes(pendingAvailability.slots, pendingAvailability.timezone)
-              : null;
-          const alreadyChoseTime = !!(
-            confirmableLocal &&
-            (namesSingleOfferedTime(customerTimeText, confirmableLocal) ||
-              namesSingleOfferedTime(finalContent, confirmableLocal))
-          );
-          const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(pendingAvailability);
-
-          // A reply that NAMES a time nobody can book is the availability twin of a false
-          // confirmation, and it reaches the customer as plain prose - above perfectly correct
-          // chips, or above nothing at all. An ENUMERATION is compared against what was actually
-          // delivered, not the whole slot list: a time truncated away by the channel is one the
-          // customer cannot take.
-          //
-          // GATED ON THE AVAILABILITY, NOT ON THE CHIPS. A requestable-only result has no chip by
-          // design, and that is the turn where an invented time is most dangerous - the tool has
-          // just asked the model to read times out in prose, and nothing on screen contradicts it.
-          // Skipped only when this call offered NOTHING: with no ground truth every named time
-          // reads as invented, including the request-capture flow's job of repeating the time the
-          // customer themselves asked for.
-          let safeContent = finalContent;
-          if (pendingAvailability && deliverableLocal?.length) {
-            const onScreen = !!slotChips?.length;
-            const judged = collapseAppointmentSpans(finalContent, slotLengthsMin);
-            // THE ENUMERATION GUARD STAYS ON CHIPPED TURNS, which is the only place its rule makes
-            // sense: it compares a list against what the channel delivered, and a time truncated
-            // away is one the customer cannot tap. With nothing on screen there is no delivered
-            // list to contradict, and its 2-or-more floor makes it the wrong instrument anyway.
-            const bogus = onScreen ? unofferedTimesIn(judged, deliverableLocal) : [];
-            // ONE named time is not a stray item in a list, it is the whole recommendation, so it
-            // is judged on EVERY turn a time was offered. That exemption shipped "the next valid
-            // time is 08:30" - the first slot's UTC instant read as a wall clock - above chips
-            // that said 10:30, and shipped it again where no chip existed to contradict it.
-            const invented = bogus.length
-              ? null
-              : unofferedSingleTimeIn(judged, everyOfferableLocal ?? deliverableLocal);
-            const flagged = bogus.length ? bogus : invented ? [invented] : [];
-            if (flagged.length) {
-              // WHICH SENTENCE IS TRUE. When one of the flagged hours is the one the CUSTOMER
-              // named, "that time is not available" answers them; a bare pointer at the list reads
-              // as if their question was never heard. Their hour never buys the reply a pass - it
-              // only chooses the wording.
-              const named = new Set(customerNamedLocal);
-              const theirs = flagged.some((w) => parseClockTimes(w).some((t) => named.has(t.key)));
-              const replacement = !onScreen
-                ? NO_SLOTS_ON_SCREEN_FALLBACK
-                : theirs || invented
-                  ? UNBOOKABLE_TIME_FALLBACK
-                  : AVAILABILITY_SAFE_FALLBACK;
-              logger.warn('[agent] reply named a time nobody offered; replacing it', {
-                sessionId: session.id,
-                named: flagged.slice(0, 6),
-                offered: everyOfferableLocal ?? deliverableLocal,
-                chips: onScreen,
-                customerNamed: theirs,
-              });
-              // IN THE CUSTOMER'S LANGUAGE. These three are authored in English and they replace a
-              // reply the model wrote in the customer's, so shipping them raw answers a Dutch
-              // question in English - seen on production on 2026-08-26, driving the real widget.
-              // `localizeMessage` fails open: anything it cannot do returns the original.
-              safeContent = await inCustomerLanguage(replacement, message, session);
-            }
-          }
-
-          return {
-            type: 'response',
-            content: safeContent,
-            quickReplies: slotChips,
-            validationContext: { bookingRecorded, priceContextLoaded },
-            ...(escalationRequested ? { handoffRequested: true } : {}),
-            ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
-            // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
-            // delivered. It cannot be measured here - channels truncate quick replies and drop
-            // them where unsupported - and dispatch knows none of this context on its own.
-            ...(slotChips?.length && pendingAvailability
-              ? {
-                  offer: {
-                    botId: bot.id,
-                    serviceId: pendingAvailability.serviceId ?? null,
-                    availabilityCallId: pendingAvailabilityCallId,
-                    locationMode: pendingAvailability.locationMode ?? null,
-                    slotStarts: pendingAvailability.slots.slice(0, slotChips.length).map((s) => s.start),
-                    // #81 (LP4): the whole scoring, not the delivered prefix of it. What was
-                    // truncated is decided at dispatch, and the counterfactual order is a
-                    // statement about the list the scorer saw.
-                    ...(pendingAvailability.grouping ? { scoring: pendingAvailability.grouping } : {}),
-                    ...(pendingAvailability.groupingPilot ? { groupingPilot: true } : {}),
-                    ...(pendingAvailability.grouped ? { grouped: pendingAvailability.grouped } : {}),
-                    ...(pendingAvailability.groupingPreviousOrder
-                      ? { groupingPreviousOrder: pendingAvailability.groupingPreviousOrder }
-                      : {}),
-                  },
-                }
-              : {}),
-          };
-        }
-
-        // Process tool calls
-        // Append assistant message WITH toolCalls BEFORE processing tool results
-        messages.push({ role: 'assistant', content: response.content || '', toolCalls: response.toolCalls });
-
-        for (const toolCall of response.toolCalls) {
-          const tool = tools.find((t) => t.name === toolCall.name);
-          const toolStartMs = Date.now();
-
-          if (!tool) {
-            messages.push({ role: 'tool', content: JSON.stringify({ error: `Unknown tool: ${toolCall.name}` }), toolCallId: toolCall.id });
-            continue;
-          }
-
-          // Precondition check
-          if (tool.preconditions?.toolsCalled) {
-            const missing = tool.preconditions.toolsCalled.filter((t) => !toolsCalled.includes(t));
-            if (missing.length > 0) {
-              const errorMsg = `Must call ${missing.join(', ')} before ${tool.name}`;
-              messages.push({ role: 'tool', content: JSON.stringify({ error: errorMsg }), toolCallId: toolCall.id });
-              traceEntry.toolCalls.push({ name: tool.name, args: toolCall.arguments, result: { success: false, error: errorMsg }, latencyMs: 0 });
-              continue;
-            }
-          }
-
-          // #7: dedupe side-effecting tools within this run — an identical (tool,
-          // args) call a second time, AFTER it already succeeded, does NOT re-execute;
-          // the model is told it was already performed. Marked only on success (below)
-          // so a failed first attempt can still be retried. (Cross-run dedupe is the
-          // provider's idempotency job.)
-          const sideEffectSig = tool.hasSideEffects
-            ? `${tool.name}:${JSON.stringify(toolCall.arguments)}`
-            : null;
-          if (sideEffectSig && sideEffectsInvoked.has(sideEffectSig)) {
-            messages.push({ role: 'tool', content: JSON.stringify({ note: 'already_performed', tool: tool.name }), toolCallId: toolCall.id });
-            traceEntry.toolCalls.push({ name: tool.name, args: toolCall.arguments, result: { success: true }, latencyMs: 0 });
-            continue;
-          }
-
-          // Execute tool
-          const ctx: ToolContext = {
-            tenantId: tenant.id,
-            sessionId: session.id,
-            runId,
-            channel: session.channel ?? 'widget',
-            toolsCalledThisTurn: toolsCalled,
-            dataSource: AppDataSource,
-            conversationHistory: messages,
-            specialtyTerms: specialtyTerms.length ? specialtyTerms : undefined,
-            botOwned: sessionBotOwned,
-          };
-
-          try {
-            const result = await tool.execute(toolCall.arguments, ctx);
-            toolsCalled.push(tool.name);
-            // #7: only now (post-success) is the side-effect "performed" — a failed
-            // attempt stays retryable.
-            if (sideEffectSig && result.success) sideEffectsInvoked.add(sideEffectSig);
-            // The customer asked for a human and the escalation tool accepted it.
-            // Latched (never reset) so whatever exit this run takes carries
-            // `handoffRequested: true` — the forwarding mapping owes them a human.
-            if (tool.name === 'escalate_to_human' && result.success && sessionBotOwned) escalationRequested = true;
-            if (result.success && result.replyFact?.kind === 'booking_address') {
-              const merged = mergeAddressFacts(pendingAddressFact, result.replyFact);
-              pendingAddressFact = merged.fact;
-              addressFactConflict ||= merged.conflict;
-            }
-            // Harvested for EVERY tool, not just the one that raises it today. The alternative -
-            // reading it inside the `check_availability` branch below - would make the next tool
-            // that wants an affordance work perfectly and ship nothing, which is the failure this
-            // whole area keeps producing.
-            if (result.affordance) pendingAffordance = result.affordance;
-            // Whatever it returned, the call happened: see `availabilityChecked`.
-            if (tool.name === 'check_availability') availabilityChecked = true;
-            // Track offered slots for the chip UI; a booking mutation clears them.
-            //
-            // OFF `availability`, never off `data`. `data` speaks the business's wall clock now,
-            // because a model handed a `Z` instant reads its digits out loud - so the chips, the
-            // offer record and the invented-time guard take the instants from the field the model
-            // never sees, exactly as #81's scoring comes off `measurement`.
-            if (tool.name === 'check_availability' && result.success && result.availability) {
-              const a = result.availability;
-              if (Array.isArray(a.slots)) {
-                pendingAvailability = {
-                  slots: a.slots,
-                  // Prose-only times: no chip carries them, and the reply guards must not treat
-                  // one the tool asked the model to offer as an invention.
-                  requestableSlots: Array.isArray(a.requestableSlots) ? a.requestableSlots : [],
-                  timezone: a.timezone ?? 'UTC',
-                  serviceName: a.serviceName,
-                  serviceId: a.serviceId,
-                  locationMode: a.locationMode,
-                  // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
-                  // shown, and this is deliberately invisible to it.
-                  grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,
-                  groupingPilot: a.travel?.groupingPilot === true,
-                  grouped: a.travel?.grouped,
-                  groupingPreviousOrder: a.travel?.groupingPreviousOrder,
-                };
-                // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
-                // and it exists separately from the offer because a call the model never surfaces
-                // still counts in "how often do customers ask across several days" - the number
-                // #84's gate turns on. Fire-and-forget: a measurement row is never worth a turn.
-                const callArgs = toolCall.arguments as { startDate?: string; endDate?: string; serviceId?: string };
-                void import('../booking/offer-record.service')
-                  .then((m) =>
-                    m.recordAvailabilityCall({
-                      tenantId: session.tenantId,
-                      botId: bot.id,
-                      sessionId: session.id,
-                      // The RESOLVED service, not the one the caller named: `check_availability`
-                      // picks the sole bookable service when the argument is omitted, and the
-                      // record should say which service was actually offered.
-                      serviceId: a.serviceId ?? callArgs?.serviceId ?? null,
-                      startDate: callArgs?.startDate,
-                      endDate: callArgs?.endDate,
-                      slotCount: a.slots.length,
-                    })
-                  )
-                  .then((id) => {
-                    pendingAvailabilityCallId = id;
-                  })
-                  .catch(() => undefined);
-              }
-            } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
-              pendingAvailability = null;
-              // The booking consumed the address binding in its own transaction, so an offer to
-              // verify one now points at a conversation state that no longer exists. Cleared with
-              // the slots, for the same reason the slots are cleared: the offer was about a
-              // decision the customer has already made.
-              pendingAffordance = null;
-              bookingRecorded = true;
-            }
-            // R31: a tool that fails may return a raw infra error (err.message)
-            // as result.error; never forward an UNMARKED error to the model — it
-            // could be echoed to the customer. Only errors a tool explicitly
-            // marks errorSafeForModel (authored domain errors) pass through; the
-            // rest become a generic message. The full result stays in the trace.
-            let modelPayload: unknown;
-            if (result.success) {
-              modelPayload = result.data ?? {};
-              if (
-                tool.name === 'kb_search' &&
-                containsCurrencyAmount(JSON.stringify(modelPayload))
-              ) {
-                priceContextLoaded = true;
-              }
-            } else if (result.errorSafeForModel) {
-              modelPayload = { error: result.error };
-            } else {
-              logger.warn('Agent tool error sanitized for model', {
-                sessionId: session.id, tool: tool.name, error: result.error,
-              });
-              modelPayload = { error: `The ${tool.name} tool couldn't complete that request right now.` };
-            }
-            let resultJson = JSON.stringify(modelPayload);
-            if (resultJson.length > 4000) {
-              resultJson = resultJson.substring(0, 4000) + '...[truncated]';
-            }
-            messages.push({
-              role: 'tool',
-              content: resultJson,
-              toolCallId: toolCall.id,
-            });
-            // The affordance is a client control, not an audit fact. `options[].text` is Google
-            // Content (ADR-0014) and `query` is the customer's typed address, which "must never
-            // reach a log". Strip it from the trace exactly as replyFact is stripped, so
-            // `agent_traces` keeps neither. See #98.
-            const { replyFact: _replyFact, affordance: _affordance, ...traceResult } = result;
-            traceEntry.toolCalls.push({
-              name: tool.name,
-              args: toolCall.arguments,
-              result: traceResult,
-              latencyMs: Date.now() - toolStartMs,
-            });
-          } catch (error) {
-            // R31: an UNEXPECTED tool exception (SQL error, stack, connection
-            // string, internal id) must never reach the model context — the model
-            // can echo it to the customer. Log the real error server-side + keep
-            // it in the trace, but hand the model a sanitized, generic message.
-            // (A tool that RETURNS an error is sanitized at the boundary above
-            // unless it set errorSafeForModel; this catch covers tools that THROW.)
-            const rawMsg = error instanceof Error ? error.message : 'Tool execution failed';
-            logger.error('Agent tool threw', { sessionId: session.id, tool: tool.name, error });
-            const safeMsg = `The ${tool.name} tool is temporarily unavailable. Do not retry it this turn.`;
-            messages.push({ role: 'tool', content: JSON.stringify({ error: safeMsg }), toolCallId: toolCall.id });
-            traceEntry.toolCalls.push({
-              name: tool.name,
-              args: toolCall.arguments,
-              result: { success: false, error: rawMsg },
-              latencyMs: Date.now() - toolStartMs,
-            });
-          }
-        }
-
-        trace.iterations.push(traceEntry);
-      }
-
-      // Max iterations reached
-      trace.finishReason = 'max_iterations';
-      trace.terminal = { result: 'max_iterations' };
-      void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-      return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent.", ...(escalationRequested ? { handoffRequested: true } : {}) };
-
     } catch (error) {
-      trace.finishReason = 'error';
-      // WHICH failure, recorded before the save. `finishReason` alone left a production
-      // incident with five candidate causes and no way to choose between them.
-      const kind = classifyTerminalError(error);
-      trace.terminal = { result: 'error', error: terminalErrorFrom(error, kind) };
-      void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-      logger.error('Agent loop error', { sessionId: session.id, error });
-      // Any upstream_* kind is a provider/platform failure, not one conversation
-      // going wrong: it must not park the session in a bot_error handoff.
-      const infraFailure =
-        kind === 'upstream_quota' ||
-        kind === 'upstream_rate_limit' ||
-        kind === 'upstream_server_error' ||
-        kind === 'upstream_unreachable';
-      if (infraFailure) {
-        // Log distinctly: a provider outage is an operational emergency, often
-        // across every tenant at once, not one conversation going wrong.
-        logger.error('[agent] upstream provider failure — NOT a bot fault', {
-          sessionId: session.id,
-          kind,
-        });
-      }
-      return {
-        type: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
-        infraFailure,
-        // A successful escalation earlier in this run survives the failure: the
-        // customer explicitly asked for a human, so the handoff must still happen
-        // — even (especially) when the provider then fell over.
-        ...(escalationRequested ? { handoffRequested: true } : {}),
-      };
+      // R31: an UNEXPECTED tool exception (SQL error, stack, connection
+      // string, internal id) must never reach the model context — the model
+      // can echo it to the customer. Log the real error server-side + keep
+      // it in the trace, but hand the model a sanitized, generic message.
+      // (A tool that RETURNS an error is sanitized at the boundary above
+      // unless it set errorSafeForModel; this catch covers tools that THROW.)
+      const rawMsg = error instanceof Error ? error.message : 'Tool execution failed';
+      logger.error('Agent tool threw', { sessionId: ctx.session.id, tool: tool.name, error });
+      const safeMsg = `The ${tool.name} tool is temporarily unavailable. Do not retry it this turn.`;
+      state.messages.push({ role: 'tool', content: JSON.stringify({ error: safeMsg }), toolCallId: toolCall.id });
+      traceEntry.toolCalls.push({
+        name: tool.name,
+        args: toolCall.arguments,
+        result: { success: false, error: rawMsg },
+        latencyMs: Date.now() - toolStartMs,
+      });
     }
+  }
+
+  /** Everything a successful tool result changes about the run's own state. */
+  private absorbToolResult(
+    tool: ToolAdapter,
+    toolCall: ToolCall,
+    result: ToolResult,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+  ): void {
+    // The customer asked for a human and the escalation tool accepted it.
+    // Latched (never reset) so whatever exit this run takes carries
+    // `handoffRequested: true` — the forwarding mapping owes them a human.
+    if (tool.name === 'escalate_to_human' && result.success && ctx.sessionBotOwned) state.escalationRequested = true;
+    if (result.success && result.replyFact?.kind === 'booking_address') {
+      const merged = mergeAddressFacts(state.pendingAddressFact, result.replyFact);
+      state.pendingAddressFact = merged.fact;
+      state.addressFactConflict ||= merged.conflict;
+    }
+    // Harvested for EVERY tool, not just the one that raises it today. The alternative -
+    // reading it inside the `check_availability` branch below - would make the next tool
+    // that wants an affordance work perfectly and ship nothing, which is the failure this
+    // whole area keeps producing.
+    if (result.affordance) state.pendingAffordance = result.affordance;
+    // Whatever it returned, the call happened: see `availabilityChecked`.
+    if (tool.name === 'check_availability') state.availabilityChecked = true;
+    // Track offered slots for the chip UI; a booking mutation clears them.
+    //
+    // OFF `availability`, never off `data`. `data` speaks the business's wall clock now,
+    // because a model handed a `Z` instant reads its digits out loud - so the chips, the
+    // offer record and the invented-time guard take the instants from the field the model
+    // never sees, exactly as #81's scoring comes off `measurement`.
+    if (tool.name === 'check_availability' && result.success && result.availability) {
+      this.absorbAvailability(toolCall, result, result.availability, ctx, state);
+    } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
+      state.pendingAvailability = null;
+      // The booking consumed the address binding in its own transaction, so an offer to
+      // verify one now points at a conversation state that no longer exists. Cleared with
+      // the slots, for the same reason the slots are cleared: the offer was about a
+      // decision the customer has already made.
+      state.pendingAffordance = null;
+      state.bookingRecorded = true;
+    }
+  }
+
+  /** A successful `check_availability`: the chip offer, plus the #80 call record. */
+  private absorbAvailability(
+    toolCall: ToolCall,
+    result: ToolResult,
+    a: NonNullable<ToolResult['availability']>,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+  ): void {
+    if (!Array.isArray(a.slots)) return;
+    const slots = a.slots;
+    state.pendingAvailability = {
+      slots,
+      // Prose-only times: no chip carries them, and the reply guards must not treat
+      // one the tool asked the model to offer as an invention.
+      requestableSlots: Array.isArray(a.requestableSlots) ? a.requestableSlots : [],
+      timezone: a.timezone ?? 'UTC',
+      serviceName: a.serviceName,
+      serviceId: a.serviceId,
+      locationMode: a.locationMode,
+      // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
+      // shown, and this is deliberately invisible to it.
+      grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,
+      groupingPilot: a.travel?.groupingPilot === true,
+      grouped: a.travel?.grouped,
+      groupingPreviousOrder: a.travel?.groupingPreviousOrder,
+    };
+    // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
+    // and it exists separately from the offer because a call the model never surfaces
+    // still counts in "how often do customers ask across several days" - the number
+    // #84's gate turns on. Fire-and-forget: a measurement row is never worth a turn.
+    const callArgs = toolCall.arguments as { startDate?: string; endDate?: string; serviceId?: string };
+    void import('../booking/offer-record.service')
+      .then((m) =>
+        m.recordAvailabilityCall({
+          tenantId: ctx.session.tenantId,
+          botId: ctx.botId,
+          sessionId: ctx.session.id,
+          // The RESOLVED service, not the one the caller named: `check_availability`
+          // picks the sole bookable service when the argument is omitted, and the
+          // record should say which service was actually offered.
+          serviceId: a.serviceId ?? callArgs?.serviceId ?? null,
+          startDate: callArgs?.startDate,
+          endDate: callArgs?.endDate,
+          slotCount: slots.length,
+        })
+      )
+      .then((id) => {
+        state.pendingAvailabilityCallId = id;
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * R31: a tool that fails may return a raw infra error (err.message)
+   * as result.error; never forward an UNMARKED error to the model — it
+   * could be echoed to the customer. Only errors a tool explicitly
+   * marks errorSafeForModel (authored domain errors) pass through; the
+   * rest become a generic message. The full result stays in the trace.
+   */
+  private modelPayloadFor(
+    tool: ToolAdapter,
+    result: ToolResult,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+  ): unknown {
+    if (result.success) {
+      const modelPayload = result.data ?? {};
+      if (tool.name === 'kb_search' && containsCurrencyAmount(JSON.stringify(modelPayload))) {
+        state.priceContextLoaded = true;
+      }
+      return modelPayload;
+    }
+    if (result.errorSafeForModel) return { error: result.error };
+    logger.warn('Agent tool error sanitized for model', {
+      sessionId: ctx.session.id, tool: tool.name, error: result.error,
+    });
+    return { error: `The ${tool.name} tool couldn't complete that request right now.` };
+  }
+
+  /** The run's terminal failure: which kind, recorded, then the caller's fallback. */
+  private terminalErrorResult(
+    error: unknown,
+    args: {
+      trace: AgentTrace;
+      session: ChatSession;
+      aiSettings: BotSettings['ai'];
+      escalationRequested: boolean;
+    },
+  ): AgentResult {
+    const { trace, session, aiSettings, escalationRequested } = args;
+    trace.finishReason = 'error';
+    // WHICH failure, recorded before the save. `finishReason` alone left a production
+    // incident with five candidate causes and no way to choose between them.
+    const kind = classifyTerminalError(error);
+    trace.terminal = { result: 'error', error: terminalErrorFrom(error, kind) };
+    void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
+    logger.error('Agent loop error', { sessionId: session.id, error });
+    // Any upstream_* kind is a provider/platform failure, not one conversation
+    // going wrong: it must not park the session in a bot_error handoff.
+    const infraFailure =
+      kind === 'upstream_quota' ||
+      kind === 'upstream_rate_limit' ||
+      kind === 'upstream_server_error' ||
+      kind === 'upstream_unreachable';
+    if (infraFailure) {
+      // Log distinctly: a provider outage is an operational emergency, often
+      // across every tenant at once, not one conversation going wrong.
+      logger.error('[agent] upstream provider failure — NOT a bot fault', {
+        sessionId: session.id,
+        kind,
+      });
+    }
+    return {
+      type: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
+      infraFailure,
+      // A successful escalation earlier in this run survives the failure: the
+      // customer explicitly asked for a human, so the handoff must still happen
+      // — even (especially) when the provider then fell over.
+      ...(escalationRequested ? { handoffRequested: true } : {}),
+    };
   }
 
   /**

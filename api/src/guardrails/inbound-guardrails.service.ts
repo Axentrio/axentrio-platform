@@ -19,10 +19,10 @@ import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { notificationService } from '../services/notification.service';
-import { classifyMessage, inspectLinks, isHighSeverity, isHumanSignal } from './classify';
+import { classifyMessage, inspectLinks, isHighSeverity, isHumanSignal, type LinkInspection } from './classify';
 import { detectBotLoop, evaluateLoopState } from './loop-detector';
 import { redisLoopStore } from './loop-store';
-import { GuardrailCategory, GuardrailJournalCategory } from './types';
+import { ClassifyResult, GuardrailCategory, GuardrailJournalCategory } from './types';
 
 export interface InboundGateInput {
   session: ChatSession;
@@ -313,6 +313,138 @@ async function enforceBlock(args: {
   return { proceed: false, category };
 }
 
+/** Fast-exit for an already guardrail-disabled session (ENFORCE only): it never
+ *  re-runs the agent. Re-reads the flag from the DB (not the possibly-stale
+ *  in-memory session) so a concurrent flip on a sibling burst message is
+ *  respected (codex review). Marks this inbound so it can't leak into history
+ *  after reactivation. Returns null when the session is not disabled. */
+async function disabledSessionResult(
+  input: InboundGateInput,
+  enforce: boolean,
+): Promise<InboundGateResult | null> {
+  if (!enforce) return null;
+  const { session, message } = input;
+  const fresh = await AppDataSource.getRepository(ChatSession).findOne({
+    where: { id: session.id },
+    select: { id: true, aiAutoReplyEnabled: true, guardrailStatus: true } as never,
+  });
+  if (!fresh || fresh.aiAutoReplyEnabled !== false) return null;
+  await markMessageFlagged(message.id);
+  session.aiAutoReplyEnabled = false;
+  session.guardrailStatus = fresh.guardrailStatus;
+  return { proceed: false, category: (fresh.guardrailStatus as GuardrailCategory) || 'spam' };
+}
+
+/** The already-gated path (this run LOST the claim): reach the SAME verdict as
+ *  the claiming run without re-running its side effects.
+ *
+ *  `guardrail_flagged` is the durable block bit. Everything else is re-derived,
+ *  for two reasons: a CLEAN first pass deliberately persists nothing (so
+ *  "claimed, unflagged, no log row" is the normal state of healthy traffic, and
+ *  blocking it froze conversations for good), and the SpamScamLog `action`
+ *  column is not a reliable control plane (legacy enforced blocks are stored as
+ *  'log_only'). classifyMessage is pure, so a rejected message still never
+ *  reaches the agent. The loop counters are PEEKED, never advanced: the claiming
+ *  run advances them itself (a peek that lands between the claim and that
+ *  advance sees the state without this message — the claiming run still blocks
+ *  and pauses the session a moment later). */
+async function replayGate(input: InboundGateInput, enforce: boolean): Promise<InboundGateResult> {
+  const { session, tenantId, message, content, channel } = input;
+  if (await readFlagged(message.id)) {
+    const status = session.guardrailStatus;
+    return {
+      proceed: false,
+      category: status && status !== 'normal' ? (status as GuardrailCategory) : 'spam',
+    };
+  }
+  if (!enforce) return { proceed: true, category: 'clean' };
+  const replayLinks = inspectLinks(content);
+  const replay = classifyMessage(content, channel, replayLinks);
+  const warnOnly = replay.category === 'solicitation' && !isHighSeverity(content, replayLinks);
+  // A reject runs the SAME epilogue as the first pass: flag, pause, journal.
+  // An unflagged reject stays in the unanswered window, so every later turn
+  // re-blocks on it and the bot goes silent on a session that still shows
+  // 'bot' — the freeze, one layer down.
+  if (replay.category !== 'clean' && !warnOnly) {
+    return enforceBlock({
+      session, channel, messageId: message.id, category: replay.category,
+      reasons: replay.reasons, score: replay.score,
+      suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
+      repeated: false, botLoop: false, replay: true,
+    });
+  }
+  // A sustained loop outranks the solicitation warning, as in the first pass.
+  const loop = evaluateLoopState(await redisLoopStore.peek(session.id));
+  if (loop.isLoop) {
+    return enforceBlock({
+      session, channel, messageId: message.id, category: 'bot_loop',
+      reasons: loop.reasons, score: null, suspiciousLink: replayLinks.score > 0,
+      repeated: loop.reasons.some((r) => r.includes('repeated')), botLoop: true, replay: true,
+    });
+  }
+  if (warnOnly) {
+    return warnSolicitation({
+      session, tenantId, channel, messageId: message.id, reasons: replay.reasons,
+      score: replay.score, suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
+      repeated: false, replay: true,
+    });
+  }
+  return { proceed: true, category: 'clean' };
+}
+
+/** Advance the Redis loop counters for the run that WON the claim. Fails open —
+ *  a turn is never blocked because loop detection errored. */
+async function detectInboundLoop(args: {
+  sessionId: string;
+  content: string;
+  flaggedByContent: boolean;
+  humanSignal: boolean;
+  suspiciousLink: boolean;
+}): Promise<{ hit: boolean; reasons: string[] }> {
+  try {
+    const r = await detectBotLoop(redisLoopStore, args.sessionId, {
+      hash: normalizedHash(args.content),
+      // Human-typical short messages reset loop streaks. Other clean, non-empty
+      // content is substantive; exact repeats are handled in the reducer.
+      meaningful: !args.flaggedByContent && args.content.trim().length > 0 && !args.humanSignal,
+      humanSignal: args.humanSignal,
+      hasSuspiciousLink: args.suspiciousLink,
+    });
+    return { hit: r.isLoop, reasons: r.reasons };
+  } catch {
+    return { hit: false, reasons: [] };
+  }
+}
+
+/** Turn the classifier + loop signals into the reported verdict. */
+function deriveInboundVerdict(args: {
+  content: string;
+  linkInfo: LinkInspection;
+  classified: ClassifyResult;
+  flaggedByContent: boolean;
+  loopHit: boolean;
+  loopReasons: string[];
+}): {
+  category: GuardrailCategory;
+  reasons: string[];
+  repeated: boolean;
+  solicitationWarnOnly: boolean;
+} {
+  const { classified: c, flaggedByContent, loopHit, loopReasons } = args;
+  // A sustained solicitation loop is still a high-severity bot_loop.
+  const solicitationWarnOnly =
+    flaggedByContent &&
+    c.category === 'solicitation' &&
+    !loopHit &&
+    !isHighSeverity(args.content, args.linkInfo);
+  const category: GuardrailCategory = loopHit && c.category === 'solicitation'
+    ? 'bot_loop'
+    : flaggedByContent ? c.category : 'bot_loop';
+  const reasons = category === 'bot_loop' ? loopReasons : c.reasons;
+  const repeated = loopReasons.some((r) => r.includes('repeated'));
+  return { category, reasons, repeated, solicitationWarnOnly };
+}
+
 /**
  * Evaluate an inbound user message. Must be called under the caller's per-session
  * lock (runTurn under the coalescer lock; the legacy path is best-effort). Returns
@@ -323,79 +455,13 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
   const { session, tenantId, message, content, channel } = input;
   const enforce = await isGuardrailsEnforcing(tenantId);
 
-  // Fast-exit: an already guardrail-disabled session never re-runs the agent.
-  // Re-read the flag from the DB (not the possibly-stale in-memory session) so a
-  // concurrent flip on a sibling burst message is respected (codex review). Mark
-  // this inbound so it can't leak into history after reactivation.
-  if (enforce) {
-    const fresh = await AppDataSource.getRepository(ChatSession).findOne({
-      where: { id: session.id },
-      select: { id: true, aiAutoReplyEnabled: true, guardrailStatus: true } as never,
-    });
-    if (fresh && fresh.aiAutoReplyEnabled === false) {
-      await markMessageFlagged(message.id);
-      session.aiAutoReplyEnabled = false;
-      session.guardrailStatus = fresh.guardrailStatus;
-      return { proceed: false, category: (fresh.guardrailStatus as GuardrailCategory) || 'spam' };
-    }
-  }
+  const disabled = await disabledSessionResult(input, enforce);
+  if (disabled) return disabled;
 
   // Idempotency: claim the message exactly once, so the loop counters are only
-  // advanced (and the outcome only logged) by the run that wins the claim.
-  //
-  // A replay then has to reach the SAME verdict without re-running the side
-  // effects. `guardrail_flagged` is the durable block bit. Everything else is
-  // re-derived, for two reasons: a CLEAN first pass deliberately persists
-  // nothing (so "claimed, unflagged, no log row" is the normal state of healthy
-  // traffic, and blocking it froze conversations for good), and the SpamScamLog
-  // `action` column is not a reliable control plane (legacy enforced blocks are
-  // stored as 'log_only'). classifyMessage is pure, so a rejected message still
-  // never reaches the agent. The loop counters are PEEKED, never advanced: the
-  // claiming run advances them itself (a peek that lands between the claim and
-  // that advance sees the state without this message — the claiming run still
-  // blocks and pauses the session a moment later).
-  if (!(await claimMessage(message.id))) {
-    if (await readFlagged(message.id)) {
-      const status = session.guardrailStatus;
-      return {
-        proceed: false,
-        category: status && status !== 'normal' ? (status as GuardrailCategory) : 'spam',
-      };
-    }
-    if (!enforce) return { proceed: true, category: 'clean' };
-    const replayLinks = inspectLinks(content);
-    const replay = classifyMessage(content, channel, replayLinks);
-    const warnOnly = replay.category === 'solicitation' && !isHighSeverity(content, replayLinks);
-    // A reject runs the SAME epilogue as the first pass: flag, pause, journal.
-    // An unflagged reject stays in the unanswered window, so every later turn
-    // re-blocks on it and the bot goes silent on a session that still shows
-    // 'bot' — the freeze, one layer down.
-    if (replay.category !== 'clean' && !warnOnly) {
-      return enforceBlock({
-        session, channel, messageId: message.id, category: replay.category,
-        reasons: replay.reasons, score: replay.score,
-        suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
-        repeated: false, botLoop: false, replay: true,
-      });
-    }
-    // A sustained loop outranks the solicitation warning, as in the first pass.
-    const loop = evaluateLoopState(await redisLoopStore.peek(session.id));
-    if (loop.isLoop) {
-      return enforceBlock({
-        session, channel, messageId: message.id, category: 'bot_loop',
-        reasons: loop.reasons, score: null, suspiciousLink: replayLinks.score > 0,
-        repeated: loop.reasons.some((r) => r.includes('repeated')), botLoop: true, replay: true,
-      });
-    }
-    if (warnOnly) {
-      return warnSolicitation({
-        session, tenantId, channel, messageId: message.id, reasons: replay.reasons,
-        score: replay.score, suspiciousLink: replayLinks.score > 0 || replay.links.length > 0,
-        repeated: false, replay: true,
-      });
-    }
-    return { proceed: true, category: 'clean' };
-  }
+  // advanced (and the outcome only logged) by the run that wins the claim. The
+  // loser replays the same verdict without the side effects (see `replayGate`).
+  if (!(await claimMessage(message.id))) return replayGate(input, enforce);
 
   const linkInfo = inspectLinks(content);
   const c = classifyMessage(content, channel, linkInfo);
@@ -405,36 +471,16 @@ export async function runInboundGate(input: InboundGateInput): Promise<InboundGa
   const suspiciousLink = hasWeakRiskLink || c.category === 'suspicious_link'
     || (c.links.length > 0 && flaggedByContent);
 
-  let loopHit = false;
-  let loopReasons: string[] = [];
-  try {
-    const r = await detectBotLoop(redisLoopStore, session.id, {
-      hash: normalizedHash(content),
-      // Human-typical short messages reset loop streaks. Other clean, non-empty
-      // content is substantive; exact repeats are handled in the reducer.
-      meaningful: !flaggedByContent && content.trim().length > 0 && !humanSignal,
-      humanSignal,
-      hasSuspiciousLink: suspiciousLink,
-    });
-    loopHit = r.isLoop;
-    loopReasons = r.reasons;
-  } catch {
-    /* fail open — never block a turn because loop detection errored */
-  }
+  const loop = await detectInboundLoop({
+    sessionId: session.id, content, flaggedByContent, humanSignal, suspiciousLink,
+  });
+  const loopHit = loop.hit;
 
   if (!flaggedByContent && !loopHit) return { proceed: true, category: 'clean' };
 
-  // A sustained solicitation loop is still a high-severity bot_loop.
-  const solicitationWarnOnly =
-    flaggedByContent &&
-    c.category === 'solicitation' &&
-    !loopHit &&
-    !isHighSeverity(content, linkInfo);
-  const category: GuardrailCategory = loopHit && c.category === 'solicitation'
-    ? 'bot_loop'
-    : flaggedByContent ? c.category : 'bot_loop';
-  const reasons = category === 'bot_loop' ? loopReasons : c.reasons;
-  const repeated = loopReasons.some((r) => r.includes('repeated'));
+  const { category, reasons, repeated, solicitationWarnOnly } = deriveInboundVerdict({
+    content, linkInfo, classified: c, flaggedByContent, loopHit, loopReasons: loop.reasons,
+  });
 
   if (!enforce) {
     // Shadow mode: observe + log only. No flag, no disable, no behaviour change.

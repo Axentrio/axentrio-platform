@@ -1,5 +1,5 @@
 import type { BookingAddressReplyFact, ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
-import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
+import { addressForTurn, addressToken, type TurnAddress } from '../../booking/travel/address-for-turn';
 import { getPendingCorrection } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
@@ -13,7 +13,12 @@ import {
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
-import type { CreateBookingResult } from '../../booking/booking-providers/types';
+import type {
+  AvailabilityResult,
+  CreateBookingResult,
+  EmptyRangeDiagnosis,
+  TravelFilterSummary,
+} from '../../booking/booking-providers/types';
 import { retryRange } from '../../booking/booking-providers/booking-dates';
 import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
@@ -223,6 +228,147 @@ function namedTimeGuidance(
   return {};
 }
 
+/** The availability result minus the two fields split off before any branch reads it. */
+type AvailabilityModel = Omit<AvailabilityResult, 'grouping' | 'emptyRange'>;
+type AvailabilitySlots = AvailabilityResult['slots'];
+
+/** The only two location choices the schema accepts; anything else is "not stated". */
+function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined {
+  return value === 'business' || value === 'customer' ? value : undefined;
+}
+
+/**
+ * OFFER TO VERIFY THE ADDRESS, computed beside `measurement` and returned from every
+ * branch below for exactly the reason stated there: this tool has four exits, and something
+ * attached only at the last one ships from none of the others. Three of those exits are the
+ * interesting cases - a fully requestable result, an empty range, a vague address - so
+ * attaching it at the end would have offered the picker only when nothing was wrong.
+ *
+ * `result.travel` is the whole gate. Travel applies only to a service whose
+ * `customerAddressRequired` is set (`booking-place.ts:80`), so its presence IS the server
+ * saying this job happens at the customer's door. Paired with "no verified place bound yet"
+ * (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
+ * changes anything - and suggestions are billed per request, so offering it anywhere else
+ * spends the tenant's money on a question with no answer worth having.
+ */
+async function availabilityAffordance(
+  ctx: ToolContext,
+  travel: TravelFilterSummary | undefined,
+  chosen: TurnAddress,
+) {
+  if (!travel || chosen.placeId) return {};
+  return addressPickerAffordance(ctx, travel.addressTooVague ? 'too_vague' : 'unverified', chosen.address);
+}
+
+/**
+ * #82: computed beside `measurement`, and for the same reason - the branches below
+ * return before the final one, so anything attached only at the end silently never ships.
+ */
+function groupingNote(travel: TravelFilterSummary | undefined): Record<string, string> {
+  const customerReason = travel?.grouped?.customerReason;
+  if (!customerReason) return {};
+  return {
+    groupingNote: `The times in "slots" are already in the best order for this business. Offer them in the order given and do not re-sort them. If the customer asks why the first one is suggested, you may say: "${customerReason}" Never invent a different reason, and never mention other customers or their addresses.`,
+  };
+}
+
+/**
+ * ONE list, said two ways: the model is given the business's wall clock, the server keeps
+ * the instants. Both come out of the same call, so the sentence the model writes and the
+ * buttons the customer taps can no longer disagree - which is precisely what happened
+ * while the model was left to convert a `Z` instant for itself.
+ */
+function modelFacingResult(result: AvailabilityModel, utcSlots: AvailabilitySlots, zone: string) {
+  const slots = wallClockSlots(utcSlots, zone);
+  const travel = result.travel;
+  if (!travel) return { ...result, slots };
+  return {
+    ...result,
+    slots,
+    travel: {
+      ...travel,
+      requestableSlots: wallClockSlots(travel.requestableSlots ?? [], zone),
+      unreachableSlots: wallClockSlots(travel.unreachableSlots ?? [], zone),
+    },
+  };
+}
+
+/**
+ * The chips, the offer record and the invented-time guard all need real instants. They
+ * travel OFF `data` for the same reason `measurement` does: `data` is what the model reads.
+ */
+function availabilityFacts(result: AvailabilityModel, utcSlots: AvailabilitySlots, zone: string) {
+  const travel = result.travel;
+  const facts = {
+    slots: utcSlots,
+    timezone: zone,
+    serviceId: result.serviceId,
+    serviceName: result.serviceName,
+    locationMode: result.locationMode,
+  };
+  if (!travel) return { availability: facts };
+  return {
+    availability: {
+      ...facts,
+      // Offered in prose, so the reply guard must know them: they are times the
+      // customer may legitimately name even though no chip carries them.
+      requestableSlots: travel.requestableSlots ?? [],
+      travel: {
+        groupingPilot: travel.groupingPilot,
+        grouped: travel.grouped,
+        groupingPreviousOrder: travel.groupingPreviousOrder,
+      },
+    },
+  };
+}
+
+/**
+ * Judged on the CLOCK TIMES this call offered, so "free" and "not free" are the same fact
+ * the create call will re-check seconds later.
+ */
+function offeredClockTimes(
+  utcSlots: AvailabilitySlots,
+  travel: TravelFilterSummary | undefined,
+  zone: string,
+): { confirmable: string[]; requestable: string[] } {
+  return {
+    confirmable: localClockTimes(utcSlots, zone) ?? [],
+    requestable: localClockTimes(travel?.requestableSlots ?? [], zone) ?? [],
+  };
+}
+
+/** What to do with a result whose remaining times all need a drive nobody has measured. */
+function travelGuidance(travel: TravelFilterSummary): string {
+  return travel.addressTooVague
+    ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
+    : 'Times in "slots" can be confirmed now. Times in "travel.requestableSlots" are further away and the journey has not been measured, so they CANNOT be auto-confirmed: offer them as times the business will confirm, and if the customer picks one, capture it with request_appointment rather than create_booking. Never present a requestable time as booked.';
+}
+
+/** Where to look instead, said as a range the business can actually take. */
+function outOfWindowGuidance(
+  outOfWindow: EmptyRangeDiagnosis,
+  retry: { startDate: string; endDate: string },
+): string {
+  return (
+    (outOfWindow.reason === 'too_soon'
+      ? 'That range is too soon: this business needs more notice than that.'
+      : outOfWindow.reason === 'too_far'
+        ? 'That range is further ahead than this business takes bookings.'
+        : 'This service already has its maximum number of bookings for that date, so NO time on that date can be booked - not the one they asked for and not any other hour.') +
+    ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
+    (outOfWindow.reason === 'service_day_full'
+      ? ' SAY THE REASON: tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these appointments it takes per day.' +
+        ' Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date - a second time on that date is refused for the same reason.' +
+        ' Checking the same date again returns the same nothing, so do not repeat it.' +
+        ' Offer ONLY times that call gives you.' +
+        ' This does NOT mean the business is closed, so do not say that.'
+      : ' Checking the same range again returns the same nothing, so do not repeat it.' +
+        ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
+        ' This does NOT mean the business is closed or fully booked, so do not say either.') +
+    ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.'
+  );
+}
+
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
   description = 'Check available appointment slots for a given date range and service.';
@@ -280,10 +426,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ctx.sessionId,
         args.customerAddress as string | undefined
       );
-      const locationChoice =
-        args.locationChoice === 'business' || args.locationChoice === 'customer'
-          ? args.locationChoice
-          : undefined;
+      const locationChoice = locationChoiceArg(args.locationChoice);
       const full = await checkAvailability(
         'agent',
         ctx.sessionId,
@@ -308,86 +451,19 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // retry RANGE derived from it is safe to say out loud.
       const { grouping, emptyRange, ...result } = full;
       const measurement = grouping ? { measurement: { grouping } } : {};
-      // OFFER TO VERIFY THE ADDRESS, computed here beside `measurement` and returned from every
-      // branch below for exactly the reason stated there: this tool has four exits, and something
-      // attached only at the last one ships from none of the others. Three of those exits are the
-      // interesting cases - a fully requestable result, an empty range, a vague address - so
-      // attaching it at the end would have offered the picker only when nothing was wrong.
-      //
-      // `result.travel` is the whole gate. Travel applies only to a service whose
-      // `customerAddressRequired` is set (`booking-place.ts:80`), so its presence IS the server
-      // saying this job happens at the customer's door. Paired with "no verified place bound yet"
-      // (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
-      // changes anything - and suggestions are billed per request, so offering it anywhere else
-      // spends the tenant's money on a question with no answer worth having.
-      const affordance = result?.travel && !chosen.placeId
-        ? await addressPickerAffordance(
-            ctx,
-            result.travel.addressTooVague ? 'too_vague' : 'unverified',
-            chosen.address,
-          )
-        : {};
+      const affordance = await availabilityAffordance(ctx, result.travel, chosen);
       const replyFact = addressReplyFact(
         chosen.address,
         'availability',
         args.customerAddress as string | undefined,
         chosen.proposedAddress
       );
-      // #82: computed here, beside `measurement`, and for the same reason - the branches below
-      // return before the final one, so anything attached only at the end silently never ships.
-      const groupedNote = result?.travel?.grouped?.customerReason
-        ? {
-            groupingNote: `The times in "slots" are already in the best order for this business. Offer them in the order given and do not re-sort them. If the customer asks why the first one is suggested, you may say: "${result.travel.grouped.customerReason}" Never invent a different reason, and never mention other customers or their addresses.`,
-          }
-        : {};
-      // ONE list, said two ways: the model is given the business's wall clock, the server keeps
-      // the instants. Both come out of this same call, so the sentence the model writes and the
-      // buttons the customer taps can no longer disagree - which is precisely what happened
-      // while the model was left to convert a `Z` instant for itself.
+      const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
       const utcSlots = Array.isArray(result.slots) ? result.slots : [];
-      const modelResult = {
-        ...result,
-        slots: wallClockSlots(utcSlots, zone),
-        ...(result.travel
-          ? {
-              travel: {
-                ...result.travel,
-                requestableSlots: wallClockSlots(result.travel.requestableSlots ?? [], zone),
-                unreachableSlots: wallClockSlots(result.travel.unreachableSlots ?? [], zone),
-              },
-            }
-          : {}),
-      };
-      // The chips, the offer record and the invented-time guard all need real instants. They
-      // travel OFF `data` for the same reason `measurement` does: `data` is what the model reads.
-      const availability = {
-        availability: {
-          slots: utcSlots,
-          timezone: zone,
-          serviceId: result.serviceId,
-          serviceName: result.serviceName,
-          locationMode: result.locationMode,
-          ...(result.travel
-            ? {
-                // Offered in prose, so the reply guard must know them: they are times the
-                // customer may legitimately name even though no chip carries them.
-                requestableSlots: result.travel.requestableSlots ?? [],
-                travel: {
-                  groupingPilot: result.travel.groupingPilot,
-                  grouped: result.travel.grouped,
-                  groupingPreviousOrder: result.travel.groupingPreviousOrder,
-                },
-              }
-            : {}),
-        },
-      };
-      // Judged on the CLOCK TIMES this call offered, so "free" and "not free" are the same fact
-      // the create call will re-check seconds later.
-      const offeredClocks = {
-        confirmable: localClockTimes(utcSlots, zone) ?? [],
-        requestable: localClockTimes(result.travel?.requestableSlots ?? [], zone) ?? [],
-      };
+      const modelResult = modelFacingResult(result, utcSlots, zone);
+      const availability = availabilityFacts(result, utcSlots, zone);
+      const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
       const withNamedTime = (data: Record<string, unknown>) => ({
         ...data,
         ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined),
@@ -419,9 +495,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             ...groupedNote,
             ...addressEcho(chosen.address),
             suggestedAction: 'request_appointment',
-            guidance: travel.addressTooVague
-              ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
-              : 'Times in "slots" can be confirmed now. Times in "travel.requestableSlots" are further away and the journey has not been measured, so they CANNOT be auto-confirmed: offer them as times the business will confirm, and if the customer picks one, capture it with request_appointment rather than create_booking. Never present a requestable time as booked.',
+            guidance: travelGuidance(travel),
           }),
         };
       }
@@ -458,23 +532,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             ...addressEcho(chosen.address),
             noSlotsInRange: true,
             suggestedAction: 'check_availability',
-            guidance:
-              (outOfWindow.reason === 'too_soon'
-                ? 'That range is too soon: this business needs more notice than that.'
-                : outOfWindow.reason === 'too_far'
-                  ? 'That range is further ahead than this business takes bookings.'
-                  : 'This service already has its maximum number of bookings for that date, so NO time on that date can be booked - not the one they asked for and not any other hour.') +
-              ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
-              (outOfWindow.reason === 'service_day_full'
-                ? ' SAY THE REASON: tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these appointments it takes per day.' +
-                  ' Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date - a second time on that date is refused for the same reason.' +
-                  ' Checking the same date again returns the same nothing, so do not repeat it.' +
-                  ' Offer ONLY times that call gives you.' +
-                  ' This does NOT mean the business is closed, so do not say that.'
-                : ' Checking the same range again returns the same nothing, so do not repeat it.' +
-                  ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
-                  ' This does NOT mean the business is closed or fully booked, so do not say either.') +
-              ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.',
+            guidance: outOfWindowGuidance(outOfWindow, retry),
           }),
         };
       }
@@ -512,6 +570,107 @@ export class CheckAvailabilityTool implements ToolAdapter {
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }
+  }
+}
+
+/**
+ * THE ONE TOOL THAT MAY ASK, and it has to claim the right to before it does.
+ *
+ * `correctionPending` says the address is contested; it does not say asking is allowed.
+ * ASKED is written exactly once per proposal, so a second attempt at the same booking
+ * proceeds on the widget rather than refusing again. A customer whose address Google cannot
+ * suggest is asked once and can still get the appointment at the address they chose. A
+ * surface without controls degrades to a Request instead of guessing.
+ *
+ * The claim lives here rather than in `addressForTurn` because the other two tools call that
+ * too, and neither of them can ask: `check_availability` is read-only and may be called
+ * speculatively, and `request_appointment` never refuses over a contested address at all.
+ * ASK ONLY IF THE QUESTION HAS NOT ALREADY REACHED THEM.
+ *
+ * Four guards have stood here, each counting something adjacent: proposals (three tools
+ * propose, one asks), claims (a second call in the same batch booked past an unread tool
+ * result), agent runs (the coalescer re-runs one message with a fresh id), and finally a SQL
+ * lookup for the reply - which was forgeable, because `/widget/message` stores
+ * customer-supplied metadata verbatim.
+ *
+ * `asked` is now set where the reply is PERSISTED, so the state means what the SQL was
+ * asked to find out, in the same store as everything else it guards. Nothing claims; delivery
+ * decides. Two concurrent asks are harmless: both refuse, and only one reply is delivered.
+ */
+async function rejectUnsettledAddress(ctx: ToolContext, booked: TurnAddress): Promise<ToolResult | null> {
+  const pendingNow = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
+
+  if (booked.correctionPending && booked.proposalId && !canRenderAddressControls(ctx.channel)) {
+    // This surface cannot render `address_confirm`, so it cannot produce ASKED evidence and
+    // cannot safely settle A-or-B. Falling through used the older bound address and would turn
+    // into a wrong-door booking as soon as any Meta channel gained an address picker. Preserve
+    // the house fallback instead: a Request commits nobody to a journey and lets the owner
+    // resolve the contested address before confirming it.
+    return {
+      success: false,
+      error:
+        `The customer has named a different address from the one previously selected, and ` +
+        `this channel cannot securely confirm which one is correct. Do not create a confirmed ` +
+        `booking. Use request_appointment instead so the business can verify the address before ` +
+        `anyone travels.`,
+      errorSafeForModel: true,
+    };
+  }
+
+  if (booked.correctionPending && booked.proposalId && pendingNow?.status !== 'asked') {
+    return {
+      success: false,
+      // The widget renders the server-authored control. Name both options in the prose too so
+      // the persisted reply and its buttons express the same A-or-B question.
+      error:
+        `The address for this appointment is not settled. Ask the customer whether the ` +
+        `appointment should be at "${booked.address}" (the address they chose earlier) or ` +
+        `"${booked.proposedAddress}" (the one just mentioned). Offer exactly those two and ` +
+        `invent no others. Do not book until they answer.`,
+      // A DOMAIN error, not an exception: the model should read it and ask the customer.
+      errorSafeForModel: true,
+      // #95. The answer needs somewhere to go, and a typed "yes" is not somewhere: it reaches
+      // the server through the model, which is the one source `address-binding` refuses. This
+      // is the control that turns the answer into a server-observed event.
+      ...(booked.proposedAddress && booked.address
+        ? {
+            affordance: {
+              kind: 'address_confirm' as const,
+              proposalId: booked.proposalId!,
+              proposed: booked.proposedAddress,
+              bound: booked.address,
+            },
+          }
+        : {}),
+    };
+  }
+  return null;
+}
+
+/**
+ * Tell the customer how to prepare, once, in chat.
+ *
+ * The Booking is already confirmed when this runs, so every failure here is swallowed: this
+ * notification is best-effort, just like email/webhook delivery, and must never undo that
+ * success.
+ */
+async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult): Promise<void> {
+  const preparationInstructions = r.preparationInstructions?.trim();
+  if (!preparationInstructions) return;
+  try {
+    // Lazy to avoid booking.tool -> message-forwarding -> AgentService ->
+    // booking.module -> booking.tool during module initialization.
+    const { sendInformationalBotMessage } = await import('../../services/message-forwarding.service');
+    await sendInformationalBotMessage(
+      ctx.sessionId,
+      `Before your appointment:\n${preparationInstructions}`,
+    );
+  } catch (err) {
+    logger.warn('[booking] preparation instructions chat notification failed', {
+      sessionId: ctx.sessionId,
+      bookingId: r.booking?.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -595,74 +754,8 @@ export class CreateBookingTool implements ToolAdapter {
         ctx.sessionId,
         args.customerAddress as string | undefined
       );
-      // THE ONE TOOL THAT MAY ASK, and it has to claim the right to before it does.
-      //
-      // `correctionPending` says the address is contested; it does not say asking is allowed.
-      // ASKED is written exactly once per proposal, so a second attempt at the same booking
-      // proceeds on the widget rather than refusing again. A customer whose address Google cannot
-      // suggest is asked once and can still get the appointment at the address they chose. A
-      // surface without controls degrades to a Request instead of guessing.
-      //
-      // The claim lives here rather than in `addressForTurn` because the other two tools call that
-      // too, and neither of them can ask: `check_availability` is read-only and may be called
-      // speculatively, and `request_appointment` never refuses over a contested address at all.
-      // ASK ONLY IF THE QUESTION HAS NOT ALREADY REACHED THEM.
-      //
-      // Four guards have stood here, each counting something adjacent: proposals (three tools
-      // propose, one asks), claims (a second call in the same batch booked past an unread tool
-      // result), agent runs (the coalescer re-runs one message with a fresh id), and finally a SQL
-      // lookup for the reply - which was forgeable, because `/widget/message` stores
-      // customer-supplied metadata verbatim.
-      //
-      // `asked` is now set where the reply is PERSISTED, so the state means what the SQL was
-      // asked to find out, in the same store as everything else it guards. Nothing claims; delivery
-      // decides. Two concurrent asks are harmless: both refuse, and only one reply is delivered.
-      const pendingNow = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
-
-      if (booked.correctionPending && booked.proposalId && !canRenderAddressControls(ctx.channel)) {
-        // This surface cannot render `address_confirm`, so it cannot produce ASKED evidence and
-        // cannot safely settle A-or-B. Falling through used the older bound address and would turn
-        // into a wrong-door booking as soon as any Meta channel gained an address picker. Preserve
-        // the house fallback instead: a Request commits nobody to a journey and lets the owner
-        // resolve the contested address before confirming it.
-        return {
-          success: false,
-          error:
-            `The customer has named a different address from the one previously selected, and ` +
-            `this channel cannot securely confirm which one is correct. Do not create a confirmed ` +
-            `booking. Use request_appointment instead so the business can verify the address before ` +
-            `anyone travels.`,
-          errorSafeForModel: true,
-        };
-      }
-
-      if (booked.correctionPending && booked.proposalId && pendingNow?.status !== 'asked') {
-        return {
-          success: false,
-          // The widget renders the server-authored control. Name both options in the prose too so
-          // the persisted reply and its buttons express the same A-or-B question.
-          error:
-            `The address for this appointment is not settled. Ask the customer whether the ` +
-            `appointment should be at "${booked.address}" (the address they chose earlier) or ` +
-            `"${booked.proposedAddress}" (the one just mentioned). Offer exactly those two and ` +
-            `invent no others. Do not book until they answer.`,
-          // A DOMAIN error, not an exception: the model should read it and ask the customer.
-          errorSafeForModel: true,
-          // #95. The answer needs somewhere to go, and a typed "yes" is not somewhere: it reaches
-          // the server through the model, which is the one source `address-binding` refuses. This
-          // is the control that turns the answer into a server-observed event.
-          ...(booked.proposedAddress && booked.address
-            ? {
-                affordance: {
-                  kind: 'address_confirm' as const,
-                  proposalId: booked.proposalId!,
-                  proposed: booked.proposedAddress,
-                  bound: booked.address,
-                },
-              }
-            : {}),
-        };
-      }
+      const unsettledAddress = await rejectUnsettledAddress(ctx, booked);
+      if (unsettledAddress) return unsettledAddress;
       // The address is in the key for the same reason it is in `request_appointment`'s: two calls
       // that differ only in where the van goes are not the same booking. The `correctionPending`
       // guard above is the first line of defence and a better one - it asks the customer - but it
@@ -681,9 +774,7 @@ export class CreateBookingTool implements ToolAdapter {
         args.serviceId as string | undefined,
         args.intakeAnswers,
         {
-          locationChoice: args.locationChoice === 'business' || args.locationChoice === 'customer'
-            ? args.locationChoice
-            : undefined,
+          locationChoice: locationChoiceArg(args.locationChoice),
           customerAddress: booked.address,
           // The identity the customer PICKED, so the booking is placed by resolving it rather
           // than by geocoding the words again. Server-injected - it is deliberately absent from
@@ -710,26 +801,7 @@ export class CreateBookingTool implements ToolAdapter {
       const r = result as CreateBookingResult;
       const isRequest = r.requested === true;
 
-      const preparationInstructions = r.preparationInstructions?.trim();
-      if (!isRequest && !r.idempotent && preparationInstructions) {
-        try {
-          // Lazy to avoid booking.tool -> message-forwarding -> AgentService ->
-          // booking.module -> booking.tool during module initialization.
-          const { sendInformationalBotMessage } = await import('../../services/message-forwarding.service');
-          await sendInformationalBotMessage(
-            ctx.sessionId,
-            `Before your appointment:\n${preparationInstructions}`,
-          );
-        } catch (err) {
-          // The Booking is already confirmed. Chat notification is best-effort,
-          // just like email/webhook delivery, and must never undo that success.
-          logger.warn('[booking] preparation instructions chat notification failed', {
-            sessionId: ctx.sessionId,
-            bookingId: r.booking?.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      if (!isRequest && !r.idempotent) await notifyPreparation(ctx, r);
       if (!isRequest && !r.idempotent) void (async () => {
         try {
           // #5: the id + canonical UTC time live at result.booking.{id,startTime} —

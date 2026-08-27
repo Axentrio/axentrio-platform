@@ -84,7 +84,7 @@ export const IntegrationTab: React.FC = () => {
             <div>
               <Label className="text-text-secondary mb-1 block">{t('settings.integrations.apiKey.label')}</Label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
+                <code className="flex-1 min-w-0 truncate px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
                   {maskSecret(tenantData?.apiKey)}
                 </code>
                 <Button

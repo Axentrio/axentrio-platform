@@ -98,44 +98,64 @@ interface ViesResponse {
   address?: string;
 }
 
-export async function lookupCompanyByVat(
-  rawVat: string,
-  deps: { redis?: Redis | null } = {},
-): Promise<LookupResult> {
+/** Either the validated VIES lookup key, or the terminal result to return as-is. */
+type VatIdentity =
+  | { ok: true; countryCode: string; nationalNumber: string; vatNumber: string }
+  | { ok: false; result: LookupResult };
+
+/**
+ * Normalises the caller's VAT input into the `(countryCode, nationalNumber)`
+ * pair VIES is queried with, or resolves to the terminal
+ * `invalid_format`/`unsupported` answer.
+ */
+function resolveVatIdentity(rawVat: string): VatIdentity {
   const raw = String(rawVat).trim().toUpperCase();
   const prefix = /^([A-Z]{2})/.exec(raw)?.[1];
-  let countryCode: string;
-  let nationalNumber: string;
-  let vatNumber: string;
 
   if (prefix && prefix !== 'BE') {
     if (!VIES_COUNTRY_CODES.has(prefix)) {
       const compact = raw.replace(/[.\s-]/g, '');
       const plausibleVat = /^[A-Z]{2}[A-Z0-9]*\d[A-Z0-9]*$/.test(compact);
       return {
-        status: plausibleVat ? 'unsupported' : 'invalid_format',
-        company: null,
-        cached: false,
+        ok: false,
+        result: {
+          status: plausibleVat ? 'unsupported' : 'invalid_format',
+          company: null,
+          cached: false,
+        },
       };
     }
 
     const normalised = normalizeAccountVat(rawVat);
     if (!normalised.ok || !normalised.value.startsWith(prefix)) {
-      return { status: 'invalid_format', company: null, cached: false };
+      return { ok: false, result: { status: 'invalid_format', company: null, cached: false } };
     }
-    nationalNumber = normalised.value.slice(2);
+    const nationalNumber = normalised.value.slice(2);
     if (!/^[A-Z0-9]{2,12}$/.test(nationalNumber)) {
-      return { status: 'invalid_format', company: null, cached: false };
+      return { ok: false, result: { status: 'invalid_format', company: null, cached: false } };
     }
-    countryCode = prefix;
-    vatNumber = normalised.value;
-  } else {
-    const parsed = parseBelgianVat(rawVat);
-    if (!parsed) return { status: 'invalid_format', company: null, cached: false };
-    countryCode = 'BE';
-    nationalNumber = parsed.enterpriseNumber;
-    vatNumber = parsed.vatNumber;
+    return { ok: true, countryCode: prefix, nationalNumber, vatNumber: normalised.value };
   }
+
+  const parsed = parseBelgianVat(rawVat);
+  if (!parsed) {
+    return { ok: false, result: { status: 'invalid_format', company: null, cached: false } };
+  }
+  return {
+    ok: true,
+    countryCode: 'BE',
+    nationalNumber: parsed.enterpriseNumber,
+    vatNumber: parsed.vatNumber,
+  };
+}
+
+export async function lookupCompanyByVat(
+  rawVat: string,
+  deps: { redis?: Redis | null } = {},
+): Promise<LookupResult> {
+  const identity = resolveVatIdentity(rawVat);
+  if (!identity.ok) return identity.result;
+  const { countryCode, nationalNumber, vatNumber } = identity;
 
   const key = cacheKey(countryCode, nationalNumber);
 

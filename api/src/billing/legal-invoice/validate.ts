@@ -9,6 +9,41 @@ function trim(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
+function resolveVatNumber(rawVat: string): { vatNumber: string | null; invalid: boolean } {
+  const digitsOnly = rawVat.toUpperCase().replace(/[.\s-]/g, '');
+  if (/^(BE)?\d+$/.test(digitsOnly)) {
+    const belgian = parseBelgianVat(rawVat);
+    if (belgian) return { vatNumber: belgian.vatNumber, invalid: false };
+    return { vatNumber: null, invalid: true };
+  }
+  const parsed = normalizeAccountVat(rawVat);
+  if (parsed.ok) return { vatNumber: parsed.value, invalid: false };
+  return { vatNumber: null, invalid: true };
+}
+
+type InvoiceAddressParts = {
+  street: string;
+  postalCode: string;
+  city: string;
+  country: string | null;
+  streetNumber: string | undefined;
+  boxNumber: string | undefined;
+};
+
+function resolveAddressParts(identity: TenantInvoiceIdentity): InvoiceAddressParts {
+  const address = identity.invoiceAddress ?? null;
+  const country =
+    (trim(address?.country) || trim(identity.operatingCountry) || '').toUpperCase() || null;
+  return {
+    street: trim(address?.street),
+    postalCode: trim(address?.postalCode),
+    city: trim(address?.city),
+    country,
+    streetNumber: trim(address?.streetNumber) || undefined,
+    boxNumber: trim(address?.boxNumber) || undefined,
+  };
+}
+
 export function validateTenantBillingData(
   identity: TenantInvoiceIdentity,
 ): BillingValidationResult {
@@ -24,25 +59,13 @@ export function validateTenantBillingData(
 
   let vatNumber: string | null = null;
   if (rawVat) {
-    const digitsOnly = rawVat.toUpperCase().replace(/[.\s-]/g, '');
-    if (/^(BE)?\d+$/.test(digitsOnly)) {
-      const belgian = parseBelgianVat(rawVat);
-      if (belgian) vatNumber = belgian.vatNumber;
-      else reasons.push('invalid_vat_number');
-    } else {
-      const parsed = normalizeAccountVat(rawVat);
-      if (parsed.ok) vatNumber = parsed.value;
-      else reasons.push('invalid_vat_number');
-    }
+    const resolved = resolveVatNumber(rawVat);
+    vatNumber = resolved.vatNumber;
+    if (resolved.invalid) reasons.push('invalid_vat_number');
   }
 
-  const address = identity.invoiceAddress ?? null;
-  const street = trim(address?.street);
-  const postalCode = trim(address?.postalCode);
-  const city = trim(address?.city);
-  const country = (trim(address?.country) || trim(identity.operatingCountry) || '').toUpperCase() || null;
-  const streetNumber = trim(address?.streetNumber) || undefined;
-  const boxNumber = trim(address?.boxNumber) || undefined;
+  const { street, postalCode, city, country, streetNumber, boxNumber } =
+    resolveAddressParts(identity);
 
   if (!country) reasons.push('missing_country');
   if (!street || !postalCode || !city) reasons.push('incomplete_address');

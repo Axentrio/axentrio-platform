@@ -185,7 +185,7 @@ const CurrentPlanCard: React.FC<{ state: BillingState }> = ({ state }) => {
   return (
     <Card variant="glass">
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-primary-400" />
             <h2 className="text-lg font-semibold text-text-primary">{t('settings.billing.currentPlan.title')}</h2>
@@ -474,8 +474,8 @@ const BillingEmailEditor: React.FC<{ state: BillingState }> = ({ state }) => {
         </h2>
       </CardHeader>
       <CardContent>
-        <form onSubmit={submit} className="flex gap-2 items-end">
-          <div className="flex-1 space-y-1">
+        <form onSubmit={submit} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="w-full flex-1 space-y-1">
             <Label htmlFor="billing-email" className="text-text-secondary">
               {t('settings.billing.email.label')}
             </Label>
@@ -553,8 +553,8 @@ const BillingHistory: React.FC<{ state: BillingState }> = ({ state }) => {
       <CardContent>
         <ul className="divide-y divide-edge">
           {state.events.map((e) => (
-            <li key={e.id} className="py-2.5 flex items-center justify-between text-sm">
-              <div>
+            <li key={e.id} className="py-2.5 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="min-w-0">
                 <div className="text-text-primary">{describeEvent(e.eventType, t)}</div>
                 <div className="text-text-muted text-xs">
                   {e.provider} · {new Date(e.createdAt).toLocaleString()}

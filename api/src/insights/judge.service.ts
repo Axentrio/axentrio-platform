@@ -84,6 +84,58 @@ function renderTranscript(messages: TranscriptMessage[]): string {
     .join('\n');
 }
 
+interface JudgeOptions {
+  withSentiment?: boolean;
+  withSentimentThemes?: boolean;
+}
+
+function selectSystemPrompt(opts?: JudgeOptions): string {
+  if (opts?.withSentimentThemes) return SENTIMENT_THEME_PROMPT;
+  if (opts?.withSentiment) return BASIC_SENTIMENT_PROMPT;
+  return SYSTEM_PROMPT;
+}
+
+function parseJudgeResponse(content: string): Record<string, unknown> {
+  try {
+    return JSON.parse(content);
+  } catch {
+    logger.warn('[insights-judge] unparseable judge response', {
+      snippet: content.slice(0, 200),
+    });
+    throw new Error('Judge returned unparseable JSON');
+  }
+}
+
+/** Evidence ids are only trusted when they name a message we actually sent. */
+function extractEvidenceIds(
+  parsed: Record<string, unknown>,
+  messages: TranscriptMessage[],
+): string[] {
+  if (!Array.isArray(parsed.evidenceMessageIds)) return [];
+  const knownIds = new Set(messages.map((m) => m.id));
+  return (parsed.evidenceMessageIds as unknown[]).filter(
+    (id): id is string => typeof id === 'string' && knownIds.has(id),
+  );
+}
+
+function extractSentiment(
+  parsed: Record<string, unknown>,
+  opts?: JudgeOptions,
+): 'positive' | 'negative' | 'neutral' | null {
+  if (!opts?.withSentiment && !opts?.withSentimentThemes) return null;
+  if (!['positive', 'negative', 'neutral'].includes(parsed.sentiment as string)) return null;
+  return parsed.sentiment as 'positive' | 'negative' | 'neutral';
+}
+
+function extractSentimentTheme(
+  parsed: Record<string, unknown>,
+  opts?: JudgeOptions,
+): string | null {
+  if (!opts?.withSentimentThemes) return null;
+  if (typeof parsed.sentimentTheme !== 'string' || !parsed.sentimentTheme.trim()) return null;
+  return parsed.sentimentTheme;
+}
+
 /**
  * Judge one session transcript. `isHandoff` forces satisfied=false per
  * ADR-0004 ("automatic flag for status='handoff'") regardless of the LLM's
@@ -102,14 +154,9 @@ export async function judgeTranscript(
   // quota (which protects their live bot). Cost is tracked via the tally
   // (ADR-0006: "monitor token spend via billing telemetry").
   const provider = getProvider(DEFAULT_PROVIDER);
-  const systemPrompt = opts?.withSentimentThemes
-    ? SENTIMENT_THEME_PROMPT
-    : opts?.withSentiment
-      ? BASIC_SENTIMENT_PROMPT
-      : SYSTEM_PROMPT;
   const response = await provider.chat(
     [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: selectSystemPrompt(opts) },
       { role: 'user', content: renderTranscript(messages) },
     ],
     { model: DEFAULT_MODEL, maxTokens: 500, temperature: 0, jsonMode: true },
@@ -121,46 +168,19 @@ export async function judgeTranscript(
     tally.calls += 1;
   }
 
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(response.content);
-  } catch {
-    logger.warn('[insights-judge] unparseable judge response', {
-      snippet: response.content.slice(0, 200),
-    });
-    throw new Error('Judge returned unparseable JSON');
-  }
-
-  const knownIds = new Set(messages.map((m) => m.id));
-  const evidence = Array.isArray(parsed.evidenceMessageIds)
-    ? (parsed.evidenceMessageIds as unknown[]).filter(
-        (id): id is string => typeof id === 'string' && knownIds.has(id),
-      )
-    : [];
+  const parsed = parseJudgeResponse(response.content);
 
   const hadQuestion = parsed.hadQuestion === true;
   let satisfied: boolean | null = hadQuestion ? parsed.satisfied === true : null;
   if (isHandoff && hadQuestion) satisfied = false;
 
-  const sentiment =
-    (opts?.withSentiment || opts?.withSentimentThemes) &&
-    ['positive', 'negative', 'neutral'].includes(parsed.sentiment as string)
-      ? (parsed.sentiment as 'positive' | 'negative' | 'neutral')
-      : null;
-  const sentimentTheme =
-    opts?.withSentimentThemes &&
-    typeof parsed.sentimentTheme === 'string' &&
-    parsed.sentimentTheme.trim()
-      ? parsed.sentimentTheme
-      : null;
-
   return {
     hadQuestion,
     satisfied,
     topicPhrase: typeof parsed.topic === 'string' && parsed.topic.trim() ? parsed.topic : null,
-    evidenceMessageIds: evidence,
+    evidenceMessageIds: extractEvidenceIds(parsed, messages),
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 1000) : null,
-    sentiment,
-    sentimentTheme,
+    sentiment: extractSentiment(parsed, opts),
+    sentimentTheme: extractSentimentTheme(parsed, opts),
   };
 }

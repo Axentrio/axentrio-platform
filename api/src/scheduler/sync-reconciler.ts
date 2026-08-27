@@ -254,6 +254,90 @@ async function processOne(row: ClaimedRow): Promise<void> {
   return clear(row);
 }
 
+/** Every column the reconciled content and location builders read from `chatbot_bookings`. */
+interface BookingContentRow {
+  attendee_name: string | null;
+  attendee_email: string | null;
+  customer_phone: string | null;
+  customer_address: string | null;
+  ai_summary: string | null;
+  notes: string | null;
+  intake_answers: unknown;
+  start_utc: string;
+  end_utc: string;
+  source_channel: string | null;
+  uploaded_files: unknown;
+  booked_duration_min: number | null;
+}
+
+/**
+ * Booked minutes for the rebuilt body: the stored value when the row carries one,
+ * else the span itself — the same fallback the inline create path uses.
+ */
+function reconciledDurationMin(b: BookingContentRow | undefined): number | null {
+  return (
+    b?.booked_duration_min ??
+    (b?.start_utc && b?.end_utc
+      ? Math.round((new Date(b.end_utc).getTime() - new Date(b.start_utc).getTime()) / 60_000)
+      : null)
+  );
+}
+
+/** The event body, from the SAME P6a builder the inline create uses. */
+function buildReconciledContent(
+  row: ClaimedRow,
+  b: BookingContentRow | undefined,
+  eventType: ServiceType
+): { summary: string; description: string } {
+  return buildBookingEventContent(
+    {
+      attendeeName: b?.attendee_name,
+      attendeeEmail: b?.attendee_email,
+      customerPhone: b?.customer_phone,
+      customerAddress: b?.customer_address,
+      aiSummary: b?.ai_summary,
+      notes: b?.notes,
+      intakeAnswers: b?.intake_answers,
+      bookingId: row.id,
+      durationMin: reconciledDurationMin(b),
+      sourceChannel: b?.source_channel,
+      uploadedFileCount: Array.isArray(b?.uploaded_files) ? b.uploaded_files.length : 0,
+    },
+    {
+      name: eventType.name,
+      description: eventType.description,
+      intakeQuestions: eventType.intakeQuestions,
+      preparationInstructions: eventType.preparationInstructions,
+    },
+    buildManageUrl(row.id)
+  );
+}
+
+/**
+ * A rebuilt mirror must carry the SAME location an inline one does, or a crash silently
+ * downgrades the event the owner navigates by. Same pure helpers as the create path.
+ */
+async function resolveMirrorLocation(
+  botId: string,
+  eventType: ServiceType,
+  customerAddress: string | null | undefined
+): Promise<string | undefined> {
+  const settings = await AppDataSource.getRepository(BookingSettings).findOne({
+    where: { botId },
+  });
+  return resolveBookingEventLocation(eventType, {
+    // As on the create path, the Meet URL is not an input to the event.
+    meetUrl: null,
+    customerAddress,
+    venue: {
+      street: settings?.venueStreet ?? null,
+      postalCode: settings?.venuePostalCode ?? null,
+      city: settings?.venueCity ?? null,
+      country: settings?.venueCountry ?? null,
+    },
+  });
+}
+
 /**
  * Resolve the rich event body + timezone for a row. Builds `content` from the
  * SAME P6a builder the inline create uses (loading the booking row's
@@ -283,20 +367,7 @@ async function loadEventMeta(
   const timezone = await getBotBusinessTimezone(row.bot_id);
   if (!eventType || !rule) return { timezone };
 
-  const bookingRows: Array<{
-    attendee_name: string | null;
-    attendee_email: string | null;
-    customer_phone: string | null;
-    customer_address: string | null;
-    ai_summary: string | null;
-    notes: string | null;
-    intake_answers: unknown;
-    start_utc: string;
-    end_utc: string;
-    source_channel: string | null;
-    uploaded_files: unknown;
-    booked_duration_min: number | null;
-  }> = await AppDataSource.query(
+  const bookingRows: BookingContentRow[] = await AppDataSource.query(
     // Every column the content builder reads. This SELECT is the whole reason the module
     // docstring promises byte-identical parity between a reconciled event and an inline
     // one — a field added to the builder but not here silently produces two different
@@ -308,48 +379,8 @@ async function loadEventMeta(
     [row.id]
   );
   const b = bookingRows[0];
-  const content = buildBookingEventContent(
-    {
-      attendeeName: b?.attendee_name,
-      attendeeEmail: b?.attendee_email,
-      customerPhone: b?.customer_phone,
-      customerAddress: b?.customer_address,
-      aiSummary: b?.ai_summary,
-      notes: b?.notes,
-      intakeAnswers: b?.intake_answers,
-      bookingId: row.id,
-      durationMin:
-        b?.booked_duration_min ??
-        (b?.start_utc && b?.end_utc
-          ? Math.round((new Date(b.end_utc).getTime() - new Date(b.start_utc).getTime()) / 60_000)
-          : null),
-      sourceChannel: b?.source_channel,
-      uploadedFileCount: Array.isArray(b?.uploaded_files) ? b.uploaded_files.length : 0,
-    },
-    {
-      name: eventType.name,
-      description: eventType.description,
-      intakeQuestions: eventType.intakeQuestions,
-      preparationInstructions: eventType.preparationInstructions,
-    },
-    buildManageUrl(row.id)
-  );
-  // A rebuilt mirror must carry the SAME location an inline one does, or a crash silently
-  // downgrades the event the owner navigates by. Same pure helpers as the create path.
-  const settings = await AppDataSource.getRepository(BookingSettings).findOne({
-    where: { botId: row.bot_id },
-  });
-  const location = resolveBookingEventLocation(eventType, {
-    // As on the create path, the Meet URL is not an input to the event.
-    meetUrl: null,
-    customerAddress: b?.customer_address,
-    venue: {
-      street: settings?.venueStreet ?? null,
-      postalCode: settings?.venuePostalCode ?? null,
-      city: settings?.venueCity ?? null,
-      country: settings?.venueCountry ?? null,
-    },
-  });
+  const content = buildReconciledContent(row, b, eventType);
+  const location = await resolveMirrorLocation(row.bot_id, eventType, b?.customer_address);
   return {
     content,
     location,

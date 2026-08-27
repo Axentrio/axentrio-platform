@@ -181,46 +181,19 @@ export class CSPBuilder {
     directives.push(`default-src ${config.defaultSrc.join(' ')}`);
 
     // Script source with nonce support
-    const scriptSrc = [...config.scriptSrc];
-    if (this.nonce) {
-      scriptSrc.push(`'nonce-${this.nonce}'`);
-    }
-    if (this.tenantConfig?.allowEval) {
-      scriptSrc.push("'unsafe-eval'");
-    }
-    if (this.tenantConfig?.allowInlineScripts) {
-      scriptSrc.push("'unsafe-inline'");
-    }
-    directives.push(`script-src ${scriptSrc.join(' ')}`);
+    directives.push(`script-src ${this.scriptSources(config).join(' ')}`);
 
     // Style source
-    const styleSrc = [...config.styleSrc];
-    if (this.tenantConfig?.allowInlineStyles) {
-      styleSrc.push("'unsafe-inline'");
-    }
-    directives.push(`style-src ${styleSrc.join(' ')}`);
+    directives.push(`style-src ${this.styleSources(config).join(' ')}`);
 
     // Image source
-    const imgSrc = [...config.imgSrc];
-    if (this.tenantConfig?.allowDataUrls) {
-      if (!imgSrc.includes('data:')) imgSrc.push('data:');
-    }
-    if (this.tenantConfig?.allowBlobUrls) {
-      if (!imgSrc.includes('blob:')) imgSrc.push('blob:');
-    }
-    directives.push(`img-src ${imgSrc.join(' ')}`);
+    directives.push(`img-src ${this.imgSources(config).join(' ')}`);
 
     // Font source
     directives.push(`font-src ${config.fontSrc.join(' ')}`);
 
     // Connect source
-    const connectSrc = [...config.connectSrc];
-    if (this.tenantConfig?.allowedDomains) {
-      connectSrc.push(...this.tenantConfig.allowedDomains);
-    }
-    // Add WebSocket support
-    connectSrc.push('wss:', 'ws:');
-    directives.push(`connect-src ${[...new Set(connectSrc)].join(' ')}`);
+    directives.push(`connect-src ${[...new Set(this.connectSources(config))].join(' ')}`);
 
     // Media source
     directives.push(`media-src ${config.mediaSrc.join(' ')}`);
@@ -232,14 +205,7 @@ export class CSPBuilder {
     directives.push(`frame-src ${config.frameSrc.join(' ')}`);
 
     // Frame ancestors (for embedding)
-    const frameAncestors = [...config.frameAncestors];
-    if (this.tenantConfig?.allowedDomains) {
-      frameAncestors.push(...this.tenantConfig.allowedDomains.map(d => {
-        // Convert domain to frame-ancestor format
-        return d.startsWith('https://') ? d : `https://${d}`;
-      }));
-    }
-    directives.push(`frame-ancestors ${[...new Set(frameAncestors)].join(' ')}`);
+    directives.push(`frame-ancestors ${[...new Set(this.frameAncestorSources(config))].join(' ')}`);
 
     // Form action
     directives.push(`form-action ${config.formAction.join(' ')}`);
@@ -253,6 +219,66 @@ export class CSPBuilder {
     // Worker source
     directives.push(`worker-src ${config.workerSrc.join(' ')}`);
 
+    this.pushPolicyFlags(directives, config);
+
+    return directives.join('; ');
+  }
+
+  private scriptSources(config: CSPConfig): string[] {
+    const scriptSrc = [...config.scriptSrc];
+    if (this.nonce) {
+      scriptSrc.push(`'nonce-${this.nonce}'`);
+    }
+    if (this.tenantConfig?.allowEval) {
+      scriptSrc.push("'unsafe-eval'");
+    }
+    if (this.tenantConfig?.allowInlineScripts) {
+      scriptSrc.push("'unsafe-inline'");
+    }
+    return scriptSrc;
+  }
+
+  private styleSources(config: CSPConfig): string[] {
+    const styleSrc = [...config.styleSrc];
+    if (this.tenantConfig?.allowInlineStyles) {
+      styleSrc.push("'unsafe-inline'");
+    }
+    return styleSrc;
+  }
+
+  private imgSources(config: CSPConfig): string[] {
+    const imgSrc = [...config.imgSrc];
+    if (this.tenantConfig?.allowDataUrls) {
+      if (!imgSrc.includes('data:')) imgSrc.push('data:');
+    }
+    if (this.tenantConfig?.allowBlobUrls) {
+      if (!imgSrc.includes('blob:')) imgSrc.push('blob:');
+    }
+    return imgSrc;
+  }
+
+  private connectSources(config: CSPConfig): string[] {
+    const connectSrc = [...config.connectSrc];
+    if (this.tenantConfig?.allowedDomains) {
+      connectSrc.push(...this.tenantConfig.allowedDomains);
+    }
+    // Add WebSocket support
+    connectSrc.push('wss:', 'ws:');
+    return connectSrc;
+  }
+
+  private frameAncestorSources(config: CSPConfig): string[] {
+    const frameAncestors = [...config.frameAncestors];
+    if (this.tenantConfig?.allowedDomains) {
+      frameAncestors.push(...this.tenantConfig.allowedDomains.map(d => {
+        // Convert domain to frame-ancestor format
+        return d.startsWith('https://') ? d : `https://${d}`;
+      }));
+    }
+    return frameAncestors;
+  }
+
+  private pushPolicyFlags(directives: string[], config: CSPConfig): void {
     // Upgrade insecure requests
     if (config.upgradeInsecureRequests) {
       directives.push('upgrade-insecure-requests');
@@ -281,8 +307,6 @@ export class CSPBuilder {
     if (config.trustedTypes && config.trustedTypes.length > 0) {
       directives.push(`trusted-types ${config.trustedTypes.join(' ')}`);
     }
-
-    return directives.join('; ');
   }
 
   private getEffectiveConfig(): CSPConfig {

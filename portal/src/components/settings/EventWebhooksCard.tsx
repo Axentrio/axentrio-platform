@@ -125,22 +125,24 @@ export const EventWebhooksCard: React.FC = () => {
 
             {rows.map((row, i) => (
               <div key={i} className="rounded-lg border border-edge p-3 space-y-3">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <Input
                     value={row.url}
                     placeholder="https://hooks.zapier.com/…"
                     onChange={(e) => update(i, { url: e.target.value })}
-                    className="flex-1"
+                    className="w-full flex-1"
                   />
-                  <Switch checked={row.enabled} onCheckedChange={(v) => update(i, { enabled: v })} />
-                  <button
-                    type="button"
-                    aria-label={t('settings.webhooks.remove', { defaultValue: 'Remove endpoint' })}
-                    className="rounded p-1.5 text-text-muted hover:bg-surface-3 hover:text-destructive"
-                    onClick={() => setDraft(rows.filter((_, idx) => idx !== i))}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={row.enabled} onCheckedChange={(v) => update(i, { enabled: v })} />
+                    <button
+                      type="button"
+                      aria-label={t('settings.webhooks.remove', { defaultValue: 'Remove endpoint' })}
+                      className="rounded p-2 text-text-muted hover:bg-surface-3 hover:text-destructive"
+                      onClick={() => setDraft(rows.filter((_, idx) => idx !== i))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">

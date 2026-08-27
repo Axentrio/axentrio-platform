@@ -150,6 +150,41 @@ function abstain(truncated = false): ExtractedLead {
   };
 }
 
+/** `null` for an absent grounded field — the read every projection below shares. */
+function fieldValue<T extends string>(f: { value: T } | null): T | null {
+  return f?.value ?? null;
+}
+
+/** A two-letter ISO code, or nothing. Anything else the model returns is discarded. */
+function resolveLanguage(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const code = raw.trim().toLowerCase();
+  return /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+/** Abstain means NOTHING survived grounding — not that one field was dropped. */
+function isAbstained(parts: {
+  request: unknown;
+  service: unknown;
+  address: unknown;
+  urgency: unknown;
+  intent: unknown;
+  preferredAtText: unknown;
+  tags: unknown;
+  enrichment: object;
+}): boolean {
+  const grounded = [
+    parts.request,
+    parts.service,
+    parts.address,
+    parts.urgency,
+    parts.intent,
+    parts.preferredAtText,
+    parts.tags,
+  ].some(Boolean);
+  return !grounded && Object.keys(parts.enrichment).length === 0;
+}
+
 /**
  * Validate a raw model response into an ExtractedLead. Pure and exported so the eval
  * and the unit tests can exercise the grounding rules without an LLM call.
@@ -211,23 +246,27 @@ export function validateExtraction(
 
   const tags = sanitizeTags(parsed.tags);
   const enrichment = sanitizeEnrichment(parsed.enrichment);
-  const language =
-    typeof parsed.language === 'string' && /^[a-z]{2}$/.test(parsed.language.trim().toLowerCase())
-      ? parsed.language.trim().toLowerCase()
-      : null;
+  const language = resolveLanguage(parsed.language);
 
-  const abstained =
-    !request && !service && !address && !urgency && !intent && !preferredAtText &&
-    !tags && Object.keys(enrichment).length === 0;
+  const abstained = isAbstained({
+    request,
+    service,
+    address,
+    urgency,
+    intent,
+    preferredAtText,
+    tags,
+    enrichment,
+  });
 
   return {
-    request: request?.value ?? null,
-    serviceRequested: service?.value ?? null,
-    address: address?.value ?? null,
+    request: fieldValue(request),
+    serviceRequested: fieldValue(service),
+    address: fieldValue(address),
     preferredAt,
     preferredAtText,
-    urgency: urgency?.value ?? null,
-    intent: intent?.value ?? null,
+    urgency: fieldValue(urgency),
+    intent: fieldValue(intent),
     tags,
     enrichment,
     evidence,

@@ -28,7 +28,7 @@ import {
 import { getBotKnowledgeBaseIds } from './bot-knowledge-bases';
 import { defaultBotAi } from '../config/default-bot-settings';
 import { resolveBotLanguage, resolveGreetingMessage } from '../config/bot-language';
-import { putBotAiSettingsSchema } from '../schemas/bot-ai-settings.schema';
+import { putBotAiSettingsSchema, PutBotAiSettingsInput } from '../schemas/bot-ai-settings.schema';
 import { testChatSchema } from '../schemas/ai-settings.schema';
 import { BotSettings } from '../database/entities/Bot';
 
@@ -95,6 +95,68 @@ export async function getBotAiSettings(req: Request, res: Response) {
 }
 
 /**
+ * Full-replace patch helpers for the optional `ai` keys. `updateBotAiSettings`
+ * rebuilds the `ai` object field-by-field, so every optional key needs the same
+ * three-way decision: preserve the existing value when the client omits the
+ * field, persist a non-empty value, and clear only on an explicit blank/empty.
+ */
+function languagePatch(
+  next: PutBotAiSettingsInput['language'],
+  existing: BotAi['language'],
+): Partial<BotAi> {
+  if (next !== undefined) return { language: next };
+  return existing ? { language: existing } : {};
+}
+
+function extraInfoPatch(next: string | undefined, existing: string | undefined): Partial<BotAi> {
+  if (next === undefined) return existing ? { extraInfo: existing } : {};
+  const trimmed = next.trim();
+  return trimmed ? { extraInfo: trimmed } : {};
+}
+
+function selectedSpecialtiesPatch(
+  next: string[] | undefined,
+  existing: string[] | undefined,
+): Partial<BotAi> {
+  if (next === undefined) return existing?.length ? { selectedSpecialties: existing } : {};
+  return next.length ? { selectedSpecialties: next } : {};
+}
+
+function templateVariablesPatch(
+  next: Record<string, string> | undefined,
+  existing: Record<string, string> | undefined,
+): Partial<BotAi> {
+  if (next === undefined) {
+    return existing && Object.keys(existing).length ? { templateVariables: existing } : {};
+  }
+  return Object.keys(next).length ? { templateVariables: next } : {};
+}
+
+function channelOverridesPatch(
+  next: PutBotAiSettingsInput['channelOverrides'],
+  existing: BotAi['channelOverrides'],
+): Partial<BotAi> {
+  if (next === undefined) return existing ? { channelOverrides: existing } : {};
+  return Object.keys(next).length ? { channelOverrides: next } : {};
+}
+
+/**
+ * T18: never persist the legacy brandVoice.templateId — the authoritative
+ * binding lives on Bot.template_id (set via PUT /bots/:id/template). Strip it
+ * even if an old client still sends it. `businessName` is persisted only when
+ * non-empty; blank means "inherit the tenant business name", resolved at
+ * prompt-composition time.
+ */
+function brandVoiceForSave(input: PutBotAiSettingsInput['brandVoice']): BotAi['brandVoice'] {
+  const businessName = input.businessName?.trim();
+  return {
+    name: input.name,
+    tone: input.tone,
+    ...(businessName ? { businessName } : {}),
+  };
+}
+
+/**
  * PUT /bots/:id/ai-settings — admin only. Full-replace of the `ai` section.
  * Carries forward the out-of-scope keys (`provider`/`model`).
  */
@@ -113,21 +175,8 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,
-    ...(data.language === undefined
-      ? (existing.language ? { language: existing.language } : {})
-      : { language: data.language }),
-    // T18: never persist the legacy brandVoice.templateId — the authoritative
-    // binding lives on Bot.template_id (set via PUT /bots/:id/template). Strip it
-    // even if an old client still sends it.
-    brandVoice: {
-      name: data.brandVoice.name,
-      tone: data.brandVoice.tone,
-      // Persist a per-bot override only when non-empty; blank means "inherit the
-      // tenant business name", resolved at prompt-composition time.
-      ...(data.brandVoice.businessName?.trim()
-        ? { businessName: data.brandVoice.businessName.trim() }
-        : {}),
-    },
+    ...languagePatch(data.language, existing.language),
+    brandVoice: brandVoiceForSave(data.brandVoice),
     guardrails: {
       ...data.guardrails,
       greetingMessage: resolveGreetingMessage(
@@ -135,28 +184,14 @@ export async function updateBotAiSettings(req: Request, res: Response) {
         resolveBotLanguage(data.language ?? existing.language),
       ),
     },
-    // Free-text supplementary context (§11b). Full-replace, so: preserve the
-    // existing value when the client omits the field (don't silently clear it),
-    // persist a non-empty value, and clear only on an explicit blank (codex).
-    ...(data.extraInfo === undefined
-      ? (existing.extraInfo ? { extraInfo: existing.extraInfo } : {})
-      : (data.extraInfo.trim() ? { extraInfo: data.extraInfo.trim() } : {})),
-    // Selected specialties (S3): same full-replace semantics — preserve when
-    // omitted, persist when non-empty, clear on an explicit []. Dropped otherwise
-    // because this rebuilds the ai object field-by-field.
-    ...(data.selectedSpecialties === undefined
-      ? (existing.selectedSpecialties?.length ? { selectedSpecialties: existing.selectedSpecialties } : {})
-      : (data.selectedSpecialties.length ? { selectedSpecialties: data.selectedSpecialties } : {})),
-    // Template variable VALUES (tenant fill) — same full-replace semantics: preserve
-    // when omitted, persist when non-empty, clear on an explicit {}.
-    ...(data.templateVariables === undefined
-      ? (existing.templateVariables && Object.keys(existing.templateVariables).length ? { templateVariables: existing.templateVariables } : {})
-      : (Object.keys(data.templateVariables).length ? { templateVariables: data.templateVariables } : {})),
-    // Per-channel overrides — same full-replace semantics. This object rebuilds `ai`
-    // field-by-field, so an unlisted key would be silently DROPPED on every save.
-    ...(data.channelOverrides === undefined
-      ? (existing.channelOverrides ? { channelOverrides: existing.channelOverrides } : {})
-      : (Object.keys(data.channelOverrides).length ? { channelOverrides: data.channelOverrides } : {})),
+    // Free-text supplementary context (§11b).
+    ...extraInfoPatch(data.extraInfo, existing.extraInfo),
+    // Selected specialties (S3).
+    ...selectedSpecialtiesPatch(data.selectedSpecialties, existing.selectedSpecialties),
+    // Template variable VALUES (tenant fill).
+    ...templateVariablesPatch(data.templateVariables, existing.templateVariables),
+    // Per-channel overrides.
+    ...channelOverridesPatch(data.channelOverrides, existing.channelOverrides),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

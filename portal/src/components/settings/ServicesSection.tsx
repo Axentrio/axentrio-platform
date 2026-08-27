@@ -90,6 +90,9 @@ interface FormState {
   intakeQuestions: IntakeQuestion[];
 }
 
+/** Field-level setter handed to the editor's field groups. */
+type FieldSetter = <K extends keyof FormState>(k: K, v: FormState[K]) => void;
+
 const BLANK: FormState = {
   name: '',
   category: '',
@@ -128,6 +131,11 @@ const BLANK: FormState = {
   intakeQuestions: [],
 };
 
+/** Optional numeric column → form text field. `null`/`undefined` becomes '' (INHERIT). */
+function numStr(v: number | string | null | undefined): string {
+  return v != null ? String(v) : '';
+}
+
 function formFromService(s: Service): FormState {
   return {
     name: s.name,
@@ -141,18 +149,18 @@ function formFromService(s: Service): FormState {
     // form never renders blank/NaN and the owner must enter valid bounds before saving.
     minDurationMin: s.minDurationMin != null ? String(s.minDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
     maxDurationMin: s.maxDurationMin != null ? String(s.maxDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
-    bufferBeforeMin: s.bufferBeforeMin != null ? String(s.bufferBeforeMin) : '',
-    bufferAfterMin: s.bufferAfterMin != null ? String(s.bufferAfterMin) : '',
-    minNoticeMin: s.minNoticeMin != null ? String(s.minNoticeMin) : '',
-    maxHorizonDays: s.maxHorizonDays != null ? String(s.maxHorizonDays) : '',
+    bufferBeforeMin: numStr(s.bufferBeforeMin),
+    bufferAfterMin: numStr(s.bufferAfterMin),
+    minNoticeMin: numStr(s.minNoticeMin),
+    maxHorizonDays: numStr(s.maxHorizonDays),
     priceDisplayType: s.priceDisplayType,
-    fixedPrice: s.fixedPrice != null ? String(s.fixedPrice) : '',
-    minPrice: s.minPrice != null ? String(s.minPrice) : '',
-    maxPrice: s.maxPrice != null ? String(s.maxPrice) : '',
+    fixedPrice: numStr(s.fixedPrice),
+    minPrice: numStr(s.minPrice),
+    maxPrice: numStr(s.maxPrice),
     priceNote: s.priceNote ?? '',
     discountEnabled: !!s.discountEnabled,
     discountType: s.discountType ?? 'percentage',
-    discountValue: s.discountValue != null ? String(s.discountValue) : '',
+    discountValue: numStr(s.discountValue),
     discountStartOn: s.discountStartOn ?? '',
     discountEndOn: s.discountEndOn ?? '',
     mentionDiscountInChat: !!s.mentionDiscountInChat,
@@ -163,7 +171,7 @@ function formFromService(s: Service): FormState {
     customerChoosesLocation: !!s.customerChoosesLocation,
     customerLocationRequired: !!s.customerLocationRequired,
     fileUploadAllowed: !!s.fileUploadAllowed,
-    maxBookingsPerDay: s.maxBookingsPerDay != null ? String(s.maxBookingsPerDay) : '',
+    maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)
       ? s.intakeQuestions.map((q) => ({ ...q, options: q.options ? [...q.options] : undefined }))
@@ -414,7 +422,7 @@ export const ServicesSection: React.FC<{
         />
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-medium text-text-primary">Services</h3>
         <Button variant="outline" size="sm" type="button" onClick={openNew}>
           <Plus className="w-3.5 h-3.5" /> Add service
@@ -447,10 +455,10 @@ export const ServicesSection: React.FC<{
       ) : (
         <div className="divide-y divide-edge rounded-lg border border-edge">
           {services.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 px-3 py-2.5">
+            <div key={s.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-sm font-medium ${s.isActive ? 'text-text-primary' : 'text-text-muted line-through'}`}>
+                  <span className={`text-sm font-medium min-w-0 truncate ${s.isActive ? 'text-text-primary' : 'text-text-muted line-through'}`}>
                     {s.name}
                   </span>
                   {/*
@@ -606,7 +614,6 @@ const ServiceEditorDialog: React.FC<{
   durationError: boolean;
   workLocation: WorkLocation;
 }> = ({ editing, form, set, save, close, saving, qError, durationError, workLocation }) => {
-  const discPreview = discountPreview(form);
   return (
       <Dialog open={!!editing} onOpenChange={(o) => !o && close()}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
@@ -621,7 +628,7 @@ const ServiceEditorDialog: React.FC<{
               <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Men’s haircut" />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-text-secondary mb-1 block">Category</Label>
                 <Input value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="Optional" />
@@ -680,7 +687,7 @@ const ServiceEditorDialog: React.FC<{
               </select>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {form.durationMode === 'fixed' ? (
                 <NumberField label="Duration (min)" value={form.durationMin} onChange={(v) => set('durationMin', v)} min={5} />
               ) : (
@@ -698,142 +705,14 @@ const ServiceEditorDialog: React.FC<{
               <InheritableNumberField label="Buffer before" value={form.bufferBeforeMin} onChange={(v) => set('bufferBeforeMin', v)} min={0} />
               <InheritableNumberField label="Buffer after" value={form.bufferAfterMin} onChange={(v) => set('bufferAfterMin', v)} min={0} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <InheritableNumberField label="Min notice (min)" value={form.minNoticeMin} onChange={(v) => set('minNoticeMin', v)} min={0} />
               <InheritableNumberField label="Max horizon (days)" value={form.maxHorizonDays} onChange={(v) => set('maxHorizonDays', v)} min={1} />
             </div>
 
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-text-secondary mb-1 block">Price display</Label>
-                  <Select
-                    value={form.priceDisplayType}
-                    onValueChange={(v) => set('priceDisplayType', v as FormState['priceDisplayType'])}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No price</SelectItem>
-                      <SelectItem value="fixed">Fixed</SelectItem>
-                      <SelectItem value="from">Starting from</SelectItem>
-                      <SelectItem value="range">Range</SelectItem>
-                      <SelectItem value="on_request">On request</SelectItem>
-                      <SelectItem value="free">Free</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {(form.priceDisplayType === 'fixed' || form.priceDisplayType === 'from') && (
-                  <NumberField label="Price (€)" value={Number(form.fixedPrice) || 0} onChange={(v) => set('fixedPrice', String(v))} min={0} />
-                )}
-              </div>
-              {form.priceDisplayType === 'range' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberField label="Min (€)" value={Number(form.minPrice) || 0} onChange={(v) => set('minPrice', String(v))} min={0} />
-                  <NumberField label="Max (€)" value={Number(form.maxPrice) || 0} onChange={(v) => set('maxPrice', String(v))} min={0} />
-                </div>
-              )}
-            </div>
+            <PriceFields form={form} set={set} />
 
-            {form.priceDisplayType !== 'none' && (
-              <div>
-                <Label className="text-text-secondary mb-1 block">Price note (optional)</Label>
-                <Input
-                  value={form.priceNote}
-                  onChange={(e) => set('priceNote', e.target.value)}
-                  placeholder="e.g. per hour, excl. materials"
-                />
-              </div>
-            )}
-
-            {(form.priceDisplayType === 'fixed' ||
-              form.priceDisplayType === 'from' ||
-              form.priceDisplayType === 'range') && (
-              <div className="space-y-3 border-t border-edge pt-3">
-                <label htmlFor="svc-discount" className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    id="svc-discount"
-                    checked={form.discountEnabled}
-                    onCheckedChange={(c) => set('discountEnabled', c === true)}
-                  />
-                  <span className="text-sm text-text-secondary">Add a discount</span>
-                </label>
-                {form.discountEnabled && (
-                  <div className="space-y-3 pl-6">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-text-secondary mb-1 block">Discount type</Label>
-                        <Select
-                          value={form.discountType}
-                          onValueChange={(v) => set('discountType', v as DiscountType)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="percentage">Percentage</SelectItem>
-                            <SelectItem value="fixed">Fixed amount</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="svc-discount-value" className="text-text-secondary mb-1 block">
-                          {form.discountType === 'percentage' ? 'Discount (%)' : 'Discount (€)'}
-                        </Label>
-                        <Input
-                          id="svc-discount-value"
-                          type="number"
-                          min={0}
-                          max={form.discountType === 'percentage' ? 100 : undefined}
-                          value={form.discountValue}
-                          onChange={(e) => set('discountValue', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-text-secondary mb-1 block">Start date (optional)</Label>
-                        <Input
-                          type="date"
-                          value={form.discountStartOn}
-                          onChange={(e) => set('discountStartOn', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-text-secondary mb-1 block">End date (optional)</Label>
-                        <Input
-                          type="date"
-                          value={form.discountEndOn}
-                          onChange={(e) => set('discountEndOn', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    {discPreview && (
-                      <p className="text-xs text-text-muted">
-                        Final price: <span className="line-through">{discPreview.original}</span>{' '}
-                        <span className="text-text-primary">{discPreview.final}</span>
-                      </p>
-                    )}
-                    <label htmlFor="svc-mention-discount" className="flex items-center gap-2 cursor-pointer">
-                      <Checkbox
-                        id="svc-mention-discount"
-                        checked={form.mentionDiscountInChat}
-                        onCheckedChange={(c) => set('mentionDiscountInChat', c === true)}
-                      />
-                      <span className="text-sm text-text-secondary">
-                        Mention discount in chat
-                        <span className="block text-xs text-text-muted">
-                          On: the assistant may say a discount is active and show the original and
-                          final price. Off: it quotes only the final price and does not advertise the
-                          discount.
-                        </span>
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-            )}
+            <DiscountFields form={form} set={set} />
 
             <QuestionsEditor
               questions={form.intakeQuestions}
@@ -841,130 +720,7 @@ const ServiceEditorDialog: React.FC<{
               error={qError}
             />
 
-            <div className="space-y-2 border-t border-edge pt-3">
-              {/*
-                Where this service happens. Stored since the beginning and read by the
-                booking engine, the invite and the calendar mirror — but with no control
-                here every hand-created service was stuck on 'custom', so an online
-                consultation never got a meeting link and an at-premises job never showed
-                the business address on the invite.
-              */}
-              <div className="space-y-1.5 pb-1">
-                <Label htmlFor="svc-location-type">Where does it happen?</Label>
-                <select
-                  id="svc-location-type"
-                  className="w-full rounded-md border border-edge bg-surface px-3 py-2 text-sm text-text-primary"
-                  value={form.locationType}
-                  onChange={(e) => {
-                    const locationType = e.target.value;
-                    set('locationType', locationType);
-                    if (locationType === 'customer_location') {
-                      set('customerAddressRequired', true);
-                      set('customerChoosesLocation', false);
-                    } else if (locationType === 'business_location') {
-                      set('customerAddressRequired', false);
-                    }
-                  }}
-                >
-                  {/* `unset` and leftover `in_person` are not offered for new services.
-                      They must be SELECTABLE to leave and never selectable to enter. */}
-                  {form.locationType === 'unset' && (
-                    <option value="unset">Not set yet - please choose</option>
-                  )}
-                  {form.locationType === 'in_person' && (
-                    <option value="in_person">In person - please choose</option>
-                  )}
-                  <option value="business_location">At my business location</option>
-                  <option value="customer_location">At the customer's location</option>
-                  <option value="google_meet">Video call (a meeting link is created)</option>
-                  <option value="phone">Phone call</option>
-                  <option value="custom">Something else</option>
-                </select>
-                <p className="text-xs text-text-muted">
-                  {form.locationType === 'unset'
-                    ? 'This service was created before this setting existed, so nobody has chosen. Your address is going on the invite for now - pick the right answer to settle it.'
-                    : form.locationType === 'in_person'
-                      ? 'In person is no longer a valid choice. Pick whether the customer comes to you or you go to them.'
-                      : form.locationType === 'google_meet'
-                        ? 'A video link is generated and sent with the invite.'
-                        : form.locationType === 'business_location'
-                          ? 'The customer comes to you. Your address goes on the invite, once you have set one under Availability.'
-                          : form.locationType === 'customer_location'
-                            ? 'You travel to the customer. Their address is required and goes on the invite.'
-                            : 'No location is put on the invite.'}
-                </p>
-              </div>
-              <label
-                htmlFor="svc-addr-req"
-                className={`flex items-center gap-2 ${form.locationType === 'business_location' || form.locationType === 'customer_location' ? '' : 'cursor-pointer'}`}
-              >
-                <Checkbox
-                  id="svc-addr-req"
-                  checked={form.customerAddressRequired}
-                  disabled={form.locationType === 'business_location' || form.locationType === 'customer_location'}
-                  onCheckedChange={(c) => set('customerAddressRequired', c === true)}
-                />
-                <span className="text-sm text-text-secondary">Requires customer address</span>
-              </label>
-              {workLocation === 'both'
-                && (form.locationType === 'business_location' || form.locationType === 'in_person')
-                && !form.customerAddressRequired && (
-                <label htmlFor="svc-choose-loc" className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    id="svc-choose-loc"
-                    checked={form.customerChoosesLocation}
-                    onCheckedChange={(c) => set('customerChoosesLocation', c === true)}
-                  />
-                  <span className="text-sm text-text-secondary">Customer can choose: at the business or at their address</span>
-                </label>
-              )}
-              <label htmlFor="svc-phone-req" className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  id="svc-phone-req"
-                  checked={form.customerLocationRequired}
-                  onCheckedChange={(c) => set('customerLocationRequired', c === true)}
-                />
-                <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>
-              </label>
-              {/*
-                Without this the portal could only ever create bookable services: the field
-                was never in the form, so the API's `default(true)` always won. An owner who
-                wanted a service listed but not self-bookable had no way to say so.
-              */}
-              <label htmlFor="svc-online-bookable" className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  id="svc-online-bookable"
-                  checked={form.onlineBookable}
-                  onCheckedChange={(c) => set('onlineBookable', c === true)}
-                />
-                <span className="text-sm text-text-secondary">
-                  Customers can book this online
-                  <span className="block text-xs text-text-muted">
-                    Off: the assistant will not offer it or take a booking for it. Use this for a
-                    service you quote by phone first.
-                  </span>
-                </span>
-              </label>
-              <label htmlFor="svc-file-allowed" className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  id="svc-file-allowed"
-                  checked={form.fileUploadAllowed}
-                  onCheckedChange={(c) => set('fileUploadAllowed', c === true)}
-                />
-                <span className="text-sm text-text-secondary">Allow file upload (e.g. a photo of the job)</span>
-              </label>
-              <div>
-                <Label htmlFor="svc-max-per-day" className="text-text-secondary mb-1 block">Max bookings per day</Label>
-                <Input
-                  id="svc-max-per-day"
-                  type="number"
-                  min={1}
-                  value={form.maxBookingsPerDay}
-                  onChange={(e) => set('maxBookingsPerDay', e.target.value)}
-                  placeholder="Unlimited"
-                />
-              </div>
-            </div>
+            <LocationFields form={form} set={set} workLocation={workLocation} />
 
             <label htmlFor="service-active" className="flex items-center gap-2 cursor-pointer">
               <Checkbox id="service-active" checked={form.isActive} onCheckedChange={(c) => set('isActive', c === true)} />
@@ -986,6 +742,296 @@ const ServiceEditorDialog: React.FC<{
           </DialogFooter>
         </DialogContent>
       </Dialog>
+  );
+};
+
+/** Price display + price note. Split out of ServiceEditorDialog (complexity). */
+const PriceFields: React.FC<{ form: FormState; set: FieldSetter }> = ({ form, set }) => (
+  <>
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label className="text-text-secondary mb-1 block">Price display</Label>
+          <Select
+            value={form.priceDisplayType}
+            onValueChange={(v) => set('priceDisplayType', v as FormState['priceDisplayType'])}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No price</SelectItem>
+              <SelectItem value="fixed">Fixed</SelectItem>
+              <SelectItem value="from">Starting from</SelectItem>
+              <SelectItem value="range">Range</SelectItem>
+              <SelectItem value="on_request">On request</SelectItem>
+              <SelectItem value="free">Free</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {(form.priceDisplayType === 'fixed' || form.priceDisplayType === 'from') && (
+          <NumberField label="Price (€)" value={Number(form.fixedPrice) || 0} onChange={(v) => set('fixedPrice', String(v))} min={0} />
+        )}
+      </div>
+      {form.priceDisplayType === 'range' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <NumberField label="Min (€)" value={Number(form.minPrice) || 0} onChange={(v) => set('minPrice', String(v))} min={0} />
+          <NumberField label="Max (€)" value={Number(form.maxPrice) || 0} onChange={(v) => set('maxPrice', String(v))} min={0} />
+        </div>
+      )}
+    </div>
+
+    {form.priceDisplayType !== 'none' && (
+      <div>
+        <Label className="text-text-secondary mb-1 block">Price note (optional)</Label>
+        <Input
+          value={form.priceNote}
+          onChange={(e) => set('priceNote', e.target.value)}
+          placeholder="e.g. per hour, excl. materials"
+        />
+      </div>
+    )}
+  </>
+);
+
+/** Discount block — only offered for the price modes that carry a number. */
+const DiscountFields: React.FC<{ form: FormState; set: FieldSetter }> = ({ form, set }) => {
+  const discPreview = discountPreview(form);
+  if (
+    form.priceDisplayType !== 'fixed' &&
+    form.priceDisplayType !== 'from' &&
+    form.priceDisplayType !== 'range'
+  ) {
+    return null;
+  }
+  return (
+    <div className="space-y-3 border-t border-edge pt-3">
+      <label htmlFor="svc-discount" className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          id="svc-discount"
+          checked={form.discountEnabled}
+          onCheckedChange={(c) => set('discountEnabled', c === true)}
+        />
+        <span className="text-sm text-text-secondary">Add a discount</span>
+      </label>
+      {form.discountEnabled && (
+        <div className="space-y-3 pl-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label className="text-text-secondary mb-1 block">Discount type</Label>
+              <Select
+                value={form.discountType}
+                onValueChange={(v) => set('discountType', v as DiscountType)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">Percentage</SelectItem>
+                  <SelectItem value="fixed">Fixed amount</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="svc-discount-value" className="text-text-secondary mb-1 block">
+                {form.discountType === 'percentage' ? 'Discount (%)' : 'Discount (€)'}
+              </Label>
+              <Input
+                id="svc-discount-value"
+                type="number"
+                min={0}
+                max={form.discountType === 'percentage' ? 100 : undefined}
+                value={form.discountValue}
+                onChange={(e) => set('discountValue', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Label className="text-text-secondary mb-1 block">Start date (optional)</Label>
+              <Input
+                type="date"
+                value={form.discountStartOn}
+                onChange={(e) => set('discountStartOn', e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-text-secondary mb-1 block">End date (optional)</Label>
+              <Input
+                type="date"
+                value={form.discountEndOn}
+                onChange={(e) => set('discountEndOn', e.target.value)}
+              />
+            </div>
+          </div>
+          {discPreview && (
+            <p className="text-xs text-text-muted">
+              Final price: <span className="line-through">{discPreview.original}</span>{' '}
+              <span className="text-text-primary">{discPreview.final}</span>
+            </p>
+          )}
+          <label htmlFor="svc-mention-discount" className="flex items-center gap-2 cursor-pointer">
+            <Checkbox
+              id="svc-mention-discount"
+              checked={form.mentionDiscountInChat}
+              onCheckedChange={(c) => set('mentionDiscountInChat', c === true)}
+            />
+            <span className="text-sm text-text-secondary">
+              Mention discount in chat
+              <span className="block text-xs text-text-muted">
+                On: the assistant may say a discount is active and show the original and
+                final price. Off: it quotes only the final price and does not advertise the
+                discount.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Copy under the "where does it happen?" picker. */
+function locationHint(locationType: string): string {
+  if (locationType === 'unset') {
+    return 'This service was created before this setting existed, so nobody has chosen. Your address is going on the invite for now - pick the right answer to settle it.';
+  }
+  if (locationType === 'in_person') {
+    return 'In person is no longer a valid choice. Pick whether the customer comes to you or you go to them.';
+  }
+  if (locationType === 'google_meet') return 'A video link is generated and sent with the invite.';
+  if (locationType === 'business_location') {
+    return 'The customer comes to you. Your address goes on the invite, once you have set one under Availability.';
+  }
+  if (locationType === 'customer_location') {
+    return 'You travel to the customer. Their address is required and goes on the invite.';
+  }
+  return 'No location is put on the invite.';
+}
+
+/** Location + on-site flags block. Split out of ServiceEditorDialog (complexity). */
+const LocationFields: React.FC<{
+  form: FormState;
+  set: FieldSetter;
+  workLocation: WorkLocation;
+}> = ({ form, set, workLocation }) => {
+  // 'business_location' and 'customer_location' both pin the address flag, so the
+  // checkbox is locked for them.
+  const addressPinned =
+    form.locationType === 'business_location' || form.locationType === 'customer_location';
+  return (
+    <div className="space-y-2 border-t border-edge pt-3">
+      {/*
+        Where this service happens. Stored since the beginning and read by the
+        booking engine, the invite and the calendar mirror — but with no control
+        here every hand-created service was stuck on 'custom', so an online
+        consultation never got a meeting link and an at-premises job never showed
+        the business address on the invite.
+      */}
+      <div className="space-y-1.5 pb-1">
+        <Label htmlFor="svc-location-type">Where does it happen?</Label>
+        <select
+          id="svc-location-type"
+          className="w-full rounded-md border border-edge bg-surface px-3 py-2 text-sm text-text-primary"
+          value={form.locationType}
+          onChange={(e) => {
+            const locationType = e.target.value;
+            set('locationType', locationType);
+            if (locationType === 'customer_location') {
+              set('customerAddressRequired', true);
+              set('customerChoosesLocation', false);
+            } else if (locationType === 'business_location') {
+              set('customerAddressRequired', false);
+            }
+          }}
+        >
+          {/* `unset` and leftover `in_person` are not offered for new services.
+              They must be SELECTABLE to leave and never selectable to enter. */}
+          {form.locationType === 'unset' && (
+            <option value="unset">Not set yet - please choose</option>
+          )}
+          {form.locationType === 'in_person' && (
+            <option value="in_person">In person - please choose</option>
+          )}
+          <option value="business_location">At my business location</option>
+          <option value="customer_location">At the customer's location</option>
+          <option value="google_meet">Video call (a meeting link is created)</option>
+          <option value="phone">Phone call</option>
+          <option value="custom">Something else</option>
+        </select>
+        <p className="text-xs text-text-muted">{locationHint(form.locationType)}</p>
+      </div>
+      <label
+        htmlFor="svc-addr-req"
+        className={`flex items-center gap-2 ${addressPinned ? '' : 'cursor-pointer'}`}
+      >
+        <Checkbox
+          id="svc-addr-req"
+          checked={form.customerAddressRequired}
+          disabled={addressPinned}
+          onCheckedChange={(c) => set('customerAddressRequired', c === true)}
+        />
+        <span className="text-sm text-text-secondary">Requires customer address</span>
+      </label>
+      {workLocation === 'both'
+        && (form.locationType === 'business_location' || form.locationType === 'in_person')
+        && !form.customerAddressRequired && (
+        <label htmlFor="svc-choose-loc" className="flex items-center gap-2 cursor-pointer">
+          <Checkbox
+            id="svc-choose-loc"
+            checked={form.customerChoosesLocation}
+            onCheckedChange={(c) => set('customerChoosesLocation', c === true)}
+          />
+          <span className="text-sm text-text-secondary">Customer can choose: at the business or at their address</span>
+        </label>
+      )}
+      <label htmlFor="svc-phone-req" className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          id="svc-phone-req"
+          checked={form.customerLocationRequired}
+          onCheckedChange={(c) => set('customerLocationRequired', c === true)}
+        />
+        <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>
+      </label>
+      {/*
+        Without this the portal could only ever create bookable services: the field
+        was never in the form, so the API's `default(true)` always won. An owner who
+        wanted a service listed but not self-bookable had no way to say so.
+      */}
+      <label htmlFor="svc-online-bookable" className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          id="svc-online-bookable"
+          checked={form.onlineBookable}
+          onCheckedChange={(c) => set('onlineBookable', c === true)}
+        />
+        <span className="text-sm text-text-secondary">
+          Customers can book this online
+          <span className="block text-xs text-text-muted">
+            Off: the assistant will not offer it or take a booking for it. Use this for a
+            service you quote by phone first.
+          </span>
+        </span>
+      </label>
+      <label htmlFor="svc-file-allowed" className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          id="svc-file-allowed"
+          checked={form.fileUploadAllowed}
+          onCheckedChange={(c) => set('fileUploadAllowed', c === true)}
+        />
+        <span className="text-sm text-text-secondary">Allow file upload (e.g. a photo of the job)</span>
+      </label>
+      <div>
+        <Label htmlFor="svc-max-per-day" className="text-text-secondary mb-1 block">Max bookings per day</Label>
+        <Input
+          id="svc-max-per-day"
+          type="number"
+          min={1}
+          value={form.maxBookingsPerDay}
+          onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+          placeholder="Unlimited"
+        />
+      </div>
+    </div>
   );
 };
 
@@ -1131,7 +1177,7 @@ const QuestionsEditor: React.FC<{
 
   return (
     <div className="space-y-2 border-t border-edge pt-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <Label className="text-text-secondary">Intake questions</Label>
         <Button variant="outline" size="sm" type="button" onClick={add} disabled={questions.length >= 8}>
           <Plus className="w-3.5 h-3.5" /> Add question
@@ -1144,7 +1190,7 @@ const QuestionsEditor: React.FC<{
       {questions.map((q, i) => (
         // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
         <div key={i} className="rounded-lg border border-edge p-2.5 space-y-2">
-          <div className="flex items-start gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
             <Input
               value={q.label}
               onChange={(e) => update(i, { label: e.target.value })}

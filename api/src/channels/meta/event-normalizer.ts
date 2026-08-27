@@ -152,54 +152,7 @@ function normalizeMessagingEvent(
 
   // Text or attachment message
   if (messaging.message) {
-    const msg = messaging.message;
-
-    if (msg.text && !msg.attachments?.length) {
-      // Pure text message
-      return {
-        type: 'message',
-        message: {
-          type: 'text',
-          content: msg.text,
-          replyToExternalId: msg.reply_to?.mid,
-        },
-        sender,
-        dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
-        timestamp: new Date(messaging.timestamp),
-        rawEventType: 'message.text',
-      };
-    }
-
-    if (msg.attachments && msg.attachments.length > 0) {
-      // Use first attachment (most common case)
-      const att = msg.attachments[0];
-      const type = att.type === 'image' ? 'image'
-        : att.type === 'video' ? 'video'
-        : att.type === 'audio' ? 'audio'
-        : att.type === 'file' ? 'file'
-        : 'file'; // fallback/template → file
-
-      return {
-        type: 'message',
-        message: {
-          type,
-          content: msg.text || '',
-          mediaUrl: att.payload?.url,
-          mediaMetadata: {
-            attachmentType: att.type,
-            stickerId: att.payload?.sticker_id,
-          },
-          replyToExternalId: msg.reply_to?.mid,
-        },
-        sender,
-        dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
-        timestamp: new Date(messaging.timestamp),
-        rawEventType: `message.${att.type}`,
-      };
-    }
-
-    // Message with no text or attachments — skip
-    return null;
+    return normalizeMetaMessageEvent(messaging.message, messaging, entry, channel, sender);
   }
 
   // Postback
@@ -276,4 +229,68 @@ function normalizeMessagingEvent(
   }
 
   return null;
+}
+
+/**
+ * Normalize a text or attachment message. Returns null when the message carries
+ * neither (nothing for the pipeline to store).
+ */
+function normalizeMetaMessageEvent(
+  msg: MetaMessage,
+  messaging: MetaMessagingEvent,
+  entry: MetaEntry,
+  channel: 'messenger' | 'instagram',
+  sender: NormalizedEvent['sender'],
+): NormalizedEvent | null {
+  if (msg.text && !msg.attachments?.length) {
+    // Pure text message
+    return {
+      type: 'message',
+      message: {
+        type: 'text',
+        content: msg.text,
+        replyToExternalId: msg.reply_to?.mid,
+      },
+      sender,
+      dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
+      timestamp: new Date(messaging.timestamp),
+      rawEventType: 'message.text',
+    };
+  }
+
+  if (msg.attachments && msg.attachments.length > 0) {
+    // Use first attachment (most common case)
+    const att = msg.attachments[0];
+    const type = metaAttachmentType(att.type);
+
+    return {
+      type: 'message',
+      message: {
+        type,
+        content: msg.text || '',
+        mediaUrl: att.payload?.url,
+        mediaMetadata: {
+          attachmentType: att.type,
+          stickerId: att.payload?.sticker_id,
+        },
+        replyToExternalId: msg.reply_to?.mid,
+      },
+      sender,
+      dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
+      timestamp: new Date(messaging.timestamp),
+      rawEventType: `message.${att.type}`,
+    };
+  }
+
+  // Message with no text or attachments — skip
+  return null;
+}
+
+/** Meta attachment type → our media type. Templates and unknowns become `file`. */
+function metaAttachmentType(attachmentType: string): 'image' | 'video' | 'audio' | 'file' {
+  return attachmentType === 'image' ? 'image'
+    : attachmentType === 'video' ? 'video'
+    : attachmentType === 'audio' ? 'audio'
+    : attachmentType === 'file' ? 'file'
+    : 'file'; // fallback/template → file
 }

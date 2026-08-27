@@ -339,7 +339,7 @@ const AdminFaqEditor: React.FC = () => {
   /* -------------------------------- Render ------------------------------- */
   return (
     <div className="h-full flex flex-col bg-surface-1">
-      <div className="px-6 pt-6 pb-4 flex items-center justify-between gap-3 shrink-0">
+      <div className="px-6 pt-6 pb-4 flex items-center justify-between flex-wrap gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-primary-500/10">
             <HelpCircle className="w-5 h-5 text-primary-400" />
@@ -543,7 +543,7 @@ const SortableSectionRow: React.FC<SortableSectionRowProps> = ({
             {t('admin.faq.itemsCount', { count: s.items.length })}
           </div>
         </button>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+        <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
           <IconButton
             aria-label={t('admin.faq.moveUp')}
             disabled={isFirst}
@@ -797,7 +797,7 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
           </div>
         )}
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+      <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
         <IconButton
           aria-label={t('admin.faq.moveUp')}
           disabled={isFirst}
@@ -847,7 +847,7 @@ const IconButton: React.FC<
   <button
     type="button"
     className={cn(
-      'p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed',
+      'p-2 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed',
       className
     )}
     {...rest}

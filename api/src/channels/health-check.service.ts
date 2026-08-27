@@ -196,56 +196,17 @@ async function probeChannel(conn: ChannelConnection): Promise<HealthCheckOutcome
   const checkedAt = new Date();
   try {
     if (conn.channel === 'telegram') {
-      const token = conn.credentials ? getTelegramBotToken(conn.credentials as Record<string, unknown>) : null;
-      if (!token) {
-        throw new Error('Missing botToken in stored credentials');
-      }
-      const res = await axios.get<{ ok: boolean; description?: string }>(
-        `${TELEGRAM_API}/bot${token}/getMe`,
-        { timeout: PROBE_TIMEOUT_MS },
-      );
-      if (!res.data?.ok) {
-        throw new Error(res.data?.description ?? 'Telegram getMe returned ok=false');
-      }
+      await probeTelegramConnection(conn);
       return { ok: true, error: null, checkedAt };
     }
 
     if (conn.channel === 'messenger' || conn.channel === 'instagram') {
-      const token = conn.credentials ? getMetaPageAccessToken(conn.credentials as Record<string, unknown>) : null;
-      if (!token) {
-        throw new Error('Missing pageAccessToken in stored credentials');
-      }
-      const res = await axios.get<{ id?: string; name?: string }>(
-        `${META_GRAPH_API}/me`,
-        { params: { fields: 'id,name', access_token: token }, timeout: PROBE_TIMEOUT_MS },
-      );
-      if (!res.data?.id) {
-        throw new Error('Meta /me returned no id');
-      }
+      await probeMetaConnection(conn);
       return { ok: true, error: null, checkedAt };
     }
 
     if (conn.channel === 'whatsapp') {
-      const token = conn.credentials ? getWhatsAppAccessToken(conn.credentials as Record<string, unknown>) : null;
-      const phoneNumberId = conn.platformAccountId;
-      if (!token) {
-        throw new Error('Missing accessToken in stored credentials');
-      }
-      if (!phoneNumberId) {
-        throw new Error('Missing WhatsApp phone number ID');
-      }
-      // Probe the phone number node — confirms the token still owns it.
-      const res = await axios.get<{ id?: string }>(
-        `${META_GRAPH_API}/${phoneNumberId}`,
-        {
-          params: { fields: 'id,verified_name,quality_rating' },
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: PROBE_TIMEOUT_MS,
-        },
-      );
-      if (!res.data?.id) {
-        throw new Error('WhatsApp phone number probe returned no id');
-      }
+      await probeWhatsAppConnection(conn);
       return { ok: true, error: null, checkedAt };
     }
 
@@ -259,5 +220,59 @@ async function probeChannel(conn: ChannelConnection): Promise<HealthCheckOutcome
       error: message,
     });
     return { ok: false, error: message, checkedAt };
+  }
+}
+
+/** Telegram getMe probe. Throws with the provider's reason when the bot token is dead. */
+async function probeTelegramConnection(conn: ChannelConnection): Promise<void> {
+  const token = conn.credentials ? getTelegramBotToken(conn.credentials as Record<string, unknown>) : null;
+  if (!token) {
+    throw new Error('Missing botToken in stored credentials');
+  }
+  const res = await axios.get<{ ok: boolean; description?: string }>(
+    `${TELEGRAM_API}/bot${token}/getMe`,
+    { timeout: PROBE_TIMEOUT_MS },
+  );
+  if (!res.data?.ok) {
+    throw new Error(res.data?.description ?? 'Telegram getMe returned ok=false');
+  }
+}
+
+/** Messenger / Instagram /me probe. Throws when the page access token no longer resolves. */
+async function probeMetaConnection(conn: ChannelConnection): Promise<void> {
+  const token = conn.credentials ? getMetaPageAccessToken(conn.credentials as Record<string, unknown>) : null;
+  if (!token) {
+    throw new Error('Missing pageAccessToken in stored credentials');
+  }
+  const res = await axios.get<{ id?: string; name?: string }>(
+    `${META_GRAPH_API}/me`,
+    { params: { fields: 'id,name', access_token: token }, timeout: PROBE_TIMEOUT_MS },
+  );
+  if (!res.data?.id) {
+    throw new Error('Meta /me returned no id');
+  }
+}
+
+/** WhatsApp phone-number probe — confirms the token still owns the number. */
+async function probeWhatsAppConnection(conn: ChannelConnection): Promise<void> {
+  const token = conn.credentials ? getWhatsAppAccessToken(conn.credentials as Record<string, unknown>) : null;
+  const phoneNumberId = conn.platformAccountId;
+  if (!token) {
+    throw new Error('Missing accessToken in stored credentials');
+  }
+  if (!phoneNumberId) {
+    throw new Error('Missing WhatsApp phone number ID');
+  }
+  // Probe the phone number node — confirms the token still owns it.
+  const res = await axios.get<{ id?: string }>(
+    `${META_GRAPH_API}/${phoneNumberId}`,
+    {
+      params: { fields: 'id,verified_name,quality_rating' },
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: PROBE_TIMEOUT_MS,
+    },
+  );
+  if (!res.data?.id) {
+    throw new Error('WhatsApp phone number probe returned no id');
   }
 }

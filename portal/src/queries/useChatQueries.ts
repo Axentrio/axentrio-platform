@@ -231,6 +231,24 @@ export const chatOptions = {
 // ---------------------------------------------------------------------------
 
 /**
+ * Row count / page count / current page from whichever meta shape the response
+ * carries, falling back to a page count derived from the requested page size.
+ */
+function readListPagination(
+  raw: ChatListResponse | undefined,
+  filters: (ChatFilters & { page?: number; limit?: number }) | undefined,
+): { total: number; totalPages: number; page: number } {
+  const total = raw?.meta?.total ?? raw?.pagination?.total ?? 0;
+  const limit = filters?.limit;
+  const totalPages =
+    raw?.meta?.totalPages ??
+    raw?.pagination?.totalPages ??
+    (limit ? Math.ceil(total / limit) : 1) ??
+    1;
+  return { total, totalPages, page: filters?.page ?? 1 };
+}
+
+/**
  * useChatsQuery
  *
  * React Query for the list; the live cache patches come from
@@ -253,13 +271,7 @@ export function useChatsQuery(
 
   const rawData = data as ChatListResponse | undefined;
   const chats: Chat[] = rawData?.data ?? [];
-  const total = rawData?.meta?.total ?? rawData?.pagination?.total ?? 0;
-  const totalPages =
-    rawData?.meta?.totalPages ??
-    rawData?.pagination?.totalPages ??
-    (filters?.limit ? Math.ceil(total / filters.limit) : 1) ??
-    1;
-  const page = filters?.page ?? 1;
+  const { total, totalPages, page } = readListPagination(rawData, filters);
 
   return {
     chats,

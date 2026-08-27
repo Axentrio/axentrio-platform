@@ -206,7 +206,7 @@ export function ChatbotStep({ status, submit }: StepProps & { status: SetupStatu
               onClick={() => toggleDay(day)}
               aria-pressed={openDays.includes(day)}
               className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs font-medium capitalize transition-colors',
+                'rounded-lg border px-3.5 py-2.5 text-xs font-medium capitalize transition-colors',
                 openDays.includes(day)
                   ? 'border-primary-500 bg-primary-500/10 text-text-primary'
                   : 'border-edge bg-surface-2 text-text-muted hover:border-primary-500/50',

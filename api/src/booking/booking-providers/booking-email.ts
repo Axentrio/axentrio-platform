@@ -183,6 +183,36 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
   });
 }
 
+/**
+ * The customer-facing invite/cancellation body.
+ *
+ * Everything interpolated here is escaped. It previously was not — `summary` is
+ * owner-authored and `location`/`description` become customer-influenced as soon as an
+ * address or intake answer reaches them, so the unescaped version was one service rename
+ * away from injecting markup into a real customer's inbox.
+ */
+function customerEmailBody(params: BookingEmailParams, cancelled: boolean): string {
+  const lead = cancelled
+    ? 'Your appointment has been cancelled.'
+    : 'Your appointment is confirmed.';
+  const duration =
+    typeof params.durationMin === 'number' && params.durationMin > 0
+      ? ` &middot; ${params.durationMin} min`
+      : '';
+  return (
+    `<p>${lead}</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}</p>` +
+    (params.location ? `<p>Location: ${esc(params.location)}</p>` : '') +
+    (!cancelled && params.preparationInstructions?.trim()
+      ? `<p><strong>Before your appointment:</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
+      : '') +
+    `<p>A calendar invite is attached.</p>` +
+    (!cancelled && params.manageUrl
+      ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel this appointment</a></p>`
+      : '')
+  );
+}
+
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
   // No customer email (WhatsApp/Messenger/Instagram bookings). There is nobody to invite,
   // but the OWNER still needs telling — this used to return here and send nothing at all,
@@ -217,28 +247,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   const to = [params.attendeeEmail];
   const cancelled = params.method === 'CANCEL';
   const subject = `${cancelled ? 'Cancelled' : 'Confirmed'}: ${params.summary}`;
-  const lead = cancelled
-    ? 'Your appointment has been cancelled.'
-    : 'Your appointment is confirmed.';
-  // Everything interpolated here is escaped. It previously was not — `summary` is
-  // owner-authored and `location`/`description` become customer-influenced as soon as an
-  // address or intake answer reaches them, so the unescaped version was one service rename
-  // away from injecting markup into a real customer's inbox.
-  const duration =
-    typeof params.durationMin === 'number' && params.durationMin > 0
-      ? ` &middot; ${params.durationMin} min`
-      : '';
-  const body =
-    `<p>${lead}</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}</p>` +
-    (params.location ? `<p>Location: ${esc(params.location)}</p>` : '') +
-    (!cancelled && params.preparationInstructions?.trim()
-      ? `<p><strong>Before your appointment:</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
-      : '') +
-    `<p>A calendar invite is attached.</p>` +
-    (!cancelled && params.manageUrl
-      ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel this appointment</a></p>`
-      : '');
+  const body = customerEmailBody(params, cancelled);
 
   await sendOrReport('invite email', params, {
       to,

@@ -209,6 +209,177 @@ function AnswerGapDialog({
   );
 }
 
+/** Topic label plus the dormant / resolved / priority badges. */
+function GapBadges({ gap }: { gap: GapRow }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', SEVERITY_DOT[gap.severity])} />
+      <p className="text-sm font-medium text-text-primary truncate capitalize">{gap.topic}</p>
+      {gap.status === 'dormant' && (
+        <Badge variant="outline" className="text-xs text-zinc-400">
+          {t('insights.status.dormant', { defaultValue: 'Dormant' })}
+        </Badge>
+      )}
+      {(gap.status === 'resolved_data' || gap.status === 'resolved_manual') && (
+        <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/40">
+          {gap.status === 'resolved_data'
+            ? t('insights.status.resolvedData', { defaultValue: 'Resolved — confirmed by chats' })
+            : t('insights.status.resolvedManual', { defaultValue: 'Resolved — marked fixed' })}
+        </Badge>
+      )}
+      {gap.priorityScore != null && (
+        <Badge variant="outline" className="text-xs text-primary-300 border-primary-400/30">
+          {t('insights.priority', {
+            defaultValue: 'Priority {{score}}',
+            score: gap.priorityScore,
+          })}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+/** The three lifecycle buttons; nothing renders once a gap leaves open/dormant. */
+function GapActions({
+  actionable,
+  answered,
+  answerPending,
+  resolvePending,
+  archivePending,
+  onAnswer,
+  onResolve,
+  onArchive,
+}: {
+  actionable: boolean;
+  answered: boolean;
+  answerPending: boolean;
+  resolvePending: boolean;
+  archivePending: boolean;
+  onAnswer: () => void;
+  onResolve: () => void;
+  onArchive: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!actionable) return null;
+  return (
+    <div className="flex gap-2 shrink-0">
+      {!answered && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={answerPending}
+          onClick={onAnswer}
+        >
+          <PenLine className="h-3.5 w-3.5 mr-1" />
+          {t('insights.actions.answer', { defaultValue: 'Answer this' })}
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={resolvePending}
+        onClick={onResolve}
+      >
+        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+        {t('insights.actions.resolve', { defaultValue: 'I fixed this' })}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={archivePending}
+        onClick={onArchive}
+        title={t('insights.actions.archiveHint', { defaultValue: 'Not relevant to my business' })}
+      >
+        <Archive className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+/** "Answer added …" line plus the asks-before/asks-since outcome. */
+function GapAnswerSummary({ gap }: { gap: GapRow }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+        {gap.answeredAt
+          ? t('insights.answer.added', {
+              defaultValue: 'Answer added {{date}}',
+              date: new Date(gap.answeredAt).toLocaleString(),
+            })
+          : t('insights.answer.addedPlain', { defaultValue: 'Answer added' })}
+      </p>
+      {/* Explicit null checks, never a falsy test: zero asks since the answer is the
+          whole point of this line, so it has to render. */}
+      {gap.asksBeforeAnswer != null && gap.asksSinceAnswer != null && (
+        <p
+          className={cn(
+            'text-xs',
+            gap.asksSinceAnswer === 0 ? 'text-emerald-400' : 'text-zinc-400',
+          )}
+        >
+          {gap.asksSinceAnswer === 0
+            ? t('insights.answer.outcomeWin', {
+                defaultValue:
+                  '{{before}} people asked before your answer. Nobody has asked since.',
+                before: gap.asksBeforeAnswer,
+              })
+            : t('insights.answer.outcome', {
+                defaultValue:
+                  '{{before}} people asked before your answer. {{since}} have asked since.',
+                before: gap.asksBeforeAnswer,
+                since: gap.asksSinceAnswer,
+              })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The expanded evidence drill-down. Renders nothing while collapsed or locked. */
+function GapEvidence({
+  expanded,
+  evidenceEnabled,
+  isLoading,
+  evidence,
+}: {
+  expanded: boolean;
+  evidenceEnabled: boolean;
+  isLoading: boolean;
+  evidence: EvidenceEntry[] | undefined;
+}) {
+  const { t } = useTranslation();
+  if (!expanded || !evidenceEnabled) return null;
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-3">
+      {isLoading ? (
+        <Skeleton className="h-16 w-full rounded-lg" />
+      ) : (
+        (evidence ?? []).map((e) => (
+          <div key={e.sessionId} className="text-xs space-y-1.5">
+            <p className="text-zinc-500">
+              {new Date(e.sessionStartedAt).toLocaleString()}
+              {e.reasoning && <span className="ml-2 text-zinc-400 italic">{e.reasoning}</span>}
+            </p>
+            {e.messages.map((m) => (
+              <p key={m.id} className="text-zinc-300">
+                <span className={cn('font-medium mr-1.5', m.sender === 'user' ? 'text-sky-400' : 'text-zinc-500')}>
+                  {m.sender === 'user'
+                    ? t('insights.evidence.customer', { defaultValue: 'Customer' })
+                    : t('insights.evidence.assistant', { defaultValue: 'Assistant' })}:
+                </span>
+                {m.content}
+              </p>
+            ))}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 function GapCard({
   gap,
   evidenceEnabled,
@@ -239,64 +410,18 @@ function GapCard({
   return (
     <Card variant="glass">
       <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', SEVERITY_DOT[gap.severity])} />
-            <p className="text-sm font-medium text-text-primary truncate capitalize">{gap.topic}</p>
-            {gap.status === 'dormant' && (
-              <Badge variant="outline" className="text-xs text-zinc-400">
-                {t('insights.status.dormant', { defaultValue: 'Dormant' })}
-              </Badge>
-            )}
-            {(gap.status === 'resolved_data' || gap.status === 'resolved_manual') && (
-              <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/40">
-                {gap.status === 'resolved_data'
-                  ? t('insights.status.resolvedData', { defaultValue: 'Resolved — confirmed by chats' })
-                  : t('insights.status.resolvedManual', { defaultValue: 'Resolved — marked fixed' })}
-              </Badge>
-            )}
-            {gap.priorityScore != null && (
-              <Badge variant="outline" className="text-xs text-primary-300 border-primary-400/30">
-                {t('insights.priority', {
-                  defaultValue: 'Priority {{score}}',
-                  score: gap.priorityScore,
-                })}
-              </Badge>
-            )}
-          </div>
-          {actionable && (
-            <div className="flex gap-2 shrink-0">
-              {!answered && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={answerGap.isPending}
-                  onClick={() => setAnswerOpen(true)}
-                >
-                  <PenLine className="h-3.5 w-3.5 mr-1" />
-                  {t('insights.actions.answer', { defaultValue: 'Answer this' })}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={resolveGap.isPending}
-                onClick={() => resolveGap.mutate(gap.id)}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                {t('insights.actions.resolve', { defaultValue: 'I fixed this' })}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={archiveGap.isPending}
-                onClick={() => archiveGap.mutate(gap.id)}
-                title={t('insights.actions.archiveHint', { defaultValue: 'Not relevant to my business' })}
-              >
-                <Archive className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          )}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <GapBadges gap={gap} />
+          <GapActions
+            actionable={actionable}
+            answered={answered}
+            answerPending={answerGap.isPending}
+            resolvePending={resolveGap.isPending}
+            archivePending={archiveGap.isPending}
+            onAnswer={() => setAnswerOpen(true)}
+            onResolve={() => resolveGap.mutate(gap.id)}
+            onArchive={() => archiveGap.mutate(gap.id)}
+          />
         </div>
 
         <p className="text-xs text-zinc-400">
@@ -308,42 +433,7 @@ function GapCard({
           })}
         </p>
 
-        {answered && (
-          <div className="space-y-1.5">
-            <p className="flex items-center gap-1.5 text-xs text-emerald-400">
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              {gap.answeredAt
-                ? t('insights.answer.added', {
-                    defaultValue: 'Answer added {{date}}',
-                    date: new Date(gap.answeredAt).toLocaleString(),
-                  })
-                : t('insights.answer.addedPlain', { defaultValue: 'Answer added' })}
-            </p>
-            {/* Explicit null checks, never a falsy test: zero asks since the answer is the
-                whole point of this line, so it has to render. */}
-            {gap.asksBeforeAnswer != null && gap.asksSinceAnswer != null && (
-              <p
-                className={cn(
-                  'text-xs',
-                  gap.asksSinceAnswer === 0 ? 'text-emerald-400' : 'text-zinc-400',
-                )}
-              >
-                {gap.asksSinceAnswer === 0
-                  ? t('insights.answer.outcomeWin', {
-                      defaultValue:
-                        '{{before}} people asked before your answer. Nobody has asked since.',
-                      before: gap.asksBeforeAnswer,
-                    })
-                  : t('insights.answer.outcome', {
-                      defaultValue:
-                        '{{before}} people asked before your answer. {{since}} have asked since.',
-                      before: gap.asksBeforeAnswer,
-                      since: gap.asksSinceAnswer,
-                    })}
-              </p>
-            )}
-          </div>
-        )}
+        {answered && <GapAnswerSummary gap={gap} />}
 
         {recommendationsEnabled && gap.status === 'open' && gap.recommendation && (
           <p className="flex items-start gap-2 text-sm text-zinc-300">
@@ -370,32 +460,12 @@ function GapCard({
           </p>
         )}
 
-        {expanded && evidenceEnabled && (
-          <div className="space-y-3 border-t border-white/10 pt-3">
-            {loadingEvidence ? (
-              <Skeleton className="h-16 w-full rounded-lg" />
-            ) : (
-              (evidenceRes?.evidence ?? []).map((e) => (
-                <div key={e.sessionId} className="text-xs space-y-1.5">
-                  <p className="text-zinc-500">
-                    {new Date(e.sessionStartedAt).toLocaleString()}
-                    {e.reasoning && <span className="ml-2 text-zinc-400 italic">{e.reasoning}</span>}
-                  </p>
-                  {e.messages.map((m) => (
-                    <p key={m.id} className="text-zinc-300">
-                      <span className={cn('font-medium mr-1.5', m.sender === 'user' ? 'text-sky-400' : 'text-zinc-500')}>
-                        {m.sender === 'user'
-                          ? t('insights.evidence.customer', { defaultValue: 'Customer' })
-                          : t('insights.evidence.assistant', { defaultValue: 'Assistant' })}:
-                      </span>
-                      {m.content}
-                    </p>
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-        )}
+        <GapEvidence
+          expanded={expanded}
+          evidenceEnabled={evidenceEnabled}
+          isLoading={loadingEvidence}
+          evidence={evidenceRes?.evidence}
+        />
 
         {answerOpen && (
           <AnswerGapDialog

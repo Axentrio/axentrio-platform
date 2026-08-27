@@ -141,23 +141,7 @@ export function entitlementsFor(
       features[key] = false;
     }
   } else if (featureCtx?.featureOverrides) {
-    for (const [key, entry] of Object.entries(featureCtx.featureOverrides)) {
-      if (!(key in features)) {
-        logger.warn('entitlementsFor: ignoring unknown feature override key', {
-          tenantId: featureCtx.tenantId,
-          key,
-        });
-        continue;
-      }
-      if (typeof entry?.value !== 'boolean') {
-        logger.warn('entitlementsFor: ignoring malformed feature override', {
-          tenantId: featureCtx.tenantId,
-          key,
-        });
-        continue;
-      }
-      features[key as FeatureKey] = entry.value;
-    }
+    applyFeatureOverrides(features, featureCtx.featureOverrides, featureCtx.tenantId);
   }
 
   // Dependency pass (taxonomy `requires`): a child feature can never be on
@@ -175,13 +159,7 @@ export function entitlementsFor(
   // is already false). Malformed/non-toggleable entries are dropped.
   const featureToggles = sanitizeFeatureToggles(featureCtx?.featureToggles, featureCtx?.tenantId);
   if (billable) {
-    for (const key of TENANT_TOGGLEABLE_FEATURES) {
-      if (featureToggles[key] === false) features[key] = false;
-      // Opt-in features invert the default: absent preference means OFF, so being
-      // entitled is not the same as having switched it on. Used for toggles that
-      // change what the bot asks a consumer for (see OPT_IN_FEATURES).
-      else if (featureToggles[key] !== true && isOptInFeature(key)) features[key] = false;
-    }
+    applyTenantToggles(features, featureToggles);
     // Cascade a toggled-off parent to its children (e.g. bookings off ⇒
     // calendarSync off; gapInsights off ⇒ gapEvidence/aiBusinessInsights off).
     enforceFeatureDependencies(features);
@@ -196,6 +174,52 @@ export function entitlementsFor(
     featureToggles,
     support: plan.support,
   };
+}
+
+/**
+ * Merge well-formed Enterprise feature overrides over the plan's feature clone.
+ * Unknown keys and non-boolean values are dropped with a warning — manual JSONB
+ * drift must never throw or apply.
+ */
+function applyFeatureOverrides(
+  features: Entitlements['features'],
+  featureOverrides: Record<string, FeatureOverride>,
+  tenantId: string | undefined,
+): void {
+  for (const [key, entry] of Object.entries(featureOverrides)) {
+    if (!(key in features)) {
+      logger.warn('entitlementsFor: ignoring unknown feature override key', {
+        tenantId,
+        key,
+      });
+      continue;
+    }
+    if (typeof entry?.value !== 'boolean') {
+      logger.warn('entitlementsFor: ignoring malformed feature override', {
+        tenantId,
+        key,
+      });
+      continue;
+    }
+    features[key as FeatureKey] = entry.value;
+  }
+}
+
+/**
+ * Layer the tenant's own preferences over the finalized ceiling. A preference
+ * can only turn a toggleable feature OFF, never on above the ceiling.
+ */
+function applyTenantToggles(
+  features: Entitlements['features'],
+  featureToggles: TenantFeatureToggles,
+): void {
+  for (const key of TENANT_TOGGLEABLE_FEATURES) {
+    if (featureToggles[key] === false) features[key] = false;
+    // Opt-in features invert the default: absent preference means OFF, so being
+    // entitled is not the same as having switched it on. Used for toggles that
+    // change what the bot asks a consumer for (see OPT_IN_FEATURES).
+    else if (featureToggles[key] !== true && isOptInFeature(key)) features[key] = false;
+  }
 }
 
 /**

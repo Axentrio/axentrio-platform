@@ -41,6 +41,7 @@ import {
   rescheduleBookingBodySchema,
   placesQuerySchema,
   placesSelectSchema,
+  type UpdateSchedulerInput,
 } from '../schemas/scheduler.schema';
 import type { Repository, EntityManager } from 'typeorm';
 import {
@@ -206,6 +207,58 @@ function reconcileIntakeQuestions(
   return out.length ? out : null;
 }
 
+/**
+ * The capacity rules, cherry-picked one field at a time.
+ *
+ * Must be returned explicitly: the config read cherry-picks, so a field added to the entity
+ * but not here reads as undefined, the portal hydrates it blank, and the owner's next
+ * Save writes that blank back over a real value. Its own helper only so the read stays
+ * one readable object; the field list IS the contract.
+ */
+function readBookingRules(s: BookingSettings | null) {
+  return {
+    maxBookingsPerDay: s?.maxBookingsPerDay ?? null,
+    maxBookedMinutesPerDay: s?.maxBookedMinutesPerDay ?? null,
+    minGapMin: s?.minGapMin ?? null,
+    defaultBufferBeforeMin: s?.defaultBufferBeforeMin ?? null,
+    defaultBufferAfterMin: s?.defaultBufferAfterMin ?? null,
+    defaultMinNoticeMin: s?.defaultMinNoticeMin ?? null,
+    defaultMaxHorizonDays: s?.defaultMaxHorizonDays ?? null,
+  };
+}
+
+/**
+ * The stored venue. Same reason as `readBookingRules`: cherry-picked, so a field added to
+ * the entity but missing here hydrates the editor blank, and the next Save writes the
+ * blank back over a real venue.
+ */
+function readVenueAddress(s: BookingSettings | null) {
+  return {
+    placeId: s?.venuePlaceId ?? null,
+    street: s?.venueStreet ?? null,
+    postalCode: s?.venuePostalCode ?? null,
+    city: s?.venueCity ?? null,
+    country: s?.venueCountry ?? null,
+  };
+}
+
+/**
+ * The travel-time preferences. Cherry-picked like everything else here — a field on the
+ * entity but missing from this object hydrates the editor blank and the owner's next Save
+ * writes the blank back. `blockedReason` is added by the caller, which owns the await.
+ */
+function readTravelSettings(s: BookingSettings | null) {
+  return {
+    enabled: s?.travelTimeEnabled === true,
+    slackMin: s?.travelSlackMin ?? null,
+    startFromBase: s?.travelStartFromBase === true,
+    baseDepartOffsetMin: s?.travelBaseDepartOffsetMin ?? 0,
+    groupingPeriod: s?.travelGroupingPeriod ?? 'none',
+    routePriority: s?.travelRoutePriority ?? 'auto',
+    maxDetourMin: s?.travelMaxDetourMin ?? null,
+  };
+}
+
 async function readConfig(tenantId: string, bot: Bot) {
   const repo = AppDataSource.getRepository(ServiceType);
   const [eventType, services, availability, bookingSettings] = await Promise.all([
@@ -244,49 +297,19 @@ async function readConfig(tenantId: string, bot: Bot) {
     // No settings row (or a hand-edited non-array) reads as "no area configured", which
     // never blocks a booking.
     serviceArea: Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
-    // Must be returned explicitly: readConfig cherry-picks, so a field added to the entity
-    // but not here reads as undefined, the portal hydrates it blank, and the owner's next
-    // Save writes that blank back over a real value.
-    bookingRules: {
-      maxBookingsPerDay: bookingSettings?.maxBookingsPerDay ?? null,
-      maxBookedMinutesPerDay: bookingSettings?.maxBookedMinutesPerDay ?? null,
-      minGapMin: bookingSettings?.minGapMin ?? null,
-      defaultBufferBeforeMin: bookingSettings?.defaultBufferBeforeMin ?? null,
-      defaultBufferAfterMin: bookingSettings?.defaultBufferAfterMin ?? null,
-      defaultMinNoticeMin: bookingSettings?.defaultMinNoticeMin ?? null,
-      defaultMaxHorizonDays: bookingSettings?.defaultMaxHorizonDays ?? null,
-    },
+    bookingRules: readBookingRules(bookingSettings),
     // Cherry-picked like everything else here, so omitting it would make the portal hydrate
     // "not paused" and quietly un-pause a business on its next Save.
     bookingsPaused: bookingSettings?.bookingsPaused === true,
-    // Same reason as bookingRules: cherry-picked, so a field added to the entity but not
-    // here reads as undefined, the editor hydrates it blank, and the next Save writes the
-    // blank back over a real venue.
-    venueAddress: {
-      // Cherry-picked like every sibling: a field on the entity but missing here hydrates the
-      // editor blank, and the owner's next Save writes that blank back over a real value.
-      placeId: bookingSettings?.venuePlaceId ?? null,
-      street: bookingSettings?.venueStreet ?? null,
-      postalCode: bookingSettings?.venuePostalCode ?? null,
-      city: bookingSettings?.venueCity ?? null,
-      country: bookingSettings?.venueCountry ?? null,
-    },
+    venueAddress: readVenueAddress(bookingSettings),
     // WHICH AGENT THESE SETTINGS BELONG TO.
     //
     // Since #86 this is whichever Agent the caller named, defaulting to the anchor — so it is
     // no longer a disclaimer about a limitation but the identity of the thing being edited.
     // The portal echoes it back on write, and renders it in the Agent picker.
     agent: { id: bot.id, name: bot.name },
-    // Cherry-picked like everything else here — a field on the entity but missing from this
-    // object hydrates the editor blank and the owner's next Save writes the blank back.
     travel: {
-      enabled: bookingSettings?.travelTimeEnabled === true,
-      slackMin: bookingSettings?.travelSlackMin ?? null,
-      startFromBase: bookingSettings?.travelStartFromBase === true,
-      baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
-      groupingPeriod: bookingSettings?.travelGroupingPeriod ?? 'none',
-      routePriority: bookingSettings?.travelRoutePriority ?? 'auto',
-      maxDetourMin: bookingSettings?.travelMaxDetourMin ?? null,
+      ...readTravelSettings(bookingSettings),
       /**
        * Why the switch cannot be turned on, or null when it can.
        *
@@ -309,6 +332,316 @@ export async function getSchedulerConfig(req: Request, res: Response): Promise<v
   sendSuccess(res, await readConfig(tenantId, bot));
 }
 
+/** Report an unsupported business-location country as the 400 the portal expects. */
+function asUnsupportedCountryError(err: unknown): never {
+  if (err instanceof UnsupportedBusinessCountryError) {
+    throw new ApiError(err.message, 400, 'UNSUPPORTED_BUSINESS_COUNTRY');
+  }
+  throw err;
+}
+
+/**
+ * Pre-write guard (PR 1a): reject an unsupported business-location country
+ * BEFORE any section write, so a refused venue leaves nothing written — the
+ * portal saves the whole page (event type, availability, venue) in one PUT, so
+ * a late rejection would otherwise persist the opening hours of a venue we
+ * refused. A TYPED country with no place id is settled here; a place id is
+ * resolved (BE-restricted, so it can only yield BE) and its post-resolution
+ * check runs in the settings write.
+ */
+function assertTypedVenueCountrySupported(venueAddress: UpdateSchedulerInput['venueAddress']): void {
+  const v = (venueAddress ?? null) as { country?: string | null; placeId?: string | null } | null;
+  const hasPlaceId = !!v && typeof v.placeId === 'string' && v.placeId.trim().length > 0;
+  if (v && !hasPlaceId && typeof v.country === 'string' && v.country.trim()) {
+    try {
+      resolveBusinessTimezone({ venue: { country: v.country } });
+    } catch (err) {
+      asUnsupportedCountryError(err);
+    }
+  }
+}
+
+/** Upsert the back-compat single event type (first active service). */
+async function writeEventTypeSection(
+  tenantId: string,
+  botId: string,
+  input: NonNullable<UpdateSchedulerInput['eventType']>
+): Promise<void> {
+  const repo = AppDataSource.getRepository(ServiceType);
+  let et = await repo.findOne({ where: { botId, isActive: true } });
+  if (!et) et = repo.create({ tenantId, botId, isActive: true });
+  Object.assign(et, input, { slug: slugify(input.name) });
+  await repo.save(et);
+}
+
+/** Upsert the weekly availability rule. */
+async function writeAvailabilitySection(
+  tenantId: string,
+  bot: Bot,
+  input: NonNullable<UpdateSchedulerInput['availability']>
+): Promise<void> {
+  const repo = AppDataSource.getRepository(AvailabilityRule);
+  let rule = await repo.findOne({ where: { botId: bot.id } });
+  if (!rule) rule = repo.create({ tenantId, botId: bot.id });
+  Object.assign(rule, input);
+  // The rule timezone is never client-writable: it is always the bot's canonical,
+  // geography-derived businessTimezone (server-owned authority, TZ PR1a).
+  const derivedTimezone = bot.businessTimezone || DEFAULT_BUSINESS_TIMEZONE;
+  rule.timezone = derivedTimezone;
+  await repo.save(rule);
+}
+
+/** Is travel time already switched on for this Agent? */
+async function travelIsAlreadyOn(botId: string): Promise<boolean> {
+  const stored = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
+  return stored?.travelTimeEnabled === true;
+}
+
+/**
+ * Settle the submitted place id, REWRITING `va` with Google's own components on success.
+ *
+ * A place id NEVER outlives the text it came from, and this is where that is guaranteed
+ * rather than hoped for. An id arriving with the venue is a claim that these four fields are
+ * that place; we settle it by resolving the id and writing GOOGLE's components, so the stored
+ * pair cannot disagree. An owner who hand-edits a field sends no id, and the id clears.
+ *
+ * FAILS OPEN. If the id will not resolve - Google down, cap spent, id retired - the venue
+ * still saves exactly as typed, with no id. An owner must always be able to record their own
+ * address; being unable to VERIFY it is not a reason to refuse to STORE it.
+ */
+async function resolveVenuePlaceId(
+  tenantId: string,
+  botId: string,
+  va: Record<string, string | null | undefined>,
+  venueProvided: boolean
+): Promise<string | null> {
+  if (!venueProvided || typeof va.placeId !== 'string' || !va.placeId.trim()) return null;
+  const resolved = await resolvePlaceId(tenantId, va.placeId.trim());
+  if (resolved.status !== 'placed') {
+    logger.info('[Travel] venue place id did not resolve; storing the address as typed', {
+      tenantId,
+      botId,
+      cause: resolved.status === 'unavailable' ? resolved.cause : resolved.status,
+    });
+    return null;
+  }
+  const c = resolved.place.components;
+  if (c) {
+    va.street = c.street ?? null;
+    va.postalCode = c.postalCode ?? null;
+    va.city = c.city ?? null;
+    va.country = c.country ?? null;
+  }
+  return resolved.place.placeId;
+}
+
+/**
+ * ── Server-owned business timezone (PR 1a) ────────────────────────────
+ * A venue write is a business-location change, so the bot's canonical
+ * businessTimezone is recomputed from it — venue country first (Google's
+ * own component when a place id resolved, else what the owner typed), the
+ * tenant's admitted operating country when the venue states none (which is
+ * also the `venueAddress: null` No-Location path). An UNSUPPORTED country
+ * is rejected here, at the business-location boundary, before anything is
+ * written: a wrong-but-plausible guess would corrupt every booking
+ * silently. The recompute itself joins the settings upsert's transaction,
+ * so the venue and the timezone it implies can never disagree.
+ */
+async function deriveVenueBusinessTimezone(
+  tenantId: string,
+  va: Record<string, string | null | undefined>
+): Promise<string> {
+  const tenantRow = await AppDataSource.getRepository(Tenant).findOne({
+    where: { id: tenantId },
+    select: { id: true, operatingCountry: true },
+  });
+  try {
+    return resolveBusinessTimezone({
+      country: tenantRow?.operatingCountry,
+      venue: { country: typeof va.country === 'string' ? va.country : null },
+    });
+  } catch (err) {
+    asUnsupportedCountryError(err);
+  }
+}
+
+/**
+ * Generated rather than hand-written: seven nullable int columns, each needing a value
+ * AND a "was it provided" flag so an untouched rule keeps its stored value while an
+ * explicit null clears it. Hand-maintaining fourteen positional params is how a column
+ * ends up silently bound to the wrong slot.
+ */
+const RULE_COLUMNS: Array<[string, string]> = [
+  ['maxBookingsPerDay', 'max_bookings_per_day'],
+  ['maxBookedMinutesPerDay', 'max_booked_minutes_per_day'],
+  ['minGapMin', 'min_gap_min'],
+  ['defaultBufferBeforeMin', 'default_buffer_before_min'],
+  ['defaultBufferAfterMin', 'default_buffer_after_min'],
+  ['defaultMinNoticeMin', 'default_min_notice_min'],
+  ['defaultMaxHorizonDays', 'default_max_horizon_days'],
+];
+
+const VENUE_COLUMNS: Array<[string, string]> = [
+  ['street', 'venue_street'],
+  ['postalCode', 'venue_postal_code'],
+  ['city', 'venue_city'],
+  ['country', 'venue_country'],
+];
+
+/** One `INSERT … ON CONFLICT DO UPDATE` for `chatbot_booking_settings`. */
+interface SettingsUpsert {
+  insertCols: string[];
+  insertVals: string[];
+  updates: string[];
+  params: unknown[];
+}
+
+/**
+ * Build the settings upsert. Every column follows the same `(value, provided)` pairing:
+ * an omitted key keeps the stored value, an explicit one writes it.
+ */
+function buildSettingsUpsert(
+  tenantId: string,
+  botId: string,
+  data: UpdateSchedulerInput,
+  va: Record<string, string | null | undefined>,
+  venueProvided: boolean,
+  venuePlaceId: string | null
+): SettingsUpsert {
+  const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
+  const t = data.travel ?? {};
+  const params: unknown[] = [
+    tenantId,
+    botId,
+    data.serviceArea === undefined ? null : JSON.stringify(data.serviceArea),
+    data.serviceArea !== undefined,
+  ];
+  const insertCols = ['tenant_id', 'bot_id', 'service_area'];
+  const insertVals = ['$1', '$2', `COALESCE($3::jsonb, '[]'::jsonb)`];
+  const updates = [
+    `service_area = CASE WHEN $4 THEN COALESCE($3::jsonb, '[]'::jsonb) ELSE chatbot_booking_settings.service_area END`,
+  ];
+  const add = (column: string, value: unknown, provided: boolean): void => {
+    const valueParam = `$${params.length + 1}`;
+    const providedParam = `$${params.length + 2}`;
+    params.push(value, provided);
+    insertCols.push(column);
+    insertVals.push(valueParam);
+    updates.push(
+      `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+    );
+  };
+
+  for (const [key, column] of RULE_COLUMNS) add(column, br[key] ?? null, br[key] !== undefined);
+
+  for (const [key, column] of VENUE_COLUMNS) {
+    // `venueAddress: null` already collapsed to `{}` in the caller, so every component reads
+    // null and the venue clears — no special case needed. A partial edit sends only the
+    // components it has, and `venueProvided` alone decides whether the row is touched.
+    const raw = va[key] ?? null;
+    add(column, typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 200) : null, venueProvided);
+  }
+
+  // Rides the venue's own `provided` flag, so the identity and the text it describes are
+  // written in ONE statement. Two statements would leave a window in which the row claimed a
+  // verified address it no longer had.
+  add('venue_place_id', venuePlaceId, venueProvided);
+
+  // NOT NULL, so the INSERT arm must always bind a real boolean — it cannot ride the
+  // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write. Same for
+  // the two travel switches.
+  const BOOLEAN_COLUMNS: Array<[boolean | undefined, string]> = [
+    [data.bookingsPaused, 'bookings_paused'],
+    [t.enabled, 'travel_time_enabled'],
+    [t.startFromBase, 'travel_start_from_base'],
+  ];
+  for (const [submitted, column] of BOOLEAN_COLUMNS) {
+    add(column, submitted === true, submitted !== undefined);
+  }
+
+  // Nullable int, so it follows the RULE_COLUMNS contract — undefined leaves the stored
+  // value alone, an explicit null clears it.
+  add('travel_slack_min', t.slackMin ?? null, t.slackMin !== undefined);
+
+  // TEXT with a NOT NULL default, so it follows the boolean contract rather than the nullable-int
+  // one: undefined leaves the stored value alone, and there is no "clear it" - `none` is off.
+  add('travel_grouping_period', t.groupingPeriod ?? 'none', t.groupingPeriod !== undefined);
+
+  // Same NOT NULL TEXT contract as groupingPeriod. Default `auto` is today's existing order.
+  add('travel_route_priority', t.routePriority ?? 'auto', t.routePriority !== undefined);
+
+  // Same nullable-int contract as slack: undefined leaves the stored value alone, an explicit
+  // null clears it back to "no threshold".
+  add('travel_max_detour_min', t.maxDetourMin ?? null, t.maxDetourMin !== undefined);
+
+  // NOT NULL with a default, so the INSERT arm must bind a real integer — it cannot ride the
+  // nullable-int contract above, which would write null on a first save and violate the column.
+  add(
+    'travel_base_depart_offset_min',
+    t.baseDepartOffsetMin ?? 0,
+    t.baseDepartOffsetMin !== undefined
+  );
+
+  return { insertCols, insertVals, updates, params };
+}
+
+/**
+ * Write the settings row: service area, capacity rules, venue, pause switch and travel.
+ *
+ * A real upsert rather than findOne-then-save: the unique index on bot_id means two
+ * concurrent first-writes for the same bot raced to a 23505.
+ *
+ * The venue write and the businessTimezone it implies commit in ONE
+ * transaction (with the denormalized AvailabilityRule copy kept equal), so
+ * a crash between them can never leave a venue whose timezone still
+ * describes the previous location.
+ */
+async function writeBookingSettingsSection(
+  tenantId: string,
+  bot: Bot,
+  data: UpdateSchedulerInput
+): Promise<void> {
+  // `venueAddress: null` clears the whole venue; an omitted key leaves it alone. Reusing
+  // the rules' value+provided pairing means one mechanism, not two.
+  const va = (data.venueAddress ?? {}) as Record<string, string | null | undefined>;
+  const venueProvided = data.venueAddress !== undefined;
+  const venuePlaceId = await resolveVenuePlaceId(tenantId, bot.id, va, venueProvided);
+  const derivedBusinessTimezone = venueProvided
+    ? await deriveVenueBusinessTimezone(tenantId, va)
+    : null;
+  const { insertCols, insertVals, updates, params } = buildSettingsUpsert(
+    tenantId,
+    bot.id,
+    data,
+    va,
+    venueProvided,
+    venuePlaceId
+  );
+
+  await AppDataSource.transaction(async (manager) => {
+    await manager.query(
+      `INSERT INTO chatbot_booking_settings (${insertCols.join(', ')})
+         VALUES (${insertVals.join(', ')})
+         ON CONFLICT (bot_id) DO UPDATE SET ${updates.join(', ')}, updated_at = now()`,
+      params
+    );
+    if (derivedBusinessTimezone) {
+      await manager.query(
+        `UPDATE chatbot_bots SET business_timezone = $1, updated_at = now()
+            WHERE id = $2 AND business_timezone IS DISTINCT FROM $1`,
+        [derivedBusinessTimezone, bot.id]
+      );
+      await manager.query(
+        `UPDATE chatbot_availability_rules SET timezone = $1, updated_at = now()
+            WHERE bot_id = $2 AND timezone IS DISTINCT FROM $1`,
+        [derivedBusinessTimezone, bot.id]
+      );
+    }
+  });
+  // Keep the in-memory bot current so the response reflects the write.
+  if (derivedBusinessTimezone) bot.businessTimezone = derivedBusinessTimezone;
+}
+
 export async function updateSchedulerConfig(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   const data = updateSchedulerSchema.parse(req.body);
@@ -322,27 +655,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // the column. Kept here rather than in the resolver so the resolver answers one question.
   const settings = bot.settings ?? ({} as BotSettings);
 
-  // Pre-write guard (PR 1a): reject an unsupported business-location country
-  // BEFORE any section write, so a refused venue leaves nothing written — the
-  // portal saves the whole page (event type, availability, venue) in one PUT, so
-  // a late rejection would otherwise persist the opening hours of a venue we
-  // refused. A TYPED country with no place id is settled here; a place id is
-  // resolved (BE-restricted, so it can only yield BE) and its post-resolution
-  // check runs below before the settings write.
-  {
-    const v = (data.venueAddress ?? null) as { country?: string | null; placeId?: string | null } | null;
-    const hasPlaceId = !!v && typeof v.placeId === 'string' && v.placeId.trim().length > 0;
-    if (v && !hasPlaceId && typeof v.country === 'string' && v.country.trim()) {
-      try {
-        resolveBusinessTimezone({ venue: { country: v.country } });
-      } catch (err) {
-        if (err instanceof UnsupportedBusinessCountryError) {
-          throw new ApiError(err.message, 400, 'UNSUPPORTED_BUSINESS_COUNTRY');
-        }
-        throw err;
-      }
-    }
-  }
+  assertTypedVenueCountrySupported(data.venueAddress);
 
   if (data.provider) {
     // Ignore any legacy 'calcom' input — the provider is always internal now.
@@ -352,25 +665,9 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     });
   }
 
-  if (data.eventType) {
-    const repo = AppDataSource.getRepository(ServiceType);
-    let et = await repo.findOne({ where: { botId: bot.id, isActive: true } });
-    if (!et) et = repo.create({ tenantId, botId: bot.id, isActive: true });
-    Object.assign(et, data.eventType, { slug: slugify(data.eventType.name) });
-    await repo.save(et);
-  }
+  if (data.eventType) await writeEventTypeSection(tenantId, bot.id, data.eventType);
 
-  if (data.availability) {
-    const repo = AppDataSource.getRepository(AvailabilityRule);
-    let rule = await repo.findOne({ where: { botId: bot.id } });
-    if (!rule) rule = repo.create({ tenantId, botId: bot.id });
-    Object.assign(rule, data.availability);
-    // The rule timezone is never client-writable: it is always the bot's canonical,
-    // geography-derived businessTimezone (server-owned authority, TZ PR1a).
-    const derivedTimezone = bot.businessTimezone || DEFAULT_BUSINESS_TIMEZONE;
-    rule.timezone = derivedTimezone;
-    await repo.save(rule);
-  }
+  if (data.availability) await writeAvailabilitySection(tenantId, bot, data.availability);
 
   // Checked BEFORE the upsert, so a refused enable leaves nothing written — not even the
   // slack value that rode along in the same payload. Only an enable is gated: switching
@@ -385,8 +682,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // Save of the WHOLE page began to 409 — venue, opening hours and the pause switch along with
   // it. An owner was locked out of their booking settings by a state they did not create and
   // could not clear.
-  const travelAlreadyOn = (await AppDataSource.getRepository(BookingSettings)
-    .findOne({ where: { botId: bot.id } }))?.travelTimeEnabled === true;
+  const travelAlreadyOn = await travelIsAlreadyOn(bot.id);
   if (data.travel?.enabled === true && !travelAlreadyOn) {
     await assertTravelEnableAllowed(tenantId, bot.id);
   }
@@ -400,250 +696,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     data.bookingsPaused !== undefined ||
     data.travel !== undefined
   ) {
-    const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
-    // `venueAddress: null` clears the whole venue; an omitted key leaves it alone. Reusing
-    // the rules' value+provided pairing means one mechanism, not two.
-    const va = (data.venueAddress ?? {}) as Record<string, string | null | undefined>;
-    const venueProvided = data.venueAddress !== undefined;
-    // A place id NEVER outlives the text it came from, and this is where that is guaranteed
-    // rather than hoped for. An id arriving with the venue is a claim that these four fields are
-    // that place; we settle it by resolving the id and writing GOOGLE's components, so the stored
-    // pair cannot disagree. An owner who hand-edits a field sends no id, and the id clears.
-    //
-    // FAILS OPEN. If the id will not resolve - Google down, cap spent, id retired - the venue
-    // still saves exactly as typed, with no id. An owner must always be able to record their own
-    // address; being unable to VERIFY it is not a reason to refuse to STORE it.
-    let venuePlaceId: string | null = null;
-    if (venueProvided && typeof va.placeId === 'string' && va.placeId.trim()) {
-      const resolved = await resolvePlaceId(tenantId, va.placeId.trim());
-      if (resolved.status === 'placed') {
-        venuePlaceId = resolved.place.placeId;
-        const c = resolved.place.components;
-        if (c) {
-          va.street = c.street ?? null;
-          va.postalCode = c.postalCode ?? null;
-          va.city = c.city ?? null;
-          va.country = c.country ?? null;
-        }
-      } else {
-        logger.info('[Travel] venue place id did not resolve; storing the address as typed', {
-          tenantId,
-          botId: bot.id,
-          cause: resolved.status === 'unavailable' ? resolved.cause : resolved.status,
-        });
-      }
-    }
-    // ── Server-owned business timezone (PR 1a) ────────────────────────────
-    // A venue write is a business-location change, so the bot's canonical
-    // businessTimezone is recomputed from it — venue country first (Google's
-    // own component when a place id resolved, else what the owner typed), the
-    // tenant's admitted operating country when the venue states none (which is
-    // also the `venueAddress: null` No-Location path). An UNSUPPORTED country
-    // is rejected here, at the business-location boundary, before anything is
-    // written: a wrong-but-plausible guess would corrupt every booking
-    // silently. The recompute itself joins the settings upsert's transaction
-    // below, so the venue and the timezone it implies can never disagree.
-    let derivedBusinessTimezone: string | null = null;
-    if (venueProvided) {
-      const tenantRow = await AppDataSource.getRepository(Tenant).findOne({
-        where: { id: tenantId },
-        select: { id: true, operatingCountry: true },
-      });
-      try {
-        derivedBusinessTimezone = resolveBusinessTimezone({
-          country: tenantRow?.operatingCountry,
-          venue: { country: typeof va.country === 'string' ? va.country : null },
-        });
-      } catch (err) {
-        if (err instanceof UnsupportedBusinessCountryError) {
-          throw new ApiError(err.message, 400, 'UNSUPPORTED_BUSINESS_COUNTRY');
-        }
-        throw err;
-      }
-    }
-    // Generated rather than hand-written: seven nullable int columns, each needing a value
-    // AND a "was it provided" flag so an untouched rule keeps its stored value while an
-    // explicit null clears it. Hand-maintaining fourteen positional params is how a column
-    // ends up silently bound to the wrong slot.
-    const RULE_COLUMNS: Array<[string, string]> = [
-      ['maxBookingsPerDay', 'max_bookings_per_day'],
-      ['maxBookedMinutesPerDay', 'max_booked_minutes_per_day'],
-      ['minGapMin', 'min_gap_min'],
-      ['defaultBufferBeforeMin', 'default_buffer_before_min'],
-      ['defaultBufferAfterMin', 'default_buffer_after_min'],
-      ['defaultMinNoticeMin', 'default_min_notice_min'],
-      ['defaultMaxHorizonDays', 'default_max_horizon_days'],
-    ];
-    const VENUE_COLUMNS: Array<[string, string]> = [
-      ['street', 'venue_street'],
-      ['postalCode', 'venue_postal_code'],
-      ['city', 'venue_city'],
-      ['country', 'venue_country'],
-    ];
-
-    const params: unknown[] = [
-      tenantId,
-      bot.id,
-      data.serviceArea === undefined ? null : JSON.stringify(data.serviceArea),
-      data.serviceArea !== undefined,
-    ];
-    const insertCols = ['tenant_id', 'bot_id', 'service_area'];
-    const insertVals = ['$1', '$2', `COALESCE($3::jsonb, '[]'::jsonb)`];
-    const updates = [
-      `service_area = CASE WHEN $4 THEN COALESCE($3::jsonb, '[]'::jsonb) ELSE chatbot_booking_settings.service_area END`,
-    ];
-    for (const [key, column] of RULE_COLUMNS) {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(br[key] ?? null, br[key] !== undefined);
-      insertCols.push(column);
-      insertVals.push(valueParam);
-      updates.push(
-        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
-      );
-    }
-
-    for (const [key, column] of VENUE_COLUMNS) {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      // `venueAddress: null` already collapsed to `{}` above, so every component reads
-      // null and the venue clears — no special case needed. A partial edit sends only the
-      // components it has, and `venueProvided` alone decides whether the row is touched.
-      const raw = va[key] ?? null;
-      params.push(typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 200) : null, venueProvided);
-      insertCols.push(column);
-      insertVals.push(valueParam);
-      updates.push(
-        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
-      );
-    }
-
-    // Rides the venue's own `provided` flag, so the identity and the text it describes are
-    // written in ONE statement. Two statements would leave a window in which the row claimed a
-    // verified address it no longer had.
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(venuePlaceId, venueProvided);
-      insertCols.push('venue_place_id');
-      insertVals.push(valueParam);
-      updates.push(
-        `venue_place_id = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.venue_place_id END`
-      );
-    }
-
-    // NOT NULL, so the INSERT arm must always bind a real boolean — it cannot ride the
-    // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write. Same for
-    // the two travel switches below.
-    const BOOLEAN_COLUMNS: Array<[boolean | undefined, string]> = [
-      [data.bookingsPaused, 'bookings_paused'],
-      [data.travel?.enabled, 'travel_time_enabled'],
-      [data.travel?.startFromBase, 'travel_start_from_base'],
-    ];
-    for (const [submitted, column] of BOOLEAN_COLUMNS) {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(submitted === true, submitted !== undefined);
-      insertCols.push(column);
-      insertVals.push(valueParam);
-      updates.push(
-        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
-      );
-    }
-
-    // Nullable int, so it follows the RULE_COLUMNS contract — undefined leaves the stored
-    // value alone, an explicit null clears it.
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(data.travel?.slackMin ?? null, data.travel?.slackMin !== undefined);
-      insertCols.push('travel_slack_min');
-      insertVals.push(valueParam);
-      updates.push(
-        `travel_slack_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_slack_min END`
-      );
-    }
-
-    // TEXT with a NOT NULL default, so it follows the boolean contract rather than the nullable-int
-    // one: undefined leaves the stored value alone, and there is no "clear it" - `none` is off.
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(data.travel?.groupingPeriod ?? 'none', data.travel?.groupingPeriod !== undefined);
-      insertCols.push('travel_grouping_period');
-      insertVals.push(valueParam);
-      updates.push(
-        `travel_grouping_period = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_grouping_period END`
-      );
-    }
-
-    // Same NOT NULL TEXT contract as groupingPeriod. Default `auto` is today's existing order.
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(data.travel?.routePriority ?? 'auto', data.travel?.routePriority !== undefined);
-      insertCols.push('travel_route_priority');
-      insertVals.push(valueParam);
-      updates.push(
-        `travel_route_priority = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_route_priority END`
-      );
-    }
-
-    // Same nullable-int contract as slack: undefined leaves the stored value alone, an explicit
-    // null clears it back to "no threshold".
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(data.travel?.maxDetourMin ?? null, data.travel?.maxDetourMin !== undefined);
-      insertCols.push('travel_max_detour_min');
-      insertVals.push(valueParam);
-      updates.push(
-        `travel_max_detour_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_max_detour_min END`
-      );
-    }
-
-    // NOT NULL with a default, so the INSERT arm must bind a real integer — it cannot ride the
-    // nullable-int contract above, which would write null on a first save and violate the column.
-    {
-      const valueParam = `$${params.length + 1}`;
-      const providedParam = `$${params.length + 2}`;
-      params.push(data.travel?.baseDepartOffsetMin ?? 0, data.travel?.baseDepartOffsetMin !== undefined);
-      insertCols.push('travel_base_depart_offset_min');
-      insertVals.push(valueParam);
-      updates.push(
-        `travel_base_depart_offset_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_base_depart_offset_min END`
-      );
-    }
-
-    // A real upsert rather than findOne-then-save: the unique index on bot_id means two
-    // concurrent first-writes for the same bot raced to a 23505.
-    //
-    // The venue write and the businessTimezone it implies commit in ONE
-    // transaction (with the denormalized AvailabilityRule copy kept equal), so
-    // a crash between them can never leave a venue whose timezone still
-    // describes the previous location.
-    await AppDataSource.transaction(async (manager) => {
-      await manager.query(
-        `INSERT INTO chatbot_booking_settings (${insertCols.join(', ')})
-         VALUES (${insertVals.join(', ')})
-         ON CONFLICT (bot_id) DO UPDATE SET ${updates.join(', ')}, updated_at = now()`,
-        params
-      );
-      if (derivedBusinessTimezone) {
-        await manager.query(
-          `UPDATE chatbot_bots SET business_timezone = $1, updated_at = now()
-            WHERE id = $2 AND business_timezone IS DISTINCT FROM $1`,
-          [derivedBusinessTimezone, bot.id]
-        );
-        await manager.query(
-          `UPDATE chatbot_availability_rules SET timezone = $1, updated_at = now()
-            WHERE bot_id = $2 AND timezone IS DISTINCT FROM $1`,
-          [derivedBusinessTimezone, bot.id]
-        );
-      }
-    });
-    // Keep the in-memory bot current so the response below reflects the write.
-    if (derivedBusinessTimezone) bot.businessTimezone = derivedBusinessTimezone;
+    await writeBookingSettingsSection(tenantId, bot, data);
   }
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });

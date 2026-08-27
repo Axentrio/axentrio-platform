@@ -141,6 +141,113 @@ function toDate(v: Date | string | null | undefined): Date | null {
 }
 
 /**
+ * The route to use, in the order an SMB actually reaches for. A widget visitor who left
+ * neither a phone number nor an email has nowhere to be reached, so this answers `null`
+ * and the caller recommends nothing at all.
+ */
+function resolveVia(lead: FollowUpInput): FollowUpVia | null {
+  if (present(lead.phone)) return 'phone';
+  if (present(lead.channel) && lead.channel !== 'widget') return 'channel';
+  if (present(lead.email)) return 'email';
+  return null;
+}
+
+function viaLabel(via: FollowUpVia): string {
+  if (via === 'phone') return 'Phone number on file';
+  if (via === 'channel') return 'Reachable in the thread they wrote from';
+  return 'Email address on file';
+}
+
+/**
+ * Beyond STALE_BOOKING_DAYS a booking is history rather than something to act on.
+ * Guards the two rules that force `priority: 'now'`, which without it fired on every
+ * dead booking a tenant had ever taken — an eight-month-old unconfirmed slot rendered
+ * as "Today".
+ */
+function isStaleBooking(startAt: Date | null, now: Date): boolean {
+  if (!startAt) return false;
+  return now.getTime() - startAt.getTime() > STALE_BOOKING_DAYS * DAY_MS;
+}
+
+/**
+ * Is the appointment over, and recently enough that a check-in is still a follow-up?
+ *
+ * Nothing to chase until the visit is OVER. Gating on the START time told the operator
+ * to ask how it went while the technician was still standing in the customer's kitchen
+ * — the appointment's own end time is right there on the booking, so use it and fall
+ * back to the start only when it is missing.
+ */
+function visitJustEnded(lead: FollowUpInput, startAt: Date | null, now: Date): boolean {
+  const endAt = toDate(lead.bookingEndAt) ?? startAt;
+  if (!endAt || endAt > now) return false;
+  return now.getTime() - endAt.getTime() <= CHECK_IN_WINDOW_DAYS * DAY_MS;
+}
+
+/**
+ * The action this row is in, with the reasons that belong to the branch that matched.
+ *
+ * Booking state partitions the rules: exactly one branch can match a given row, so
+ * "the first rule wins" never hides a second, competing recommendation. `null` is the
+ * honest answer for a booking state these rules cannot act on.
+ */
+function decideAction(
+  lead: FollowUpInput,
+  now: Date,
+): { action: FollowUpAction; reasons: FollowUpReason[] } | null {
+  const reasons: FollowUpReason[] = [];
+  const hasBooking = present(lead.bookingId);
+  const bookingStatus = lead.bookingStatus ?? null;
+  const startAt = toDate(lead.bookingStartAt);
+
+  if (hasBooking && (bookingStatus === 'pending' || bookingStatus === 'request_created')) {
+    // Same staleness reasoning the check-in rule already applied, and it belongs here
+    // more: "confirm or decline the slot they asked for" about a slot eight months in
+    // the past is the recommendation that embarrasses a tenant in front of a customer.
+    if (isStaleBooking(startAt, now)) return null;
+    reasons.push({
+      key: 'booking_unconfirmed',
+      label: 'They asked for a slot that is still unconfirmed',
+    });
+    // Only here: an unconfirmed on-site job cannot be confirmed without somewhere to go,
+    // and the operator is about to be on the phone to them anyway.
+    if (!present(lead.address)) reasons.push({ key: 'no_address', label: 'No address on the booking' });
+    return { action: 'confirm_request', reasons };
+  }
+
+  if (hasBooking && (bookingStatus === 'cancelled' || bookingStatus === 'failed')) {
+    // The list query surfaces the most recent NON-cancelled booking first, so a dead
+    // status reaching here means EVERY booking this lead has is dead — not that one of
+    // several fell through. A cancelled appointment is therefore never mistaken for a
+    // completed one: it wins back, it does not check in.
+    // A cancellation two years old is history, not a lead to win back.
+    if (isStaleBooking(startAt, now)) return null;
+    reasons.push({ key: 'booking_cancelled', label: 'Their booking was cancelled' });
+    return { action: 'win_back_cancelled', reasons };
+  }
+
+  if (hasBooking && bookingStatus === 'confirmed') {
+    if (!visitJustEnded(lead, startAt, now)) return null;
+    reasons.push({ key: 'visit_passed', label: 'Their appointment time has passed' });
+    return { action: 'check_in_after_visit', reasons };
+  }
+
+  if (hasBooking) {
+    // Unreachable while BookingStatus is the closed union it is today; kept as the
+    // fail-closed landing for a status added later. Saying nothing is the right
+    // response to a state whose meaning these rules do not know.
+    return null;
+  }
+
+  if (present(lead.notes) || present(lead.serviceRequested)) {
+    reasons.push({ key: 'request_known', label: 'They told us what they need' });
+    return { action: 'offer_a_time', reasons };
+  }
+
+  reasons.push({ key: 'no_request', label: 'Nothing recorded about what they need' });
+  return { action: 'ask_what_they_need', reasons };
+}
+
+/**
  * The one recommendation for this lead, or `null` when the honest answer is nothing.
  *
  * Returning `null` is a first-class outcome, not a failure: a suggestion the operator
@@ -155,82 +262,23 @@ export function recommendFollowUp(lead: FollowUpInput): FollowUpRecommendation |
 
   // No route to the customer, no recommendation. Every action below ends in "contact
   // them", so without a way to do that the answer is nothing at all — not a suggestion
-  // that cannot be carried out. A widget visitor who left neither phone nor email is
-  // exactly this case: the chat is over and there is nowhere to reply.
-  const via: FollowUpVia | null = present(lead.phone)
-    ? 'phone'
-    : present(lead.channel) && lead.channel !== 'widget'
-      ? 'channel'
-      : present(lead.email)
-        ? 'email'
-        : null;
+  // that cannot be carried out.
+  const via = resolveVia(lead);
   if (!via) return null;
-
-  const reasons: FollowUpReason[] = [];
-  const add = (key: string, label: string, days?: number) =>
-    reasons.push({ key, label, ...(days === undefined ? {} : { days }) });
 
   const now = lead.now ?? new Date();
   // Someone with an appointment in the diary is not waiting to be chased, whichever of
   // their rows this is.
   if (lead.personHasUpcomingBooking) return null;
-  const hasBooking = present(lead.bookingId);
-  const bookingStatus = lead.bookingStatus ?? null;
-  const startAt = toDate(lead.bookingStartAt);
 
-  // Booking state partitions the rules: exactly one branch can match a given row, so
-  // "the first rule wins" never hides a second, competing recommendation.
-  let action: FollowUpAction;
-  if (hasBooking && (bookingStatus === 'pending' || bookingStatus === 'request_created')) {
-    // Same staleness reasoning the check-in rule already applied, and it belongs here
-    // more: "confirm or decline the slot they asked for" about a slot eight months in
-    // the past is the recommendation that embarrasses a tenant in front of a customer.
-    if (startAt && now.getTime() - startAt.getTime() > STALE_BOOKING_DAYS * DAY_MS) return null;
-    action = 'confirm_request';
-    add('booking_unconfirmed', 'They asked for a slot that is still unconfirmed');
-    // Only here: an unconfirmed on-site job cannot be confirmed without somewhere to go,
-    // and the operator is about to be on the phone to them anyway.
-    if (!present(lead.address)) add('no_address', 'No address on the booking');
-  } else if (hasBooking && (bookingStatus === 'cancelled' || bookingStatus === 'failed')) {
-    // The list query surfaces the most recent NON-cancelled booking first, so a dead
-    // status reaching here means EVERY booking this lead has is dead — not that one of
-    // several fell through. A cancelled appointment is therefore never mistaken for a
-    // completed one: it wins back, it does not check in.
-    // A cancellation two years old is history, not a lead to win back.
-    if (startAt && now.getTime() - startAt.getTime() > STALE_BOOKING_DAYS * DAY_MS) return null;
-    action = 'win_back_cancelled';
-    add('booking_cancelled', 'Their booking was cancelled');
-  } else if (hasBooking && bookingStatus === 'confirmed') {
-    // Nothing to chase until the visit is OVER. Gating on the START time told the
-    // operator to ask how it went while the technician was still standing in the
-    // customer's kitchen — the appointment's own end time is right there on the
-    // booking, so use it and fall back to the start only when it is missing.
-    const endAt = toDate(lead.bookingEndAt) ?? startAt;
-    if (!endAt || endAt > now) return null;
-    if (now.getTime() - endAt.getTime() > CHECK_IN_WINDOW_DAYS * DAY_MS) return null;
-    action = 'check_in_after_visit';
-    add('visit_passed', 'Their appointment time has passed');
-  } else if (hasBooking) {
-    // Unreachable while BookingStatus is the closed union it is today; kept as the
-    // fail-closed landing for a status added later. Saying nothing is the right
-    // response to a state whose meaning these rules do not know.
-    return null;
-  } else if (present(lead.notes) || present(lead.serviceRequested)) {
-    action = 'offer_a_time';
-    add('request_known', 'They told us what they need');
-  } else {
-    action = 'ask_what_they_need';
-    add('no_request', 'Nothing recorded about what they need');
-  }
+  const decided = decideAction(lead, now);
+  if (!decided) return null;
+  const { action, reasons } = decided;
 
-  add(
-    `reach_${via}`,
-    via === 'phone'
-      ? 'Phone number on file'
-      : via === 'channel'
-        ? 'Reachable in the thread they wrote from'
-        : 'Email address on file',
-  );
+  const add = (key: string, label: string, days?: number) =>
+    reasons.push({ key, label, ...(days === undefined ? {} : { days }) });
+
+  add(`reach_${via}`, viaLabel(via));
 
   if (lead.isRepeatCustomer) add('returning', 'Returning customer');
 

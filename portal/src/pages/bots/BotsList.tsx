@@ -45,6 +45,7 @@ import {
   useDeleteBot,
   extractApiErrorCode,
   type BotListItem,
+  type BotsListResponse,
 } from '@/queries/useBotsQueries';
 import CreateBotDialog from './CreateBotDialog';
 import RenameBotDialog from './RenameBotDialog';
@@ -60,6 +61,53 @@ function formatDate(iso: string): string {
     return iso;
   }
 }
+
+/** The list page's quota-aware view of the bots response. */
+function readBotsPage(data: BotsListResponse | undefined) {
+  const bots = data?.bots ?? [];
+  const used = data?.used ?? 0;
+  const limit = data?.limit ?? null;
+  return { bots, used, limit, atQuota: limit !== null && used >= limit };
+}
+
+/** Destructive-action confirm dialog — open whenever a bot is targeted. */
+const ConfirmBotActionDialog: React.FC<{
+  target: BotListItem | null;
+  titleKey: string;
+  descriptionKey: string;
+  confirmLabelKey: string;
+  confirmClassName?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({
+  target,
+  titleKey,
+  descriptionKey,
+  confirmLabelKey,
+  confirmClassName,
+  onCancel,
+  onConfirm,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={!!target} onOpenChange={(o) => !o && onCancel()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(titleKey)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {target ? t(descriptionKey, { name: target.name }) : ''}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} className={confirmClassName}>
+            {t(confirmLabelKey)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
 
 export const BotsList: React.FC = () => {
   const { t } = useTranslation();
@@ -83,10 +131,7 @@ export const BotsList: React.FC = () => {
   if (isLoading) return <PageSkeleton variant="list" rows={4} />;
   if (error) return <InlineError message={t('bots.errors.generic')} />;
 
-  const bots = data?.bots ?? [];
-  const used = data?.used ?? 0;
-  const limit = data?.limit ?? null;
-  const atQuota = limit !== null && used >= limit;
+  const { bots, used, limit, atQuota } = readBotsPage(data);
 
   const defaultBot = bots.find((b) => b.isDefault);
   const aiEnabled = onboarding?.steps.aiEnabled ?? false;
@@ -183,7 +228,7 @@ export const BotsList: React.FC = () => {
         />
 
         {/* Header: usage + new bot button */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-text-muted">{usageLabel}</p>
           {atQuota ? (
             <Tooltip>
@@ -304,47 +349,25 @@ export const BotsList: React.FC = () => {
         <EmbedSnippetDialog botId={embedFor} onClose={() => setEmbedFor(null)} />
 
         {/* Pause confirm */}
-        <AlertDialog open={!!pauseTarget} onOpenChange={(o) => !o && setPauseTarget(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('bots.pause.title')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {pauseTarget
-                  ? t('bots.pause.description', { name: pauseTarget.name })
-                  : ''}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-              <AlertDialogAction onClick={handlePause}>
-                {t('bots.actions.pause')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmBotActionDialog
+          target={pauseTarget}
+          titleKey="bots.pause.title"
+          descriptionKey="bots.pause.description"
+          confirmLabelKey="bots.actions.pause"
+          onCancel={() => setPauseTarget(null)}
+          onConfirm={handlePause}
+        />
 
         {/* Delete confirm */}
-        <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('bots.delete.title')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {deleteTarget
-                  ? t('bots.delete.description', { name: deleteTarget.name })
-                  : ''}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDelete}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                {t('common.delete')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmBotActionDialog
+          target={deleteTarget}
+          titleKey="bots.delete.title"
+          descriptionKey="bots.delete.description"
+          confirmLabelKey="common.delete"
+          confirmClassName="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
       </div>
     </TooltipProvider>
   );

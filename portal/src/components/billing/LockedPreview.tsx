@@ -152,49 +152,11 @@ export function LockedPreview({
 
         {/* Tier strip — only when NOT coming soon */}
         {!comingSoon && (
-          <div className="rounded-xl border border-edge bg-surface-1 p-4 space-y-1.5 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">
-                {t('lockedPreview.tierStrip.yourPlan')}
-              </span>
-              <span className="font-medium text-text-primary">
-                {currentPlan?.displayName ?? '—'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">
-                {t('lockedPreview.tierStrip.required')}
-              </span>
-              <span className="font-medium text-text-primary">
-                {requiredPlan?.displayName ?? requiredTierId}
-              </span>
-            </div>
-            {requiredTierId === 'pro' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <span className="text-text-muted">
-                    {t('lockedPreview.tierStrip.trial')}
-                  </span>
-                  <span className="font-medium text-text-primary">
-                    {t('lockedPreview.tierStrip.trialValue')}
-                  </span>
-                </div>
-                {requiredPlan?.priceEurMonthly != null && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-text-muted">
-                      {t('lockedPreview.tierStrip.afterTrial')}
-                    </span>
-                    <span className="font-medium text-text-primary">
-                      €{requiredPlan.priceEurMonthly.toFixed(2)}/mo
-                    </span>
-                  </div>
-                )}
-                <div className="text-xs text-text-muted pt-1">
-                  {t('lockedPreview.tierStrip.cancelAnytime')}
-                </div>
-              </>
-            )}
-          </div>
+          <TierStrip
+            currentPlan={currentPlan}
+            requiredPlan={requiredPlan}
+            requiredTierId={requiredTierId}
+          />
         )}
 
         {/* CTAs */}
@@ -209,6 +171,64 @@ export function LockedPreview({
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+/** Current plan / required plan / trial pricing rows shown under the bullets. */
+function TierStrip({
+  currentPlan,
+  requiredPlan,
+  requiredTierId,
+}: {
+  currentPlan: PlanDefinition | undefined;
+  requiredPlan: PlanDefinition | undefined;
+  requiredTierId: RequiredTier;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-xl border border-edge bg-surface-1 p-4 space-y-1.5 text-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-text-muted">
+          {t('lockedPreview.tierStrip.yourPlan')}
+        </span>
+        <span className="font-medium text-text-primary">
+          {currentPlan?.displayName ?? '—'}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-text-muted">
+          {t('lockedPreview.tierStrip.required')}
+        </span>
+        <span className="font-medium text-text-primary">
+          {requiredPlan?.displayName ?? requiredTierId}
+        </span>
+      </div>
+      {requiredTierId === 'pro' && (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-text-muted">
+              {t('lockedPreview.tierStrip.trial')}
+            </span>
+            <span className="font-medium text-text-primary">
+              {t('lockedPreview.tierStrip.trialValue')}
+            </span>
+          </div>
+          {requiredPlan?.priceEurMonthly != null && (
+            <div className="flex items-center justify-between">
+              <span className="text-text-muted">
+                {t('lockedPreview.tierStrip.afterTrial')}
+              </span>
+              <span className="font-medium text-text-primary">
+                €{requiredPlan.priceEurMonthly.toFixed(2)}/mo
+              </span>
+            </div>
+          )}
+          <div className="text-xs text-text-muted pt-1">
+            {t('lockedPreview.tierStrip.cancelAnytime')}
+          </div>
+        </>
+      )}
     </div>
   );
 }

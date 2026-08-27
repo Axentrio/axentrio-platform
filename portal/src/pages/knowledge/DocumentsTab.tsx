@@ -130,14 +130,14 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
     <div className="space-y-4">
       {/* AI not configured banner */}
       {showAiBanner && onConfigureAi && (
-        <div className="flex items-center justify-between p-3 rounded-lg bg-amber-400/5 border border-amber-400/10">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 rounded-lg bg-amber-400/5 border border-amber-400/10">
           <p className="text-xs text-amber-400/80">
             {t("ai.knowledge.list.banner.aiDisabled")}
           </p>
           <button
             type="button"
             onClick={onConfigureAi}
-            className="text-xs font-medium text-amber-400 hover:text-amber-300 flex-shrink-0 ml-3"
+            className="text-xs font-medium text-amber-400 hover:text-amber-300 flex-shrink-0 self-start sm:self-auto sm:ml-3"
           >
             {t("ai.knowledge.list.banner.configureCta")}
           </button>
@@ -169,7 +169,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleFilterClick(f.key)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
+                  className={`px-2.5 py-2 rounded-full text-xs font-medium transition-all duration-150 ${
                     typeFilter === f.key
                       ? "bg-primary-500 text-white shadow-sm"
                       : "bg-surface-2 text-text-muted hover:text-text-secondary hover:bg-surface-3"
@@ -181,14 +181,14 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
             );
           })}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
             <Input
               placeholder={t("ai.knowledge.list.searchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-52 pl-8 h-8 text-xs"
+              className="w-full sm:w-52 pl-8 h-8 text-xs"
             />
           </div>
           {isAdmin && (

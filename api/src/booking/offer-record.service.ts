@@ -67,6 +67,31 @@ export async function recordAvailabilityCall(input: {
 }
 
 /**
+ * #81 (LP4). Null throughout when the scorer did not run, which is a different fact from
+ * a run that had no opinion - that one is a present row with null costs and a reason.
+ */
+function scoringColumns(scoring?: OfferScoring): {
+  scorerVersion: OfferScoring['scorerVersion'] | null;
+  scoringElements: OfferScoring['elementsSpent'] | null;
+  scoringMs: OfferScoring['ms'] | null;
+  counterfactualOrder: OfferScoring['counterfactualOrder'] | null;
+  cheaperAlternativeExisted: OfferScoring['cheaperAlternativeExisted'] | null;
+} {
+  return {
+    scorerVersion: scoring?.scorerVersion ?? null,
+    // Elements this scoring actually billed: baseline legs only, one per gap. The two legs
+    // beside a candidate come from the cache the feasibility gate just filled.
+    scoringElements: scoring?.elementsSpent ?? null,
+    scoringMs: scoring?.ms ?? null,
+    counterfactualOrder: scoring?.counterfactualOrder ?? null,
+    // #85's pre-registered gate, stored rather than derived. It is a statement about the FULL
+    // scored list, and the row keeps only the slots the channel delivered - so a later reader
+    // could not recompute it from this row without inventing the slots that were truncated.
+    cheaperAlternativeExisted: scoring?.cheaperAlternativeExisted ?? null,
+  };
+}
+
+/**
  * Record an offer that actually reached a customer.
  *
  * `slots` must be what the CHANNEL sent, already truncated - not what the agent composed. The two
@@ -105,18 +130,7 @@ export async function recordBookingOffer(input: {
         offeredSlots: input.slots,
         offeredCount: input.slots.length,
         deliveryBasis: input.deliveryBasis,
-        // #81 (LP4). Null throughout when the scorer did not run, which is a different fact from
-        // a run that had no opinion - that one is a present row with null costs and a reason.
-        scorerVersion: input.scoring?.scorerVersion ?? null,
-        // Elements this scoring actually billed: baseline legs only, one per gap. The two legs
-        // beside a candidate come from the cache the feasibility gate just filled.
-        scoringElements: input.scoring?.elementsSpent ?? null,
-        scoringMs: input.scoring?.ms ?? null,
-        counterfactualOrder: input.scoring?.counterfactualOrder ?? null,
-        // #85's pre-registered gate, stored rather than derived. It is a statement about the FULL
-        // scored list, and the row keeps only the slots the channel delivered - so a later reader
-        // could not recompute it from this row without inventing the slots that were truncated.
-        cheaperAlternativeExisted: input.scoring?.cheaperAlternativeExisted ?? null,
+        ...scoringColumns(input.scoring),
         // #82, and the three states are the point. NULL means the pilot was off for this offer,
         // FALSE means it was on and left the order alone, TRUE means it reordered. Keying this on
         // whether the SCORER ran would collapse the first two - every shadow offer would read

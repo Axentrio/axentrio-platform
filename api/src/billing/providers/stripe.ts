@@ -604,147 +604,162 @@ export class StripeBillingProvider implements BillingProvider {
           raw: event,
         };
       }
-      case 'customer.subscription.trial_will_end': {
-        // PR9: logging-only handler. No state mutation. Normalize without
-        // re-fetching schedule/price info (it's not consulted downstream).
-        const sub = event.data.object as StripeNS.Subscription;
-        const customerId =
-          typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
-        return {
-          providerEventId: event.id,
-          type: 'subscription.trial_will_end',
-          customerId,
-          subscriptionId: sub.id,
-          subscription: null,
-          occurredAt,
-          raw: event,
-        };
-      }
-      case 'checkout.session.completed': {
-        // PR9: bookkeeping only — persists customer_id / subscription_id
-        // on the TBA row. Tier change is driven by the subsequent
-        // customer.subscription.created event.
-        const session = event.data.object as StripeNS.Checkout.Session;
-        const customerId =
-          typeof session.customer === 'string'
-            ? session.customer
-            : session.customer?.id ?? '';
-        const subscriptionId =
-          typeof session.subscription === 'string'
-            ? session.subscription
-            : session.subscription?.id;
-        return {
-          providerEventId: event.id,
-          type: 'checkout.session.completed',
-          customerId,
-          subscriptionId: subscriptionId ?? undefined,
-          sessionId: session.id,
-          subscription: null,
-          occurredAt,
-          raw: event,
-        };
-      }
-      case 'checkout.session.expired': {
-        // Audit gap #2 fix: Stripe fires this 24h after an abandoned
-        // checkout. We release the (unclaimed) trial reservation so the
-        // tenant can retry with a fresh trial — M0 spec line 532.
-        const session = event.data.object as StripeNS.Checkout.Session;
-        const customerId =
-          typeof session.customer === 'string'
-            ? session.customer
-            : session.customer?.id ?? '';
-        return {
-          providerEventId: event.id,
-          type: 'checkout.session.expired',
-          customerId,
-          sessionId: session.id,
-          subscription: null,
-          occurredAt,
-          raw: event,
-        };
-      }
+      case 'customer.subscription.trial_will_end':
+        return normalizeTrialWillEnd(event, occurredAt);
+      case 'checkout.session.completed':
+        return normalizeCheckoutCompleted(event, occurredAt);
+      case 'checkout.session.expired':
+        return normalizeCheckoutExpired(event, occurredAt);
       case 'invoice.paid':
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object as StripeNS.Invoice;
-        const customerId =
-          typeof invoice.customer === 'string'
-            ? invoice.customer
-            : invoice.customer?.id ?? '';
-        // basil moved invoice.subscription → invoice.parent.subscription_
-        // details.subscription. Helper reads either shape so past_due
-        // recovery + payment-failure routing keep working on both
-        // pinned API versions.
-        const subId = readInvoiceSubscriptionId(invoice);
-        return {
-          providerEventId: event.id,
-          type: event.type === 'invoice.paid' ? 'invoice.paid' : 'invoice.payment_failed',
-          customerId,
-          subscriptionId: subId ?? undefined,
-          subscription: null,
-          invoiceUrl: invoice.hosted_invoice_url ?? undefined,
-          invoiceId: invoice.id,
-          occurredAt,
-          raw: event,
-        };
-      }
-      case 'charge.refunded': {
-        const charge = event.data.object as StripeNS.Charge;
-        const customerId =
-          typeof charge.customer === 'string'
-            ? charge.customer
-            : charge.customer?.id ?? '';
-        const invoiceRef = (charge as { invoice?: string | { id?: string } }).invoice;
-        const invoiceId =
-          typeof invoiceRef === 'string'
-            ? invoiceRef
-            : invoiceRef && typeof invoiceRef === 'object'
-              ? invoiceRef.id
-              : undefined;
-        const refunds = charge.refunds?.data ?? [];
-        const latest = refunds[refunds.length - 1];
-        return {
-          providerEventId: event.id,
-          type: 'refund.recorded',
-          customerId,
-          subscriptionId: undefined,
-          subscription: null,
-          invoiceId,
-          refundId: latest?.id,
-          refundAmountCents: latest?.amount ?? charge.amount_refunded,
-          chargeId: charge.id,
-          occurredAt,
-          raw: event,
-        };
-      }
-      case 'charge.dispute.closed': {
-        const dispute = event.data.object as StripeNS.Dispute;
-        // funds_withdrawn fires when the dispute OPENS, not when it's lost.
-        // A Credit Note here would be irreversible if the Tenant later wins.
-        if (dispute.status !== 'lost') {
-          return null;
-        }
-        const chargeRef = dispute.charge;
-        const chargeId =
-          typeof chargeRef === 'string'
-            ? chargeRef
-            : chargeRef && typeof chargeRef === 'object'
-              ? chargeRef.id
-              : undefined;
-        return {
-          providerEventId: event.id,
-          type: 'refund.recorded',
-          customerId: '',
-          subscriptionId: undefined,
-          subscription: null,
-          refundId: dispute.id,
-          refundAmountCents: dispute.amount,
-          chargeId,
-          occurredAt,
-          raw: event,
-        };
-      }
+      case 'invoice.payment_failed':
+        return normalizeInvoiceEvent(event, occurredAt);
+      case 'charge.refunded':
+        return normalizeChargeRefunded(event, occurredAt);
+      case 'charge.dispute.closed':
+        return normalizeDisputeClosed(event, occurredAt);
       default:
         return null;
     }
   }
+}
+
+/**
+ * PR9: logging-only handler. No state mutation. Normalize without re-fetching
+ * schedule/price info (it's not consulted downstream).
+ */
+function normalizeTrialWillEnd(event: StripeNS.Event, occurredAt: Date): NormalizedEvent {
+  const sub = event.data.object as StripeNS.Subscription;
+  const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+  return {
+    providerEventId: event.id,
+    type: 'subscription.trial_will_end',
+    customerId,
+    subscriptionId: sub.id,
+    subscription: null,
+    occurredAt,
+    raw: event,
+  };
+}
+
+/**
+ * PR9: bookkeeping only — persists customer_id / subscription_id on the TBA
+ * row. Tier change is driven by the subsequent customer.subscription.created
+ * event.
+ */
+function normalizeCheckoutCompleted(event: StripeNS.Event, occurredAt: Date): NormalizedEvent {
+  const session = event.data.object as StripeNS.Checkout.Session;
+  const customerId =
+    typeof session.customer === 'string' ? session.customer : session.customer?.id ?? '';
+  const subscriptionId =
+    typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+  return {
+    providerEventId: event.id,
+    type: 'checkout.session.completed',
+    customerId,
+    subscriptionId: subscriptionId ?? undefined,
+    sessionId: session.id,
+    subscription: null,
+    occurredAt,
+    raw: event,
+  };
+}
+
+/**
+ * Audit gap #2 fix: Stripe fires this 24h after an abandoned checkout. We
+ * release the (unclaimed) trial reservation so the tenant can retry with a
+ * fresh trial — M0 spec line 532.
+ */
+function normalizeCheckoutExpired(event: StripeNS.Event, occurredAt: Date): NormalizedEvent {
+  const session = event.data.object as StripeNS.Checkout.Session;
+  const customerId =
+    typeof session.customer === 'string' ? session.customer : session.customer?.id ?? '';
+  return {
+    providerEventId: event.id,
+    type: 'checkout.session.expired',
+    customerId,
+    sessionId: session.id,
+    subscription: null,
+    occurredAt,
+    raw: event,
+  };
+}
+
+function normalizeInvoiceEvent(event: StripeNS.Event, occurredAt: Date): NormalizedEvent {
+  const invoice = event.data.object as StripeNS.Invoice;
+  const customerId =
+    typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id ?? '';
+  // basil moved invoice.subscription → invoice.parent.subscription_
+  // details.subscription. Helper reads either shape so past_due
+  // recovery + payment-failure routing keep working on both
+  // pinned API versions.
+  const subId = readInvoiceSubscriptionId(invoice);
+  return {
+    providerEventId: event.id,
+    type: event.type === 'invoice.paid' ? 'invoice.paid' : 'invoice.payment_failed',
+    customerId,
+    subscriptionId: subId ?? undefined,
+    subscription: null,
+    invoiceUrl: invoice.hosted_invoice_url ?? undefined,
+    invoiceId: invoice.id,
+    occurredAt,
+    raw: event,
+  };
+}
+
+function normalizeChargeRefunded(event: StripeNS.Event, occurredAt: Date): NormalizedEvent {
+  const charge = event.data.object as StripeNS.Charge;
+  const customerId =
+    typeof charge.customer === 'string' ? charge.customer : charge.customer?.id ?? '';
+  // The pinned Stripe Charge type omits `invoice`; the field is on the wire.
+  const chargeWithInvoice = charge as { invoice?: string | { id?: string } };
+  const invoiceRef = chargeWithInvoice.invoice;
+  const invoiceId =
+    typeof invoiceRef === 'string'
+      ? invoiceRef
+      : invoiceRef && typeof invoiceRef === 'object'
+        ? invoiceRef.id
+        : undefined;
+  const refunds = charge.refunds?.data ?? [];
+  const latest = refunds[refunds.length - 1];
+  return {
+    providerEventId: event.id,
+    type: 'refund.recorded',
+    customerId,
+    subscriptionId: undefined,
+    subscription: null,
+    invoiceId,
+    refundId: latest?.id,
+    refundAmountCents: latest?.amount ?? charge.amount_refunded,
+    chargeId: charge.id,
+    occurredAt,
+    raw: event,
+  };
+}
+
+function normalizeDisputeClosed(event: StripeNS.Event, occurredAt: Date): NormalizedEvent | null {
+  const dispute = event.data.object as StripeNS.Dispute;
+  // funds_withdrawn fires when the dispute OPENS, not when it's lost.
+  // A Credit Note here would be irreversible if the Tenant later wins.
+  if (dispute.status !== 'lost') {
+    return null;
+  }
+  const chargeRef = dispute.charge;
+  const chargeId =
+    typeof chargeRef === 'string'
+      ? chargeRef
+      : chargeRef && typeof chargeRef === 'object'
+        ? chargeRef.id
+        : undefined;
+  return {
+    providerEventId: event.id,
+    type: 'refund.recorded',
+    customerId: '',
+    subscriptionId: undefined,
+    subscription: null,
+    refundId: dispute.id,
+    refundAmountCents: dispute.amount,
+    chargeId,
+    occurredAt,
+    raw: event,
+  };
 }

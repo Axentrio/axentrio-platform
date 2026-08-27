@@ -227,7 +227,7 @@ const FeaturesSettings: React.FC = () => {
 
       {isAdmin && (
         <Card variant="glass">
-          <CardContent className="flex items-center justify-between gap-3 px-4 py-3">
+          <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="font-medium text-text-primary">
                 {t('features.pauseAllBots.button', { defaultValue: 'Pause all bots' })}

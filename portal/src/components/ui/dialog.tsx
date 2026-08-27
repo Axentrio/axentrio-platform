@@ -40,7 +40,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%]",
+        "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto translate-x-[-50%] translate-y-[-50%]",
         "gap-4 border border-edge bg-surface-1 p-6 shadow-lg",
         "duration-200 sm:rounded-2xl",
         // Grid items default to min-width: auto, so a child wider than the
@@ -58,7 +58,7 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-text-muted transition-colors hover:text-text-primary hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:pointer-events-none">
+      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-2 -m-1 text-text-muted transition-colors hover:text-text-primary hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:pointer-events-none">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>

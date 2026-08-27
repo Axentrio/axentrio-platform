@@ -213,7 +213,7 @@ const SuperAdminSkillsView: React.FC<{
                       <button
                         type="button"
                         onClick={() => onEdit(skill)}
-                        className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
+                        className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
                         title={t('common.edit')}
                       >
                         <Pencil className="w-4 h-4" />
@@ -221,7 +221,7 @@ const SuperAdminSkillsView: React.FC<{
                       <button
                         type="button"
                         onClick={() => setDeleteConfirm(skill.name)}
-                        className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
                         title={t('common.delete')}
                       >
                         <Trash2 className="w-4 h-4" />
@@ -417,7 +417,7 @@ const NotificationCard: React.FC<{
                     {t('settings.capabilities.teamNotifications.recipients.label')}
                     <span className="ml-1 text-text-muted font-normal">{t('settings.capabilities.teamNotifications.recipients.commaSeparated')}</span>
                   </Label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       id={`${definition.type}-recipients`}
                       value={recipients}
@@ -520,7 +520,7 @@ const CapabilitiesSettings: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Zap className="w-5 h-5 text-primary-400" />
@@ -623,7 +623,7 @@ const CapabilitiesSettings: React.FC = () => {
               {availableTools.length > 0 && (
                 <div className="space-y-1.5">
                   <Label>{t('settings.capabilities.dialog.tools.label')}</Label>
-                  <div className="grid grid-cols-2 gap-2 p-3 rounded-lg border border-edge bg-surface-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-lg border border-edge bg-surface-2">
                     {availableTools.map((tool: Any) => {
                       const toolName = tool.name ?? tool;
                       return (

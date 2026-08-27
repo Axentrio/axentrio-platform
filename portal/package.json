@@ -55,6 +55,7 @@
     "autoprefixer": "^10.4.16",
     "axios-mock-adapter": "^2.1.0",
     "jsdom": "^25.0.1",
+    "oxlint": "^1.80.0",
     "postcss": "^8.4.31",
     "react-doctor": "^0.4.2",
     "shadcn": "^4.1.0",
@@ -68,6 +69,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "lint": "oxlint src",
     "doctor": "npx react-doctor@latest",
     "test:coverage": "vitest run --coverage --coverage.include=\"src/**/*.{ts,tsx}\""
   },

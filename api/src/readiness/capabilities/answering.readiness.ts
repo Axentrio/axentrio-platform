@@ -23,7 +23,7 @@
 import { AppDataSource } from '../../database/data-source';
 import { KnowledgeDocument } from '../../database/entities/KnowledgeDocument';
 import { getBotKnowledgeBaseIds } from '../../knowledge/bot-knowledge-bases';
-import { resolveBoundTemplates } from '../../templates/template-resolver';
+import { resolveBoundTemplates, type ResolvedTemplate } from '../../templates/template-resolver';
 import {
   registerCapability,
   type CapabilityReadiness,
@@ -67,77 +67,13 @@ export const answeringReadiness: CapabilityReadiness = {
         })
       : [];
 
-    // "Indexed" is the document's own status; chunks are what retrieval reads.
-    // A doc with zero chunks is still being processed and cannot be answered from.
-    const retrievable = docs.filter((d) => d.status === 'indexed' && (d.chunkCount ?? 0) > 0);
-    const stillProcessing = docs.filter((d) => (d.chunkCount ?? 0) === 0 && d.status !== 'failed');
-    const failed = docs.filter((d) => d.status === 'failed');
-
-    if (retrievable.length === 0) {
-      missingSteps.push({
-        id: 'no_knowledge',
-        label:
-          docs.length === 0
-            ? 'No knowledge for this bot to answer from'
-            : 'No document has finished indexing yet, so the bot cannot answer from any of them',
-        cta: { route: KB_ROUTE, label: 'Add knowledge' },
-      });
-    } else if (stillProcessing.length > 0) {
-      attention.push({
-        code: 'documents_indexing',
-        label: `${stillProcessing.length} document(s) not retrievable yet — still indexing`,
-        cta: { route: KB_ROUTE, label: 'View knowledge' },
-      });
-    }
-
-    if (failed.length > 0) {
-      attention.push({
-        code: 'documents_failed',
-        label: `${failed.length} document(s) failed to index and will never be answered from`,
-        cta: { route: KB_ROUTE, label: 'View knowledge' },
-      });
-    }
+    const knowledge = collectKnowledgeFindings(docs, missingSteps, attention);
 
     // Template health. Unavailable ⇒ the runtime silently substitutes a generic
     // core, so the bot keeps talking while no longer representing the business.
     const resolved = await resolveBoundTemplates(ctx.bot);
     const primary = resolved[0];
-    if (!primary || !primary.templateId) {
-      attention.push({
-        code: 'no_template',
-        label: 'No speciality bound — the bot uses a generic service-business identity',
-        cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Choose a speciality' },
-      });
-    } else if (primary.templateUnavailable) {
-      missingSteps.push({
-        id: 'template_unavailable',
-        label: 'The bound speciality is archived or unpublished — the bot fell back to a generic identity',
-        cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Fix the speciality' },
-      });
-    } else if (primary.pinnedButUnavailable) {
-      attention.push({
-        code: 'pinned_version_gone',
-        label: 'The pinned version is no longer published — using the latest instead',
-        cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Review the speciality' },
-      });
-    }
-
-    // Declared-but-unfilled {placeholders} render as blanks mid-sentence.
-    const filled = (ctx.bot.settings?.ai as { templateVariables?: Record<string, string> } | undefined)
-      ?.templateVariables ?? {};
-    const unfilled = (primary?.variables ?? [])
-      .filter((v) => {
-        const value = filled[v.key] ?? (typeof v.default === 'string' ? v.default : '');
-        return value.trim().length === 0;
-      })
-      .map((v) => v.key);
-    if (unfilled.length > 0) {
-      attention.push({
-        code: 'unfilled_variables',
-        label: `Speciality details not filled in: ${unfilled.join(', ')} — these appear blank in replies`,
-        cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Fill in the details' },
-      });
-    }
+    collectTemplateFindings(ctx, primary, missingSteps, attention);
 
     return [
       {
@@ -146,9 +82,9 @@ export const answeringReadiness: CapabilityReadiness = {
         missingSteps,
         attention: attention.length ? attention : undefined,
         detail: {
-          retrievableDocuments: retrievable.length,
-          documentsIndexing: stillProcessing.length,
-          documentsFailed: failed.length,
+          retrievableDocuments: knowledge.retrievable,
+          documentsIndexing: knowledge.stillProcessing,
+          documentsFailed: knowledge.failed,
           knowledgeBasesAttached: kbIds.length,
           templateId: primary?.templateId ?? null,
           resolvedTemplateVersion: primary?.resolvedVersion ?? null,
@@ -157,5 +93,105 @@ export const answeringReadiness: CapabilityReadiness = {
     ];
   },
 };
+
+/** Retrievable / still-indexing / failed document counts for the detail block. */
+interface KnowledgeFindings {
+  retrievable: number;
+  stillProcessing: number;
+  failed: number;
+}
+
+/**
+ * "Indexed" is the document's own status; chunks are what retrieval reads.
+ * A doc with zero chunks is still being processed and cannot be answered from.
+ */
+function collectKnowledgeFindings(
+  docs: KnowledgeDocument[],
+  missingSteps: ReadinessResult['missingSteps'],
+  attention: NonNullable<ReadinessResult['attention']>,
+): KnowledgeFindings {
+  const retrievable = docs.filter((d) => d.status === 'indexed' && (d.chunkCount ?? 0) > 0);
+  const stillProcessing = docs.filter((d) => (d.chunkCount ?? 0) === 0 && d.status !== 'failed');
+  const failed = docs.filter((d) => d.status === 'failed');
+
+  if (retrievable.length === 0) {
+    missingSteps.push({
+      id: 'no_knowledge',
+      label:
+        docs.length === 0
+          ? 'No knowledge for this bot to answer from'
+          : 'No document has finished indexing yet, so the bot cannot answer from any of them',
+      cta: { route: KB_ROUTE, label: 'Add knowledge' },
+    });
+  } else if (stillProcessing.length > 0) {
+    attention.push({
+      code: 'documents_indexing',
+      label: `${stillProcessing.length} document(s) not retrievable yet — still indexing`,
+      cta: { route: KB_ROUTE, label: 'View knowledge' },
+    });
+  }
+
+  if (failed.length > 0) {
+    attention.push({
+      code: 'documents_failed',
+      label: `${failed.length} document(s) failed to index and will never be answered from`,
+      cta: { route: KB_ROUTE, label: 'View knowledge' },
+    });
+  }
+
+  return {
+    retrievable: retrievable.length,
+    stillProcessing: stillProcessing.length,
+    failed: failed.length,
+  };
+}
+
+/**
+ * Bound-speciality health plus declared-but-unfilled {placeholders}, which
+ * render as blanks mid-sentence in a live reply.
+ */
+function collectTemplateFindings(
+  ctx: ReadinessBotCtx,
+  primary: ResolvedTemplate | undefined,
+  missingSteps: ReadinessResult['missingSteps'],
+  attention: NonNullable<ReadinessResult['attention']>,
+): void {
+  if (!primary || !primary.templateId) {
+    attention.push({
+      code: 'no_template',
+      label: 'No speciality bound — the bot uses a generic service-business identity',
+      cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Choose a speciality' },
+    });
+  } else if (primary.templateUnavailable) {
+    missingSteps.push({
+      id: 'template_unavailable',
+      label: 'The bound speciality is archived or unpublished — the bot fell back to a generic identity',
+      cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Fix the speciality' },
+    });
+  } else if (primary.pinnedButUnavailable) {
+    attention.push({
+      code: 'pinned_version_gone',
+      label: 'The pinned version is no longer published — using the latest instead',
+      cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Review the speciality' },
+    });
+  }
+
+  // Declared-but-unfilled {placeholders} render as blanks mid-sentence.
+  const filled = (ctx.bot.settings?.ai as { templateVariables?: Record<string, string> } | undefined)
+    ?.templateVariables ?? {};
+  const unfilled = (primary?.variables ?? [])
+    .filter((v) => {
+      const value = filled[v.key] ?? (typeof v.default === 'string' ? v.default : '');
+      return value.trim().length === 0;
+    })
+    .map((v) => v.key);
+  if (unfilled.length > 0) {
+    attention.push({
+      code: 'unfilled_variables',
+      label: `Speciality details not filled in: ${unfilled.join(', ')} — these appear blank in replies`,
+      cta: { route: `/ai/bots/${ctx.bot.id}`, label: 'Fill in the details' },
+    });
+  }
+}
 
 registerCapability(answeringReadiness);

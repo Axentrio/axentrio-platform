@@ -156,205 +156,15 @@ export class TelegramEventNormalizer implements EventNormalizer {
       ? String(msg.reply_to_message.message_id)
       : undefined;
 
-    // Determine message type and content
-    if (msg.text) {
-      return {
-        type: 'message',
-        message: {
-          type: 'text',
-          content: msg.text,
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.text',
-      };
-    }
+    const { message, rawEventType } = telegramMessagePayload(msg, replyToExternalId);
 
-    if (msg.photo && msg.photo.length > 0) {
-      // Use the largest photo (last in array)
-      const largest = msg.photo[msg.photo.length - 1];
-      return {
-        type: 'message',
-        message: {
-          type: 'image',
-          content: msg.caption || '',
-          mediaMetadata: {
-            fileId: largest.file_id,
-            fileUniqueId: largest.file_unique_id,
-            width: largest.width,
-            height: largest.height,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.photo',
-      };
-    }
-
-    if (msg.video) {
-      return {
-        type: 'message',
-        message: {
-          type: 'video',
-          content: msg.caption || '',
-          mediaMetadata: {
-            fileId: msg.video.file_id,
-            fileUniqueId: msg.video.file_unique_id,
-            duration: msg.video.duration,
-            mimeType: msg.video.mime_type,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.video',
-      };
-    }
-
-    if (msg.audio) {
-      return {
-        type: 'message',
-        message: {
-          type: 'audio',
-          content: msg.caption || msg.audio.title || '',
-          mediaMetadata: {
-            fileId: msg.audio.file_id,
-            fileUniqueId: msg.audio.file_unique_id,
-            duration: msg.audio.duration,
-            performer: msg.audio.performer,
-            title: msg.audio.title,
-            mimeType: msg.audio.mime_type,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.audio',
-      };
-    }
-
-    if (msg.voice) {
-      return {
-        type: 'message',
-        message: {
-          type: 'audio',
-          content: msg.caption || '',
-          mediaMetadata: {
-            fileId: msg.voice.file_id,
-            fileUniqueId: msg.voice.file_unique_id,
-            duration: msg.voice.duration,
-            mimeType: msg.voice.mime_type,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.voice',
-      };
-    }
-
-    if (msg.document) {
-      return {
-        type: 'message',
-        message: {
-          type: 'file',
-          content: msg.caption || msg.document.file_name || '',
-          mediaMetadata: {
-            fileId: msg.document.file_id,
-            fileUniqueId: msg.document.file_unique_id,
-            fileName: msg.document.file_name,
-            mimeType: msg.document.mime_type,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.document',
-      };
-    }
-
-    if (msg.sticker) {
-      return {
-        type: 'message',
-        message: {
-          type: 'sticker',
-          content: msg.sticker.emoji || '',
-          mediaMetadata: {
-            fileId: msg.sticker.file_id,
-            fileUniqueId: msg.sticker.file_unique_id,
-            setName: msg.sticker.set_name,
-            isAnimated: msg.sticker.is_animated,
-            isVideo: msg.sticker.is_video,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.sticker',
-      };
-    }
-
-    if (msg.location) {
-      return {
-        type: 'message',
-        message: {
-          type: 'location',
-          content: `${msg.location.latitude},${msg.location.longitude}`,
-          mediaMetadata: {
-            latitude: msg.location.latitude,
-            longitude: msg.location.longitude,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.location',
-      };
-    }
-
-    if (msg.contact) {
-      return {
-        type: 'message',
-        message: {
-          type: 'contact',
-          content: `${msg.contact.first_name} ${msg.contact.last_name || ''}`.trim(),
-          mediaMetadata: {
-            phoneNumber: msg.contact.phone_number,
-            firstName: msg.contact.first_name,
-            lastName: msg.contact.last_name,
-            userId: msg.contact.user_id,
-          },
-          replyToExternalId,
-        },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: 'message.contact',
-      };
-    }
-
-    // Unknown message type - return as text with empty content
     return {
       type: 'message',
-      message: {
-        type: 'text',
-        content: '',
-        replyToExternalId,
-      },
+      message,
       sender,
       dedupeKey,
       timestamp,
-      rawEventType: 'message.unknown',
+      rawEventType,
     };
   }
 
@@ -399,4 +209,181 @@ export class TelegramEventNormalizer implements EventNormalizer {
       },
     };
   }
+}
+
+type TelegramMessagePayload = {
+  message: NonNullable<NormalizedEvent['message']>;
+  rawEventType: string;
+};
+
+/**
+ * Determine message type and content. An unknown Telegram message type becomes
+ * text with empty content, so the pipeline still sees a message.
+ */
+function telegramMessagePayload(
+  msg: TelegramMessage,
+  replyToExternalId: string | undefined,
+): TelegramMessagePayload {
+  if (msg.text) {
+    return {
+      message: { type: 'text', content: msg.text, replyToExternalId },
+      rawEventType: 'message.text',
+    };
+  }
+
+  const media = telegramMediaPayload(msg, replyToExternalId);
+  if (media) return media;
+
+  if (msg.sticker) {
+    return {
+      message: {
+        type: 'sticker',
+        content: msg.sticker.emoji || '',
+        mediaMetadata: {
+          fileId: msg.sticker.file_id,
+          fileUniqueId: msg.sticker.file_unique_id,
+          setName: msg.sticker.set_name,
+          isAnimated: msg.sticker.is_animated,
+          isVideo: msg.sticker.is_video,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.sticker',
+    };
+  }
+
+  if (msg.location) {
+    return {
+      message: {
+        type: 'location',
+        content: `${msg.location.latitude},${msg.location.longitude}`,
+        mediaMetadata: {
+          latitude: msg.location.latitude,
+          longitude: msg.location.longitude,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.location',
+    };
+  }
+
+  if (msg.contact) {
+    return {
+      message: {
+        type: 'contact',
+        content: `${msg.contact.first_name} ${msg.contact.last_name || ''}`.trim(),
+        mediaMetadata: {
+          phoneNumber: msg.contact.phone_number,
+          firstName: msg.contact.first_name,
+          lastName: msg.contact.last_name,
+          userId: msg.contact.user_id,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.contact',
+    };
+  }
+
+  // Unknown message type - return as text with empty content
+  return {
+    message: { type: 'text', content: '', replyToExternalId },
+    rawEventType: 'message.unknown',
+  };
+}
+
+/** Photo / video / audio / voice / document payload, or null when the message carries none. */
+function telegramMediaPayload(
+  msg: TelegramMessage,
+  replyToExternalId: string | undefined,
+): TelegramMessagePayload | null {
+  if (msg.photo && msg.photo.length > 0) {
+    // Use the largest photo (last in array)
+    const largest = msg.photo[msg.photo.length - 1];
+    return {
+      message: {
+        type: 'image',
+        content: msg.caption || '',
+        mediaMetadata: {
+          fileId: largest.file_id,
+          fileUniqueId: largest.file_unique_id,
+          width: largest.width,
+          height: largest.height,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.photo',
+    };
+  }
+
+  if (msg.video) {
+    return {
+      message: {
+        type: 'video',
+        content: msg.caption || '',
+        mediaMetadata: {
+          fileId: msg.video.file_id,
+          fileUniqueId: msg.video.file_unique_id,
+          duration: msg.video.duration,
+          mimeType: msg.video.mime_type,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.video',
+    };
+  }
+
+  if (msg.audio) {
+    return {
+      message: {
+        type: 'audio',
+        content: msg.caption || msg.audio.title || '',
+        mediaMetadata: {
+          fileId: msg.audio.file_id,
+          fileUniqueId: msg.audio.file_unique_id,
+          duration: msg.audio.duration,
+          performer: msg.audio.performer,
+          title: msg.audio.title,
+          mimeType: msg.audio.mime_type,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.audio',
+    };
+  }
+
+  if (msg.voice) {
+    return {
+      message: {
+        type: 'audio',
+        content: msg.caption || '',
+        mediaMetadata: {
+          fileId: msg.voice.file_id,
+          fileUniqueId: msg.voice.file_unique_id,
+          duration: msg.voice.duration,
+          mimeType: msg.voice.mime_type,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.voice',
+    };
+  }
+
+  if (msg.document) {
+    return {
+      message: {
+        type: 'file',
+        content: msg.caption || msg.document.file_name || '',
+        mediaMetadata: {
+          fileId: msg.document.file_id,
+          fileUniqueId: msg.document.file_unique_id,
+          fileName: msg.document.file_name,
+          mimeType: msg.document.mime_type,
+        },
+        replyToExternalId,
+      },
+      rawEventType: 'message.document',
+    };
+  }
+
+  return null;
 }

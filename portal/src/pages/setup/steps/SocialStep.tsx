@@ -34,6 +34,222 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp: "WhatsApp",
 };
 
+function MetaPagesPicker({
+  pages,
+  isLoading,
+  selectedPageIds,
+  setSelectedPageIds,
+  onConnect,
+  isConnecting,
+}: {
+  pages: MetaPage[];
+  isLoading: boolean;
+  selectedPageIds: string[];
+  setSelectedPageIds: React.Dispatch<React.SetStateAction<string[]>>;
+  onConnect: () => void;
+  isConnecting: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3 rounded-xl border border-primary-500/40 bg-surface-2 p-4">
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary">
+          {t("setup.steps.social.metaPagesTitle")}
+        </h3>
+        <p className="text-xs text-text-muted">
+          {t("setup.steps.social.metaPagesDescription")}
+        </p>
+      </div>
+      {isLoading ? (
+        <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
+      ) : (
+        <>
+          {pages.map((page) => (
+            <label
+              key={page.id}
+              className="flex cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
+            >
+              <Checkbox
+                checked={selectedPageIds.includes(page.id)}
+                onCheckedChange={(checked) =>
+                  setSelectedPageIds((current) =>
+                    checked
+                      ? [...current, page.id]
+                      : current.filter((pageId) => pageId !== page.id),
+                  )
+                }
+              />
+              <span className="text-sm text-text-primary">{page.name}</span>
+              {page.instagramAccount && (
+                <span className="flex items-center gap-1 text-xs text-text-muted">
+                  <SiInstagram className="h-3.5 w-3.5" />@
+                  {page.instagramAccount.username}
+                </span>
+              )}
+            </label>
+          ))}
+          <Button
+            onClick={onConnect}
+            disabled={selectedPageIds.length === 0 || isConnecting}
+          >
+            {isConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t("setup.steps.social.connectSelected")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChannelCards({
+  messengerActive,
+  instagramActive,
+  canConnectMeta,
+  onConnectMeta,
+  busy,
+  oauthPending,
+}: {
+  messengerActive: boolean;
+  instagramActive: boolean;
+  canConnectMeta: boolean;
+  onConnectMeta: () => void;
+  busy: boolean;
+  oauthPending: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-3 rounded-xl border border-edge bg-surface-2 p-4">
+        <div className="flex items-center gap-2">
+          <SiMessenger className="h-5 w-5 text-blue-400" />
+          <h3 className="font-medium text-text-primary">Facebook Messenger</h3>
+          {messengerActive && (
+            <CheckCircle2 className="ml-auto h-4 w-4 text-status-online" />
+          )}
+        </div>
+        <p className="text-xs text-text-muted">
+          {t("setup.steps.social.messengerBody")}
+        </p>
+        {canConnectMeta ? (
+          <Button variant="outline" onClick={onConnectMeta} disabled={busy}>
+            {oauthPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t("setup.steps.social.connectMessenger")}
+          </Button>
+        ) : (
+          <p className="text-xs text-text-muted">
+            {t("setup.steps.social.upgradeHint")}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-edge bg-surface-2 p-4">
+        <div className="flex items-center gap-2">
+          <SiInstagram className="h-5 w-5 text-pink-400" />
+          <h3 className="font-medium text-text-primary">Instagram</h3>
+          {instagramActive && (
+            <CheckCircle2 className="ml-auto h-4 w-4 text-status-online" />
+          )}
+        </div>
+        <p className="text-xs text-text-muted">
+          {t("setup.steps.social.instagramBody")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function WhatsAppConnect({
+  canConnect,
+  embeddedEnabled,
+  busy,
+  embeddedPending,
+  manualPending,
+  onConnectEmbedded,
+  onConnectManual,
+  phoneNumberId,
+  setPhoneNumberId,
+  accessToken,
+  setAccessToken,
+  wabaId,
+  setWabaId,
+}: {
+  canConnect: boolean;
+  embeddedEnabled: boolean;
+  busy: boolean;
+  embeddedPending: boolean;
+  manualPending: boolean;
+  onConnectEmbedded: () => void;
+  onConnectManual: () => void;
+  phoneNumberId: string;
+  setPhoneNumberId: (value: string) => void;
+  accessToken: string;
+  setAccessToken: (value: string) => void;
+  wabaId: string;
+  setWabaId: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!canConnect) {
+    return (
+      <p className="text-xs text-text-muted">
+        {t("setup.steps.social.upgradeHint")}
+      </p>
+    );
+  }
+  if (embeddedEnabled) {
+    return (
+      <Button variant="outline" onClick={onConnectEmbedded} disabled={busy}>
+        {embeddedPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {t("setup.steps.social.connectWhatsApp")}
+      </Button>
+    );
+  }
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="setup-wa-phone">
+            {t("setup.steps.social.phoneNumberId")}
+          </Label>
+          <Input
+            id="setup-wa-phone"
+            value={phoneNumberId}
+            onChange={(event) => setPhoneNumberId(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="setup-wa-token">
+            {t("setup.steps.social.accessToken")}
+          </Label>
+          <Input
+            id="setup-wa-token"
+            type="password"
+            value={accessToken}
+            onChange={(event) => setAccessToken(event.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="setup-wa-waba">
+            {t("setup.steps.social.wabaId")}
+          </Label>
+          <Input
+            id="setup-wa-waba"
+            value={wabaId}
+            onChange={(event) => setWabaId(event.target.value)}
+          />
+        </div>
+      </div>
+      <Button
+        variant="outline"
+        onClick={onConnectManual}
+        disabled={busy || !phoneNumberId.trim() || !accessToken.trim()}
+      >
+        {manualPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {t("setup.steps.social.connectWhatsApp")}
+      </Button>
+    </>
+  );
+}
+
 export function SocialStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -206,98 +422,24 @@ export function SocialStep({ submit }: StepProps) {
       </div>
 
       {metaSetupToken && (
-        <div className="space-y-3 rounded-xl border border-primary-500/40 bg-surface-2 p-4">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">
-              {t("setup.steps.social.metaPagesTitle")}
-            </h3>
-            <p className="text-xs text-text-muted">
-              {t("setup.steps.social.metaPagesDescription")}
-            </p>
-          </div>
-          {metaPagesLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
-          ) : (
-            <>
-              {metaPages.map((page) => (
-                <label
-                  key={page.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-edge px-3 py-2"
-                >
-                  <Checkbox
-                    checked={selectedPageIds.includes(page.id)}
-                    onCheckedChange={(checked) =>
-                      setSelectedPageIds((current) =>
-                        checked
-                          ? [...current, page.id]
-                          : current.filter((pageId) => pageId !== page.id),
-                      )
-                    }
-                  />
-                  <span className="text-sm text-text-primary">{page.name}</span>
-                  {page.instagramAccount && (
-                    <span className="flex items-center gap-1 text-xs text-text-muted">
-                      <SiInstagram className="h-3.5 w-3.5" />@
-                      {page.instagramAccount.username}
-                    </span>
-                  )}
-                </label>
-              ))}
-              <Button
-                onClick={connectSelectedPages}
-                disabled={selectedPageIds.length === 0 || connectMeta.isPending}
-              >
-                {connectMeta.isPending && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {t("setup.steps.social.connectSelected")}
-              </Button>
-            </>
-          )}
-        </div>
+        <MetaPagesPicker
+          pages={metaPages}
+          isLoading={metaPagesLoading}
+          selectedPageIds={selectedPageIds}
+          setSelectedPageIds={setSelectedPageIds}
+          onConnect={connectSelectedPages}
+          isConnecting={connectMeta.isPending}
+        />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-3 rounded-xl border border-edge bg-surface-2 p-4">
-          <div className="flex items-center gap-2">
-            <SiMessenger className="h-5 w-5 text-blue-400" />
-            <h3 className="font-medium text-text-primary">
-              Facebook Messenger
-            </h3>
-            {activeChannels.has("messenger") && (
-              <CheckCircle2 className="ml-auto h-4 w-4 text-status-online" />
-            )}
-          </div>
-          <p className="text-xs text-text-muted">
-            {t("setup.steps.social.messengerBody")}
-          </p>
-          {canConnectMeta ? (
-            <Button variant="outline" onClick={startMetaOAuth} disabled={busy}>
-              {metaOAuthUrl.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              {t("setup.steps.social.connectMessenger")}
-            </Button>
-          ) : (
-            <p className="text-xs text-text-muted">
-              {t("setup.steps.social.upgradeHint")}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-3 rounded-xl border border-edge bg-surface-2 p-4">
-          <div className="flex items-center gap-2">
-            <SiInstagram className="h-5 w-5 text-pink-400" />
-            <h3 className="font-medium text-text-primary">Instagram</h3>
-            {activeChannels.has("instagram") && (
-              <CheckCircle2 className="ml-auto h-4 w-4 text-status-online" />
-            )}
-          </div>
-          <p className="text-xs text-text-muted">
-            {t("setup.steps.social.instagramBody")}
-          </p>
-        </div>
-      </div>
+      <ChannelCards
+        messengerActive={activeChannels.has("messenger")}
+        instagramActive={activeChannels.has("instagram")}
+        canConnectMeta={canConnectMeta}
+        onConnectMeta={startMetaOAuth}
+        busy={busy}
+        oauthPending={metaOAuthUrl.isPending}
+      />
 
       <div className="space-y-4 rounded-xl border border-edge bg-surface-2 p-4">
         <div className="flex items-center gap-2">
@@ -310,70 +452,21 @@ export function SocialStep({ submit }: StepProps) {
         <p className="text-xs text-text-muted">
           {t("setup.steps.social.whatsappBody")}
         </p>
-        {canConnectWhatsApp ? (
-          whatsappEsEnabled ? (
-            <Button
-              variant="outline"
-              onClick={connectWhatsAppEmbedded}
-              disabled={busy}
-            >
-              {completeWhatsAppEs.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              {t("setup.steps.social.connectWhatsApp")}
-            </Button>
-          ) : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="setup-wa-phone">
-                    {t("setup.steps.social.phoneNumberId")}
-                  </Label>
-                  <Input
-                    id="setup-wa-phone"
-                    value={phoneNumberId}
-                    onChange={(event) => setPhoneNumberId(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="setup-wa-token">
-                    {t("setup.steps.social.accessToken")}
-                  </Label>
-                  <Input
-                    id="setup-wa-token"
-                    type="password"
-                    value={accessToken}
-                    onChange={(event) => setAccessToken(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="setup-wa-waba">
-                    {t("setup.steps.social.wabaId")}
-                  </Label>
-                  <Input
-                    id="setup-wa-waba"
-                    value={wabaId}
-                    onChange={(event) => setWabaId(event.target.value)}
-                  />
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                onClick={connectWhatsAppNumber}
-                disabled={busy || !phoneNumberId.trim() || !accessToken.trim()}
-              >
-                {connectWhatsApp.isPending && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {t("setup.steps.social.connectWhatsApp")}
-              </Button>
-            </>
-          )
-        ) : (
-          <p className="text-xs text-text-muted">
-            {t("setup.steps.social.upgradeHint")}
-          </p>
-        )}
+        <WhatsAppConnect
+          canConnect={canConnectWhatsApp}
+          embeddedEnabled={whatsappEsEnabled}
+          busy={busy}
+          embeddedPending={completeWhatsAppEs.isPending}
+          manualPending={connectWhatsApp.isPending}
+          onConnectEmbedded={connectWhatsAppEmbedded}
+          onConnectManual={connectWhatsAppNumber}
+          phoneNumberId={phoneNumberId}
+          setPhoneNumberId={setPhoneNumberId}
+          accessToken={accessToken}
+          setAccessToken={setAccessToken}
+          wabaId={wabaId}
+          setWabaId={setWabaId}
+        />
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs text-text-muted">

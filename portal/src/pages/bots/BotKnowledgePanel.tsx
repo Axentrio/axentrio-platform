@@ -166,7 +166,7 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({
   return (
     <Card variant="glass">
       <CardHeader>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-primary-400" />
             <h3 className="font-medium text-text-primary">
@@ -260,7 +260,7 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({
                 placeholder={t(
                   "ai.knowledge.modal.fields.websiteUrl.placeholder",
                 )}
-                className="h-8 flex-1 min-w-[12rem]"
+                className="h-8 flex-1 min-w-0"
               />
               <Button
                 variant="outline"

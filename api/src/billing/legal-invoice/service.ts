@@ -1,17 +1,23 @@
+import type { Repository } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { LegalInvoice } from '../../database/entities/LegalInvoice';
 import { Tenant } from '../../database/entities/Tenant';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 import { logger } from '../../utils/logger';
 import { getStripeClient } from '../providers/stripe';
-import { BillitClientError, getBillitClient } from './billit-client';
+import { BillitClientError, getBillitClient, type BillitClient } from './billit-client';
 import {
   mapStripeInvoiceToBillitOrder,
   shouldSkipZeroAmountInvoice,
   totalsFromStripeInvoice,
 } from './map-stripe-to-billit';
 import type { NormalizedEvent } from '../types';
-import type { LegalInvoiceStatus, StripeInvoiceLike, StripeInvoiceLineLike } from './types';
+import type {
+  BillingValidationResult,
+  LegalInvoiceStatus,
+  StripeInvoiceLike,
+  StripeInvoiceLineLike,
+} from './types';
 import { notifyLegalInvoiceAttention } from './notify-attention';
 import { validateTenantBillingData } from './validate';
 
@@ -101,39 +107,7 @@ export async function processPaidStripeInvoice(input: {
   try {
     invoice = await loadStripeInvoice(input.stripeInvoiceId);
   } catch (err) {
-    logger.error('Legal invoice: Stripe retrieve failed', {
-      ...input,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    const repo = AppDataSource.getRepository(LegalInvoice);
-    let row = await repo.findOne({
-      where: { tenantId: input.tenantId, stripeInvoiceId: input.stripeInvoiceId, documentKind: 'invoice' },
-    });
-    if (!row) {
-      row = repo.create({
-        tenantId: input.tenantId,
-        documentKind: 'invoice',
-        stripeInvoiceId: input.stripeInvoiceId,
-        invoiceStatus: 'failed',
-        peppolStatus: 'pending',
-        paymentStatus: 'paid',
-        peppolRequired: false,
-        currency: 'EUR',
-        amountExclCents: 0,
-        vatAmountCents: 0,
-        amountInclCents: 0,
-        reviewReasons: [],
-        retryCount: 0,
-      });
-    } else {
-      row.retryCount += 1;
-    }
-    row.lastError = 'stripe_retrieve_failed';
-    if (row.invoiceStatus !== 'sent' && row.invoiceStatus !== 'credited') {
-      row.invoiceStatus = 'failed';
-    }
-    await persistLegalInvoice(row);
-    return { outcome: 'stripe_retrieve_failed', legalInvoiceId: row.id };
+    return recordStripeRetrieveFailure(input, err);
   }
 
   if (shouldSkipZeroAmountInvoice(invoice)) {
@@ -141,39 +115,15 @@ export async function processPaidStripeInvoice(input: {
   }
 
   const repo = AppDataSource.getRepository(LegalInvoice);
-  let row = await repo.findOne({
+  const existing = await repo.findOne({
     where: { tenantId: input.tenantId, stripeInvoiceId: input.stripeInvoiceId, documentKind: 'invoice' },
   });
-  if (row && TERMINAL.includes(row.invoiceStatus)) {
-    return { outcome: 'already_final', legalInvoiceId: row.id };
+  if (existing && TERMINAL.includes(existing.invoiceStatus)) {
+    return { outcome: 'already_final', legalInvoiceId: existing.id };
   }
 
   const validation = validateTenantBillingData(identityFromTenant(tenant));
-  const totals = totalsFromStripeInvoice(invoice);
-  const fields = {
-    stripeCustomerId: readCustomerId(invoice),
-    stripeSubscriptionId: readSubscriptionId(invoice),
-    paymentStatus: 'paid' as const,
-    peppolRequired: validation.peppolRequired,
-    currency: (invoice.currency ?? 'eur').toUpperCase(),
-    ...totals,
-    reviewReasons: validation.reasons,
-  };
-
-  if (!row) {
-    row = repo.create({
-      tenantId: input.tenantId,
-      documentKind: 'invoice',
-      stripeInvoiceId: input.stripeInvoiceId,
-      invoiceStatus: 'draft',
-      peppolStatus: validation.peppolRequired ? 'pending' : 'not_required',
-      retryCount: 0,
-      ...fields,
-    });
-  } else {
-    Object.assign(row, fields);
-    row.retryCount += 1;
-  }
+  const row = upsertInvoiceRowFields(repo, existing, input, invoice, validation);
 
   if (!validation.ok) {
     row.invoiceStatus = 'manual_review';
@@ -197,31 +147,17 @@ export async function processPaidStripeInvoice(input: {
       await persistLegalInvoice(row);
     }
 
-    if (!row.billitOrderId) {
-      try {
-        const created = await billit.createOrder(
-          mapStripeInvoiceToBillitOrder({
-            invoice,
-            validation,
-            orderNumber: row.billitInvoiceNumber,
-            tenantId: tenant.id,
-          }),
-          input.stripeInvoiceId,
-        );
-        row.billitOrderId = created.orderId;
-        if (created.orderNumber) row.billitInvoiceNumber = created.orderNumber;
-      } catch (err) {
-        if (err instanceof BillitClientError && err.code === 'billit_idempotent_replay') {
-          row.lastError = 'billit_idempotent_replay';
-          row.invoiceStatus = row.billitOrderId ? 'created' : 'failed';
-          await persistLegalInvoice(row);
-          if (!row.billitOrderId) {
-            return { outcome: 'failed', legalInvoiceId: row.id };
-          }
-        } else {
-          throw err;
-        }
-      }
+    const orderStep = await ensureBillitOrder({
+      billit,
+      row,
+      invoice,
+      validation,
+      orderNumber: row.billitInvoiceNumber,
+      tenantId: tenant.id,
+      stripeInvoiceId: input.stripeInvoiceId,
+    });
+    if (orderStep.status === 'failed') {
+      return { outcome: 'failed', legalInvoiceId: row.id };
     }
 
     row.invoiceStatus = 'created';
@@ -243,35 +179,175 @@ export async function processPaidStripeInvoice(input: {
       return { outcome: 'peppol_not_available', legalInvoiceId: row.id };
     }
 
-    await billit.sendOrders([row.billitOrderId], 'Peppol');
+    await billit.sendOrders([orderStep.billitOrderId], 'Peppol');
     row.peppolStatus = 'sent';
     row.invoiceStatus = 'sent';
     await persistLegalInvoice(row);
     return { outcome: 'sent', legalInvoiceId: row.id };
   } catch (err) {
-    const message = errorMessage(err);
-    logger.error('Legal invoice Billit step failed', {
-      tenantId: input.tenantId,
-      stripeInvoiceId: input.stripeInvoiceId,
-      legalInvoiceId: row.id,
-      error: message,
-    });
-    if (row.billitOrderId) {
-      row.invoiceStatus = 'created';
-      row.peppolStatus = validation.peppolRequired ? 'failed' : row.peppolStatus;
-    } else {
-      row.invoiceStatus = 'failed';
-    }
-    row.lastError = message;
-    try {
-      await persistLegalInvoice(row);
-    } catch (saveErr) {
-      logger.error('Legal invoice persist failed after Billit error', {
-        legalInvoiceId: row.id,
-        error: saveErr instanceof Error ? saveErr.message : String(saveErr),
-      });
-    }
+    await recordBillitFailure(row, validation, input, err);
     return { outcome: 'failed', legalInvoiceId: row.id };
+  }
+}
+
+/**
+ * Stripe wouldn't give us the invoice. Record the failure on the (possibly
+ * new) legal-invoice row without ever downgrading a terminal status.
+ */
+async function recordStripeRetrieveFailure(
+  input: { tenantId: string; stripeInvoiceId: string },
+  err: unknown,
+): Promise<{ outcome: string; legalInvoiceId?: string }> {
+  logger.error('Legal invoice: Stripe retrieve failed', {
+    ...input,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  const repo = AppDataSource.getRepository(LegalInvoice);
+  let row = await repo.findOne({
+    where: { tenantId: input.tenantId, stripeInvoiceId: input.stripeInvoiceId, documentKind: 'invoice' },
+  });
+  if (!row) {
+    row = repo.create({
+      tenantId: input.tenantId,
+      documentKind: 'invoice',
+      stripeInvoiceId: input.stripeInvoiceId,
+      invoiceStatus: 'failed',
+      peppolStatus: 'pending',
+      paymentStatus: 'paid',
+      peppolRequired: false,
+      currency: 'EUR',
+      amountExclCents: 0,
+      vatAmountCents: 0,
+      amountInclCents: 0,
+      reviewReasons: [],
+      retryCount: 0,
+    });
+  } else {
+    row.retryCount += 1;
+  }
+  row.lastError = 'stripe_retrieve_failed';
+  if (row.invoiceStatus !== 'sent' && row.invoiceStatus !== 'credited') {
+    row.invoiceStatus = 'failed';
+  }
+  await persistLegalInvoice(row);
+  return { outcome: 'stripe_retrieve_failed', legalInvoiceId: row.id };
+}
+
+/**
+ * Create the row for a first sighting, or refresh the Stripe-derived fields
+ * and bump the retry counter on an existing one.
+ */
+function upsertInvoiceRowFields(
+  repo: Repository<LegalInvoice>,
+  row: LegalInvoice | null,
+  input: { tenantId: string; stripeInvoiceId: string },
+  invoice: StripeInvoiceLike,
+  validation: BillingValidationResult,
+): LegalInvoice {
+  const totals = totalsFromStripeInvoice(invoice);
+  const fields = {
+    stripeCustomerId: readCustomerId(invoice),
+    stripeSubscriptionId: readSubscriptionId(invoice),
+    paymentStatus: 'paid' as const,
+    peppolRequired: validation.peppolRequired,
+    currency: (invoice.currency ?? 'eur').toUpperCase(),
+    ...totals,
+    reviewReasons: validation.reasons,
+  };
+
+  if (!row) {
+    return repo.create({
+      tenantId: input.tenantId,
+      documentKind: 'invoice',
+      stripeInvoiceId: input.stripeInvoiceId,
+      invoiceStatus: 'draft',
+      peppolStatus: validation.peppolRequired ? 'pending' : 'not_required',
+      retryCount: 0,
+      ...fields,
+    });
+  }
+  Object.assign(row, fields);
+  row.retryCount += 1;
+  return row;
+}
+
+type EnsureOrderResult = { status: 'ok'; billitOrderId: string } | { status: 'failed' };
+
+/**
+ * Create the Billit order when the row has none yet. Returns `'failed'` when
+ * an idempotent replay left us without an order id — the caller then returns
+ * the `failed` outcome. Any other Billit error propagates.
+ */
+async function ensureBillitOrder(input: {
+  billit: BillitClient;
+  row: LegalInvoice;
+  invoice: StripeInvoiceLike;
+  validation: BillingValidationResult;
+  orderNumber: string;
+  tenantId: string;
+  stripeInvoiceId: string;
+}): Promise<EnsureOrderResult> {
+  const { billit, row, invoice, validation, orderNumber, tenantId, stripeInvoiceId } = input;
+  if (row.billitOrderId) return { status: 'ok', billitOrderId: row.billitOrderId };
+  try {
+    const created = await billit.createOrder(
+      mapStripeInvoiceToBillitOrder({
+        invoice,
+        validation,
+        orderNumber,
+        tenantId,
+      }),
+      stripeInvoiceId,
+    );
+    row.billitOrderId = created.orderId;
+    if (created.orderNumber) row.billitInvoiceNumber = created.orderNumber;
+    return { status: 'ok', billitOrderId: created.orderId };
+  } catch (err) {
+    if (err instanceof BillitClientError && err.code === 'billit_idempotent_replay') {
+      row.lastError = 'billit_idempotent_replay';
+      row.invoiceStatus = row.billitOrderId ? 'created' : 'failed';
+      await persistLegalInvoice(row);
+      if (!row.billitOrderId) {
+        return { status: 'failed' };
+      }
+      return { status: 'ok', billitOrderId: row.billitOrderId };
+    }
+    throw err;
+  }
+}
+
+/**
+ * A Billit step threw. Keep `created` when the order already exists (only the
+ * Peppol leg failed), otherwise mark the row failed. A persist failure here is
+ * logged and swallowed — the caller still reports the `failed` outcome.
+ */
+async function recordBillitFailure(
+  row: LegalInvoice,
+  validation: BillingValidationResult,
+  input: { tenantId: string; stripeInvoiceId: string },
+  err: unknown,
+): Promise<void> {
+  const message = errorMessage(err);
+  logger.error('Legal invoice Billit step failed', {
+    tenantId: input.tenantId,
+    stripeInvoiceId: input.stripeInvoiceId,
+    legalInvoiceId: row.id,
+    error: message,
+  });
+  if (row.billitOrderId) {
+    row.invoiceStatus = 'created';
+    row.peppolStatus = validation.peppolRequired ? 'failed' : row.peppolStatus;
+  } else {
+    row.invoiceStatus = 'failed';
+  }
+  row.lastError = message;
+  try {
+    await persistLegalInvoice(row);
+  } catch (saveErr) {
+    logger.error('Legal invoice persist failed after Billit error', {
+      legalInvoiceId: row.id,
+      error: saveErr instanceof Error ? saveErr.message : String(saveErr),
+    });
   }
 }
 
@@ -302,31 +378,7 @@ export async function processStripeRefund(input: {
   if (!tenant) return { outcome: 'tenant_missing' };
 
   const validation = validateTenantBillingData(identityFromTenant(tenant));
-  const credit =
-    existing ??
-    repo.create({
-      tenantId: input.tenantId,
-      documentKind: 'credit_note',
-      stripeInvoiceId: input.stripeInvoiceId ?? null,
-      stripeRefundId: input.stripeRefundId,
-      stripeChargeId: input.stripeChargeId ?? null,
-      creditedFromId: original?.id ?? null,
-      paymentStatus: 'refunded',
-      invoiceStatus: 'draft',
-      peppolStatus: validation.peppolRequired ? 'pending' : 'not_required',
-      peppolRequired: validation.peppolRequired,
-      currency: original?.currency ?? 'EUR',
-      amountExclCents: input.amountRefundedCents,
-      vatAmountCents: 0,
-      amountInclCents: input.amountRefundedCents,
-      reviewReasons: validation.ok ? [] : validation.reasons,
-      retryCount: 0,
-    });
-  if (existing) {
-    credit.retryCount += 1;
-    credit.reviewReasons = validation.ok ? [] : validation.reasons;
-    credit.creditedFromId = original?.id ?? credit.creditedFromId;
-  }
+  const credit = buildCreditNoteRow(repo, existing, original, input, validation);
 
   if (!existing && original?.invoiceStatus === 'credited') {
     return { outcome: 'already_credited', legalInvoiceId: original.id };
@@ -355,91 +407,188 @@ export async function processStripeRefund(input: {
   }
 
   try {
-    if (!credit.billitInvoiceNumber) {
-      credit.billitInvoiceNumber = await billit.consumeNextNumber('credit_note');
-      await persistLegalInvoice(credit);
-    }
-    if (!credit.billitOrderId) {
-      const created = await billit.createOrder(
-        mapStripeInvoiceToBillitOrder({
-          invoice: {
-            id: input.stripeRefundId,
-            amount_paid: input.amountRefundedCents,
-            total: input.amountRefundedCents,
-            total_excluding_tax: input.amountRefundedCents,
-            currency: credit.currency.toLowerCase(),
-            created: Math.floor(Date.now() / 1000),
-            lines: {
-              data: [
-                {
-                  description: `Credit note for ${original.billitInvoiceNumber}`,
-                  quantity: 1,
-                  amount: input.amountRefundedCents,
-                  amount_excluding_tax: input.amountRefundedCents,
-                },
-              ],
-            },
-          },
-          validation,
-          orderNumber: credit.billitInvoiceNumber,
-          tenantId: tenant.id,
-          orderType: 'CreditNote',
-          aboutInvoiceNumber: original.billitInvoiceNumber,
-        }),
-        input.stripeRefundId,
-      );
-      credit.billitOrderId = created.orderId;
-    }
-    credit.invoiceStatus = 'created';
-    credit.paymentStatus = 'refunded';
-
-    if (validation.peppolRequired) {
-      const peppol = await billit.lookupPeppol(validation.vatNumber!);
-      if (peppol.registered && peppol.documentTypes.includes('BISv3CreditNote')) {
-        await billit.sendOrders([credit.billitOrderId], 'Peppol');
-        credit.peppolStatus = 'sent';
-        credit.invoiceStatus = 'sent';
-        credit.lastError = null;
-      } else {
-        credit.peppolStatus = 'not_available';
-        credit.invoiceStatus = 'manual_review';
-        credit.lastError = 'peppol_not_available';
-      }
-    } else {
-      credit.peppolStatus = 'not_required';
-    }
-
-    if (original.amountInclCents > 0 && input.amountRefundedCents >= original.amountInclCents) {
-      original.invoiceStatus = 'credited';
-      original.paymentStatus = 'refunded';
-      await persistLegalInvoice(original);
-    }
-    await persistLegalInvoice(credit);
-    return { outcome: credit.invoiceStatus === 'sent' ? 'sent' : credit.invoiceStatus, legalInvoiceId: credit.id };
-  } catch (err) {
-    const message = errorMessage(err);
-    logger.error('Credit note Billit step failed', {
-      tenantId: input.tenantId,
-      stripeRefundId: input.stripeRefundId,
-      legalInvoiceId: credit.id,
-      error: message,
+    return await runCreditNoteBillitSteps({
+      billit,
+      credit,
+      original,
+      originalBillitInvoiceNumber: original.billitInvoiceNumber,
+      validation,
+      refund: input,
+      tenantId: tenant.id,
     });
-    if (credit.billitOrderId) {
-      credit.invoiceStatus = 'created';
-      credit.peppolStatus = validation.peppolRequired ? 'failed' : credit.peppolStatus;
-    } else {
-      credit.invoiceStatus = 'failed';
-    }
-    credit.lastError = message;
-    try {
-      await persistLegalInvoice(credit);
-    } catch (saveErr) {
-      logger.error('Credit note persist failed after Billit error', {
-        legalInvoiceId: credit.id,
-        error: saveErr instanceof Error ? saveErr.message : String(saveErr),
-      });
-    }
+  } catch (err) {
+    await recordCreditNoteFailure(credit, validation, input, err);
     return { outcome: 'failed', legalInvoiceId: credit.id };
+  }
+}
+
+type StripeRefundInput = {
+  tenantId: string;
+  stripeInvoiceId?: string | null;
+  stripeRefundId: string;
+  stripeChargeId?: string | null;
+  amountRefundedCents: number;
+};
+
+/**
+ * Reuse the retryable credit-note row when one exists (bumping its retry
+ * counter), otherwise build a fresh one from the refund + the original
+ * invoice.
+ */
+function buildCreditNoteRow(
+  repo: Repository<LegalInvoice>,
+  existing: LegalInvoice | null,
+  original: LegalInvoice | null,
+  input: StripeRefundInput,
+  validation: BillingValidationResult,
+): LegalInvoice {
+  const credit =
+    existing ??
+    repo.create({
+      tenantId: input.tenantId,
+      documentKind: 'credit_note',
+      stripeInvoiceId: input.stripeInvoiceId ?? null,
+      stripeRefundId: input.stripeRefundId,
+      stripeChargeId: input.stripeChargeId ?? null,
+      creditedFromId: original?.id ?? null,
+      paymentStatus: 'refunded',
+      invoiceStatus: 'draft',
+      peppolStatus: validation.peppolRequired ? 'pending' : 'not_required',
+      peppolRequired: validation.peppolRequired,
+      currency: original?.currency ?? 'EUR',
+      amountExclCents: input.amountRefundedCents,
+      vatAmountCents: 0,
+      amountInclCents: input.amountRefundedCents,
+      reviewReasons: validation.ok ? [] : validation.reasons,
+      retryCount: 0,
+    });
+  if (existing) {
+    credit.retryCount += 1;
+    credit.reviewReasons = validation.ok ? [] : validation.reasons;
+    credit.creditedFromId = original?.id ?? credit.creditedFromId;
+  }
+  return credit;
+}
+
+/**
+ * Number, create and (when Peppol applies) send the credit note, then mark the
+ * original invoice `credited` once the refund covers it in full. Billit errors
+ * propagate to the caller's failure recorder.
+ */
+async function runCreditNoteBillitSteps(input: {
+  billit: BillitClient;
+  credit: LegalInvoice;
+  original: LegalInvoice;
+  originalBillitInvoiceNumber: string;
+  validation: BillingValidationResult;
+  refund: StripeRefundInput;
+  tenantId: string;
+}): Promise<{ outcome: string; legalInvoiceId?: string }> {
+  const {
+    billit,
+    credit,
+    original,
+    originalBillitInvoiceNumber,
+    validation,
+    refund,
+    tenantId,
+  } = input;
+
+  if (!credit.billitInvoiceNumber) {
+    credit.billitInvoiceNumber = await billit.consumeNextNumber('credit_note');
+    await persistLegalInvoice(credit);
+  }
+  if (!credit.billitOrderId) {
+    const created = await billit.createOrder(
+      mapStripeInvoiceToBillitOrder({
+        invoice: {
+          id: refund.stripeRefundId,
+          amount_paid: refund.amountRefundedCents,
+          total: refund.amountRefundedCents,
+          total_excluding_tax: refund.amountRefundedCents,
+          currency: credit.currency.toLowerCase(),
+          created: Math.floor(Date.now() / 1000),
+          lines: {
+            data: [
+              {
+                description: `Credit note for ${originalBillitInvoiceNumber}`,
+                quantity: 1,
+                amount: refund.amountRefundedCents,
+                amount_excluding_tax: refund.amountRefundedCents,
+              },
+            ],
+          },
+        },
+        validation,
+        orderNumber: credit.billitInvoiceNumber,
+        tenantId,
+        orderType: 'CreditNote',
+        aboutInvoiceNumber: originalBillitInvoiceNumber,
+      }),
+      refund.stripeRefundId,
+    );
+    credit.billitOrderId = created.orderId;
+  }
+  credit.invoiceStatus = 'created';
+  credit.paymentStatus = 'refunded';
+
+  if (validation.peppolRequired) {
+    const peppol = await billit.lookupPeppol(validation.vatNumber!);
+    if (peppol.registered && peppol.documentTypes.includes('BISv3CreditNote')) {
+      await billit.sendOrders([credit.billitOrderId], 'Peppol');
+      credit.peppolStatus = 'sent';
+      credit.invoiceStatus = 'sent';
+      credit.lastError = null;
+    } else {
+      credit.peppolStatus = 'not_available';
+      credit.invoiceStatus = 'manual_review';
+      credit.lastError = 'peppol_not_available';
+    }
+  } else {
+    credit.peppolStatus = 'not_required';
+  }
+
+  if (original.amountInclCents > 0 && refund.amountRefundedCents >= original.amountInclCents) {
+    original.invoiceStatus = 'credited';
+    original.paymentStatus = 'refunded';
+    await persistLegalInvoice(original);
+  }
+  await persistLegalInvoice(credit);
+  return { outcome: credit.invoiceStatus === 'sent' ? 'sent' : credit.invoiceStatus, legalInvoiceId: credit.id };
+}
+
+/**
+ * A credit-note Billit step threw. Keep `created` when the order already
+ * exists, otherwise mark the row failed. A persist failure here is logged and
+ * swallowed — the caller still reports the `failed` outcome.
+ */
+async function recordCreditNoteFailure(
+  credit: LegalInvoice,
+  validation: BillingValidationResult,
+  input: StripeRefundInput,
+  err: unknown,
+): Promise<void> {
+  const message = errorMessage(err);
+  logger.error('Credit note Billit step failed', {
+    tenantId: input.tenantId,
+    stripeRefundId: input.stripeRefundId,
+    legalInvoiceId: credit.id,
+    error: message,
+  });
+  if (credit.billitOrderId) {
+    credit.invoiceStatus = 'created';
+    credit.peppolStatus = validation.peppolRequired ? 'failed' : credit.peppolStatus;
+  } else {
+    credit.invoiceStatus = 'failed';
+  }
+  credit.lastError = message;
+  try {
+    await persistLegalInvoice(credit);
+  } catch (saveErr) {
+    logger.error('Credit note persist failed after Billit error', {
+      legalInvoiceId: credit.id,
+      error: saveErr instanceof Error ? saveErr.message : String(saveErr),
+    });
   }
 }
 
@@ -634,21 +783,50 @@ async function resolveChargeContext(event: NormalizedEvent): Promise<{
   }
   let customerId = event.customerId;
   if ((!invoiceId || !customerId) && chargeId) {
-    try {
-      const charge = await getStripeClient().charges.retrieve(chargeId);
-      if (!invoiceId) invoiceId = readId((charge as { invoice?: unknown }).invoice);
-      if (!customerId) customerId = readId(charge.customer) ?? '';
-    } catch (err) {
-      logger.warn('Credit note: Stripe charge retrieve failed', {
-        chargeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    ({ invoiceId, customerId } = await enrichFromStripeCharge(chargeId, {
+      invoiceId,
+      customerId,
+    }));
   }
   return {
     invoiceId,
     chargeId,
     customerId,
+    ...readRefundIdAndAmount(event, obj, latest),
+  };
+}
+
+/**
+ * Fill in the invoice / customer we couldn't read off the event by asking
+ * Stripe for the charge. A retrieve failure leaves the inputs untouched.
+ */
+async function enrichFromStripeCharge(
+  chargeId: string,
+  current: { invoiceId: string | null; customerId: string },
+): Promise<{ invoiceId: string | null; customerId: string }> {
+  let { invoiceId, customerId } = current;
+  try {
+    const charge = await getStripeClient().charges.retrieve(chargeId);
+    // The pinned Stripe Charge type omits `invoice`; the field is on the wire.
+    const chargeWithInvoice = charge as { invoice?: unknown };
+    if (!invoiceId) invoiceId = readId(chargeWithInvoice.invoice);
+    if (!customerId) customerId = readId(charge.customer) ?? '';
+  } catch (err) {
+    logger.warn('Credit note: Stripe charge retrieve failed', {
+      chargeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return { invoiceId, customerId };
+}
+
+/** Refund id + amount, preferring the normalized event over the raw payload. */
+function readRefundIdAndAmount(
+  event: NormalizedEvent,
+  obj: { amount?: number; amount_refunded?: number } | undefined,
+  latest: { id?: string; amount?: number } | undefined,
+): { refundId: string | null; amountCents: number } {
+  return {
     refundId: event.refundId ?? latest?.id ?? null,
     amountCents: event.refundAmountCents ?? latest?.amount ?? obj?.amount ?? obj?.amount_refunded ?? 0,
   };

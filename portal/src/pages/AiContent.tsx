@@ -80,7 +80,7 @@ const AiContent: React.FC = () => {
 
       {/* Tabs */}
       <div className="px-6 border-b border-edge">
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.key;
@@ -89,7 +89,7 @@ const AiContent: React.FC = () => {
                 type="button"
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
                   isActive
                     ? 'border-primary-500 text-primary-400'
                     : 'border-transparent text-text-muted hover:text-text-secondary'

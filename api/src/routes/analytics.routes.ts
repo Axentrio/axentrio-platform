@@ -30,6 +30,41 @@ const bookingRepository = AppDataSource.getRepository(Booking);
 const leadRepository = AppDataSource.getRepository(Lead);
 const availabilityRepository = AppDataSource.getRepository(AvailabilityRule);
 
+type RawStatRow = Record<string, string | null | undefined> | undefined;
+
+const rawInt = (raw: string | null | undefined) => parseInt(raw || '0');
+
+/** Session half of the dashboard payload (counts, CSAT, bot resolution rate). */
+function summarizeSessionStats(sessionStats: RawStatRow) {
+  const closed = rawInt(sessionStats?.closed);
+  const humanResolved = rawInt(sessionStats?.humanResolved);
+  const botResolved = closed - humanResolved;
+  const csatAvg = sessionStats?.csatAvg ? parseFloat(parseFloat(sessionStats.csatAvg).toFixed(1)) : null;
+
+  return {
+    sessions: {
+      total: rawInt(sessionStats?.total),
+      active: rawInt(sessionStats?.active),
+      waiting: rawInt(sessionStats?.waiting),
+      handoff: rawInt(sessionStats?.handoff),
+      bot: rawInt(sessionStats?.bot),
+    },
+    csatScore: csatAvg,
+    botResolutionRate: closed > 0 ? Math.round((botResolved / closed) * 100) : null,
+  };
+}
+
+/** Agent half of the dashboard payload. */
+function summarizeAgentStats(agentStats: RawStatRow) {
+  return {
+    agents: {
+      total: rawInt(agentStats?.total),
+      online: rawInt(agentStats?.online),
+    },
+    avgResponseTimeSeconds: Math.round(parseFloat(agentStats?.avgResponseTime || '0')),
+  };
+}
+
 // All routes require agent authentication
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
@@ -74,26 +109,14 @@ router.get(
             .getRawOne(),
         ]);
 
-        const closed = parseInt(sessionStats?.closed || '0');
-        const humanResolved = parseInt(sessionStats?.humanResolved || '0');
-        const botResolved = closed - humanResolved;
-        const csatAvg = sessionStats?.csatAvg ? parseFloat(parseFloat(sessionStats.csatAvg).toFixed(1)) : null;
-        const botResolutionRate = closed > 0 ? Math.round((botResolved / closed) * 100) : null;
+        const { sessions, csatScore, botResolutionRate } = summarizeSessionStats(sessionStats);
+        const { agents, avgResponseTimeSeconds } = summarizeAgentStats(agentStats);
 
         return {
-          sessions: {
-            total: parseInt(sessionStats?.total || '0'),
-            active: parseInt(sessionStats?.active || '0'),
-            waiting: parseInt(sessionStats?.waiting || '0'),
-            handoff: parseInt(sessionStats?.handoff || '0'),
-            bot: parseInt(sessionStats?.bot || '0'),
-          },
-          agents: {
-            total: parseInt(agentStats?.total || '0'),
-            online: parseInt(agentStats?.online || '0'),
-          },
-          avgResponseTimeSeconds: Math.round(parseFloat(agentStats?.avgResponseTime || '0')),
-          csatScore: csatAvg,
+          sessions,
+          agents,
+          avgResponseTimeSeconds,
+          csatScore,
           botResolutionRate,
         };
       }

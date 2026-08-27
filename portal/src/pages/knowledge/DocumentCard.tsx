@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Card } from "@/components/ui/card";
 import {
     FileText,
@@ -120,6 +121,100 @@ const statusConfig: Record<
     },
 };
 
+type KnowledgeDoc = DocumentCardProps["document"];
+type QualityReport = NonNullable<KnowledgeDoc["qualityReport"]>;
+
+/** The truncated content summary, or the quality label when no summary exists. */
+function qualitySummary(t: TFunction, report: QualityReport): string {
+    if (report.contentSummary) {
+        return (
+            report.contentSummary.slice(0, 60) +
+            (report.contentSummary.length > 60 ? "..." : "")
+        );
+    }
+    const labelKey = qualityConfig[report.qualityScore]?.labelKey;
+    return labelKey ? t(labelKey) : "";
+}
+
+/** Admin-only row actions for one document. */
+const DocumentActionsMenu: React.FC<{
+    type: KnowledgeDoc["type"];
+    status: KnowledgeDoc["status"];
+    onEdit: () => void;
+    onRetry: () => void;
+    onDelete: () => void;
+    onRefresh?: () => void;
+}> = ({ type, status, onEdit, onRetry, onDelete, onRefresh }) => {
+    const { t } = useTranslation();
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                >
+                    <MoreVertical className="w-3.5 h-3.5" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+                {type !== "url" && (
+                    <DropdownMenuItem onClick={onEdit}>
+                        {t("common.edit")}
+                    </DropdownMenuItem>
+                )}
+                {type === "url" && onRefresh && (
+                    <DropdownMenuItem onClick={onRefresh}>
+                        <RefreshCw className="w-3.5 h-3.5 mr-2" />
+                        {t("ai.knowledge.card.actions.refresh")}
+                    </DropdownMenuItem>
+                )}
+                {status === "failed" && (
+                    <DropdownMenuItem onClick={onRetry}>
+                        {t("ai.knowledge.card.actions.retry")}
+                    </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                    onClick={onDelete}
+                    className="text-red-400"
+                >
+                    {t("common.delete")}
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+};
+
+/** Quality dot + summary, plus the amber warning for a fair/poor document.
+ *  Only meaningful once indexing produced a quality report. */
+const DocumentQuality: React.FC<{
+    report: KnowledgeDoc["qualityReport"];
+    status: KnowledgeDoc["status"];
+}> = ({ report, status }) => {
+    const { t } = useTranslation();
+    if (!report || status !== "indexed") return null;
+    return (
+        <>
+            <div
+                className="mt-2 flex items-center gap-1.5"
+                title={report.qualityReason}
+            >
+                <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[report.qualityScore]?.color || "bg-gray-400"}`}
+                />
+                <span className="text-[10px] text-text-muted truncate">
+                    {qualitySummary(t, report)}
+                </span>
+            </div>
+            {["poor", "fair"].includes(report.qualityScore) && (
+                <p className="text-[10px] text-amber-400/80 mt-1">
+                    {report.qualityReason}
+                </p>
+            )}
+        </>
+    );
+};
+
 const DocumentCard: React.FC<DocumentCardProps> = ({
     document,
     onEdit,
@@ -160,41 +255,14 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
                         </span>
                     )}
                     {isAdmin && (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                    <MoreVertical className="w-3.5 h-3.5" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {document.type !== "url" && (
-                                    <DropdownMenuItem onClick={onEdit}>
-                                        {t("common.edit")}
-                                    </DropdownMenuItem>
-                                )}
-                                {document.type === "url" && onRefresh && (
-                                    <DropdownMenuItem onClick={onRefresh}>
-                                        <RefreshCw className="w-3.5 h-3.5 mr-2" />
-                                        {t("ai.knowledge.card.actions.refresh")}
-                                    </DropdownMenuItem>
-                                )}
-                                {document.status === "failed" && (
-                                    <DropdownMenuItem onClick={onRetry}>
-                                        {t("ai.knowledge.card.actions.retry")}
-                                    </DropdownMenuItem>
-                                )}
-                                <DropdownMenuItem
-                                    onClick={onDelete}
-                                    className="text-red-400"
-                                >
-                                    {t("common.delete")}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <DocumentActionsMenu
+                            type={document.type}
+                            status={document.status}
+                            onEdit={onEdit}
+                            onRetry={onRetry}
+                            onDelete={onDelete}
+                            onRefresh={onRefresh}
+                        />
                     )}
                 </div>
             </div>
@@ -217,46 +285,11 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
                 <span>{timeAgo(document.updatedAt)}</span>
             </div>
 
-            {/* Quality indicator */}
-            {document.qualityReport && document.status === "indexed" && (
-                <div
-                    className="mt-2 flex items-center gap-1.5"
-                    title={document.qualityReport.qualityReason}
-                >
-                    <span
-                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[document.qualityReport.qualityScore]?.color || "bg-gray-400"}`}
-                    />
-                    <span className="text-[10px] text-text-muted truncate">
-                        {document.qualityReport.contentSummary
-                            ? document.qualityReport.contentSummary.slice(
-                                  0,
-                                  60,
-                              ) +
-                              (document.qualityReport.contentSummary.length > 60
-                                  ? "..."
-                                  : "")
-                            : qualityConfig[document.qualityReport.qualityScore]
-                                    ?.labelKey
-                              ? t(
-                                    qualityConfig[
-                                        document.qualityReport.qualityScore
-                                    ].labelKey,
-                                )
-                              : ""}
-                    </span>
-                </div>
-            )}
-
-            {/* Quality warning for fair/poor */}
-            {document.qualityReport &&
-                ["poor", "fair"].includes(
-                    document.qualityReport.qualityScore,
-                ) &&
-                document.status === "indexed" && (
-                    <p className="text-[10px] text-amber-400/80 mt-1">
-                        {document.qualityReport.qualityReason}
-                    </p>
-                )}
+            {/* Quality indicator + fair/poor warning */}
+            <DocumentQuality
+                report={document.qualityReport}
+                status={document.status}
+            />
 
             {/* Processing progress bar */}
             {document.status === "processing" && (

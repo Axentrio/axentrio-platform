@@ -423,7 +423,7 @@ export default function CloudImportPanel({
         </p>
       )}
       <div className="rounded-xl border border-border p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Cloud className="w-4 h-4 text-text-muted" />
             <p className="text-sm font-medium">
@@ -450,10 +450,10 @@ export default function CloudImportPanel({
           googleConns.map((conn) => (
             <div
               key={conn.id}
-              className="flex items-center justify-between gap-3"
+              className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-              <div>
-                <p className="text-xs text-text-muted">
+              <div className="min-w-0">
+                <p className="text-xs text-text-muted truncate">
                   {conn.accountEmail || t("ai.knowledge.cloud.connected")}
                   {conn.reauthRequired
                     ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
@@ -467,7 +467,7 @@ export default function CloudImportPanel({
                   </p>
                 ) : null}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"
@@ -494,7 +494,7 @@ export default function CloudImportPanel({
       </div>
 
       <div className="rounded-xl border border-border p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-medium">
             {t("ai.knowledge.cloud.providerOneDrive")}
           </p>
@@ -522,10 +522,10 @@ export default function CloudImportPanel({
           oneDriveConns.map((conn) => (
             <div
               key={conn.id}
-              className="flex items-center justify-between gap-3"
+              className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-              <div>
-                <p className="text-xs text-text-muted">
+              <div className="min-w-0">
+                <p className="text-xs text-text-muted truncate">
                   {conn.accountEmail || t("ai.knowledge.cloud.connected")}
                   {conn.reauthRequired
                     ? ` - ${t("ai.knowledge.cloud.needsReauth")}`
@@ -539,7 +539,7 @@ export default function CloudImportPanel({
                   </p>
                 ) : null}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"

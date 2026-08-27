@@ -98,13 +98,29 @@ export function validateOAuthState(state: string): {
   };
 }
 
-/**
- * Exchange authorization code for access tokens, then list available Pages.
- */
-export async function handleOAuthCallback(code: string): Promise<{
-  pages: MetaPage[];
-  sessionToken: string;
-}> {
+const PAGE_FIELDS = 'id,name,access_token,picture,tasks,instagram_business_account{id,username,profile_picture_url}';
+
+/** Raw Graph API page node, as returned by /me/accounts and /{business}/owned_pages. */
+interface RawGraphPage {
+  id: string;
+  name: string;
+  access_token: string;
+  picture?: { data?: { url?: string } };
+  tasks?: string[];
+  instagram_business_account?: {
+    id: string;
+    username?: string;
+    profile_picture_url?: string;
+  };
+}
+
+/** Axios/Graph rejection shape. `as` cast keeps the original optional reads. */
+interface GraphErrorLike {
+  message?: string;
+  response?: { data?: { error?: { message?: string } } };
+}
+
+async function exchangeCodeForUserToken(code: string): Promise<string> {
   // 1. Exchange code for short-lived user token
   const tokenResponse = await axios.get(`${GRAPH_API}/oauth/access_token`, {
     params: {
@@ -127,65 +143,81 @@ export async function handleOAuthCallback(code: string): Promise<{
     },
     timeout: 10000,
   });
-  const longLivedUserToken = longLivedResponse.data.access_token;
+  return longLivedResponse.data.access_token;
+}
 
-  // Debug: check what permissions the token has
+/** Debug: check what permissions the token has. */
+async function logTokenPermissions(userToken: string): Promise<void> {
   try {
     const debugResponse = await axios.get(`${GRAPH_API}/me/permissions`, {
-      params: { access_token: longLivedUserToken },
+      params: { access_token: userToken },
       timeout: 10000,
     });
     logger.debug('[meta-oauth] Token permissions', { permissions: debugResponse.data.data });
-  } catch (e: any) {
-    logger.debug('[meta-oauth] Permission check failed', { error: e.response?.data || e.message });
+  } catch (e) {
+    const err = e as GraphErrorLike;
+    logger.debug('[meta-oauth] Permission check failed', { error: err.response?.data || err.message });
   }
+}
 
-  // 3. Get pages the user manages (personal pages)
-  const pageFields = 'id,name,access_token,picture,tasks,instagram_business_account{id,username,profile_picture_url}';
+/** Pages the user manages personally. */
+async function fetchPersonalPages(userToken: string): Promise<RawGraphPage[]> {
   const pagesResponse = await axios.get(`${GRAPH_API}/me/accounts`, {
     params: {
-      access_token: longLivedUserToken,
-      fields: pageFields,
+      access_token: userToken,
+      fields: PAGE_FIELDS,
       limit: 100,
     },
     timeout: 10000,
   });
+  return pagesResponse.data.data || [];
+}
 
-  const allPageData: any[] = [...(pagesResponse.data.data || [])];
+/** Adds the business's pages that aren't already in the list. */
+async function appendPagesOwnedByBusiness(
+  userToken: string,
+  businessId: string,
+  allPageData: RawGraphPage[],
+): Promise<void> {
+  try {
+    const bizPagesResponse = await axios.get(`${GRAPH_API}/${businessId}/owned_pages`, {
+      params: {
+        access_token: userToken,
+        fields: PAGE_FIELDS,
+        limit: 100,
+      },
+      timeout: 10000,
+    });
+    for (const bizPage of bizPagesResponse.data.data || []) {
+      if (!allPageData.find((p) => p.id === bizPage.id)) {
+        allPageData.push(bizPage);
+      }
+    }
+  } catch (e) {
+    const err = e as GraphErrorLike;
+    logger.warn(`[meta-oauth] Failed to get pages for business ${businessId}`, { error: err.response?.data?.error?.message || err.message });
+  }
+}
 
-  // 4. Also get pages from Business Portfolios (Business Manager-managed pages)
+/** Pages from Business Portfolios (Business Manager-managed pages). */
+async function appendBusinessPages(userToken: string, allPageData: RawGraphPage[]): Promise<void> {
   try {
     const businessesResponse = await axios.get(`${GRAPH_API}/me/businesses`, {
-      params: { access_token: longLivedUserToken, fields: 'id,name', limit: 100 },
+      params: { access_token: userToken, fields: 'id,name', limit: 100 },
       timeout: 10000,
     });
 
     for (const biz of businessesResponse.data.data || []) {
-      try {
-        const bizPagesResponse = await axios.get(`${GRAPH_API}/${biz.id}/owned_pages`, {
-          params: {
-            access_token: longLivedUserToken,
-            fields: pageFields,
-            limit: 100,
-          },
-          timeout: 10000,
-        });
-        // Add business pages that aren't already in the list
-        for (const bizPage of bizPagesResponse.data.data || []) {
-          if (!allPageData.find((p: any) => p.id === bizPage.id)) {
-            allPageData.push(bizPage);
-          }
-        }
-      } catch (e: any) {
-        logger.warn(`[meta-oauth] Failed to get pages for business ${biz.id}`, { error: e.response?.data?.error?.message || e.message });
-      }
+      await appendPagesOwnedByBusiness(userToken, biz.id, allPageData);
     }
-  } catch (e: any) {
-    logger.warn('[meta-oauth] Failed to get businesses', { error: e.response?.data?.error?.message || e.message });
+  } catch (e) {
+    const err = e as GraphErrorLike;
+    logger.warn('[meta-oauth] Failed to get businesses', { error: err.response?.data?.error?.message || err.message });
   }
+}
 
-  logger.debug('[meta-oauth] Total pages found', { pages: allPageData.map((p: any) => ({ id: p.id, name: p.name, tasks: p.tasks })) });
-
+/** Keeps only pages with the MESSAGING task, plus any linked Instagram account. */
+function selectMessagingPages(allPageData: RawGraphPage[]): MetaPage[] {
   const pages: MetaPage[] = [];
 
   for (const page of allPageData) {
@@ -211,6 +243,30 @@ export async function handleOAuthCallback(code: string): Promise<{
 
     pages.push(metaPage);
   }
+
+  return pages;
+}
+
+/**
+ * Exchange authorization code for access tokens, then list available Pages.
+ */
+export async function handleOAuthCallback(code: string): Promise<{
+  pages: MetaPage[];
+  sessionToken: string;
+}> {
+  const longLivedUserToken = await exchangeCodeForUserToken(code);
+
+  await logTokenPermissions(longLivedUserToken);
+
+  // 3. Get pages the user manages (personal pages)
+  const allPageData: RawGraphPage[] = [...(await fetchPersonalPages(longLivedUserToken))];
+
+  // 4. Also get pages from Business Portfolios (Business Manager-managed pages)
+  await appendBusinessPages(longLivedUserToken, allPageData);
+
+  logger.debug('[meta-oauth] Total pages found', { pages: allPageData.map((p) => ({ id: p.id, name: p.name, tasks: p.tasks })) });
+
+  const pages = selectMessagingPages(allPageData);
 
   // 4. Create a signed session token containing page data (15-min expiry)
   const sessionToken = jwt.sign(

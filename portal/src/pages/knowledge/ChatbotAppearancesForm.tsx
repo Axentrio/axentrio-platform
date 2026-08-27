@@ -118,7 +118,7 @@ const ChatbotAppearancesForm: React.FC = () => {
 
         <div className="space-y-2">
           <Label>{t('ai.appearances.launcher.position.label')}</Label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {(['bottom-right', 'bottom-left'] as const).map((pos) => (
               <Button
                 key={pos}
@@ -161,7 +161,7 @@ const ChatbotAppearancesForm: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <AutoSaveStatusIndicator status={status} onRetry={retry} />
           <a
             href={widgetTestHref}

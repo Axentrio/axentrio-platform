@@ -29,6 +29,7 @@
 
 import { EntityManager } from 'typeorm';
 import Stripe from 'stripe';
+import type { Stripe as StripeNS } from 'stripe/cjs/stripe.core';
 import { logger } from '../utils/logger';
 import { returningRows } from '../utils/raw-sql';
 import { AppDataSource } from '../database/data-source';
@@ -144,19 +145,7 @@ export async function handleNormalizedEvent(
   // mutation, no email, no banner. Just emit the structured log line; the
   // idempotency wrapper persists the event-log row.
   if (event.type === 'subscription.trial_will_end') {
-    const raw = event.raw as {
-      data?: { object?: { trial_end?: number | null } };
-    };
-    const trialEnd = raw?.data?.object?.trial_end
-      ? new Date(raw.data.object.trial_end * 1000).toISOString()
-      : null;
-    logger.info('Stripe trial_will_end received', {
-      eventId: event.providerEventId,
-      subscriptionId: event.subscriptionId ?? null,
-      tenantId: matched?.tenantId ?? null,
-      trialEnd,
-    });
-    return { outcome: 'trial_will_end_logged' };
+    return logTrialWillEnd(event, matched);
   }
 
   // PR9: checkout.session.completed is bookkeeping only — persists
@@ -200,356 +189,16 @@ export async function handleNormalizedEvent(
   });
 
   switch (event.type) {
-    case 'subscription.deleted': {
+    case 'subscription.deleted':
       // PR9: dedicated cancellation sink with stale-guard + resource_missing
       // refetch distinction. Earlier behavior (sharing the created/updated
       // arm) didn't apply the stale guard and silently called the schedule
       // retrieve path on cancelled subs.
-      const deletedSubId = (event.raw as { data?: { object?: { id?: string } } })
-        ?.data?.object?.id;
-
-      // Stale-subscription guard (codex round 6 item 4): if the TBA row no
-      // longer points at the deleted subscription, an OLDER cancellation
-      // event arrived after the tenant re-subscribed. Do not clobber the
-      // newer state.
-      if (deletedSubId && row.subscriptionId && row.subscriptionId !== deletedSubId) {
-        logger.info(
-          'Stale subscription.deleted event; current TBA points at a different subscription — no mutation',
-          {
-            eventId: event.providerEventId,
-            tenantId,
-            deletedSubId,
-            currentSubscriptionId: row.subscriptionId,
-          },
-        );
-        return {
-          outcome: 'subscription_deleted_stale',
-          meta: { deletedSubId, currentSubscriptionId: row.subscriptionId },
-        };
-      }
-
-      // Refetch with resource_missing distinction (codex round 6 item 5).
-      // Stripe keeps cancelled subs visible for a while; a successful refetch
-      // confirms the deletion is current canonical state. A resource_missing
-      // error means Stripe hard-deleted the record — payload is canonical,
-      // proceed. Any other error means transient API failure — re-throw so
-      // the wrapper marks failed and Stripe retries.
-      let refetchOutcome: 'fresh' | 'resource_missing_proceed' = 'fresh';
-      if (deletedSubId) {
-        try {
-          await getStripeClient().subscriptions.retrieve(deletedSubId);
-        } catch (err) {
-          if (
-            err instanceof Stripe.errors.StripeInvalidRequestError &&
-            err.code === 'resource_missing'
-          ) {
-            refetchOutcome = 'resource_missing_proceed';
-            logger.warn(
-              'subscription.deleted refetch returned resource_missing — proceeding with cancellation',
-              { eventId: event.providerEventId, deletedSubId },
-            );
-          } else {
-            logger.warn(
-              'subscription.deleted refetch failed with non-resource_missing error — Stripe will retry',
-              {
-                eventId: event.providerEventId,
-                deletedSubId,
-                error: err instanceof Error ? err.message : String(err),
-              },
-            );
-            throw err;
-          }
-        }
-      }
-
-      // Apply cancellation mutations (plan PR9 §"customer.subscription.deleted").
-      await manager.update(
-        TenantBillingAccount,
-        { id: row.id },
-        {
-          status: 'cancelled',
-          currentPlanId: 'free',
-          pendingPlanId: null,
-          pendingPlanEffectiveAt: null,
-          trialEnd: null,
-          currentPeriodEnd: null,
-          cancelAtPeriodEnd: false,
-          subscriptionId: null,
-        },
-      );
-      // Primary cancellation cascades Tenant.tier='free'. Non-primary rows
-      // stay row-local — Tenant.tier reflects the surviving primary.
-      if (row.isPrimary) {
-        await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
-        // Invalidation deferred to after the outer commit (see return below).
-      }
-
-      // Audit log entry — `tenant.cancelled`. actor_id is the Tenant.id
-      // (Stripe is not a User; AuditLog.actorId is NOT NULL so we record the
-      // Tenant as both actor and entity to preserve the foreign-key shape).
-      const auditMeta: Record<string, unknown> = {
-        eventId: event.providerEventId,
-        deletedSubId,
-        refetchOutcome,
-      };
-      if (refetchOutcome === 'resource_missing_proceed') {
-        auditMeta.refetch_failed = 'resource_missing';
-      }
-      // Use raw SQL — TypeORM's insert() narrows `metadata` against the
-      // entity's `Record<string, unknown> | undefined` field in a way that
-      // rejects a dynamic dictionary literal.
-      await manager.query(
-        `INSERT INTO audit_logs (tenant_id, actor_id, action, entity_type, entity_id, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-        [
-          tenantId,
-          tenantId,
-          'tenant.cancelled',
-          'tenant',
-          tenantId,
-          JSON.stringify(auditMeta),
-        ],
-      );
-
-      return {
-        outcome: 'tenant_cancelled',
-        meta: auditMeta,
-        // Only a primary cancellation cascaded Tenant.tier → 'free'.
-        invalidateTenantIds: row.isPrimary ? [tenantId] : undefined,
-      };
-    }
+      return handleSubscriptionDeleted(manager, event, row, tenantId);
 
     case 'subscription.created':
-    case 'subscription.updated': {
-      if (!event.subscription) {
-        return { outcome: 'subscription_event_no_payload' };
-      }
-      const s = event.subscription;
-
-      // Detect subscription mismatch (codex r4 #16): the row already has a
-      // DIFFERENT subscription_id than the incoming event's. Audit-only.
-      if (
-        row.subscriptionId &&
-        s.subscriptionId &&
-        row.subscriptionId !== s.subscriptionId
-      ) {
-        return {
-          outcome: 'subscription_mismatch',
-          meta: { existing: row.subscriptionId, incoming: s.subscriptionId },
-        };
-      }
-
-      // Unknown price (codex r4 #15 + cluster-2 round-1 #4 + PR9 codex r5 #9):
-      // if the raw Stripe price id is unknown to our PLANS catalog, we cannot
-      // trust any state transition that would set `current_plan_id`. This
-      // replaces the old `planIdForStripePriceId(priceId) ?? 'free'` silent-
-      // downgrade pattern that previously lived in `stripe.ts`. Apply the
-      // guard for ALL non-terminal statuses (trialing/active/past_due AND
-      // 'none' from `incomplete` — which is pre-payment, not terminal).
-      //
-      // The outer idempotency wrapper finalizes the event-log row as
-      // 'processed' (no Stripe retry) and logs at warn level.
-      const rawSub = (event.raw as { data?: { object?: { status?: string; items?: { data?: Array<{ price?: { id?: string } }> } } } })?.data?.object;
-      const rawStripeStatus = rawSub?.status;
-      const rawPriceId = rawSub?.items?.data?.[0]?.price?.id;
-      const isTerminalStripeStatus =
-        rawStripeStatus === 'canceled' ||
-        rawStripeStatus === 'incomplete_expired' ||
-        rawStripeStatus === 'unpaid';
-      if (!isTerminalStripeStatus && rawPriceId && planIdForStripePriceId(rawPriceId) === null) {
-        logger.warn('Unknown Stripe price ID — skipping state mutation', {
-          priceId: rawPriceId,
-          eventId: event.providerEventId,
-        });
-        return { outcome: 'unknown_price', meta: { priceId: rawPriceId } };
-      }
-
-      // past_due preserves plan + tier (grace period, cluster-2 round-1 #1).
-      // A failed-but-already-committed Stripe upgrade could otherwise grant
-      // the higher tier during grace. We update local status and other
-      // metadata, but NOT current_plan_id, and we do not cascade tier.
-      const isPastDue = s.status === 'past_due';
-
-      // Plan-id resolution for non-past_due statuses.
-      const newPlanForStatus: InternalPlanId = (() => {
-        if (isPastDue) return row.currentPlanId; // preserved (unused for past_due update)
-        if (s.status === 'none' && rawPriceId) {
-          // `incomplete` exception: keep price-mapped plan
-          return planIdForStripePriceId(rawPriceId) ?? 'free';
-        }
-        if (s.status === 'cancelled' || s.status === 'none') return 'free';
-        return s.currentPlanId;
-      })();
-
-      // Schedule field handling (cluster-2 round-1 #3). Stripe may send the
-      // schedule as a full object OR as a string id. When it's a string,
-      // retrieve the schedule with expanded phase prices so we can resolve
-      // pendingPlanId. When schedule is absent, clear local pending fields.
-      const rawSchedule = (event.raw as { data?: { object?: { schedule?: unknown } } })
-        ?.data?.object?.schedule;
-      let scheduleEnrichment:
-        | { pendingPlanId: InternalPlanId | null; pendingPlanEffectiveAt: Date | null; scheduleIdToStore: string | null; clearSchedule: false }
-        | { clearSchedule: true }
-        | null = null;
-      if (typeof rawSchedule === 'string' && rawSchedule.length > 0) {
-        // String id — retrieve to get phases. We deliberately do NOT
-        // swallow failures here: a transient Stripe API error must bubble
-        // up so the whole webhook tx rolls back, letting Stripe retry
-        // delivery (and giving us a clean shot at writing the scheduleId).
-        const schedule = await getStripeClient().subscriptionSchedules.retrieve(
-          rawSchedule,
-          { expand: ['phases.items.price'] },
-        );
-        const phase2 = schedule.phases[1];
-        let pendingPlanId: InternalPlanId | null = null;
-        let pendingPlanEffectiveAt: Date | null = null;
-        if (phase2) {
-          const item = phase2.items[0];
-          const priceId =
-            typeof item?.price === 'string'
-              ? item.price
-              : (item?.price as { id?: string } | undefined)?.id ?? null;
-          pendingPlanId = planIdForStripePriceId(priceId);
-          pendingPlanEffectiveAt = phase2.start_date
-            ? new Date(phase2.start_date * 1000)
-            : null;
-        }
-        scheduleEnrichment = {
-          pendingPlanId,
-          pendingPlanEffectiveAt,
-          scheduleIdToStore: schedule.id,
-          clearSchedule: false,
-        };
-      } else if (rawSchedule === null || rawSchedule === undefined) {
-        // Schedule cleared — null out local pending fields.
-        scheduleEnrichment = { clearSchedule: true };
-      } else if (typeof rawSchedule === 'object') {
-        // Already an expanded object — normalized.pendingPlanId is authoritative.
-        scheduleEnrichment = {
-          pendingPlanId: s.pendingPlanId,
-          pendingPlanEffectiveAt: s.pendingPlanEffectiveAt,
-          scheduleIdToStore: (rawSchedule as { id?: string }).id ?? null,
-          clearSchedule: false,
-        };
-      }
-
-      // Persist subscription_id FIRST (codex r3 #4) so subsequent events
-      // can lookup by (provider, subscription_id) cleanly.
-      // For past_due: skip current_plan_id update.
-      // Type as a plain object rather than Partial<entity> to avoid
-      // TypeORM's QueryDeepPartialEntity recursing through the relation graph.
-      const updateFields: {
-        subscriptionId: string | null;
-        status: typeof s.status;
-        currentPeriodEnd: Date | null;
-        cancelAtPeriodEnd: boolean;
-        trialEnd: Date | null;
-        currentPlanId?: InternalPlanId;
-        pendingPlanId?: InternalPlanId | null;
-        pendingPlanEffectiveAt?: Date | null;
-      } = {
-        subscriptionId: s.subscriptionId ?? row.subscriptionId ?? null,
-        status: s.status,
-        currentPeriodEnd: s.currentPeriodEnd,
-        cancelAtPeriodEnd: s.cancelAtPeriodEnd,
-        trialEnd: s.trialEnd,
-      };
-      if (!isPastDue) {
-        updateFields.currentPlanId = newPlanForStatus;
-      }
-      if (scheduleEnrichment) {
-        if (scheduleEnrichment.clearSchedule) {
-          updateFields.pendingPlanId = null;
-          updateFields.pendingPlanEffectiveAt = null;
-        } else {
-          updateFields.pendingPlanId = scheduleEnrichment.pendingPlanId;
-          updateFields.pendingPlanEffectiveAt = scheduleEnrichment.pendingPlanEffectiveAt;
-        }
-      }
-
-      await manager.update(TenantBillingAccount, { id: row.id }, updateFields);
-
-      // Audit gap #2 fix: claim the trial reservation. Idempotent — the
-      // WHERE clause only matches an unclaimed row. Runs for both
-      // subscription.created and subscription.updated so out-of-order
-      // events (which Stripe permits) still land the claim.
-      if (s.subscriptionId) {
-        await manager.query(
-          `UPDATE chatbot_tenant_trial_reservations
-             SET subscription_id = $1
-           WHERE tenant_id = $2 AND subscription_id IS NULL`,
-          [s.subscriptionId, tenantId],
-        );
-      }
-
-      // Merge raw_provider_data.stripe.scheduleId via jsonb_set (preserves
-      // siblings). Or clear it if schedule was removed.
-      if (scheduleEnrichment) {
-        if (scheduleEnrichment.clearSchedule) {
-          await manager.query(
-            `UPDATE tenant_billing_accounts
-                SET raw_provider_data = raw_provider_data #- '{stripe,scheduleId}'
-              WHERE id = $1`,
-            [row.id],
-          );
-        } else if (scheduleEnrichment.scheduleIdToStore) {
-          // `jsonb_set` with create_missing=true creates missing LEAF keys
-          // but NOT intermediate objects, so the path '{stripe,scheduleId}'
-          // is a no-op when `raw_provider_data` is `{}`. Use top-level
-          // `||` merge instead, building the nested `stripe` object
-          // explicitly and preserving any sibling keys already inside it.
-          await manager.query(
-            `UPDATE tenant_billing_accounts
-                SET raw_provider_data = raw_provider_data || jsonb_build_object(
-                  'stripe',
-                  COALESCE(raw_provider_data->'stripe', '{}'::jsonb)
-                    || jsonb_build_object('scheduleId', $1::text)
-                )
-              WHERE id = $2`,
-            [scheduleEnrichment.scheduleIdToStore, row.id],
-          );
-        }
-      }
-
-      // Primary-switch & tier-cascade rules:
-      // - Promotion fires only on transition into 'trialing' or 'active'.
-      // - past_due preserves tier (cluster-2 round-1 #1).
-      // - Already-primary cascades tier ONLY for entitlement-granting statuses
-      //   (trialing/active). `none` (= Stripe 'incomplete' / 'incomplete_expired')
-      //   and 'cancelled' must not promote `tenants.tier` to a paid plan — the
-      //   payment hasn't succeeded yet, and entitlements read `tenants.tier`
-      //   directly. `subscription.deleted` cascades to `free` via its own
-      //   dedicated handler, not this branch.
-      const isPromotion = (s.status === 'trialing' || s.status === 'active') && !row.isPrimary;
-      if (isPromotion) {
-        await promotePrimaryAndCascadeTier(manager, row, newPlanForStatus);
-        return { outcome: 'promoted_primary', invalidateTenantIds: [row.tenantId] };
-      }
-
-      const isEntitlementGranting = s.status === 'trialing' || s.status === 'active';
-      if (row.isPrimary && isEntitlementGranting) {
-        await manager.update(Tenant, { id: tenantId }, { tier: newPlanForStatus });
-        // Invalidation deferred to after the outer commit (see return).
-        return { outcome: 'tier_cascaded', invalidateTenantIds: [tenantId] };
-      }
-
-      if (row.isPrimary && isPastDue) {
-        // Grace period — tier preserved.
-        return { outcome: 'past_due_grace' };
-      }
-
-      if (row.isPrimary) {
-        // Primary row with a non-entitlement-granting status (e.g. `none`
-        // from `incomplete`, or `cancelled` that didn't go through
-        // subscription.deleted). Update row-local fields above already
-        // happened; tier stays as-is to avoid handing out paid access on
-        // no successful payment.
-        return { outcome: 'primary_non_entitlement_no_tier_cascade' };
-      }
-
-      // Non-primary row: update row-local fields only.
-      return { outcome: 'non_primary_row_updated' };
-    }
+    case 'subscription.updated':
+      return handleSubscriptionUpsert(manager, event, row, tenantId);
 
     case 'invoice.paid': {
       // Recovery from past_due: if row was past_due, move back to active.
@@ -584,6 +233,481 @@ export async function handleNormalizedEvent(
       return { outcome: 'unknown_event_type' };
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-event-type arms of `handleNormalizedEvent`.
+// ---------------------------------------------------------------------------
+
+type EventOutcome = {
+  outcome: string;
+  meta?: Record<string, unknown>;
+  invalidateTenantIds?: string[];
+};
+
+type EventSubscription = NonNullable<NormalizedEvent['subscription']>;
+
+/** trial_will_end is logging-only: emit the structured line, mutate nothing. */
+function logTrialWillEnd(event: NormalizedEvent, matched: ResolvedRow | null): EventOutcome {
+  const raw = event.raw as {
+    data?: { object?: { trial_end?: number | null } };
+  };
+  const trialEnd = raw?.data?.object?.trial_end
+    ? new Date(raw.data.object.trial_end * 1000).toISOString()
+    : null;
+  logger.info('Stripe trial_will_end received', {
+    eventId: event.providerEventId,
+    subscriptionId: event.subscriptionId ?? null,
+    tenantId: matched?.tenantId ?? null,
+    trialEnd,
+  });
+  return { outcome: 'trial_will_end_logged' };
+}
+
+/**
+ * Refetch with resource_missing distinction (codex round 6 item 5).
+ * Stripe keeps cancelled subs visible for a while; a successful refetch
+ * confirms the deletion is current canonical state. A resource_missing
+ * error means Stripe hard-deleted the record — payload is canonical,
+ * proceed. Any other error means transient API failure — re-throw so
+ * the wrapper marks failed and Stripe retries.
+ */
+async function confirmDeletedSubscription(
+  deletedSubId: string | undefined,
+  eventId: string,
+): Promise<'fresh' | 'resource_missing_proceed'> {
+  if (!deletedSubId) return 'fresh';
+  try {
+    await getStripeClient().subscriptions.retrieve(deletedSubId);
+    return 'fresh';
+  } catch (err) {
+    if (
+      err instanceof Stripe.errors.StripeInvalidRequestError &&
+      err.code === 'resource_missing'
+    ) {
+      logger.warn(
+        'subscription.deleted refetch returned resource_missing — proceeding with cancellation',
+        { eventId, deletedSubId },
+      );
+      return 'resource_missing_proceed';
+    }
+    logger.warn(
+      'subscription.deleted refetch failed with non-resource_missing error — Stripe will retry',
+      {
+        eventId,
+        deletedSubId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
+    throw err;
+  }
+}
+
+async function handleSubscriptionDeleted(
+  manager: EntityManager,
+  event: NormalizedEvent,
+  row: TenantBillingAccount,
+  tenantId: string,
+): Promise<EventOutcome> {
+  const rawDeleted = event.raw as { data?: { object?: { id?: string } } };
+  const deletedSubId = rawDeleted?.data?.object?.id;
+
+  // Stale-subscription guard (codex round 6 item 4): if the TBA row no
+  // longer points at the deleted subscription, an OLDER cancellation
+  // event arrived after the tenant re-subscribed. Do not clobber the
+  // newer state.
+  if (deletedSubId && row.subscriptionId && row.subscriptionId !== deletedSubId) {
+    logger.info(
+      'Stale subscription.deleted event; current TBA points at a different subscription — no mutation',
+      {
+        eventId: event.providerEventId,
+        tenantId,
+        deletedSubId,
+        currentSubscriptionId: row.subscriptionId,
+      },
+    );
+    return {
+      outcome: 'subscription_deleted_stale',
+      meta: { deletedSubId, currentSubscriptionId: row.subscriptionId },
+    };
+  }
+
+  const refetchOutcome = await confirmDeletedSubscription(deletedSubId, event.providerEventId);
+
+  // Apply cancellation mutations (plan PR9 §"customer.subscription.deleted").
+  await manager.update(
+    TenantBillingAccount,
+    { id: row.id },
+    {
+      status: 'cancelled',
+      currentPlanId: 'free',
+      pendingPlanId: null,
+      pendingPlanEffectiveAt: null,
+      trialEnd: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      subscriptionId: null,
+    },
+  );
+  // Primary cancellation cascades Tenant.tier='free'. Non-primary rows
+  // stay row-local — Tenant.tier reflects the surviving primary.
+  if (row.isPrimary) {
+    await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
+    // Invalidation deferred to after the outer commit (see return below).
+  }
+
+  // Audit log entry — `tenant.cancelled`. actor_id is the Tenant.id
+  // (Stripe is not a User; AuditLog.actorId is NOT NULL so we record the
+  // Tenant as both actor and entity to preserve the foreign-key shape).
+  const auditMeta: Record<string, unknown> = {
+    eventId: event.providerEventId,
+    deletedSubId,
+    refetchOutcome,
+  };
+  if (refetchOutcome === 'resource_missing_proceed') {
+    auditMeta.refetch_failed = 'resource_missing';
+  }
+  // Use raw SQL — TypeORM's insert() narrows `metadata` against the
+  // entity's `Record<string, unknown> | undefined` field in a way that
+  // rejects a dynamic dictionary literal.
+  await manager.query(
+    `INSERT INTO audit_logs (tenant_id, actor_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [
+      tenantId,
+      tenantId,
+      'tenant.cancelled',
+      'tenant',
+      tenantId,
+      JSON.stringify(auditMeta),
+    ],
+  );
+
+  return {
+    outcome: 'tenant_cancelled',
+    meta: auditMeta,
+    // Only a primary cancellation cascaded Tenant.tier → 'free'.
+    invalidateTenantIds: row.isPrimary ? [tenantId] : undefined,
+  };
+}
+
+/** The fields the created/updated arm reads straight off the raw payload. */
+function readRawSubscriptionFields(event: NormalizedEvent): {
+  status: string | undefined;
+  priceId: string | undefined;
+  schedule: unknown;
+} {
+  const raw = event.raw as {
+    data?: {
+      object?: {
+        status?: string;
+        items?: { data?: Array<{ price?: { id?: string } }> };
+        schedule?: unknown;
+      };
+    };
+  };
+  const rawSub = raw?.data?.object;
+  return {
+    status: rawSub?.status,
+    priceId: rawSub?.items?.data?.[0]?.price?.id,
+    schedule: rawSub?.schedule,
+  };
+}
+
+/** Plan-id resolution for non-past_due statuses. */
+function resolveNewPlanForStatus(
+  s: EventSubscription,
+  row: TenantBillingAccount,
+  isPastDue: boolean,
+  rawPriceId: string | undefined,
+): InternalPlanId {
+  if (isPastDue) return row.currentPlanId; // preserved (unused for past_due update)
+  if (s.status === 'none' && rawPriceId) {
+    // `incomplete` exception: keep price-mapped plan
+    return planIdForStripePriceId(rawPriceId) ?? 'free';
+  }
+  if (s.status === 'cancelled' || s.status === 'none') return 'free';
+  return s.currentPlanId;
+}
+
+type ScheduleEnrichment =
+  | {
+      pendingPlanId: InternalPlanId | null;
+      pendingPlanEffectiveAt: Date | null;
+      scheduleIdToStore: string | null;
+      clearSchedule: false;
+    }
+  | { clearSchedule: true };
+
+/**
+ * Schedule field handling (cluster-2 round-1 #3). Stripe may send the
+ * schedule as a full object OR as a string id. When it's a string,
+ * retrieve the schedule with expanded phase prices so we can resolve
+ * pendingPlanId. When schedule is absent, clear local pending fields.
+ */
+async function resolveScheduleEnrichment(
+  rawSchedule: unknown,
+  s: EventSubscription,
+): Promise<ScheduleEnrichment | null> {
+  if (typeof rawSchedule === 'string' && rawSchedule.length > 0) {
+    // String id — retrieve to get phases. We deliberately do NOT
+    // swallow failures here: a transient Stripe API error must bubble
+    // up so the whole webhook tx rolls back, letting Stripe retry
+    // delivery (and giving us a clean shot at writing the scheduleId).
+    const schedule = await getStripeClient().subscriptionSchedules.retrieve(
+      rawSchedule,
+      { expand: ['phases.items.price'] },
+    );
+    const phase2 = schedule.phases[1];
+    let pendingPlanId: InternalPlanId | null = null;
+    let pendingPlanEffectiveAt: Date | null = null;
+    if (phase2) {
+      const item = phase2.items[0];
+      // Expanded price object — the pinned phase-item type keeps `price` as a ref.
+      const expandedPrice = item?.price as { id?: string } | undefined;
+      const priceId = typeof item?.price === 'string' ? item.price : expandedPrice?.id ?? null;
+      pendingPlanId = planIdForStripePriceId(priceId);
+      pendingPlanEffectiveAt = phase2.start_date
+        ? new Date(phase2.start_date * 1000)
+        : null;
+    }
+    return {
+      pendingPlanId,
+      pendingPlanEffectiveAt,
+      scheduleIdToStore: schedule.id,
+      clearSchedule: false,
+    };
+  }
+  if (rawSchedule === null || rawSchedule === undefined) {
+    // Schedule cleared — null out local pending fields.
+    return { clearSchedule: true };
+  }
+  if (typeof rawSchedule === 'object') {
+    // Already an expanded object — normalized.pendingPlanId is authoritative.
+    const scheduleObject = rawSchedule as { id?: string };
+    return {
+      pendingPlanId: s.pendingPlanId,
+      pendingPlanEffectiveAt: s.pendingPlanEffectiveAt,
+      scheduleIdToStore: scheduleObject.id ?? null,
+      clearSchedule: false,
+    };
+  }
+  return null;
+}
+
+type SubscriptionUpdateFields = {
+  subscriptionId: string | null;
+  status: EventSubscription['status'];
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  trialEnd: Date | null;
+  currentPlanId?: InternalPlanId;
+  pendingPlanId?: InternalPlanId | null;
+  pendingPlanEffectiveAt?: Date | null;
+};
+
+function buildSubscriptionUpdateFields(
+  s: EventSubscription,
+  row: TenantBillingAccount,
+  isPastDue: boolean,
+  newPlanForStatus: InternalPlanId,
+  scheduleEnrichment: ScheduleEnrichment | null,
+): SubscriptionUpdateFields {
+  // Persist subscription_id FIRST (codex r3 #4) so subsequent events
+  // can lookup by (provider, subscription_id) cleanly.
+  // For past_due: skip current_plan_id update.
+  // Type as a plain object rather than Partial<entity> to avoid
+  // TypeORM's QueryDeepPartialEntity recursing through the relation graph.
+  const updateFields: SubscriptionUpdateFields = {
+    subscriptionId: s.subscriptionId ?? row.subscriptionId ?? null,
+    status: s.status,
+    currentPeriodEnd: s.currentPeriodEnd,
+    cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+    trialEnd: s.trialEnd,
+  };
+  if (!isPastDue) {
+    updateFields.currentPlanId = newPlanForStatus;
+  }
+  if (scheduleEnrichment) {
+    if (scheduleEnrichment.clearSchedule) {
+      updateFields.pendingPlanId = null;
+      updateFields.pendingPlanEffectiveAt = null;
+    } else {
+      updateFields.pendingPlanId = scheduleEnrichment.pendingPlanId;
+      updateFields.pendingPlanEffectiveAt = scheduleEnrichment.pendingPlanEffectiveAt;
+    }
+  }
+  return updateFields;
+}
+
+/**
+ * Merge raw_provider_data.stripe.scheduleId via jsonb (preserves siblings).
+ * Or clear it if the schedule was removed.
+ */
+async function applyScheduleRawData(
+  manager: EntityManager,
+  row: TenantBillingAccount,
+  scheduleEnrichment: ScheduleEnrichment,
+): Promise<void> {
+  if (scheduleEnrichment.clearSchedule) {
+    await manager.query(
+      `UPDATE tenant_billing_accounts
+                SET raw_provider_data = raw_provider_data #- '{stripe,scheduleId}'
+              WHERE id = $1`,
+      [row.id],
+    );
+    return;
+  }
+  if (scheduleEnrichment.scheduleIdToStore) {
+    // `jsonb_set` with create_missing=true creates missing LEAF keys
+    // but NOT intermediate objects, so the path '{stripe,scheduleId}'
+    // is a no-op when `raw_provider_data` is `{}`. Use top-level
+    // `||` merge instead, building the nested `stripe` object
+    // explicitly and preserving any sibling keys already inside it.
+    await manager.query(
+      `UPDATE tenant_billing_accounts
+                SET raw_provider_data = raw_provider_data || jsonb_build_object(
+                  'stripe',
+                  COALESCE(raw_provider_data->'stripe', '{}'::jsonb)
+                    || jsonb_build_object('scheduleId', $1::text)
+                )
+              WHERE id = $2`,
+      [scheduleEnrichment.scheduleIdToStore, row.id],
+    );
+  }
+}
+
+/**
+ * Primary-switch & tier-cascade rules:
+ * - Promotion fires only on transition into 'trialing' or 'active'.
+ * - past_due preserves tier (cluster-2 round-1 #1).
+ * - Already-primary cascades tier ONLY for entitlement-granting statuses
+ *   (trialing/active). `none` (= Stripe 'incomplete' / 'incomplete_expired')
+ *   and 'cancelled' must not promote `tenants.tier` to a paid plan — the
+ *   payment hasn't succeeded yet, and entitlements read `tenants.tier`
+ *   directly. `subscription.deleted` cascades to `free` via its own
+ *   dedicated handler, not this branch.
+ */
+async function resolveSubscriptionOutcome(
+  manager: EntityManager,
+  row: TenantBillingAccount,
+  tenantId: string,
+  s: EventSubscription,
+  isPastDue: boolean,
+  newPlanForStatus: InternalPlanId,
+): Promise<EventOutcome> {
+  const isPromotion = (s.status === 'trialing' || s.status === 'active') && !row.isPrimary;
+  if (isPromotion) {
+    await promotePrimaryAndCascadeTier(manager, row, newPlanForStatus);
+    return { outcome: 'promoted_primary', invalidateTenantIds: [row.tenantId] };
+  }
+
+  const isEntitlementGranting = s.status === 'trialing' || s.status === 'active';
+  if (row.isPrimary && isEntitlementGranting) {
+    await manager.update(Tenant, { id: tenantId }, { tier: newPlanForStatus });
+    // Invalidation deferred to after the outer commit (see return).
+    return { outcome: 'tier_cascaded', invalidateTenantIds: [tenantId] };
+  }
+
+  if (row.isPrimary && isPastDue) {
+    // Grace period — tier preserved.
+    return { outcome: 'past_due_grace' };
+  }
+
+  if (row.isPrimary) {
+    // Primary row with a non-entitlement-granting status (e.g. `none`
+    // from `incomplete`, or `cancelled` that didn't go through
+    // subscription.deleted). Update row-local fields above already
+    // happened; tier stays as-is to avoid handing out paid access on
+    // no successful payment.
+    return { outcome: 'primary_non_entitlement_no_tier_cascade' };
+  }
+
+  // Non-primary row: update row-local fields only.
+  return { outcome: 'non_primary_row_updated' };
+}
+
+async function handleSubscriptionUpsert(
+  manager: EntityManager,
+  event: NormalizedEvent,
+  row: TenantBillingAccount,
+  tenantId: string,
+): Promise<EventOutcome> {
+  if (!event.subscription) {
+    return { outcome: 'subscription_event_no_payload' };
+  }
+  const s = event.subscription;
+
+  // Detect subscription mismatch (codex r4 #16): the row already has a
+  // DIFFERENT subscription_id than the incoming event's. Audit-only.
+  if (
+    row.subscriptionId &&
+    s.subscriptionId &&
+    row.subscriptionId !== s.subscriptionId
+  ) {
+    return {
+      outcome: 'subscription_mismatch',
+      meta: { existing: row.subscriptionId, incoming: s.subscriptionId },
+    };
+  }
+
+  // Unknown price (codex r4 #15 + cluster-2 round-1 #4 + PR9 codex r5 #9):
+  // if the raw Stripe price id is unknown to our PLANS catalog, we cannot
+  // trust any state transition that would set `current_plan_id`. This
+  // replaces the old `planIdForStripePriceId(priceId) ?? 'free'` silent-
+  // downgrade pattern that previously lived in `stripe.ts`. Apply the
+  // guard for ALL non-terminal statuses (trialing/active/past_due AND
+  // 'none' from `incomplete` — which is pre-payment, not terminal).
+  //
+  // The outer idempotency wrapper finalizes the event-log row as
+  // 'processed' (no Stripe retry) and logs at warn level.
+  const { status: rawStripeStatus, priceId: rawPriceId, schedule: rawSchedule } =
+    readRawSubscriptionFields(event);
+  const isTerminalStripeStatus =
+    rawStripeStatus === 'canceled' ||
+    rawStripeStatus === 'incomplete_expired' ||
+    rawStripeStatus === 'unpaid';
+  if (!isTerminalStripeStatus && rawPriceId && planIdForStripePriceId(rawPriceId) === null) {
+    logger.warn('Unknown Stripe price ID — skipping state mutation', {
+      priceId: rawPriceId,
+      eventId: event.providerEventId,
+    });
+    return { outcome: 'unknown_price', meta: { priceId: rawPriceId } };
+  }
+
+  // past_due preserves plan + tier (grace period, cluster-2 round-1 #1).
+  // A failed-but-already-committed Stripe upgrade could otherwise grant
+  // the higher tier during grace. We update local status and other
+  // metadata, but NOT current_plan_id, and we do not cascade tier.
+  const isPastDue = s.status === 'past_due';
+  const newPlanForStatus = resolveNewPlanForStatus(s, row, isPastDue, rawPriceId);
+
+  const scheduleEnrichment = await resolveScheduleEnrichment(rawSchedule, s);
+
+  await manager.update(
+    TenantBillingAccount,
+    { id: row.id },
+    buildSubscriptionUpdateFields(s, row, isPastDue, newPlanForStatus, scheduleEnrichment),
+  );
+
+  // Audit gap #2 fix: claim the trial reservation. Idempotent — the
+  // WHERE clause only matches an unclaimed row. Runs for both
+  // subscription.created and subscription.updated so out-of-order
+  // events (which Stripe permits) still land the claim.
+  if (s.subscriptionId) {
+    await manager.query(
+      `UPDATE chatbot_tenant_trial_reservations
+             SET subscription_id = $1
+           WHERE tenant_id = $2 AND subscription_id IS NULL`,
+      [s.subscriptionId, tenantId],
+    );
+  }
+
+  if (scheduleEnrichment) {
+    await applyScheduleRawData(manager, row, scheduleEnrichment);
+  }
+
+  return resolveSubscriptionOutcome(manager, row, tenantId, s, isPastDue, newPlanForStatus);
 }
 
 // ---------------------------------------------------------------------------
@@ -628,30 +752,8 @@ async function handleCheckoutSessionCompleted(
     return { outcome: 'checkout_session_non_subscription' };
   }
 
-  // Tenant resolution fallback chain (metadata only — email fallback is
-  // explicitly REJECTED per codex round 3 item 7).
-  const sessionTenantId =
-    typeof session.metadata?.tenantId === 'string' ? session.metadata.tenantId : null;
-  const customerTenantId = (() => {
-    if (!session.customer || typeof session.customer === 'string') return null;
-    const md = (session.customer as { metadata?: Record<string, string> }).metadata;
-    return typeof md?.tenantId === 'string' ? md.tenantId : null;
-  })();
-  const subscriptionTenantId = (() => {
-    if (typeof session.subscription === 'string') return null;
-    const md = (session.subscription as { metadata?: Record<string, string> }).metadata;
-    return typeof md?.tenantId === 'string' ? md.tenantId : null;
-  })();
-
-  const tenantId = sessionTenantId ?? customerTenantId ?? subscriptionTenantId;
-  const customerId =
-    typeof session.customer === 'string'
-      ? session.customer
-      : session.customer?.id ?? null;
-  const subscriptionId =
-    typeof session.subscription === 'string'
-      ? session.subscription
-      : session.subscription?.id ?? null;
+  const tenantId = resolveCheckoutTenantId(session);
+  const { customerId, subscriptionId } = resolveCheckoutIds(session);
 
   if (!tenantId) {
     logger.error(
@@ -694,14 +796,7 @@ async function handleCheckoutSessionCompleted(
     };
   }
 
-  // Idempotent updates — re-delivery leaves the same values.
-  const updates: { customerId?: string; subscriptionId?: string } = {};
-  if (customerId && stripeRow.customerId !== customerId) {
-    updates.customerId = customerId;
-  }
-  if (subscriptionId && stripeRow.subscriptionId !== subscriptionId) {
-    updates.subscriptionId = subscriptionId;
-  }
+  const updates = buildCheckoutBookkeepingUpdates(stripeRow, customerId, subscriptionId);
   if (Object.keys(updates).length > 0) {
     await tbaRepo.update({ id: stripeRow.id }, updates);
   }
@@ -710,6 +805,68 @@ async function handleCheckoutSessionCompleted(
     outcome: 'checkout_session_bookkeeping_applied',
     meta: { tenantId, customerId, subscriptionId, fieldsUpdated: Object.keys(updates) },
   };
+}
+
+/**
+ * Tenant resolution fallback chain for a completed Checkout Session
+ * (metadata only — email fallback is explicitly REJECTED per codex round 3
+ * item 7):
+ *   1. session.metadata.tenantId
+ *   2. session.customer.metadata.tenantId
+ *   3. session.subscription.metadata.tenantId
+ *
+ * Only call this once `session.subscription` is known to be non-null.
+ */
+function resolveCheckoutTenantId(session: StripeNS.Checkout.Session): string | null {
+  const sessionTenantId =
+    typeof session.metadata?.tenantId === 'string' ? session.metadata.tenantId : null;
+  const customerTenantId = (() => {
+    if (!session.customer || typeof session.customer === 'string') return null;
+    // Expanded customer: the pinned type does not carry `metadata` on the union.
+    const customer = session.customer as { metadata?: Record<string, string> };
+    const md = customer.metadata;
+    return typeof md?.tenantId === 'string' ? md.tenantId : null;
+  })();
+  const subscriptionTenantId = (() => {
+    if (typeof session.subscription === 'string') return null;
+    // Expanded subscription: same reason as the customer cast above.
+    const subscription = session.subscription as { metadata?: Record<string, string> };
+    const md = subscription.metadata;
+    return typeof md?.tenantId === 'string' ? md.tenantId : null;
+  })();
+
+  return sessionTenantId ?? customerTenantId ?? subscriptionTenantId;
+}
+
+/** Read customer / subscription ids from a session whose refs may be expanded. */
+function resolveCheckoutIds(session: StripeNS.Checkout.Session): {
+  customerId: string | null;
+  subscriptionId: string | null;
+} {
+  return {
+    customerId:
+      typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null,
+    subscriptionId:
+      typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id ?? null,
+  };
+}
+
+/** Idempotent bookkeeping diff — re-delivery leaves the same values. */
+function buildCheckoutBookkeepingUpdates(
+  stripeRow: TenantBillingAccount,
+  customerId: string | null,
+  subscriptionId: string | null,
+): { customerId?: string; subscriptionId?: string } {
+  const updates: { customerId?: string; subscriptionId?: string } = {};
+  if (customerId && stripeRow.customerId !== customerId) {
+    updates.customerId = customerId;
+  }
+  if (subscriptionId && stripeRow.subscriptionId !== subscriptionId) {
+    updates.subscriptionId = subscriptionId;
+  }
+  return updates;
 }
 
 // ---------------------------------------------------------------------------

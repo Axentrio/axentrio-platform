@@ -664,6 +664,69 @@ export async function grantOnboardingProTrial(
 }
 
 /**
+ * `setTierManual` idempotent path: the tenant is already on the target manual
+ * primary row, so only the optional fields may change. Returns
+ * `{ changed: false }` when nothing differs (no audit row), otherwise writes
+ * the field update plus the `tier.manual_override` audit row.
+ */
+async function applyManualFieldUpdatesOnly(input: {
+  manager: typeof AppDataSource.manager;
+  tenantId: string;
+  tier: TenantTier;
+  previousTier: TenantTier;
+  existingManual: TenantBillingAccount;
+  opts: { currentPeriodEnd?: Date | null; billingEmail?: string | null };
+}): Promise<{ changed: boolean }> {
+  const { manager, tenantId, tier, previousTier, existingManual, opts } = input;
+  // Allow opt-field updates without rewriting tier/status/is_primary.
+  // Plain object (not Partial<entity>) to avoid TypeORM's deep-partial
+  // recursing through the Tenant relation graph (same pattern as events.ts).
+  const updateFields: {
+    currentPeriodEnd?: Date | null;
+    billingEmail?: string | null;
+  } = {};
+  if (
+    opts.currentPeriodEnd !== undefined &&
+    opts.currentPeriodEnd !== (existingManual.currentPeriodEnd ?? null)
+  ) {
+    updateFields.currentPeriodEnd = opts.currentPeriodEnd;
+  }
+  if (
+    opts.billingEmail !== undefined &&
+    opts.billingEmail !== (existingManual.billingEmail ?? null)
+  ) {
+    updateFields.billingEmail = opts.billingEmail;
+  }
+  if (Object.keys(updateFields).length === 0) {
+    return { changed: false };
+  }
+  await manager.update(
+    TenantBillingAccount,
+    { id: existingManual.id },
+    updateFields,
+  );
+  const event = manager.create(BillingEvent, {
+    tenantId,
+    provider: 'system',
+    eventType: 'tier.manual_override',
+    payload: {
+      previousTier,
+      newTier: tier,
+      fieldUpdates: {
+        currentPeriodEnd:
+          opts.currentPeriodEnd !== undefined
+            ? opts.currentPeriodEnd?.toISOString() ?? null
+            : undefined,
+        billingEmail:
+          opts.billingEmail !== undefined ? opts.billingEmail : undefined,
+      },
+    },
+  });
+  await manager.save(event);
+  return { changed: true };
+}
+
+/**
  * Super-admin "Set tier (manual)" — general tier override that bypasses
  * Stripe. Used for sales-managed Enterprise, comps (Pro/Premium given
  * away), and refund/abuse-driven downgrades to Free.
@@ -728,52 +791,14 @@ export async function setTierManual(
       existingManual.status === targetStatus;
 
     if (alreadyOnTarget) {
-      // Allow opt-field updates without rewriting tier/status/is_primary.
-      // Plain object (not Partial<entity>) to avoid TypeORM's deep-partial
-      // recursing through the Tenant relation graph (same pattern as events.ts).
-      const updateFields: {
-        currentPeriodEnd?: Date | null;
-        billingEmail?: string | null;
-      } = {};
-      if (
-        opts.currentPeriodEnd !== undefined &&
-        opts.currentPeriodEnd !== (existingManual.currentPeriodEnd ?? null)
-      ) {
-        updateFields.currentPeriodEnd = opts.currentPeriodEnd;
-      }
-      if (
-        opts.billingEmail !== undefined &&
-        opts.billingEmail !== (existingManual.billingEmail ?? null)
-      ) {
-        updateFields.billingEmail = opts.billingEmail;
-      }
-      if (Object.keys(updateFields).length === 0) {
-        return { changed: false };
-      }
-      await manager.update(
-        TenantBillingAccount,
-        { id: existingManual.id },
-        updateFields,
-      );
-      const event = manager.create(BillingEvent, {
+      return applyManualFieldUpdatesOnly({
+        manager,
         tenantId,
-        provider: 'system',
-        eventType: 'tier.manual_override',
-        payload: {
-          previousTier: tenant.tier,
-          newTier: tier,
-          fieldUpdates: {
-            currentPeriodEnd:
-              opts.currentPeriodEnd !== undefined
-                ? opts.currentPeriodEnd?.toISOString() ?? null
-                : undefined,
-            billingEmail:
-              opts.billingEmail !== undefined ? opts.billingEmail : undefined,
-          },
-        },
+        tier,
+        previousTier: tenant.tier,
+        existingManual,
+        opts,
       });
-      await manager.save(event);
-      return { changed: true };
     }
 
     // Step 1: demote every currently-primary row so the partial unique

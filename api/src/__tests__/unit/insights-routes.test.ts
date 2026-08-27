@@ -47,7 +47,13 @@ vi.mock('../../middleware/super-admin.middleware', () => ({
 vi.mock('../../billing/entitlements', () => ({
   // ceiling == effective in these tests (no tenant toggles), so the gate's
   // disabled_by_tenant-vs-not_entitled check resolves to not_entitled → 403.
-  getEntitlements: async () => ({ features: state.features, entitledFeatures: state.features }),
+  // Copy the flags so a later assertion cannot mutate `state.features` by
+  // writing through the returned object. One full-suite run saw GET
+  // /insights/:id/evidence return 200 instead of 403 when gapEvidence was off.
+  getEntitlements: async () => ({
+    features: { ...state.features },
+    entitledFeatures: { ...state.features },
+  }),
 }));
 
 vi.mock('../../utils/logger', () => ({

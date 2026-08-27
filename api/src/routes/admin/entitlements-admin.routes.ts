@@ -35,6 +35,36 @@ async function loadTenant(id: string): Promise<Tenant> {
   return tenant;
 }
 
+/**
+ * Validates one wire override entry and returns the stamped record, or null
+ * when the entry is an explicit deletion ("tier default").
+ */
+function normalizeOverride(
+  key: string,
+  entry: unknown,
+  existing: FeatureOverride | undefined,
+  setBy: string,
+  setAt: string,
+): FeatureOverride | null {
+  if (!FEATURE_KEYS.has(key)) throw new ValidationError(`Unknown feature key: ${key}`);
+  if (entry === null) return null; // explicit null = no override (deletion)
+  if (typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new ValidationError(`Override for "${key}" must be { value, reason } or null`);
+  }
+  const { value, reason } = entry as { value?: unknown; reason?: unknown };
+  if (typeof value !== 'boolean') {
+    throw new ValidationError(`Override for "${key}": value must be a boolean`);
+  }
+  if (typeof reason !== 'string' || !reason.trim()) {
+    throw new ValidationError(`Override for "${key}": a non-empty reason is required`);
+  }
+  // Preserve original provenance when the override is unchanged; restamp on
+  // any value/reason change.
+  return existing && existing.value === value && existing.reason === reason.trim()
+    ? existing
+    : { value, reason: reason.trim().slice(0, 500), setBy, setAt };
+}
+
 // ── Feature overrides ────────────────────────────────────────────────────────
 
 // GET /admin/tenants/:id/feature-overrides — overrides + tier defaults for the
@@ -86,29 +116,17 @@ router.put(
     const aboveTierNew: string[] = [];
 
     for (const [key, entry] of Object.entries(body)) {
-      if (!FEATURE_KEYS.has(key)) throw new ValidationError(`Unknown feature key: ${key}`);
-      if (entry === null) continue; // explicit null = no override (deletion)
-      if (typeof entry !== 'object' || Array.isArray(entry)) {
-        throw new ValidationError(`Override for "${key}" must be { value, reason } or null`);
-      }
-      const { value, reason } = entry as { value?: unknown; reason?: unknown };
-      if (typeof value !== 'boolean') {
-        throw new ValidationError(`Override for "${key}": value must be a boolean`);
-      }
-      if (typeof reason !== 'string' || !reason.trim()) {
-        throw new ValidationError(`Override for "${key}": a non-empty reason is required`);
-      }
-      // Preserve original provenance when the override is unchanged; restamp on
-      // any value/reason change.
       const existing = tenant.featureOverrides?.[key];
-      next[key] =
-        existing && existing.value === value && existing.reason === reason.trim()
-          ? existing
-          : { value, reason: reason.trim().slice(0, 500), setBy, setAt };
+      const override = normalizeOverride(key, entry, existing, setBy, setAt);
+      if (override === null) continue;
+      next[key] = override;
       // A grant is "new above-tier" only when it exceeds the plan AND was not
       // already granted — so re-saving an existing comp, or editing an unrelated
       // key, never re-prompts.
-      if (overrideExceedsTier(tenant.tier, key as FeatureKey, value) && existing?.value !== true) {
+      if (
+        overrideExceedsTier(tenant.tier, key as FeatureKey, override.value) &&
+        existing?.value !== true
+      ) {
         aboveTierNew.push(key);
       }
     }

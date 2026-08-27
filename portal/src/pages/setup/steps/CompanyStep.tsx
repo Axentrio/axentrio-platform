@@ -20,6 +20,7 @@ import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import {
   useCompanyLookup,
   type CompanyLookupStatus,
+  type SetupCompany,
   type SetupStatus,
 } from '@/queries/useOnboardingQueries';
 import type { StepProps } from './types';
@@ -34,29 +35,33 @@ interface Fields {
 
 const EMPTY: Fields = { name: '', legalForm: '', street: '', postalCode: '', city: '' };
 
+function initialFields(stored: SetupCompany | null): Fields {
+  if (!stored) return EMPTY;
+  return {
+    name: stored.name,
+    legalForm: stored.legalForm ?? '',
+    street: stored.street ?? '',
+    postalCode: stored.postalCode ?? '',
+    city: stored.city ?? '',
+  };
+}
+
+function initialPresence(stored: SetupCompany | null): 'online' | 'physical' | '' {
+  const presence = stored?.presence;
+  return presence === 'physical' || presence === 'online' ? presence : '';
+}
+
 export function CompanyStep({ status, submit }: StepProps & { status: SetupStatus }) {
   const { t } = useTranslation();
   const lookup = useCompanyLookup();
   const stored = status.state.company;
 
   const [vat, setVat] = React.useState(stored?.vatNumber ?? '');
-  const [fields, setFields] = React.useState<Fields>(
-    stored
-      ? {
-          name: stored.name,
-          legalForm: stored.legalForm ?? '',
-          street: stored.street ?? '',
-          postalCode: stored.postalCode ?? '',
-          city: stored.city ?? '',
-        }
-      : EMPTY,
-  );
+  const [fields, setFields] = React.useState<Fields>(initialFields(stored));
   const [outcome, setOutcome] = React.useState<CompanyLookupStatus | null>(null);
   const [lookupError, setLookupError] = React.useState<'lookupFailed' | 'lookupRateLimited' | null>(null);
   const [verified, setVerified] = React.useState(stored?.verified ?? false);
-  const [presence, setPresence] = React.useState<'online' | 'physical' | ''>(
-    stored?.presence === 'physical' || stored?.presence === 'online' ? stored.presence : '',
-  );
+  const [presence, setPresence] = React.useState<'online' | 'physical' | ''>(initialPresence(stored));
 
   const set = (key: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
@@ -130,6 +135,7 @@ export function CompanyStep({ status, submit }: StepProps & { status: SetupStatu
             onKeyDown={(e) => e.key === 'Enter' && runLookup()}
             placeholder="BE 0400.378.485"
             autoComplete="off"
+            className="min-w-0 flex-1"
           />
           <Button
             type="button"

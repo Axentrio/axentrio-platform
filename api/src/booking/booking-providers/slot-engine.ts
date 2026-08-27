@@ -156,18 +156,30 @@ function overlapsBusy(startMs: number, endMs: number, busy: BusyInterval[]): boo
 const dayKeyOf = (ms: number, zone: string): string =>
   DateTime.fromMillis(ms, { zone }).toFormat('yyyy-MM-dd');
 
-export function computeSlots(input: SlotEngineInput): BookingSlot[] {
+/** Everything the day walk needs, resolved once from the input. */
+interface SlotBounds {
+  zone: string;
+  busy: BusyInterval[];
+  granularity: number;
+  duration: number;
+  bufferBeforeMs: number;
+  bufferAfterMs: number;
+  rangeStartMs: number;
+  rangeEndMs: number;
+  earliestStartMs: number;
+  horizonMs: number;
+  firstDay: DateTime;
+  lastDay: DateTime;
+}
+
+/** Null when the requested range is invalid or empty — the caller then offers nothing. */
+function resolveSlotBounds(input: SlotEngineInput): SlotBounds | null {
   const { rule, eventType, now } = input;
   const zone = rule.timezone || 'UTC';
-  const busy = input.busy || [];
-  const granularity = Math.max(1, rule.slotGranularityMin || 30);
-  const duration = eventType.durationMin;
-  const bufferBeforeMs = (eventType.bufferBeforeMin || 0) * 60_000;
-  const bufferAfterMs = (eventType.bufferAfterMin || 0) * 60_000;
 
   const rangeStart = DateTime.fromISO(input.rangeStart, { zone: 'utc' });
   const rangeEnd = DateTime.fromISO(input.rangeEnd, { zone: 'utc' });
-  if (!rangeStart.isValid || !rangeEnd.isValid || rangeEnd <= rangeStart) return [];
+  if (!rangeStart.isValid || !rangeEnd.isValid || rangeEnd <= rangeStart) return null;
 
   // A slot may start no earlier than now + minNotice, and no later than now + horizon. ONE
   // definition, shared with `diagnoseEmptyRange`, so the bound the engine enforces and the
@@ -176,14 +188,37 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
   const earliestStartMs = Math.max(rangeStart.toMillis(), earliestMs);
   const rangeEndMs = rangeEnd.toMillis();
 
-  // Iterate local calendar days across the (clamped) range.
-  const firstDay = DateTime.fromMillis(Math.max(rangeStart.toMillis(), earliestStartMs), { zone })
-    .setZone(zone)
-    .startOf('day');
-  const lastDay = DateTime.fromMillis(Math.min(rangeEndMs, horizonMs), { zone })
-    .setZone(zone)
-    .startOf('day');
+  return {
+    zone,
+    busy: input.busy || [],
+    granularity: Math.max(1, rule.slotGranularityMin || 30),
+    duration: eventType.durationMin,
+    bufferBeforeMs: (eventType.bufferBeforeMin || 0) * 60_000,
+    bufferAfterMs: (eventType.bufferAfterMin || 0) * 60_000,
+    rangeStartMs: rangeStart.toMillis(),
+    rangeEndMs,
+    earliestStartMs,
+    horizonMs,
+    // Iterate local calendar days across the (clamped) range.
+    firstDay: DateTime.fromMillis(Math.max(rangeStart.toMillis(), earliestStartMs), { zone })
+      .setZone(zone)
+      .startOf('day'),
+    lastDay: DateTime.fromMillis(Math.min(rangeEndMs, horizonMs), { zone })
+      .setZone(zone)
+      .startOf('day'),
+  };
+}
 
+/** The daily caps plus the per-day usage they are measured against. */
+interface DayCaps {
+  maxPerDay: number;
+  maxMinutesPerDay: number;
+  serviceMax: number;
+  usage: Map<string, { count: number; minutes: number }>;
+  serviceUsage: Map<string, number>;
+}
+
+function resolveDayCaps(input: SlotEngineInput, zone: string): DayCaps {
   // Per-day usage from the ledger, so a day already at its business cap offers nothing
   // rather than offering a slot the create path will then refuse.
   const maxPerDay = input.business?.maxBookingsPerDay ?? 0;
@@ -207,48 +242,74 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
       serviceUsage.set(key, (serviceUsage.get(key) ?? 0) + 1);
     }
   }
+  return { maxPerDay, maxMinutesPerDay, serviceMax, usage, serviceUsage };
+}
+
+/** Whole-day skip: no point walking the windows of a day that is already full. */
+function dayAtCap(dayKey: string, duration: number, caps: DayCaps): boolean {
+  const used = caps.usage.get(dayKey) ?? { count: 0, minutes: 0 };
+  if (caps.maxPerDay > 0 && used.count >= caps.maxPerDay) return true;
+  if (caps.maxMinutesPerDay > 0 && used.minutes + duration > caps.maxMinutesPerDay) return true;
+  if (caps.serviceMax > 0 && (caps.serviceUsage.get(dayKey) ?? 0) >= caps.serviceMax) return true;
+  return false;
+}
+
+/** Walk one day's opening windows, appending every startable slot to `out`. */
+function collectDaySlots(
+  day: DateTime,
+  windows: TimeWindow[],
+  b: SlotBounds,
+  seen: Set<number>,
+  out: BookingSlot[],
+): void {
+  for (const window of windows) {
+    const ws = parseHHMM(window.start);
+    const we = parseHHMM(window.end);
+    if (!ws || !we) continue;
+    const winStartMin = ws.h * 60 + ws.m;
+    const winEndMin = we.h * 60 + we.m;
+    if (winEndMin <= winStartMin) continue;
+
+    for (let startMin = winStartMin; startMin + b.duration <= winEndMin; startMin += b.granularity) {
+      const hour = Math.floor(startMin / 60);
+      const minute = startMin % 60;
+      const startLocal = localTime(day.year, day.month, day.day, hour, minute, b.zone);
+      if (!startLocal) continue; // DST gap → skip
+
+      const startUtc = startLocal.toUTC();
+      const endUtc = startUtc.plus({ minutes: b.duration });
+      const startMs = startUtc.toMillis();
+      const endMs = endUtc.toMillis();
+
+      if (startMs < b.earliestStartMs) continue; // past or inside min-notice
+      if (startMs > b.horizonMs) continue; // beyond max horizon
+      if (startMs < b.rangeStartMs || startMs >= b.rangeEndMs) continue; // outside query window
+      if (overlapsBusy(startMs - b.bufferBeforeMs, endMs + b.bufferAfterMs, b.busy)) continue;
+      if (seen.has(startMs)) continue;
+
+      seen.add(startMs);
+      out.push({ start: startUtc.toISO()!, end: endUtc.toISO()! });
+    }
+  }
+}
+
+export function computeSlots(input: SlotEngineInput): BookingSlot[] {
+  const bounds = resolveSlotBounds(input);
+  if (!bounds) return [];
+  const caps = resolveDayCaps(input, bounds.zone);
 
   const slots: BookingSlot[] = [];
   const seen = new Set<number>();
 
   // Hard cap on day iteration as a runaway guard (horizon already bounds it).
   let guard = 0;
-  for (let day = firstDay; day <= lastDay && guard < 400; day = day.plus({ days: 1 }), guard++) {
-    const used = usage.get(day.toFormat('yyyy-MM-dd')) ?? { count: 0, minutes: 0 };
-    // Whole-day skips: no point walking the windows of a day that is already full.
-    if (maxPerDay > 0 && used.count >= maxPerDay) continue;
-    if (maxMinutesPerDay > 0 && used.minutes + duration > maxMinutesPerDay) continue;
-    if (serviceMax > 0 && (serviceUsage.get(day.toFormat('yyyy-MM-dd')) ?? 0) >= serviceMax) continue;
-
-    for (const window of windowsForDay(rule, day)) {
-      const ws = parseHHMM(window.start);
-      const we = parseHHMM(window.end);
-      if (!ws || !we) continue;
-      const winStartMin = ws.h * 60 + ws.m;
-      const winEndMin = we.h * 60 + we.m;
-      if (winEndMin <= winStartMin) continue;
-
-      for (let startMin = winStartMin; startMin + duration <= winEndMin; startMin += granularity) {
-        const hour = Math.floor(startMin / 60);
-        const minute = startMin % 60;
-        const startLocal = localTime(day.year, day.month, day.day, hour, minute, zone);
-        if (!startLocal) continue; // DST gap → skip
-
-        const startUtc = startLocal.toUTC();
-        const endUtc = startUtc.plus({ minutes: duration });
-        const startMs = startUtc.toMillis();
-        const endMs = endUtc.toMillis();
-
-        if (startMs < earliestStartMs) continue; // past or inside min-notice
-        if (startMs > horizonMs) continue; // beyond max horizon
-        if (startMs < rangeStart.toMillis() || startMs >= rangeEndMs) continue; // outside query window
-        if (overlapsBusy(startMs - bufferBeforeMs, endMs + bufferAfterMs, busy)) continue;
-        if (seen.has(startMs)) continue;
-
-        seen.add(startMs);
-        slots.push({ start: startUtc.toISO()!, end: endUtc.toISO()! });
-      }
-    }
+  for (
+    let day = bounds.firstDay;
+    day <= bounds.lastDay && guard < 400;
+    day = day.plus({ days: 1 }), guard++
+  ) {
+    if (dayAtCap(day.toFormat('yyyy-MM-dd'), bounds.duration, caps)) continue;
+    collectDaySlots(day, windowsForDay(input.rule, day), bounds, seen, slots);
   }
 
   slots.sort((a, b) => a.start.localeCompare(b.start));

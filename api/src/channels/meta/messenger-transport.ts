@@ -88,34 +88,7 @@ export class MessengerOutboundTransport extends GraphOutboundTransport {
     switch (message.type) {
       case 'text':
       case 'quick_reply': {
-        body.message = { text: message.content || '' };
-
-        if (message.quickReplies && message.quickReplies.length > 0) {
-          (body.message as any).quick_replies = message.quickReplies
-            .slice(0, 13)
-            .map((qr) => ({
-              content_type: 'text',
-              title: qr.title.slice(0, 20),
-              payload: qr.payload.slice(0, 1000),
-            }));
-        }
-
-        if (message.buttons && message.buttons.length > 0) {
-          body.message = {
-            attachment: {
-              type: 'template',
-              payload: {
-                template_type: 'button',
-                text: message.content || 'Choose an option',
-                buttons: message.buttons.slice(0, 3).map((btn) =>
-                  btn.type === 'url'
-                    ? { type: 'web_url', title: btn.title, url: btn.value }
-                    : { type: 'postback', title: btn.title, payload: btn.value },
-                ),
-              },
-            },
-          };
-        }
+        body.message = messengerTextPayload(message);
         break;
       }
       case 'image':
@@ -131,25 +104,9 @@ export class MessengerOutboundTransport extends GraphOutboundTransport {
         break;
       }
       case 'carousel': {
-        if (message.cards && message.cards.length > 0) {
-          body.message = {
-            attachment: {
-              type: 'template',
-              payload: {
-                template_type: 'generic',
-                elements: message.cards.slice(0, 10).map((card) => ({
-                  title: card.title,
-                  subtitle: card.subtitle,
-                  image_url: card.imageUrl,
-                  buttons: card.buttons?.slice(0, 3).map((btn) =>
-                    btn.type === 'url'
-                      ? { type: 'web_url', title: btn.title, url: btn.value }
-                      : { type: 'postback', title: btn.title, payload: btn.value },
-                  ),
-                })),
-              },
-            },
-          };
+        const carousel = messengerCarouselPayload(message);
+        if (carousel) {
+          body.message = carousel;
         }
         break;
       }
@@ -160,4 +117,60 @@ export class MessengerOutboundTransport extends GraphOutboundTransport {
 
     return body;
   }
+}
+
+/** Messenger `message` payload for a text / quick-reply send. Buttons win over chips. */
+function messengerTextPayload(message: OutboundChannelMessage): Record<string, unknown> {
+  if (message.buttons && message.buttons.length > 0) {
+    return {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: message.content || 'Choose an option',
+          buttons: message.buttons.slice(0, 3).map(messengerButton),
+        },
+      },
+    };
+  }
+
+  const payload: Record<string, unknown> = { text: message.content || '' };
+  if (message.quickReplies && message.quickReplies.length > 0) {
+    payload.quick_replies = message.quickReplies
+      .slice(0, 13)
+      .map((qr) => ({
+        content_type: 'text',
+        title: qr.title.slice(0, 20),
+        payload: qr.payload.slice(0, 1000),
+      }));
+  }
+  return payload;
+}
+
+/** Messenger generic-template payload for a carousel, or undefined when it has no cards. */
+function messengerCarouselPayload(
+  message: OutboundChannelMessage,
+): Record<string, unknown> | undefined {
+  if (!message.cards || message.cards.length === 0) return undefined;
+  return {
+    attachment: {
+      type: 'template',
+      payload: {
+        template_type: 'generic',
+        elements: message.cards.slice(0, 10).map((card) => ({
+          title: card.title,
+          subtitle: card.subtitle,
+          image_url: card.imageUrl,
+          buttons: card.buttons?.slice(0, 3).map(messengerButton),
+        })),
+      },
+    },
+  };
+}
+
+/** One Messenger button: a web_url link or a postback. */
+function messengerButton(btn: { type: 'url' | 'postback'; title: string; value: string }): Record<string, unknown> {
+  return btn.type === 'url'
+    ? { type: 'web_url', title: btn.title, url: btn.value }
+    : { type: 'postback', title: btn.title, payload: btn.value };
 }

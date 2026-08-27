@@ -68,6 +68,111 @@ function mapApiToTenant(data: TenantApiData): Tenant {
   };
 }
 
+/** Logo upload card. Owns the file input ref and the upload/remove state so the
+ * page component stays small. */
+const LogoCard: React.FC<{ tenantName: string }> = ({ tenantName }) => {
+  const { t } = useTranslation();
+  const { organization } = useOrganization();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !organization) return;
+    setIsUploadingLogo(true);
+    try {
+      await organization.setLogo({ file });
+      toast.success(t('settings.widget.logo.uploaded'));
+    } catch {
+      toast.error(t('settings.widget.logo.uploadFailed'));
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (!organization) return;
+    setIsUploadingLogo(true);
+    try {
+      await organization.setLogo({ file: null });
+      toast.success(t('settings.widget.logo.removed'));
+    } catch {
+      toast.error(t('settings.widget.logo.removeFailed'));
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
+  return (
+    <Card variant="glass">
+      <CardHeader>
+        <h3 className="font-medium text-text-primary">{t('settings.widget.logo.title')}</h3>
+        <p className="text-sm text-text-muted">
+          {t('settings.widget.logo.description')}
+        </p>
+      </CardHeader>
+      <CardContent className="flex items-center gap-4">
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/*"
+          aria-label={t('settings.widget.logo.title')}
+          onChange={handleLogoUpload}
+          className="hidden"
+        />
+        <div className="relative group">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => logoInputRef.current?.click()}
+            disabled={isUploadingLogo}
+            className="relative w-16 h-16 rounded-xl overflow-hidden cursor-pointer p-0"
+          >
+            {organization?.hasImage ? (
+              <img
+                src={organization.imageUrl}
+                alt={tenantName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white font-bold text-xl bg-primary-600">
+                {tenantName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className={cn(
+              'absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity',
+              isUploadingLogo ? 'opacity-100' : 'md:opacity-0 md:group-hover:opacity-100'
+            )}>
+              {isUploadingLogo ? (
+                <Loader2 className="w-5 h-5 text-white animate-spin" />
+              ) : (
+                <Camera className="w-5 h-5 text-white" />
+              )}
+            </div>
+          </Button>
+          {organization?.hasImage && !isUploadingLogo && (
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleLogoRemove(); }}
+              className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-surface-3 border border-edge flex items-center justify-center md:opacity-0 md:group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive text-text-muted hover:text-white"
+              title={t('settings.widget.logo.removeTitle')}
+            >
+              <X className="w-3 h-3" />
+            </Button>
+          )}
+        </div>
+        <div className="text-sm text-text-muted">
+          <p>{t('settings.widget.logo.uploadHint')}</p>
+          <p className="text-xs">{t('settings.widget.logo.recommended')}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 const WidgetBrandSettings: React.FC = () => {
   const { t } = useTranslation();
   const { organization } = useOrganization();
@@ -76,8 +181,6 @@ const WidgetBrandSettings: React.FC = () => {
   // also returns true for super_admin, matching the API guard.
   const { isRole } = useAppAuth();
   const canEditName = isRole('admin');
-  const logoInputRef = useRef<HTMLInputElement>(null);
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   // ---------- Fetch current tenant ----------
   const { data: rawTenant, isLoading, isError, error } = useTenantSettings();
@@ -120,34 +223,6 @@ const WidgetBrandSettings: React.FC = () => {
     }
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !organization) return;
-    setIsUploadingLogo(true);
-    try {
-      await organization.setLogo({ file });
-      toast.success(t('settings.widget.logo.uploaded'));
-    } catch {
-      toast.error(t('settings.widget.logo.uploadFailed'));
-    } finally {
-      setIsUploadingLogo(false);
-      if (logoInputRef.current) logoInputRef.current.value = '';
-    }
-  };
-
-  const handleLogoRemove = async () => {
-    if (!organization) return;
-    setIsUploadingLogo(true);
-    try {
-      await organization.setLogo({ file: null });
-      toast.success(t('settings.widget.logo.removed'));
-    } catch {
-      toast.error(t('settings.widget.logo.removeFailed'));
-    } finally {
-      setIsUploadingLogo(false);
-    }
-  };
-
   const isDirty = tenant && displayName !== tenant.name;
 
   // ---------- Loading / Error states ----------
@@ -184,71 +259,7 @@ const WidgetBrandSettings: React.FC = () => {
       </div>
 
       {/* Logo Section */}
-      <Card variant="glass">
-        <CardHeader>
-          <h3 className="font-medium text-text-primary">{t('settings.widget.logo.title')}</h3>
-          <p className="text-sm text-text-muted">
-            {t('settings.widget.logo.description')}
-          </p>
-        </CardHeader>
-        <CardContent className="flex items-center gap-4">
-          <input
-            ref={logoInputRef}
-            type="file"
-            accept="image/*"
-            aria-label={t('settings.widget.logo.title')}
-            onChange={handleLogoUpload}
-            className="hidden"
-          />
-          <div className="relative group">
-            <Button
-              variant="ghost"
-              type="button"
-              onClick={() => logoInputRef.current?.click()}
-              disabled={isUploadingLogo}
-              className="relative w-16 h-16 rounded-xl overflow-hidden cursor-pointer p-0"
-            >
-              {organization?.hasImage ? (
-                <img
-                  src={organization.imageUrl}
-                  alt={tenant.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-white font-bold text-xl bg-primary-600">
-                  {tenant.name.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className={cn(
-                'absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity',
-                isUploadingLogo ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              )}>
-                {isUploadingLogo ? (
-                  <Loader2 className="w-5 h-5 text-white animate-spin" />
-                ) : (
-                  <Camera className="w-5 h-5 text-white" />
-                )}
-              </div>
-            </Button>
-            {organization?.hasImage && !isUploadingLogo && (
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                onClick={(e) => { e.stopPropagation(); handleLogoRemove(); }}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-3 border border-edge flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive text-text-muted hover:text-white"
-                title={t('settings.widget.logo.removeTitle')}
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            )}
-          </div>
-          <div className="text-sm text-text-muted">
-            <p>{t('settings.widget.logo.uploadHint')}</p>
-            <p className="text-xs">{t('settings.widget.logo.recommended')}</p>
-          </div>
-        </CardContent>
-      </Card>
+      <LogoCard tenantName={tenant.name} />
 
       {/* Display Name */}
       <Card variant="glass">

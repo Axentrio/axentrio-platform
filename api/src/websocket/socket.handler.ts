@@ -88,6 +88,137 @@ const messageRepository = AppDataSource.getRepository(Message);
 let io: SocketIOServer | null = null;
 
 /**
+ * Mode 1.5: Widget JWT — binds an authoritative sessionId to the socket (#19).
+ */
+async function authenticateWidgetToken(socket: TenantSocket, widgetToken: string): Promise<void> {
+  let payload;
+  try {
+    payload = verifyAppJwt(widgetToken);
+  } catch (err) {
+    const code = (err as Error)?.name === 'TokenExpiredError' ? 'WIDGET_TOKEN_EXPIRED' : 'WIDGET_TOKEN_INVALID';
+    throw authError('Authentication error: widget token rejected', code);
+  }
+  if (
+    payload.type !== 'widget' ||
+    !UUID_RE.test(payload.sessionId || '') ||
+    !payload.tenantId ||
+    !payload.userId
+  ) {
+    throw authError('Authentication error: invalid widget token claims', 'WIDGET_TOKEN_INVALID');
+  }
+  // If an apiKey is also supplied, it must resolve and match the token's tenant
+  // (same-tenant different-bot is fine). Invalid/paused apiKey alongside a token → reject.
+  if (socket.handshake.query?.apiKey) {
+    try {
+      const resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
+      if (resolved.tenant.id !== payload.tenantId) {
+        throw authError('Authentication error: apiKey/token tenant mismatch', 'WIDGET_TOKEN_INVALID');
+      }
+    } catch (err) {
+      if (err instanceof BotPausedError || err instanceof BotNotFoundError) {
+        throw authError('Authentication error: apiKey rejected', 'WIDGET_TOKEN_INVALID');
+      }
+      throw err;
+    }
+  }
+  socket.data.user = {
+    id: payload.userId,
+    email: '',
+    role: 'agent' as const,
+    tenantId: payload.tenantId,
+    type: 'widget' as const,
+  };
+  socket.data.tenantId = payload.tenantId;
+  socket.data.boundSessionId = payload.sessionId;
+}
+
+/** Mode 1: Portal agent (Clerk token). */
+async function authenticateClerkAgent(socket: TenantSocket, token: string): Promise<void> {
+  let verified;
+  try {
+    verified = await verifyToken(token, {
+      secretKey: config.clerk.secretKey,
+    });
+  } catch {
+    throw new Error('Authentication error: Invalid token');
+  }
+
+  const clerkUserId = verified.sub;
+  const clerkOrgId = verified.org_id;
+
+  if (clerkOrgId) {
+    const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
+    if (dbIds) {
+      socket.data.user = {
+        id: dbIds.agentId,
+        userId: dbIds.userId,
+        name: dbIds.userName || '',
+        email: dbIds.email || '',
+        tenantId: dbIds.tenantId,
+        role: dbIds.userRole,
+        type: 'agent',
+      };
+      socket.data.tenantId = dbIds.tenantId;
+      return;
+    }
+  }
+
+  const { User } = await import('../database/entities/User');
+  const { Agent } = await import('../database/entities/Agent');
+  const userRepo = AppDataSource.getRepository(User);
+  const agentRepo = AppDataSource.getRepository(Agent);
+
+  const user = await userRepo.findOne({ where: { clerkUserId } });
+  if (!user) throw new Error('Authentication error: User not provisioned');
+
+  const agent = await agentRepo.findOne({ where: { userId: user.id } });
+  if (!agent) throw new Error('Authentication error: Agent not provisioned');
+
+  socket.data.user = {
+    id: agent.id,
+    userId: user.id,
+    name: user.name || user.email?.split('@')[0] || '',
+    email: user.email || '',
+    tenantId: user.tenantId,
+    role: user.role,
+    type: 'agent',
+  };
+  socket.data.tenantId = user.tenantId;
+}
+
+/**
+ * Mode 2: Widget (API key in query). The key can be either a Bot.publicKey
+ * (`bk_*`) or a legacy Tenant.apiKey. resolveBotKeyStrict throws on unknown
+ * keys and on paused bots — both surface as auth errors that disconnect
+ * the socket (#16b's natural wiring for websocket).
+ */
+async function authenticateApiKey(socket: TenantSocket, apiKey: string): Promise<void> {
+  let resolved;
+  try {
+    resolved = await resolveBotKeyStrict(apiKey);
+  } catch (err) {
+    if (err instanceof BotPausedError) {
+      throw new Error('Authentication error: Bot is paused');
+    }
+    if (err instanceof BotNotFoundError) {
+      throw new Error('Authentication error: Invalid API key');
+    }
+    throw err;
+  }
+
+  const { tenant, bot } = resolved;
+
+  socket.data.user = {
+    id: (socket.handshake.query.visitorId as string) || socket.id,
+    email: '',
+    role: 'agent' as const,
+    tenantId: tenant.id,
+    type: 'widget' as const,
+  };
+  socket.data.tenantId = tenant.id;
+  socket.data.botId = bot.id;
+}
+/**
  * Authenticate a socket connection (extracted for timeout wrapping).
  * Throws on failure instead of calling next() — the caller handles next().
  */
@@ -99,134 +230,18 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
     throw authError('Authentication error: conflicting credentials', 'WIDGET_TOKEN_INVALID');
   }
 
-  // Mode 1.5: Widget JWT — binds an authoritative sessionId to the socket (#19).
   if (widgetToken) {
-    let payload;
-    try {
-      payload = verifyAppJwt(widgetToken);
-    } catch (err) {
-      const code = (err as Error)?.name === 'TokenExpiredError' ? 'WIDGET_TOKEN_EXPIRED' : 'WIDGET_TOKEN_INVALID';
-      throw authError('Authentication error: widget token rejected', code);
-    }
-    if (
-      payload.type !== 'widget' ||
-      !UUID_RE.test(payload.sessionId || '') ||
-      !payload.tenantId ||
-      !payload.userId
-    ) {
-      throw authError('Authentication error: invalid widget token claims', 'WIDGET_TOKEN_INVALID');
-    }
-    // If an apiKey is also supplied, it must resolve and match the token's tenant
-    // (same-tenant different-bot is fine). Invalid/paused apiKey alongside a token → reject.
-    if (socket.handshake.query?.apiKey) {
-      try {
-        const resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
-        if (resolved.tenant.id !== payload.tenantId) {
-          throw authError('Authentication error: apiKey/token tenant mismatch', 'WIDGET_TOKEN_INVALID');
-        }
-      } catch (err) {
-        if (err instanceof BotPausedError || err instanceof BotNotFoundError) {
-          throw authError('Authentication error: apiKey rejected', 'WIDGET_TOKEN_INVALID');
-        }
-        throw err;
-      }
-    }
-    socket.data.user = {
-      id: payload.userId,
-      email: '',
-      role: 'agent' as const,
-      tenantId: payload.tenantId,
-      type: 'widget' as const,
-    };
-    socket.data.tenantId = payload.tenantId;
-    socket.data.boundSessionId = payload.sessionId;
+    await authenticateWidgetToken(socket, widgetToken);
     return;
   }
 
-  // Mode 1: Portal agent (Clerk token)
   if (socket.handshake.auth?.token) {
-    let verified;
-    try {
-      verified = await verifyToken(socket.handshake.auth.token, {
-        secretKey: config.clerk.secretKey,
-      });
-    } catch {
-      throw new Error('Authentication error: Invalid token');
-    }
-
-    const clerkUserId = verified.sub;
-    const clerkOrgId = verified.org_id;
-
-    if (clerkOrgId) {
-      const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
-      if (dbIds) {
-        socket.data.user = {
-          id: dbIds.agentId,
-          userId: dbIds.userId,
-          name: dbIds.userName || '',
-          email: dbIds.email || '',
-          tenantId: dbIds.tenantId,
-          role: dbIds.userRole,
-          type: 'agent',
-        };
-        socket.data.tenantId = dbIds.tenantId;
-        return;
-      }
-    }
-
-    const { User } = await import('../database/entities/User');
-    const { Agent } = await import('../database/entities/Agent');
-    const userRepo = AppDataSource.getRepository(User);
-    const agentRepo = AppDataSource.getRepository(Agent);
-
-    const user = await userRepo.findOne({ where: { clerkUserId } });
-    if (!user) throw new Error('Authentication error: User not provisioned');
-
-    const agent = await agentRepo.findOne({ where: { userId: user.id } });
-    if (!agent) throw new Error('Authentication error: Agent not provisioned');
-
-    socket.data.user = {
-      id: agent.id,
-      userId: user.id,
-      name: user.name || user.email?.split('@')[0] || '',
-      email: user.email || '',
-      tenantId: user.tenantId,
-      role: user.role,
-      type: 'agent',
-    };
-    socket.data.tenantId = user.tenantId;
+    await authenticateClerkAgent(socket, socket.handshake.auth.token);
     return;
   }
 
-  // Mode 2: Widget (API key in query). The key can be either a Bot.publicKey
-  // (`bk_*`) or a legacy Tenant.apiKey. resolveBotKeyStrict throws on unknown
-  // keys and on paused bots — both surface as auth errors that disconnect
-  // the socket (#16b's natural wiring for websocket).
   if (socket.handshake.query?.apiKey) {
-    let resolved;
-    try {
-      resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
-    } catch (err) {
-      if (err instanceof BotPausedError) {
-        throw new Error('Authentication error: Bot is paused');
-      }
-      if (err instanceof BotNotFoundError) {
-        throw new Error('Authentication error: Invalid API key');
-      }
-      throw err;
-    }
-
-    const { tenant, bot } = resolved;
-
-    socket.data.user = {
-      id: (socket.handshake.query.visitorId as string) || socket.id,
-      email: '',
-      role: 'agent' as const,
-      tenantId: tenant.id,
-      type: 'widget' as const,
-    };
-    socket.data.tenantId = tenant.id;
-    socket.data.botId = bot.id;
+    await authenticateApiKey(socket, socket.handshake.query.apiKey as string);
     return;
   }
 

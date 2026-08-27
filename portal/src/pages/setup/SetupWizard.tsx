@@ -154,11 +154,17 @@ export default function SetupWizard() {
                     aria-current={isActive ? 'step' : undefined}
                     title={t(`setup.steps.${step}.title`)}
                     className={cn(
-                      'h-1.5 w-full rounded-full transition-colors',
-                      isActive ? 'bg-primary-500' : done ? 'bg-primary-500/40' : 'bg-surface-2',
-                      done && !isActive && 'hover:bg-primary-500/70 cursor-pointer',
+                      'group block w-full py-2',
+                      done && !isActive && 'cursor-pointer',
                     )}
                   >
+                    <div
+                      className={cn(
+                        'h-1.5 w-full rounded-full transition-colors',
+                        isActive ? 'bg-primary-500' : done ? 'bg-primary-500/40' : 'bg-surface-2',
+                        done && !isActive && 'group-hover:bg-primary-500/70',
+                      )}
+                    />
                     <span className="sr-only">{t(`setup.steps.${step}.title`)}</span>
                   </button>
                 </li>

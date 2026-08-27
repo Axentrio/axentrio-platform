@@ -82,45 +82,49 @@ export const TENANT_KEY_DENYLIST: readonly string[] = [
   'customer_id',
 ] as const;
 
-/**
- * Throw if any property key in the schema (case-insensitive,
- * recursive) matches the tenant-key denylist.
- *
- * Walks `properties`, `items` / `additionalProperties` shapes, plus
- * the `$defs` / `anyOf` / `oneOf` / `allOf` combinators. Non-object
- * nodes are skipped.
- */
-export function assertSchemaHasNoTenantKeys(
-  schema: unknown,
+/** Walk `properties`, throwing on the first denylisted key. */
+function assertPropertiesHaveNoTenantKeys(
+  node: Record<string, unknown>,
   toolName: string,
-  path: string[] = [],
+  path: string[],
 ): void {
-  if (schema === null || typeof schema !== 'object') return;
-  const node = schema as Record<string, unknown>;
-
   const properties = node.properties;
-  if (properties && typeof properties === 'object') {
-    for (const [key, child] of Object.entries(properties)) {
-      if (TENANT_KEY_DENYLIST.includes(key.toLowerCase())) {
-        throw new Error(
-          `Copilot tool '${toolName}' parameter schema includes forbidden tenant-binding key '${key}' at ${[...path, 'properties', key].join('.')}. ` +
-            `Tenant context comes from ctx, never from args.`,
-        );
-      }
-      assertSchemaHasNoTenantKeys(child, toolName, [...path, 'properties', key]);
+  if (!properties || typeof properties !== 'object') return;
+  for (const [key, child] of Object.entries(properties)) {
+    if (TENANT_KEY_DENYLIST.includes(key.toLowerCase())) {
+      throw new Error(
+        `Copilot tool '${toolName}' parameter schema includes forbidden tenant-binding key '${key}' at ${[...path, 'properties', key].join('.')}. ` +
+          `Tenant context comes from ctx, never from args.`,
+      );
     }
+    assertSchemaHasNoTenantKeys(child, toolName, [...path, 'properties', key]);
   }
+}
 
-  // patternProperties — keys are regex, so we can't lowercase-compare
-  // them. We don't currently allow tenant patterns via this path; if a
-  // tool needs patternProperties later we'll re-evaluate.
+// patternProperties — keys are regex, so we can't lowercase-compare
+// them. We don't currently allow tenant patterns via this path; if a
+// tool needs patternProperties later we'll re-evaluate.
+function assertPatternPropertiesHaveNoTenantKeys(
+  node: Record<string, unknown>,
+  toolName: string,
+  path: string[],
+): void {
   const patternProperties = node.patternProperties;
-  if (patternProperties && typeof patternProperties === 'object') {
-    for (const [pat, child] of Object.entries(patternProperties)) {
-      assertSchemaHasNoTenantKeys(child, toolName, [...path, 'patternProperties', pat]);
-    }
+  if (!patternProperties || typeof patternProperties !== 'object') return;
+  for (const [pat, child] of Object.entries(patternProperties)) {
+    assertSchemaHasNoTenantKeys(child, toolName, [...path, 'patternProperties', pat]);
   }
+}
 
+/**
+ * Walk `items` / `additionalProperties`, then the `$defs` /
+ * `definitions` map and the `anyOf` / `oneOf` / `allOf` combinators.
+ */
+function assertNestedSchemasHaveNoTenantKeys(
+  node: Record<string, unknown>,
+  toolName: string,
+  path: string[],
+): void {
   const items = node.items;
   if (items && typeof items === 'object') {
     assertSchemaHasNoTenantKeys(items, toolName, [...path, 'items']);
@@ -146,6 +150,27 @@ export function assertSchemaHasNoTenantKeys(
       );
     }
   }
+}
+
+/**
+ * Throw if any property key in the schema (case-insensitive,
+ * recursive) matches the tenant-key denylist.
+ *
+ * Walks `properties`, `items` / `additionalProperties` shapes, plus
+ * the `$defs` / `anyOf` / `oneOf` / `allOf` combinators. Non-object
+ * nodes are skipped.
+ */
+export function assertSchemaHasNoTenantKeys(
+  schema: unknown,
+  toolName: string,
+  path: string[] = [],
+): void {
+  if (schema === null || typeof schema !== 'object') return;
+  const node = schema as Record<string, unknown>;
+
+  assertPropertiesHaveNoTenantKeys(node, toolName, path);
+  assertPatternPropertiesHaveNoTenantKeys(node, toolName, path);
+  assertNestedSchemasHaveNoTenantKeys(node, toolName, path);
 }
 
 /**

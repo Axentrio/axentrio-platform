@@ -154,48 +154,73 @@ export function isOutsideBusinessHours(
   if (!bh?.enabled || !Array.isArray(bh.schedule) || bh.schedule.length === 0) return false;
   if (!timezone) return false; // no trustworthy timezone → treat as open
   try {
-    const tz = timezone;
-    const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(now);
-    const hour = parts.find((p) => p.type === 'hour')?.value;
-    const minute = parts.find((p) => p.type === 'minute')?.value;
-    if (!hour || !minute) return false;
-    const timeStr = `${hour}:${minute}`;
-    const dateParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-    const y = dateParts.find((p) => p.type === 'year')?.value;
-    const m = dateParts.find((p) => p.type === 'month')?.value;
-    const d = dateParts.find((p) => p.type === 'day')?.value;
-    const dateStr = y && m && d ? `${y}-${m}-${d}` : '';
+    const zoned = zonedNowInTimezone(now, timezone);
+    if (!zoned) return false;
     // A well-formed Date Override replaces the weekly schedule for that local
     // date. Malformed / missing exceptions are ignored (fail-safe to the weekly
     // grid, never a wrong "closed").
-    const override = dateStr ? pickOverrideForDate(bh.dateOverrides, dateStr) : undefined;
-    if (override) {
-      if (override.closed) return true;
-      const windows = Array.isArray(override.windows) ? override.windows : [];
-      const usable = windows.filter(
-        (w) => w && typeof w.start === 'string' && typeof w.end === 'string' && w.start && w.end,
-      );
-      if (usable.length === 0) return false; // override present but hours unusable → open
-      return usable.every((w) => timeStr < w.start || timeStr >= w.end);
-    }
-    const daySchedule = bh.schedule.find(
-      (s) => s && typeof s.day === 'string' && s.day.toLowerCase() === dayName,
-    );
-    if (!daySchedule || daySchedule.closed) return true; // no entry for today, or explicitly closed
-    if (typeof daySchedule.open !== 'string' || typeof daySchedule.close !== 'string') return false; // malformed → open
-    return timeStr < daySchedule.open || timeStr >= daySchedule.close;
+    const override = zoned.dateStr ? pickOverrideForDate(bh.dateOverrides, zoned.dateStr) : undefined;
+    if (override) return isOutsideOverride(override, zoned.timeStr);
+    return isOutsideWeeklySchedule(bh.schedule, zoned.dayName, zoned.timeStr);
   } catch {
     return false; // invalid timezone or any unexpected shape → treat as open
   }
+}
+
+interface ZonedNow {
+  /** Lowercased weekday name in the business timezone, e.g. "monday". */
+  dayName: string;
+  /** Local wall clock as "HH:mm", h23. */
+  timeStr: string;
+  /** Local calendar date as "YYYY-MM-DD", or '' when unavailable. */
+  dateStr: string;
+}
+
+/** The local day/time/date in `tz`, or null when the clock parts are unusable. */
+function zonedNowInTimezone(now: Date, tz: string): ZonedNow | null {
+  const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const hour = parts.find((p) => p.type === 'hour')?.value;
+  const minute = parts.find((p) => p.type === 'minute')?.value;
+  if (!hour || !minute) return null;
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const y = dateParts.find((p) => p.type === 'year')?.value;
+  const m = dateParts.find((p) => p.type === 'month')?.value;
+  const d = dateParts.find((p) => p.type === 'day')?.value;
+  return { dayName, timeStr: `${hour}:${minute}`, dateStr: y && m && d ? `${y}-${m}-${d}` : '' };
+}
+
+/** Closed right now per a Date Override; unusable windows fail safe to open. */
+function isOutsideOverride(override: DateOverride, timeStr: string): boolean {
+  if (override.closed) return true;
+  const windows = Array.isArray(override.windows) ? override.windows : [];
+  const usable = windows.filter(
+    (w) => w && typeof w.start === 'string' && typeof w.end === 'string' && w.start && w.end,
+  );
+  if (usable.length === 0) return false; // override present but hours unusable → open
+  return usable.every((w) => timeStr < w.start || timeStr >= w.end);
+}
+
+/** Closed right now per the weekly grid; malformed entries fail safe to open. */
+function isOutsideWeeklySchedule(
+  schedule: BusinessHoursDay[],
+  dayName: string,
+  timeStr: string,
+): boolean {
+  const daySchedule = schedule.find(
+    (s) => s && typeof s.day === 'string' && s.day.toLowerCase() === dayName,
+  );
+  if (!daySchedule || daySchedule.closed) return true; // no entry for today, or explicitly closed
+  if (typeof daySchedule.open !== 'string' || typeof daySchedule.close !== 'string') return false; // malformed → open
+  return timeStr < daySchedule.open || timeStr >= daySchedule.close;
 }

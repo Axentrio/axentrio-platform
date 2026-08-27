@@ -38,6 +38,10 @@ jobs:
         working-directory: api
         run: npx tsc --noEmit
 
+      - name: Lint API
+        working-directory: api
+        run: npm run lint
+
       - name: Run API unit tests
         working-directory: api
         run: npm run test:unit
@@ -131,6 +135,10 @@ jobs:
       - name: Type-check Portal
         working-directory: portal
         run: npx tsc --noEmit
+
+      - name: Lint Portal
+        working-directory: portal
+        run: npm run lint
 
       - name: Run Portal tests
         working-directory: portal

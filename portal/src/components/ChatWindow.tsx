@@ -29,7 +29,7 @@ import { FileAttachment } from './FilePreview';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { Chat, Message } from '@app-types/index';
+import type { Chat, Message, ThreadDuplicateEntry } from '@app-types/index';
 
 interface ChatWindowProps {
   chat: Chat;
@@ -51,6 +51,296 @@ function handleTextareaResize(e: React.ChangeEvent<HTMLTextAreaElement>): void {
   textarea.style.height = 'auto';
   textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
 }
+
+/** Sender disc: 'A' for the agent, 'B' for the bot, an icon for the visitor. */
+const MessageAvatar: React.FC<{ isAgent: boolean; isBot: boolean }> = ({ isAgent, isBot }) => (
+  <div className={cn(
+    'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
+    isAgent
+      ? 'bg-primary-600/20 text-primary-400'
+      : isBot
+        ? 'bg-chat-bot/20 text-chat-bot'
+        : 'bg-surface-3 text-text-secondary'
+  )}>
+    {isAgent ? 'A' : isBot ? 'B' : <User className="w-4 h-4" />}
+  </div>
+);
+
+/** Sender label above a bubble: the carried name, else the role. */
+const MessageSenderName: React.FC<{ message: Message; isAgent: boolean; isBot: boolean }> = ({
+  message,
+  isAgent,
+  isBot,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <span className="text-xs text-text-muted mb-1">
+      {message.senderName || (isAgent ? t('inbox.window.sender.agent') : isBot ? t('inbox.window.sender.bot') : t('inbox.window.sender.visitor'))}
+    </span>
+  );
+};
+
+/** Bubble payload: text, image, or file attachment. */
+const MessageBody: React.FC<{ message: Message }> = ({ message }) => {
+  const { t } = useTranslation();
+  return message.type === 'text' ? (
+    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+  ) : message.type === 'image' ? (
+    <img
+      src={message.fileUrl}
+      alt={message.fileName || t('inbox.window.message.image')}
+      className="max-w-48 max-h-48 rounded-lg object-cover"
+    />
+  ) : (
+    <FileAttachment
+      fileName={message.fileName || t('inbox.window.message.file')}
+      fileType={message.fileType || 'application/octet-stream'}
+      fileSize={message.fileSize}
+      onClick={() => {
+        // Open file preview
+      }}
+    />
+  );
+};
+
+/** Timestamp, or the pending / failed delivery line with its Retry. */
+const MessageDeliveryLine: React.FC<{
+  message: Message;
+  onRetry: (clientMessageId: string) => void;
+}> = ({ message, onRetry }) => {
+  const { t } = useTranslation();
+  if (message.deliveryState === 'pending') {
+    return (
+      <span className="text-xs text-text-muted mt-1">
+        {t('inbox.window.message.sending')}
+      </span>
+    );
+  }
+  if (message.deliveryState === 'failed') {
+    return (
+      <span className="text-xs text-red-500 mt-1 flex items-center gap-1.5">
+        {t('inbox.window.message.failed')}
+        {message.clientMessageId && (
+          <button
+            type="button"
+            onClick={() => onRetry(message.clientMessageId!)}
+            className="inline-flex items-center gap-1 font-medium text-red-500 hover:text-red-400 underline"
+          >
+            <RotateCw className="w-3 h-3" />
+            {t('inbox.window.message.retry')}
+          </button>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-text-muted mt-1">
+      {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+    </span>
+  );
+};
+
+/** One thread row: a centered system event, or an avatar + bubble exchange. */
+const MessageRow: React.FC<{
+  message: Message;
+  onRetry: (clientMessageId: string) => void;
+}> = ({ message, onRetry }) => {
+  if (message.type === 'system' || message.sender === 'system') {
+    return (
+      <div className="flex justify-center mb-4" data-testid="system-event">
+        <p className="text-xs text-text-muted text-center max-w-[80%]">{message.content}</p>
+      </div>
+    );
+  }
+
+  const isAgent = message.sender === 'agent';
+  const isBot = message.sender === 'bot';
+  const isVisitor = !isAgent && !isBot;
+  const isPending = message.deliveryState === 'pending';
+  const isFailed = message.deliveryState === 'failed';
+
+  return (
+    <div className={`flex ${isVisitor ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
+        {/* Avatar */}
+        <MessageAvatar isAgent={isAgent} isBot={isBot} />
+
+        {/* Message content */}
+        <div className={`flex flex-col ${isVisitor ? 'items-end' : 'items-start'}`}>
+          {/* Sender name */}
+          <MessageSenderName message={message} isAgent={isAgent} isBot={isBot} />
+
+          {/* Message bubble */}
+          <div
+            className={cn(
+              'px-4 py-2 rounded-2xl',
+              isVisitor
+                ? 'bg-primary-600 text-white rounded-br-md'
+                : isBot
+                  ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'
+                  : 'bg-surface-3 text-text-primary rounded-bl-md',
+              isPending && 'opacity-60',
+              isFailed && 'border border-red-500/50'
+            )}
+          >
+            <MessageBody message={message} />
+          </div>
+
+          {/* Timestamp / delivery state */}
+          <MessageDeliveryLine message={message} onRetry={onRetry} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Conversation header: visitor identity, status, transfer / close actions. */
+const ChatWindowHeader: React.FC<{
+  chat: Chat;
+  onClose?: () => void;
+  onTransfer?: (chatId: string) => void;
+}> = ({ chat, onClose, onTransfer }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-surface-3 flex items-center justify-center">
+          <User className="w-5 h-5 text-text-secondary" />
+        </div>
+        <div>
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="font-semibold text-text-primary truncate">
+              {chat.userName || t('inbox.chat.anonymousUser')}
+            </h3>
+            <ChannelBadge channel={chat.channel} source={chat.metadata?.source} />
+          </div>
+          <div className="flex items-center gap-2">
+            <ChatStatusBadge status={chat.status} size="sm" />
+            {chat.tenantName && (
+              <span className="text-xs text-text-muted">• {chat.tenantName}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {onTransfer && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onTransfer(chat.id)}
+            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
+            title={t('inbox.window.transferChat')}
+            aria-label={t('inbox.window.transferChat')}
+          >
+            <ArrowRightLeft className="w-5 h-5" />
+          </Button>
+        )}
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            ×
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** Optional visitor facts strip. Renders nothing without email or page URL. */
+const VisitorInfoBar: React.FC<{ chat: Chat }> = ({ chat }) => {
+  if (!chat?.userEmail && !chat?.metadata?.pageUrl) return null;
+  return (
+    <div className="px-4 py-2 border-b border-edge bg-surface-1/50 text-xs text-text-secondary space-y-1">
+      {chat.userEmail && (
+        <div className="flex items-center gap-1.5">
+          <Mail className="w-3 h-3" />
+          <span>{chat.userEmail}</span>
+        </div>
+      )}
+      {chat.metadata?.pageUrl && (
+        <div className="flex items-center gap-1.5">
+          <Globe className="w-3 h-3" />
+          <span className="truncate">{chat.metadata.pageUrl}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Possible-duplicates audit (B-PR4b §4): read-only, never merged. */
+const PossibleDuplicatesNote: React.FC<{
+  duplicates: ThreadDuplicateEntry[];
+  onOpenSession?: (sessionId: string) => void;
+}> = ({ duplicates, onOpenSession }) => {
+  const { t } = useTranslation();
+  if (duplicates.length === 0) return null;
+  return (
+    <div className="px-4 py-2 border-b border-edge bg-amber-500/5 text-xs" role="note">
+      <p className="flex items-center gap-1.5 font-medium text-amber-600">
+        <Users className="w-3 h-3 flex-shrink-0" />
+        {t('inbox.thread.duplicatesTitle')}
+      </p>
+      <ul className="mt-1 space-y-1">
+        {duplicates.map((dup) => (
+          <li
+            key={dup.summary.id}
+            className="flex items-center gap-2 text-text-secondary"
+          >
+            <span className="truncate flex-1">
+              {dup.summary.userName || t('inbox.chat.anonymousUser')}
+              {' · '}
+              {dup.summary.channel ?? dup.summary.source ?? ''}
+              {' · '}
+              {formatBoundaryDate(dup.boundary.startedAt)}
+            </span>
+            {onOpenSession && (
+              <button
+                type="button"
+                onClick={() => onOpenSession(dup.summary.sessionId ?? dup.summary.id)}
+                className="flex-shrink-0 font-medium text-primary-400 hover:text-primary-300 underline"
+              >
+                {t('inbox.thread.open')}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+/** Non-destructive send-conflict notice — the composer draft is KEPT. */
+const SendConflictNotice: React.FC<{ notice: string | null; onDismiss: () => void }> = ({
+  notice,
+  onDismiss,
+}) => {
+  const { t } = useTranslation();
+  if (!notice) return null;
+  return (
+    <div
+      role="status"
+      className="mb-2 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600"
+    >
+      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+      <span className="flex-1">{notice}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="font-medium hover:text-amber-500"
+        aria-label={t('common.close')}
+      >
+        ×
+      </button>
+    </div>
+  );
+};
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   chat,
@@ -185,113 +475,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Auto-resize textarea
-  const renderMessage = (message: Message) => {
-    if (message.type === 'system' || message.sender === 'system') {
-      return (
-        <div
-          key={message.clientMessageId ?? message.id}
-          className="flex justify-center mb-4"
-          data-testid="system-event"
-        >
-          <p className="text-xs text-text-muted text-center max-w-[80%]">{message.content}</p>
-        </div>
-      );
-    }
-
-    const isAgent = message.sender === 'agent';
-    const isBot = message.sender === 'bot';
-    const isVisitor = !isAgent && !isBot;
-    const isPending = message.deliveryState === 'pending';
-    const isFailed = message.deliveryState === 'failed';
-
-    return (
-      <div
-        key={message.clientMessageId ?? message.id}
-        className={`flex ${isVisitor ? 'justify-end' : 'justify-start'} mb-4`}
-      >
-        <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
-          {/* Avatar */}
-          <div className={cn(
-            'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
-            isAgent
-              ? 'bg-primary-600/20 text-primary-400'
-              : isBot
-                ? 'bg-chat-bot/20 text-chat-bot'
-                : 'bg-surface-3 text-text-secondary'
-          )}>
-            {isAgent ? 'A' : isBot ? 'B' : <User className="w-4 h-4" />}
-          </div>
-
-          {/* Message content */}
-          <div className={`flex flex-col ${isVisitor ? 'items-end' : 'items-start'}`}>
-            {/* Sender name */}
-            <span className="text-xs text-text-muted mb-1">
-              {message.senderName || (isAgent ? t('inbox.window.sender.agent') : isBot ? t('inbox.window.sender.bot') : t('inbox.window.sender.visitor'))}
-            </span>
-
-            {/* Message bubble */}
-            <div
-              className={cn(
-                'px-4 py-2 rounded-2xl',
-                isVisitor
-                  ? 'bg-primary-600 text-white rounded-br-md'
-                  : isBot
-                    ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'
-                    : 'bg-surface-3 text-text-primary rounded-bl-md',
-                isPending && 'opacity-60',
-                isFailed && 'border border-red-500/50'
-              )}
-            >
-              {message.type === 'text' ? (
-                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-              ) : message.type === 'image' ? (
-                <img
-                  src={message.fileUrl}
-                  alt={message.fileName || t('inbox.window.message.image')}
-                  className="max-w-48 max-h-48 rounded-lg object-cover"
-                />
-              ) : (
-                <FileAttachment
-                  fileName={message.fileName || t('inbox.window.message.file')}
-                  fileType={message.fileType || 'application/octet-stream'}
-                  fileSize={message.fileSize}
-                  onClick={() => {
-                    // Open file preview
-                  }}
-                />
-              )}
-            </div>
-
-            {/* Timestamp / delivery state */}
-            {isPending ? (
-              <span className="text-xs text-text-muted mt-1">
-                {t('inbox.window.message.sending')}
-              </span>
-            ) : isFailed ? (
-              <span className="text-xs text-red-500 mt-1 flex items-center gap-1.5">
-                {t('inbox.window.message.failed')}
-                {message.clientMessageId && (
-                  <button
-                    type="button"
-                    onClick={() => handleRetry(message.clientMessageId!)}
-                    className="inline-flex items-center gap-1 font-medium text-red-500 hover:text-red-400 underline"
-                  >
-                    <RotateCw className="w-3 h-3" />
-                    {t('inbox.window.message.retry')}
-                  </button>
-                )}
-              </span>
-            ) : (
-              <span className="text-xs text-text-muted mt-1">
-                {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const renderMessage = (message: Message) => (
+    <MessageRow
+      key={message.clientMessageId ?? message.id}
+      message={message}
+      onRetry={handleRetry}
+    />
+  );
 
   // B-PR4b: one prior session as a labelled boundary block - collapsed by
   // default, expandable, strictly read-only. Rendered ABOVE the live thread.
@@ -346,107 +536,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   return (
     <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-surface-3 flex items-center justify-center">
-            <User className="w-5 h-5 text-text-secondary" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 min-w-0">
-              <h3 className="font-semibold text-text-primary truncate">
-                {chat.userName || t('inbox.chat.anonymousUser')}
-              </h3>
-              <ChannelBadge channel={chat.channel} source={chat.metadata?.source} />
-            </div>
-            <div className="flex items-center gap-2">
-              <ChatStatusBadge status={chat.status} size="sm" />
-              {chat.tenantName && (
-                <span className="text-xs text-text-muted">• {chat.tenantName}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {onTransfer && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onTransfer(chat.id)}
-              className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
-              title={t('inbox.window.transferChat')}
-              aria-label={t('inbox.window.transferChat')}
-            >
-              <ArrowRightLeft className="w-5 h-5" />
-            </Button>
-          )}
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
-              aria-label={t('common.close')}
-              title={t('common.close')}
-            >
-              ×
-            </Button>
-          )}
-        </div>
-      </div>
+      <ChatWindowHeader chat={chat} onClose={onClose} onTransfer={onTransfer} />
 
       {/* Visitor info */}
-      {(chat?.userEmail || chat?.metadata?.pageUrl) ? (
-        <div className="px-4 py-2 border-b border-edge bg-surface-1/50 text-xs text-text-secondary space-y-1">
-          {chat.userEmail && (
-            <div className="flex items-center gap-1.5">
-              <Mail className="w-3 h-3" />
-              <span>{chat.userEmail}</span>
-            </div>
-          )}
-          {chat.metadata?.pageUrl && (
-            <div className="flex items-center gap-1.5">
-              <Globe className="w-3 h-3" />
-              <span className="truncate">{chat.metadata.pageUrl}</span>
-            </div>
-          )}
-        </div>
-      ) : null}
+      <VisitorInfoBar chat={chat} />
 
-      {/* Possible-duplicates audit (B-PR4b §4): read-only, never merged */}
-      {possibleDuplicates.length > 0 && (
-        <div className="px-4 py-2 border-b border-edge bg-amber-500/5 text-xs" role="note">
-          <p className="flex items-center gap-1.5 font-medium text-amber-600">
-            <Users className="w-3 h-3 flex-shrink-0" />
-            {t('inbox.thread.duplicatesTitle')}
-          </p>
-          <ul className="mt-1 space-y-1">
-            {possibleDuplicates.map((dup) => (
-              <li
-                key={dup.summary.id}
-                className="flex items-center gap-2 text-text-secondary"
-              >
-                <span className="truncate flex-1">
-                  {dup.summary.userName || t('inbox.chat.anonymousUser')}
-                  {' · '}
-                  {dup.summary.channel ?? dup.summary.source ?? ''}
-                  {' · '}
-                  {formatBoundaryDate(dup.boundary.startedAt)}
-                </span>
-                {onOpenSession && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenSession(dup.summary.sessionId ?? dup.summary.id)}
-                    className="flex-shrink-0 font-medium text-primary-400 hover:text-primary-300 underline"
-                  >
-                    {t('inbox.thread.open')}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <PossibleDuplicatesNote duplicates={possibleDuplicates} onOpenSession={onOpenSession} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 bg-surface-1">
@@ -481,24 +576,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Input area */}
       <div className="px-4 py-3 border-t border-edge bg-surface-2">
-        {/* Non-destructive send-conflict notice — the draft below is KEPT */}
-        {sendNotice && (
-          <div
-            role="status"
-            className="mb-2 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600"
-          >
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="flex-1">{sendNotice}</span>
-            <button
-              type="button"
-              onClick={() => setSendNotice(null)}
-              className="font-medium hover:text-amber-500"
-              aria-label={t('common.close')}
-            >
-              ×
-            </button>
-          </div>
-        )}
+        <SendConflictNotice notice={sendNotice} onDismiss={() => setSendNotice(null)} />
         {showTakeoverHint && (
           <p className="mb-2 text-xs text-text-muted" data-testid="send-takes-over-hint">
             {t('inbox.window.composer.sendTakesOver')}

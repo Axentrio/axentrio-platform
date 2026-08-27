@@ -62,7 +62,7 @@ import {
   type PlanFeatures,
 } from '../queries/useEntitlementsQueries';
 import { PlanBadge } from '@/components/billing/PlanBadge';
-import type { UserRole } from '@app-types/index';
+import type { User, UserRole } from '@app-types/index';
 
 type RequiredTier = 'pro' | 'enterprise';
 
@@ -218,6 +218,176 @@ const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount })
   );
 };
 
+/** The organization fields the sidebar header reads. */
+interface SidebarOrg {
+  name?: string | null;
+  hasImage: boolean;
+  imageUrl: string;
+}
+
+/** A membership row offered by the org switcher. */
+interface SidebarOrgOption {
+  organization: { id: string; name: string };
+}
+
+/** Logo (or initial) plus the org / impersonated tenant name. */
+const SidebarOrgIdentity: React.FC<{
+  impersonatedTenantName: string | null;
+  organization: SidebarOrg | null | undefined;
+}> = ({ impersonatedTenantName, organization }) => {
+  const { t } = useTranslation();
+  const isImpersonating = impersonatedTenantName != null;
+  return (
+    <>
+      <div className="relative">
+        <div className={cn(
+          'absolute inset-0 rounded-xl blur-md',
+          isImpersonating ? 'bg-orange-500/20' : 'bg-primary-500/20'
+        )} />
+        {!isImpersonating && organization?.hasImage ? (
+          <img
+            src={organization.imageUrl}
+            alt={organization.name ?? ''}
+            className="relative w-8 h-8 rounded-xl object-cover"
+          />
+        ) : (
+          <div className={cn(
+            'relative w-8 h-8 rounded-xl flex items-center justify-center',
+            isImpersonating ? 'bg-orange-500' : 'bg-primary-600'
+          )}>
+            <span className="text-sm font-bold text-white">
+              {isImpersonating
+                ? impersonatedTenantName.charAt(0).toUpperCase()
+                : organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <h1 className="font-bold text-text-primary truncate">
+          {isImpersonating ? impersonatedTenantName : organization?.name ?? 'Axentrio'}
+        </h1>
+        {isImpersonating && (
+          <p className="text-xs text-orange-400 font-medium">
+            {t('sidebar.impersonating')}
+          </p>
+        )}
+      </div>
+    </>
+  );
+};
+
+/** Org branding row: identity plus the tenant-palette / org-switch / exit controls. */
+const SidebarOrgHeader: React.FC<{
+  isSuperAdmin: boolean;
+  impersonatedTenantName: string | null;
+  organization: SidebarOrg | null | undefined;
+  otherOrgs: SidebarOrgOption[];
+  onOpenTenantPalette: () => void;
+  onExitImpersonation: () => void;
+  onSwitchOrg: (orgId: string) => void;
+}> = ({
+  isSuperAdmin,
+  impersonatedTenantName,
+  organization,
+  otherOrgs,
+  onOpenTenantPalette,
+  onExitImpersonation,
+  onSwitchOrg,
+}) => {
+  const { t } = useTranslation();
+  const isImpersonating = impersonatedTenantName != null;
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 px-4 py-4 border-b border-edge relative',
+        isImpersonating && 'bg-orange-500/10'
+      )}
+    >
+      <SidebarOrgIdentity
+        impersonatedTenantName={impersonatedTenantName}
+        organization={organization}
+      />
+      {isSuperAdmin && !isImpersonating && (
+        <button
+          type="button"
+          onClick={onOpenTenantPalette}
+          className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+          title={t('sidebar.switchTenant')}
+        >
+          <ChevronDown className="w-4 h-4" />
+        </button>
+      )}
+      {!isSuperAdmin && otherOrgs.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+              title={t('sidebar.switchOrganization', { defaultValue: 'Switch organization' })}
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            {otherOrgs.map((m) => (
+              <DropdownMenuItem key={m.organization.id} onClick={() => onSwitchOrg(m.organization.id)}>
+                {m.organization.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {isImpersonating && (
+        <button
+          type="button"
+          onClick={onExitImpersonation}
+          className="px-2 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors"
+        >
+          {t('sidebar.exitImpersonation')}
+        </button>
+      )}
+    </div>
+  );
+};
+
+/** Avatar, name, role, and the sign-out button at the foot of the sidebar. */
+const SidebarUserSection: React.FC<{
+  user: User | null;
+  onSignOut: () => void;
+}> = ({ user, onSignOut }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="px-4 py-4 border-t border-edge">
+      <div className="flex items-center gap-3 mb-4 p-2 rounded-xl glass">
+        <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
+          <span className="text-sm font-medium text-primary-400">
+            {user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-text-primary truncate">
+            {user?.firstName} {user?.lastName}
+          </p>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-status-online shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+            <p className="text-xs text-text-muted">{user?.role ? t(`roles.${user.role}`) : ''}</p>
+          </div>
+        </div>
+      </div>
+
+      <Button
+        variant="ghost"
+        onClick={() => onSignOut()}
+        className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors justify-start"
+      >
+        <LogOut className="w-5 h-5" />
+        {t('sidebar.signOut')}
+      </Button>
+    </div>
+  );
+};
+
 export const Sidebar: React.FC<SidebarProps> = ({
   className = ''
 }) => {
@@ -232,6 +402,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { exitTenant } = useTenantSwitch();
   const isSuperAdmin = user?.role === 'super_admin';
   const isImpersonating = isSuperAdmin && !!activeTenant;
+  const impersonatedTenantName = isImpersonating ? activeTenant.tenantName : null;
 
   // Clerk org switching for multi-org members. Super admins use the tenant
   // palette (impersonation) instead; everyone else previously had NO way to
@@ -266,7 +437,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className={cn(
-      'flex flex-col w-full h-full bg-surface-0 border-r border-edge',
+      'relative flex flex-col w-full h-full bg-surface-0 border-r border-edge',
       isImpersonating && 'border-l-[3px] border-l-orange-500',
       className
     )}>
@@ -274,86 +445,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
 
       {/* Org branding / Tenant switcher trigger */}
-      <div
-        className={cn(
-          'flex items-center gap-3 px-4 py-4 border-b border-edge relative',
-          isImpersonating && 'bg-orange-500/10'
-        )}
-      >
-        <div className="relative">
-          <div className={cn(
-            'absolute inset-0 rounded-xl blur-md',
-            isImpersonating ? 'bg-orange-500/20' : 'bg-primary-500/20'
-          )} />
-          {!isImpersonating && organization?.hasImage ? (
-            <img
-              src={organization.imageUrl}
-              alt={organization.name ?? ''}
-              className="relative w-8 h-8 rounded-xl object-cover"
-            />
-          ) : (
-            <div className={cn(
-              'relative w-8 h-8 rounded-xl flex items-center justify-center',
-              isImpersonating ? 'bg-orange-500' : 'bg-primary-600'
-            )}>
-              <span className="text-sm font-bold text-white">
-                {isImpersonating
-                  ? activeTenant.tenantName.charAt(0).toUpperCase()
-                  : organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="font-bold text-text-primary truncate">
-            {isImpersonating ? activeTenant.tenantName : organization?.name ?? 'Axentrio'}
-          </h1>
-          {isImpersonating && (
-            <p className="text-xs text-orange-400 font-medium">
-              {t('sidebar.impersonating')}
-            </p>
-          )}
-        </div>
-        {isSuperAdmin && !isImpersonating && (
-          <button
-            type="button"
-            onClick={openTenantPalette}
-            className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
-            title={t('sidebar.switchTenant')}
-          >
-            <ChevronDown className="w-4 h-4" />
-          </button>
-        )}
-        {!isSuperAdmin && otherOrgs.length > 0 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
-                title={t('sidebar.switchOrganization', { defaultValue: 'Switch organization' })}
-              >
-                <ChevronDown className="w-4 h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              {otherOrgs.map((m) => (
-                <DropdownMenuItem key={m.organization.id} onClick={() => handleSwitchOrg(m.organization.id)}>
-                  {m.organization.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        {isImpersonating && (
-          <button
-            type="button"
-            onClick={exitTenant}
-            className="px-2 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors"
-          >
-            {t('sidebar.exitImpersonation')}
-          </button>
-        )}
-      </div>
+      <SidebarOrgHeader
+        isSuperAdmin={isSuperAdmin}
+        impersonatedTenantName={impersonatedTenantName}
+        organization={organization}
+        otherOrgs={otherOrgs}
+        onOpenTenantPalette={openTenantPalette}
+        onExitImpersonation={exitTenant}
+        onSwitchOrg={handleSwitchOrg}
+      />
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
@@ -411,33 +511,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* User section */}
-      <div className="px-4 py-4 border-t border-edge">
-        <div className="flex items-center gap-3 mb-4 p-2 rounded-xl glass">
-          <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
-            <span className="text-sm font-medium text-primary-400">
-              {user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-text-primary truncate">
-              {user?.firstName} {user?.lastName}
-            </p>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-status-online shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              <p className="text-xs text-text-muted">{user?.role ? t(`roles.${user.role}`) : ''}</p>
-            </div>
-          </div>
-        </div>
-
-        <Button
-          variant="ghost"
-          onClick={() => signOut()}
-          className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors justify-start"
-        >
-          <LogOut className="w-5 h-5" />
-          {t('sidebar.signOut')}
-        </Button>
-      </div>
+      <SidebarUserSection user={user} onSignOut={signOut} />
     </aside>
   );
 };

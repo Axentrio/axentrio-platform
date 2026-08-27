@@ -1,7 +1,12 @@
 import { logger } from '../utils/logger';
 import { EmailService } from './email.service';
 import { renderTemplate, buildVariablesFromEvent } from './template';
-import type { WebhookEvent } from '../webhooks/webhook.types';
+import type {
+  AppointmentBookedEvent,
+  ConversationEndedEvent,
+  LeadCreatedEvent,
+  WebhookEvent,
+} from '../webhooks/webhook.types';
 import type { Tenant } from '../database/entities/Tenant';
 
 type EmailNotificationConfig = {
@@ -36,68 +41,107 @@ export class AutomationEngine {
 
     try {
       if (event.type === 'appointment.booked') {
-        const config = emailNotifications.bookingConfirmation;
-        if (!config?.enabled) return;
-
-        const attendeeEmail = event.appointment.attendeeEmail;
-        const variables = buildVariablesFromEvent(
-          { type: event.type, data: { name: event.appointment.attendeeName, email: attendeeEmail, date: event.appointment.startTime, time: event.appointment.startTime } },
+        await this.sendBookingConfirmation(
+          event,
+          emailNotifications.bookingConfirmation,
           tenantName,
-          botName
+          botName,
         );
-        const subject = config.subject ? renderTemplate(config.subject, variables) : 'Your appointment has been confirmed';
-        const body = config.body ? renderTemplate(config.body, variables) : `Hi {name}, your appointment is confirmed.`;
-
-        await this.emailService.send({ to: attendeeEmail, subject, body });
         return;
       }
 
       if (event.type === 'lead.created') {
-        const config = emailNotifications.newLeadAlert;
-        if (!config?.enabled) return;
-
-        const recipients = config.recipients ?? [];
-        if (recipients.length === 0) return;
-
-        const variables = buildVariablesFromEvent(
-          { type: event.type, data: { name: event.lead.name, email: event.lead.email, phone: event.lead.phone, notes: event.lead.notes } },
+        await this.sendNewLeadAlert(
+          event,
+          emailNotifications.newLeadAlert,
           tenantName,
-          botName
+          botName,
         );
-        const subject = config.subject ? renderTemplate(config.subject, variables) : 'New lead received';
-        const body = config.body ? renderTemplate(config.body, variables) : `A new lead has been captured.`;
-
-        await this.emailService.send({ to: recipients, subject, body });
         return;
       }
 
       if (event.type === 'conversation.ended') {
-        const config = emailNotifications.conversationSummary;
-        if (!config?.enabled) return;
-
-        const recipients = config.recipients ?? [];
-        if (recipients.length === 0) return;
-
-        const variables = buildVariablesFromEvent(
-          {
-            type: event.type,
-            data: {
-              messageCount: event.conversation.messageCount,
-              duration: event.conversation.durationSeconds,
-              tags: event.session.tags,
-            },
-          },
+        await this.sendConversationSummary(
+          event,
+          emailNotifications.conversationSummary,
           tenantName,
-          botName
+          botName,
         );
-        const subject = config.subject ? renderTemplate(config.subject, variables) : 'Conversation summary';
-        const body = config.body ? renderTemplate(config.body, variables) : `A conversation has ended.`;
-
-        await this.emailService.send({ to: recipients, subject, body });
         return;
       }
     } catch (err) {
       logger.error('[AutomationEngine] failed to process event', { eventType: event.type, tenantId: tenant.id, err });
     }
+  }
+
+  private async sendBookingConfirmation(
+    event: AppointmentBookedEvent,
+    config: EmailNotificationConfig | undefined,
+    tenantName: string,
+    botName: string,
+  ): Promise<void> {
+    if (!config?.enabled) return;
+
+    const attendeeEmail = event.appointment.attendeeEmail;
+    const variables = buildVariablesFromEvent(
+      { type: event.type, data: { name: event.appointment.attendeeName, email: attendeeEmail, date: event.appointment.startTime, time: event.appointment.startTime } },
+      tenantName,
+      botName
+    );
+    const subject = config.subject ? renderTemplate(config.subject, variables) : 'Your appointment has been confirmed';
+    const body = config.body ? renderTemplate(config.body, variables) : `Hi {name}, your appointment is confirmed.`;
+
+    await this.emailService.send({ to: attendeeEmail, subject, body });
+  }
+
+  private async sendNewLeadAlert(
+    event: LeadCreatedEvent,
+    config: (EmailNotificationConfig & { recipients: string[] }) | undefined,
+    tenantName: string,
+    botName: string,
+  ): Promise<void> {
+    if (!config?.enabled) return;
+
+    const recipients = config.recipients ?? [];
+    if (recipients.length === 0) return;
+
+    const variables = buildVariablesFromEvent(
+      { type: event.type, data: { name: event.lead.name, email: event.lead.email, phone: event.lead.phone, notes: event.lead.notes } },
+      tenantName,
+      botName
+    );
+    const subject = config.subject ? renderTemplate(config.subject, variables) : 'New lead received';
+    const body = config.body ? renderTemplate(config.body, variables) : `A new lead has been captured.`;
+
+    await this.emailService.send({ to: recipients, subject, body });
+  }
+
+  private async sendConversationSummary(
+    event: ConversationEndedEvent,
+    config: (EmailNotificationConfig & { recipients: string[] }) | undefined,
+    tenantName: string,
+    botName: string,
+  ): Promise<void> {
+    if (!config?.enabled) return;
+
+    const recipients = config.recipients ?? [];
+    if (recipients.length === 0) return;
+
+    const variables = buildVariablesFromEvent(
+      {
+        type: event.type,
+        data: {
+          messageCount: event.conversation.messageCount,
+          duration: event.conversation.durationSeconds,
+          tags: event.session.tags,
+        },
+      },
+      tenantName,
+      botName
+    );
+    const subject = config.subject ? renderTemplate(config.subject, variables) : 'Conversation summary';
+    const body = config.body ? renderTemplate(config.body, variables) : `A conversation has ended.`;
+
+    await this.emailService.send({ to: recipients, subject, body });
   }
 }

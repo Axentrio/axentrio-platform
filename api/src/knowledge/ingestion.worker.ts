@@ -17,6 +17,48 @@ interface IngestionJobData {
   processingVersion: number;
 }
 
+/**
+ * Resolve one document's raw text: inline types come from `sourceContent`, file
+ * types are downloaded from S3 and run through the per-type extractor. Throws
+ * when the document has no reachable content.
+ */
+async function extractDocumentText(
+  doc: KnowledgeDocument,
+  s3Client: S3Client | null,
+): Promise<string> {
+  const inlineTypes: ReadonlySet<string> = new Set(["text", "faq", "url"]);
+  if (inlineTypes.has(doc.type)) {
+    return extractText(doc.sourceContent || "");
+  }
+  if (!doc.storagePath) {
+    throw new Error(`No content available for document type ${doc.type}`);
+  }
+  if (!s3Client || !config.s3?.bucket) {
+    throw new Error(
+      "S3 is not configured but document requires file download",
+    );
+  }
+  const command = new GetObjectCommand({
+    Bucket: config.s3.bucket,
+    Key: doc.storagePath,
+  });
+  const response = await s3Client.send(command);
+  const buffer = Buffer.from(await response.Body!.transformToByteArray());
+  return doc.type === "pdf" ? extractPdf(buffer) : extractDocx(buffer);
+}
+
+/**
+ * Document-level summary chunk for broad queries. The embedding is null when the
+ * content is too short to be worth embedding.
+ */
+async function buildSummaryChunk(title: string, summaryText: string) {
+  const content = summaryText
+    ? `[Document: ${title}] ${summaryText}`
+    : `[Document: ${title}]`;
+  const embedding = content.length > 10 ? await embed(content) : null;
+  return { content, embedding };
+}
+
 export function createIngestionProcessor(
   dataSource: DataSource,
   s3Client: S3Client | null,
@@ -38,31 +80,7 @@ export function createIngestionProcessor(
       doc.status = "processing";
       await docRepo.save(doc);
 
-      let text: string;
-      const inlineTypes: ReadonlySet<string> = new Set(["text", "faq", "url"]);
-      if (inlineTypes.has(doc.type)) {
-        text = extractText(doc.sourceContent || "");
-      } else if (doc.storagePath) {
-        if (!s3Client || !config.s3?.bucket) {
-          throw new Error(
-            "S3 is not configured but document requires file download",
-          );
-        }
-        const command = new GetObjectCommand({
-          Bucket: config.s3.bucket,
-          Key: doc.storagePath,
-        });
-        const response = await s3Client.send(command);
-        const buffer = Buffer.from(await response.Body!.transformToByteArray());
-
-        if (doc.type === "pdf") {
-          text = await extractPdf(buffer);
-        } else {
-          text = await extractDocx(buffer);
-        }
-      } else {
-        throw new Error(`No content available for document type ${doc.type}`);
-      }
+      let text = await extractDocumentText(doc, s3Client);
 
       if (!text.trim()) {
         throw new Error("No text content found");
@@ -146,12 +164,11 @@ export function createIngestionProcessor(
       }
 
       // Create document-level summary chunk for broad queries
-      const summaryText = preprocessResult.qualityReport.contentSummary;
-      const summaryContent = summaryText
-        ? `[Document: ${doc.title}] ${summaryText}`
-        : `[Document: ${doc.title}]`;
-      const summaryEmbedding =
-        summaryContent.length > 10 ? await embed(summaryContent) : null;
+      const { content: summaryContent, embedding: summaryEmbedding } =
+        await buildSummaryChunk(
+          doc.title,
+          preprocessResult.qualityReport.contentSummary,
+        );
 
       await dataSource.transaction(async (manager) => {
         await manager.query(

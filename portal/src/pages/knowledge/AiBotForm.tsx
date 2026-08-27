@@ -39,7 +39,14 @@ import {
   type BusinessHoursDateOverride,
   type QuotedAddress,
   type WeekDay,
+  type BotTemplateView,
+  type BotTemplateOption,
+  type BoundTemplate,
+  type TemplateMode,
+  type TemplateVariableDef,
 } from '@/queries/useBotsQueries';
+import type { SkillReadinessDto } from '@contracts/skill-readiness';
+import type { UnselectedEntitledSkill } from '@/queries/useReadinessQueries';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -185,6 +192,1009 @@ const computeEffectiveTone = (tone: string, customTone: string): string => {
   return isCustom ? (customTone.trim() || 'custom') : tone;
 };
 
+/** The GET ai-settings fields this form hydrates from. */
+type AiSettingsView = {
+  enabled?: boolean;
+  supportEmail?: string | null;
+  language?: string;
+  brandVoice?: { name?: string | null; businessName?: string | null; tone?: string | null };
+  guardrails?: {
+    greetingMessage?: string | null;
+    fallbackMessage?: string | null;
+    offHoursMessage?: string | null;
+    confidenceThreshold?: number | null;
+    maxResponseLength?: number | null;
+    escalationKeywords?: string[] | null;
+    topicsToAvoid?: string[] | null;
+  };
+  selectedSpecialties?: string[] | null;
+  templateVariables?: Record<string, string> | null;
+  channelOverrides?: { social?: Partial<SocialOverride> | null };
+};
+
+type HydratedForm = {
+  enabled: boolean;
+  botName: string;
+  businessName: string;
+  supportEmail: string;
+  tone: string;
+  /** Empty for a preset tone; the server tone itself when it is a custom one. */
+  customTone: string;
+  language: BotLanguage;
+  greetingMessage: string;
+  fallbackMessage: string;
+  offHoursMessage: string;
+  confidenceThreshold: number;
+  maxResponseLength: number;
+  escalationKeywords: string[];
+  topicsToAvoid: string[];
+  selectedSpecialties: string[];
+  templateVariables: Record<string, string>;
+  socialOverride: SocialOverride;
+};
+
+function readIdentityValues(s: AiSettingsView) {
+  const brandVoice = s.brandVoice;
+  const serverTone = brandVoice?.tone ?? 'friendly';
+  const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
+  const rawLanguage = s.language;
+  return {
+    enabled: s.enabled ?? false,
+    botName: brandVoice?.name ?? '',
+    businessName: brandVoice?.businessName ?? '',
+    supportEmail: s.supportEmail ?? '',
+    tone: serverTone,
+    customTone: isPreset ? '' : serverTone,
+    language: (isBotLanguage(rawLanguage ?? '') ? rawLanguage : 'en') as BotLanguage,
+    selectedSpecialties: (s.selectedSpecialties ?? []) as string[],
+    templateVariables: s.templateVariables ?? {},
+    socialOverride: { ...EMPTY_SOCIAL, ...(s.channelOverrides?.social ?? {}) },
+  };
+}
+
+function readGuardrailValues(g: AiSettingsView['guardrails']) {
+  return {
+    greetingMessage: g?.greetingMessage ?? '',
+    fallbackMessage: g?.fallbackMessage ?? '',
+    offHoursMessage: g?.offHoursMessage ?? '',
+    confidenceThreshold: g?.confidenceThreshold ?? 0.7,
+    maxResponseLength: g?.maxResponseLength ?? 500,
+    escalationKeywords: g?.escalationKeywords ?? [],
+    topicsToAvoid: g?.topicsToAvoid ?? [],
+  };
+}
+
+/** Every form field this bot's stored AI settings define, with the API's defaults. */
+function hydrateFormValues(s: AiSettingsView): HydratedForm {
+  return { ...readIdentityValues(s), ...readGuardrailValues(s.guardrails) };
+}
+
+type AddressSource = {
+  street?: string | null;
+  streetNumber?: string | null;
+  boxNumber?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  country?: string | null;
+};
+
+const firstFilled = (primary: string | null | undefined, fallback: string | null | undefined): string =>
+  primary ?? fallback ?? '';
+
+/** The quoted address: the per-bot value, then the account's invoice address while on. */
+function resolveQuotedAddressFields(
+  qa: AddressSource | undefined,
+  account: AddressSource | undefined,
+  enabled: boolean,
+) {
+  const fallback = enabled ? account : undefined;
+  const countryFallback = enabled ? account?.country ?? 'BE' : '';
+  return {
+    street: firstFilled(qa?.street, fallback?.street),
+    streetNumber: firstFilled(qa?.streetNumber, fallback?.streetNumber),
+    boxNumber: firstFilled(qa?.boxNumber, fallback?.boxNumber),
+    postal: firstFilled(qa?.postalCode, fallback?.postalCode),
+    city: firstFilled(qa?.city, fallback?.city),
+    country: (qa?.country ?? countryFallback).toUpperCase(),
+  };
+}
+
+type BindingInput = { templateId: string; version: string };
+
+/** The template picker's view of the bindings resource, with its empty-state defaults. */
+function readTemplateView(view: BotTemplateView | undefined) {
+  return {
+    bindings: view?.bindings ?? [],
+    templateMode: view?.mode ?? 'or',
+    availableTemplates: view?.available ?? [],
+    missingModules: view?.missingModules ?? [],
+    skillNames: view?.skillNames ?? {},
+    variables: view?.variables ?? [],
+  };
+}
+
+/** Skill id → readiness state, for the per-skill pills. */
+function buildSkillStateMap(readiness: SkillReadinessDto[] | undefined): Record<string, string> {
+  const byId: Record<string, string> = {};
+  for (const s of readiness ?? []) byId[s.id] = s.state;
+  return byId;
+}
+
+type SpecialtyOption = {
+  key: string;
+  name: string;
+  description: string;
+  requiresSpecialPrompt: boolean;
+};
+
+
+/** Bot identity: who the bot says it is, and in which voice and language. */
+const IdentitySection: React.FC<{
+  readOnly: boolean;
+  orgBusinessName: string;
+  businessName: string;
+  setBusinessName: (value: string) => void;
+  supportEmail: string;
+  setSupportEmail: (value: string) => void;
+  isSupportEmailValid: boolean;
+  isCustomTone: boolean;
+  tone: string;
+  setTone: (value: string) => void;
+  customTone: string;
+  setCustomTone: (value: string) => void;
+  language: BotLanguage;
+  setLanguage: (value: BotLanguage) => void;
+  setGreetingMessage: React.Dispatch<React.SetStateAction<string>>;
+}> = ({
+  readOnly,
+  orgBusinessName,
+  businessName,
+  setBusinessName,
+  supportEmail,
+  setSupportEmail,
+  isSupportEmailValid,
+  isCustomTone,
+  tone,
+  setTone,
+  customTone,
+  setCustomTone,
+  language,
+  setLanguage,
+  setGreetingMessage,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Section icon={Fingerprint} title={t('ai.bot.identity.title')} description={t('ai.bot.identity.description')}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
+          <Input
+            value={businessName}
+            onChange={(e) => setBusinessName(e.target.value)}
+            placeholder={orgBusinessName || t('ai.bot.identity.businessName.placeholder')}
+            disabled={readOnly}
+          />
+          <p className="text-[10px] text-text-muted mt-1">
+            {orgBusinessName
+              ? t('ai.bot.identity.businessName.helperInherit', { name: orgBusinessName })
+              : t('ai.bot.identity.businessName.helper')}
+          </p>
+        </div>
+        <div>
+          <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.supportEmail.label')}</Label>
+          <Input
+            type="email"
+            value={supportEmail}
+            onChange={(e) => setSupportEmail(e.target.value)}
+            placeholder={t('ai.bot.identity.supportEmail.placeholder')}
+            disabled={readOnly}
+            aria-invalid={!isSupportEmailValid}
+          />
+          {isSupportEmailValid ? (
+            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
+          ) : (
+            <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
+          )}
+        </div>
+        <div>
+          <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.voiceTone.label')}</Label>
+          <Select
+            value={isCustomTone ? '__custom__' : tone}
+            onValueChange={(v) => {
+              if (v === '__custom__') setTone(customTone || 'custom');
+              else { setTone(v); setCustomTone(''); }
+            }}
+            disabled={readOnly}
+          >
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TONE_PRESETS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
+              ))}
+              <SelectItem value="__custom__">{t('ai.bot.identity.tones.custom')}</SelectItem>
+            </SelectContent>
+          </Select>
+          {isCustomTone && (
+            <Input
+              className="mt-1.5"
+              value={customTone}
+              onChange={(e) => { setCustomTone(e.target.value); setTone(e.target.value || 'custom'); }}
+              placeholder={t('ai.bot.identity.customTone.placeholder')}
+              disabled={readOnly}
+            />
+          )}
+          <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
+        </div>
+        <div>
+          <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.language.label')}</Label>
+          <Select
+            value={language}
+            onValueChange={(v) => {
+              const next = isBotLanguage(v) ? v : 'en';
+              setLanguage(next);
+              setGreetingMessage((prev) => {
+                const stock = Object.values(STOCK_GREETINGS);
+                if (!prev.trim() || stock.includes(prev)) return STOCK_GREETINGS[next];
+                return prev;
+              });
+            }}
+            disabled={readOnly}
+          >
+            <SelectTrigger className="h-9" aria-label={t('ai.bot.identity.language.label')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BOT_LANGUAGES.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {t(`ai.bot.identity.language.options.${code}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.language.helper')}</p>
+        </div>
+      </div>
+    </Section>
+  );
+};
+
+
+/** Adds a speciality — lists only the not-yet-selected templates (cap 3). */
+const TemplatePicker: React.FC<{
+  availableTemplates: BotTemplateOption[];
+  bindings: BoundTemplate[];
+  readOnly: boolean;
+  isSaving: boolean;
+  toggleTemplate: (id: string) => void;
+  skillLabel: (id: string) => string;
+}> = ({ availableTemplates, bindings, readOnly, isSaving, toggleTemplate, skillLabel }) => {
+  const { t } = useTranslation();
+  const unselected = availableTemplates.filter((x) => !bindings.some((b) => b.templateId === x.id));
+  const atCap = bindings.length >= 3;
+  return (
+    <Select value="" onValueChange={(id) => toggleTemplate(id)} disabled={readOnly || isSaving || atCap || unselected.length === 0}>
+      <SelectTrigger className="h-9" aria-label={t('ai.bot.template.addPlaceholder')}>
+        <SelectValue placeholder={atCap ? t('ai.bot.template.maxReached') : t('ai.bot.template.addPlaceholder')} />
+      </SelectTrigger>
+      <SelectContent>
+        {unselected.map((tpl) => (
+          <SelectItem key={tpl.id} value={tpl.id}>
+            <span className="flex flex-col gap-0.5">
+              <span>{tpl.displayName}</span>
+              {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
+              {(tpl.skills?.length ?? 0) > 0 && (
+                <span className="text-[10px] text-text-muted">
+                  {t('ai.bot.template.gives', { defaultValue: 'Gives' })}: {(tpl.skills ?? []).map(skillLabel).join(' · ')}
+                </span>
+              )}
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};
+
+
+/** The bound specialities as cards — version, remove, and the skills each gives. */
+const BoundTemplateList: React.FC<{
+  bindings: BoundTemplate[];
+  availableTemplates: BotTemplateOption[];
+  readOnly: boolean;
+  isSaving: boolean;
+  toggleTemplate: (id: string) => void;
+  setVersionFor: (id: string, version: string) => void;
+  skillLabel: (id: string) => string;
+  skillIssue: (state?: string) => string | null;
+  skillStateById: Record<string, string>;
+}> = ({
+  bindings,
+  availableTemplates,
+  readOnly,
+  isSaving,
+  toggleTemplate,
+  setVersionFor,
+  skillLabel,
+  skillIssue,
+  skillStateById,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <>
+      {bindings.length > 0 && (
+        <div className="space-y-2">
+          {bindings.map((b) => {
+            const tpl = availableTemplates.find((x) => x.id === b.templateId);
+            const skills = tpl?.skills ?? [];
+            return (
+              <div key={b.templateId} className="rounded-xl border border-edge bg-surface-2 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</div>
+                    {tpl?.description && <div className="truncate text-[11px] text-text-muted">{tpl.description}</div>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {b.publishedVersions.length > 0 && (
+                      <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || isSaving}>
+                        <SelectTrigger className="h-7 gap-1 rounded-full border border-edge bg-surface-3 px-2.5 text-[11px] text-text-secondary" title={b.version === 'latest' ? t('ai.bot.template.latest') : t('ai.bot.template.pinTo', { version: b.version })}>
+                          {b.version === 'latest' ? t('ai.bot.template.latestShort', { defaultValue: 'Latest' }) : `v${b.version}`}
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
+                          {b.publishedVersions.map((v) => (
+                            <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {!readOnly && (
+                      <button type="button" onClick={() => toggleTemplate(b.templateId)} aria-label={t('ai.bot.template.removeAria')} className="rounded-full p-2 text-text-muted hover:bg-surface-3 hover:text-text-primary">
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {skills.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-edge/50 pt-3">
+                    <span className="mr-0.5 text-[10px] uppercase tracking-wide text-text-muted">{t('ai.bot.template.gives', { defaultValue: 'Gives' })}</span>
+                    {skills.map((id) => {
+                      const issue = skillIssue(skillStateById[id]);
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-[11px] text-text-secondary">
+                          <span className={`h-1.5 w-1.5 rounded-full ${issue ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                          {skillLabel(id)}
+                          {issue && <span className="text-amber-400/90">· {issue}</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {bindings.length === 0 && (
+        <div className="rounded-lg border border-dashed border-edge bg-surface-2 p-3 text-xs text-text-muted">
+          {t('ai.bot.template.none', { defaultValue: 'No speciality bound — this bot answers generically from your knowledge base only. Add one above to give it skills like booking, lead capture, or handoff.' })}
+        </div>
+      )}
+
+      {bindings.filter((b) => b.pinnedButUnavailable).map((b) => (
+        <p key={'p' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
+      ))}
+      {bindings.filter((b) => b.templateUnavailable).map((b) => (
+        <p key={'u' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
+      ))}
+    </>
+  );
+};
+
+
+/** AND / OR — only meaningful with more than one speciality. */
+const TemplateModeToggle: React.FC<{
+  templateMode: TemplateMode;
+  bindingsInput: BindingInput[];
+  readOnly: boolean;
+  isSaving: boolean;
+  saveBindings: (next: BindingInput[], nextMode: TemplateMode) => void;
+}> = ({ templateMode, bindingsInput, readOnly, isSaving, saveBindings }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-lg border border-edge p-3 space-y-2">
+      <Label className="text-text-secondary">{t('ai.bot.template.modeLabel')}</Label>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" variant={templateMode === 'or' ? 'default' : 'outline'} disabled={readOnly || isSaving} onClick={() => saveBindings(bindingsInput, 'or')}>
+          {t('ai.bot.template.modeOr')}
+        </Button>
+        <Button type="button" size="sm" variant={templateMode === 'and' ? 'default' : 'outline'} disabled={readOnly || isSaving} onClick={() => saveBindings(bindingsInput, 'and')}>
+          {t('ai.bot.template.modeAnd')}
+        </Button>
+      </div>
+      <p className="text-[10px] text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
+    </div>
+  );
+};
+
+
+/** What the plan pays for but no bound speciality delivers, plus per-skill remedies. */
+const SkillAdvisories: React.FC<{
+  unselectedEntitledSkills: UnselectedEntitledSkill[] | undefined;
+  missingModules: string[];
+  skillReadiness: SkillReadinessDto[] | undefined;
+}> = ({ unselectedEntitledSkills, missingModules, skillReadiness }) => {
+  const { t } = useTranslation();
+  return (
+    <>
+      <SkillCoverageWarning skills={unselectedEntitledSkills} />
+
+      {/* Legacy advisory — only when the composable per-skill states aren't shown. */}
+      {!COMPOSABLE_TEMPLATES_ENABLED && missingModules.length > 0 && (
+        <p className="text-[11px] text-amber-400">
+          {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
+          {t('ai.bot.template.warnings.missingModulesAction')}
+        </p>
+      )}
+
+      {/* Actionable remedies only for skills that aren't ready yet — the ready ones
+          already show as green pills on their speciality card above. */}
+      {COMPOSABLE_TEMPLATES_ENABLED && (skillReadiness ?? []).some((s) => s.state !== 'ready') && (
+        <div className="space-y-1.5">
+          {(skillReadiness ?? []).filter((s) => s.state !== 'ready').map((skill) => (
+            <SkillStateCard key={skill.id} skill={skill} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+};
+
+
+/** Bot templates (specialities, managed centrally; bind up to 3, AND/OR). */
+const TemplatesSection: React.FC<{
+  availableTemplates: BotTemplateOption[];
+  bindings: BoundTemplate[];
+  bindingsInput: BindingInput[];
+  templateMode: TemplateMode;
+  missingModules: string[];
+  skillReadiness: SkillReadinessDto[] | undefined;
+  skillStateById: Record<string, string>;
+  unselectedEntitledSkills: UnselectedEntitledSkill[] | undefined;
+  readOnly: boolean;
+  isSaving: boolean;
+  toggleTemplate: (id: string) => void;
+  setVersionFor: (id: string, version: string) => void;
+  saveBindings: (next: BindingInput[], nextMode: TemplateMode) => void;
+  skillLabel: (id: string) => string;
+  skillIssue: (state?: string) => string | null;
+}> = ({
+  availableTemplates,
+  bindings,
+  bindingsInput,
+  templateMode,
+  missingModules,
+  skillReadiness,
+  skillStateById,
+  unselectedEntitledSkills,
+  readOnly,
+  isSaving,
+  toggleTemplate,
+  setVersionFor,
+  saveBindings,
+  skillLabel,
+  skillIssue,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Section
+      icon={Boxes}
+      title={t('ai.bot.template.title')}
+      description={t('ai.bot.template.descriptionMulti')}
+      action={availableTemplates.length > 0 ? (
+        <span className="whitespace-nowrap text-[11px] text-text-muted">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
+      ) : undefined}
+    >
+      {availableTemplates.length === 0 ? (
+        <div className="rounded-lg border border-edge bg-surface-2 p-3 text-xs text-text-muted">
+          {t('ai.bot.template.noneAvailable')}
+        </div>
+      ) : (
+        <>
+          <TemplatePicker
+            availableTemplates={availableTemplates}
+            bindings={bindings}
+            readOnly={readOnly}
+            isSaving={isSaving}
+            toggleTemplate={toggleTemplate}
+            skillLabel={skillLabel}
+          />
+          <BoundTemplateList
+            bindings={bindings}
+            availableTemplates={availableTemplates}
+            readOnly={readOnly}
+            isSaving={isSaving}
+            toggleTemplate={toggleTemplate}
+            setVersionFor={setVersionFor}
+            skillLabel={skillLabel}
+            skillIssue={skillIssue}
+            skillStateById={skillStateById}
+          />
+        </>
+      )}
+
+      {bindings.length > 1 && (
+        <TemplateModeToggle
+          templateMode={templateMode}
+          bindingsInput={bindingsInput}
+          readOnly={readOnly}
+          isSaving={isSaving}
+          saveBindings={saveBindings}
+        />
+      )}
+
+      <SkillAdvisories
+        unselectedEntitledSkills={unselectedEntitledSkills}
+        missingModules={missingModules}
+        skillReadiness={skillReadiness}
+      />
+    </Section>
+  );
+};
+
+
+/** Your template details — the custom {placeholders} the bound template declares
+ *  for the tenant to complete. Saved into ai.templateVariables; substituted into
+ *  the prompt at runtime (an unfilled field falls back to the template's default). */
+const TemplateVariablesSection: React.FC<{
+  variables: TemplateVariableDef[];
+  templateVarValues: Record<string, string>;
+  setTemplateVarValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  readOnly: boolean;
+}> = ({ variables, templateVarValues, setTemplateVarValues, readOnly }) => {
+  const { t } = useTranslation();
+  if (variables.length === 0) return null;
+  return (
+    <Section
+      icon={PenLine}
+      title={t('ai.bot.templateDetails.title', { defaultValue: 'Your template details' })}
+      description={t('ai.bot.templateDetails.subtitle', { defaultValue: "Your bot's template asks for a few details — they're filled into its prompt where the template expects them." })}
+    >
+      <div className="space-y-3">
+        {variables.map((v) => {
+          const value = templateVarValues[v.key] ?? v.default ?? '';
+          const missing = !!v.required && !value.trim();
+          return (
+            <div key={v.key} className="space-y-1">
+              <label htmlFor={`tv-${v.key}`} className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+                {v.label || v.key}
+                {v.required && <span className="text-amber-400">*</span>}
+              </label>
+              <textarea
+                id={`tv-${v.key}`}
+                rows={2}
+                readOnly={readOnly}
+                value={value}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplateVarValues((prev) => ({ ...prev, [v.key]: e.target.value }))}
+                className={`w-full rounded-lg border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-50 ${missing ? 'border-amber-500/50' : 'border-edge'}`}
+              />
+              {v.help && <p className="text-[11px] text-text-muted">{v.help}</p>}
+              {missing && <p className="text-[11px] text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+};
+
+
+/** Specialties — scoped to the bot's vertical (bound template category). Only
+ *  shown when the vertical defines specialties. Selecting biases KB retrieval;
+ *  a specialty flagged requiresSpecialPrompt also injects its exception block. */
+const SpecialtiesSection: React.FC<{
+  availableSpecialties: SpecialtyOption[];
+  selectedSpecialties: string[];
+  toggleSpecialty: (key: string) => void;
+}> = ({ availableSpecialties, selectedSpecialties, toggleSpecialty }) => {
+  if (availableSpecialties.length === 0) return null;
+  return (
+    <Section
+      icon={Sparkles}
+      title="Specialties"
+      description="Pick what this bot specialises in. This sharpens knowledge-base answers; some specialties also add tailored handling."
+    >
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {availableSpecialties.map((s) => (
+          <label key={s.key} className="flex items-start gap-2 rounded-lg border border-edge p-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={selectedSpecialties.includes(s.key)}
+              onChange={() => toggleSpecialty(s.key)}
+            />
+            <span>
+              <span className="font-medium text-text-primary">{s.name}</span>
+              {s.requiresSpecialPrompt && <span className="ml-1 text-[10px] text-amber-400">(special handling)</span>}
+              {s.description && <span className="block text-xs text-text-muted">{s.description}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+    </Section>
+  );
+};
+
+
+/** Social & messaging — per-channel prompt overrides. Applies to WhatsApp /
+ *  Messenger / Instagram / Telegram only; the web widget is unaffected. */
+const SocialSection: React.FC<{
+  socialOverride: SocialOverride;
+  setSocialOverride: React.Dispatch<React.SetStateAction<SocialOverride>>;
+  maxResponseLength: number;
+  readOnly: boolean;
+}> = ({ socialOverride, setSocialOverride, maxResponseLength, readOnly }) => {
+  const { t } = useTranslation();
+  return (
+    <Section
+      icon={MessagesSquare}
+      title={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
+      description={t('ai.bot.social.subtitle', { defaultValue: 'Reply differently on WhatsApp, Messenger, Instagram and Telegram. Your website widget is unaffected.' })}
+      action={
+        <Switch
+          checked={socialOverride.enabled}
+          onCheckedChange={(v) => setSocialOverride((s) => ({ ...s, enabled: v }))}
+          disabled={readOnly}
+          aria-label={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
+        />
+      }
+    >
+      {!socialOverride.enabled ? (
+        <p className="text-xs text-text-muted">
+          {t('ai.bot.social.off', { defaultValue: 'Off — messaging channels use the same voice and length as your widget, plus the built-in short-reply rule.' })}
+        </p>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.social.tone', { defaultValue: 'Voice tone on messaging' })}</Label>
+              <Select
+                value={socialOverride.tone || '__same__'}
+                onValueChange={(v) => setSocialOverride((s) => ({ ...s, tone: v === '__same__' ? '' : v }))}
+                disabled={readOnly}
+              >
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__same__">{t('ai.bot.social.sameTone', { defaultValue: 'Same as main tone' })}</SelectItem>
+                  {TONE_PRESETS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.toneHelper', { defaultValue: 'Used only on messaging channels.' })}</p>
+            </div>
+            <div>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.social.maxLen', { defaultValue: 'Max reply length (characters)' })}</Label>
+              <Input
+                type="number"
+                min={50}
+                max={5000}
+                value={socialOverride.maxResponseLength ?? ''}
+                placeholder={String(maxResponseLength)}
+                onChange={(e) =>
+                  setSocialOverride((s) => ({ ...s, maxResponseLength: e.target.value ? Number(e.target.value) : undefined }))
+                }
+                disabled={readOnly}
+              />
+              <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.maxLenHelper', { defaultValue: 'Leave blank to use the main limit. Shorter suits phone screens.' })}</p>
+            </div>
+          </div>
+          <div>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.social.instructions', { defaultValue: 'Extra instructions for messaging' })}</Label>
+            <textarea
+              rows={3}
+              readOnly={readOnly}
+              maxLength={2000}
+              value={socialOverride.instructions}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSocialOverride((s) => ({ ...s, instructions: e.target.value }))}
+              placeholder={t('ai.bot.social.instructionsPlaceholder', { defaultValue: 'e.g. Keep replies under two sentences and always end with a question.' })}
+              className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+            />
+            <p className="mt-1 text-[10px] text-text-muted">
+              {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule — it can't be removed, only tightened." })}
+            </p>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+};
+
+
+/** Business hours — its own resource, saved with an explicit button. */
+const BusinessHoursCard: React.FC<{
+  readOnly: boolean;
+  bhEnabled: boolean;
+  setBhEnabled: (value: boolean) => void;
+  bhSchedule: DaySchedule[];
+  setBhSchedule: React.Dispatch<React.SetStateAction<DaySchedule[]>>;
+  bhOverrides: OverrideRow[];
+  setBhOverrides: React.Dispatch<React.SetStateAction<OverrideRow[]>>;
+  setDay: (day: WeekDay, patch: Partial<DaySchedule>) => void;
+  bhDirty: boolean;
+  isSaving: boolean;
+  saveBusinessHours: () => void;
+}> = ({
+  readOnly,
+  bhEnabled,
+  setBhEnabled,
+  bhSchedule,
+  setBhSchedule,
+  bhOverrides,
+  setBhOverrides,
+  setDay,
+  bhDirty,
+  isSaving,
+  saveBusinessHours,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-xl border border-edge p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
+          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
+          <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.alwaysOnHint')}</p>
+        </div>
+        <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
+      </div>
+
+      {bhEnabled && (
+        <>
+          {!readOnly && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.presetsLabel')}</span>
+              <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_WEEKDAYS)}>
+                {t('ai.bot.operational.businessHours.presetWeekdays')}
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_EVERYDAY)}>
+                {t('ai.bot.operational.businessHours.presetEveryday')}
+              </Button>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            {bhSchedule.map((d) => (
+              <div key={d.day} className="flex flex-wrap items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="w-24 capitalize text-text-secondary">{d.day}</span>
+                  <Switch
+                    checked={!d.closed}
+                    onCheckedChange={(open) => setDay(d.day, { closed: !open })}
+                    disabled={readOnly}
+                    aria-label={`${d.day} open`}
+                  />
+                </div>
+                {d.closed ? (
+                  <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
+                    <span className="text-text-muted">–</span>
+                    <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2 border-t border-edge pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.overrides.label')}</Label>
+                <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.overrides.helper')}</p>
+              </div>
+              {!readOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    setBhOverrides((prev) => [
+                      ...prev,
+                      { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_OVERRIDE_WINDOW }] },
+                    ])
+                  }
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {t('ai.bot.operational.businessHours.overrides.add')}
+                </Button>
+              )}
+            </div>
+            {bhOverrides.length === 0 ? (
+              <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.overrides.empty')}</p>
+            ) : (
+              <div className="space-y-2">
+                {bhOverrides.map((o, i) => (
+                  // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
+                  <div key={i} className="flex items-center gap-2 flex-wrap">
+                    <DatePicker
+                      value={o.date}
+                      onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))}
+                      className="w-full sm:w-44"
+                      disabled={readOnly}
+                    />
+                    <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.overrides.to')}</span>
+                    <DatePicker
+                      value={o.endDate}
+                      onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))}
+                      className="w-full sm:w-44"
+                      disabled={readOnly}
+                    />
+                    <label htmlFor={`bh-override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        id={`bh-override-closed-${i}`}
+                        checked={o.closed}
+                        disabled={readOnly}
+                        onCheckedChange={(c) =>
+                          setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
+                        }
+                      />
+                      <span className="text-xs text-text-secondary">{t('ai.bot.operational.businessHours.overrides.closed')}</span>
+                    </label>
+                    {!o.closed && (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="time"
+                          className="h-8 w-28"
+                          value={o.windows[0]?.start ?? '09:00'}
+                          disabled={readOnly}
+                          onChange={(e) =>
+                            setBhOverrides((prev) =>
+                              prev.map((x, j) =>
+                                j === i
+                                  ? { ...x, windows: [{ start: e.target.value, end: x.windows[0]?.end ?? '17:00' }] }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                        <span className="text-text-muted">–</span>
+                        <Input
+                          type="time"
+                          className="h-8 w-28"
+                          value={o.windows[0]?.end ?? '17:00'}
+                          disabled={readOnly}
+                          onChange={(e) =>
+                            setBhOverrides((prev) =>
+                              prev.map((x, j) =>
+                                j === i
+                                  ? { ...x, windows: [{ start: x.windows[0]?.start ?? '09:00', end: e.target.value }] }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                    {!readOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:text-red-300"
+                        aria-label={t('ai.bot.operational.businessHours.overrides.remove')}
+                        onClick={() => setBhOverrides((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || isSaving}>
+            {t('ai.bot.operational.businessHours.save')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+/** The address the bot quotes to customers — the account address unless overridden. */
+const QuotedAddressCard: React.FC<{
+  readOnly: boolean;
+  qaEnabled: boolean;
+  setQuotedAddressEnabled: (checked: boolean) => void;
+  qaHydrated: boolean;
+  qaDirty: boolean;
+  isSaving: boolean;
+  saveQuotedAddress: () => void;
+  qaStreet: string;
+  setQaStreet: (value: string) => void;
+  qaStreetNumber: string;
+  setQaStreetNumber: (value: string) => void;
+  qaBoxNumber: string;
+  setQaBoxNumber: (value: string) => void;
+  qaPostal: string;
+  setQaPostal: (value: string) => void;
+  qaCity: string;
+  setQaCity: (value: string) => void;
+  qaCountry: string;
+  setQaCountry: (value: string) => void;
+}> = ({
+  readOnly,
+  qaEnabled,
+  setQuotedAddressEnabled,
+  qaHydrated,
+  qaDirty,
+  isSaving,
+  saveQuotedAddress,
+  qaStreet,
+  setQaStreet,
+  qaStreetNumber,
+  setQaStreetNumber,
+  qaBoxNumber,
+  setQaBoxNumber,
+  qaPostal,
+  setQaPostal,
+  qaCity,
+  setQaCity,
+  qaCountry,
+  setQaCountry,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-xl border border-edge p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="text-text-secondary">{t('ai.bot.operational.quotedAddress.label')}</Label>
+          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
+        </div>
+        <Switch
+          aria-label={t('ai.bot.operational.quotedAddress.label')}
+          checked={qaEnabled}
+          onCheckedChange={setQuotedAddressEnabled}
+          disabled={readOnly || !qaHydrated || isSaving}
+          aria-busy={!qaHydrated || isSaving}
+        />
+      </div>
+      {qaEnabled && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
+            <Input placeholder={t('ai.bot.operational.quotedAddress.streetNumber')} value={qaStreetNumber} onChange={(e) => setQaStreetNumber(e.target.value)} disabled={readOnly} />
+            <Input placeholder={t('ai.bot.operational.quotedAddress.boxNumber')} value={qaBoxNumber} onChange={(e) => setQaBoxNumber(e.target.value)} disabled={readOnly} />
+            <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
+            <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
+            <Input
+              placeholder={t('ai.bot.operational.quotedAddress.country')}
+              value={qaCountry}
+              maxLength={2}
+              onChange={(e) => setQaCountry(e.target.value.toUpperCase())}
+              disabled={readOnly}
+            />
+          </div>
+          {!readOnly && (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={saveQuotedAddress} disabled={!qaDirty || isSaving}>
+                {t('ai.bot.operational.quotedAddress.save')}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => {
   const { t } = useTranslation();
   const { isRole, tenantId } = useAppAuth();
@@ -278,62 +1288,42 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     if (hydratedKeyRef.current === hydrationKey) return;
     hydratedKeyRef.current = hydrationKey;
 
-    const hEnabled = aiSettings.enabled ?? false;
-    const hBotName = aiSettings.brandVoice?.name ?? '';
-    const hBusinessName = aiSettings.brandVoice?.businessName ?? '';
-    const hSupportEmail = aiSettings.supportEmail ?? '';
-    const serverTone: string = aiSettings.brandVoice?.tone ?? 'friendly';
-    const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
-    const hTone = serverTone;
-    const hCustomTone = isPreset ? '' : serverTone;
-    const rawLanguage = (aiSettings as { language?: string }).language;
-    const hLanguage: BotLanguage = isBotLanguage(rawLanguage ?? '') ? (rawLanguage as BotLanguage) : 'en';
-    const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
-    const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
-    const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
-    const hConfidence = aiSettings.guardrails?.confidenceThreshold ?? 0.7;
-    const hMaxLen = aiSettings.guardrails?.maxResponseLength ?? 500;
-    const hEscalation = aiSettings.guardrails?.escalationKeywords ?? [];
-    const hTopics = aiSettings.guardrails?.topicsToAvoid ?? [];
-    const hSpecialties = (aiSettings.selectedSpecialties ?? []) as string[];
-    const hTemplateVars = ((aiSettings as { templateVariables?: Record<string, string> }).templateVariables) ?? {};
-    const hSocial: SocialOverride = { ...EMPTY_SOCIAL, ...((aiSettings as { channelOverrides?: { social?: SocialOverride } }).channelOverrides?.social ?? {}) };
-
-    setEnabled(hEnabled);
-    setBotName(hBotName);
-    setBusinessName(hBusinessName);
-    setSupportEmail(hSupportEmail);
-    setTone(hTone);
-    setCustomTone(hCustomTone);
-    setLanguage(hLanguage);
-    setGreetingMessage(hGreeting);
-    setFallbackMessage(hFallback);
-    setOffHoursMessage(hOffHours);
-    setConfidenceThreshold(hConfidence);
-    setMaxResponseLength(hMaxLen);
-    setEscalationKeywords(hEscalation);
-    setTopicsToAvoid(hTopics);
-    setSelectedSpecialties(hSpecialties);
-    setTemplateVarValues(hTemplateVars);
-    setSocialOverride(hSocial);
+    const h = hydrateFormValues(aiSettings);
+    setEnabled(h.enabled);
+    setBotName(h.botName);
+    setBusinessName(h.businessName);
+    setSupportEmail(h.supportEmail);
+    setTone(h.tone);
+    setCustomTone(h.customTone);
+    setLanguage(h.language);
+    setGreetingMessage(h.greetingMessage);
+    setFallbackMessage(h.fallbackMessage);
+    setOffHoursMessage(h.offHoursMessage);
+    setConfidenceThreshold(h.confidenceThreshold);
+    setMaxResponseLength(h.maxResponseLength);
+    setEscalationKeywords(h.escalationKeywords);
+    setTopicsToAvoid(h.topicsToAvoid);
+    setSelectedSpecialties(h.selectedSpecialties);
+    setTemplateVarValues(h.templateVariables);
+    setSocialOverride(h.socialOverride);
 
     setInitialSnapshot(snapshotKey({
-      enabled: hEnabled,
-      botName: hBotName,
-      businessName: hBusinessName,
-      supportEmail: hSupportEmail,
-      effectiveTone: computeEffectiveTone(hTone, hCustomTone),
-      language: hLanguage,
-      greetingMessage: hGreeting,
-      fallbackMessage: hFallback,
-      offHoursMessage: hOffHours,
-      confidenceThreshold: hConfidence,
-      maxResponseLength: hMaxLen,
-      escalationKeywords: hEscalation,
-      topicsToAvoid: hTopics,
-      selectedSpecialties: hSpecialties,
-      templateVariables: hTemplateVars,
-      socialOverride: hSocial,
+      enabled: h.enabled,
+      botName: h.botName,
+      businessName: h.businessName,
+      supportEmail: h.supportEmail,
+      effectiveTone: computeEffectiveTone(h.tone, h.customTone),
+      language: h.language,
+      greetingMessage: h.greetingMessage,
+      fallbackMessage: h.fallbackMessage,
+      offHoursMessage: h.offHoursMessage,
+      confidenceThreshold: h.confidenceThreshold,
+      maxResponseLength: h.maxResponseLength,
+      escalationKeywords: h.escalationKeywords,
+      topicsToAvoid: h.topicsToAvoid,
+      selectedSpecialties: h.selectedSpecialties,
+      templateVariables: h.templateVariables,
+      socialOverride: h.socialOverride,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
 
@@ -358,23 +1348,24 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     if (qaHydratedKeyRef.current === hydrationKey) return;
     qaHydratedKeyRef.current = hydrationKey;
     const qa = botDetail.quotedAddress;
-    const account = accountInformation?.invoiceAddress;
     const enabled = qa?.enabled ?? true;
-    const fallback = enabled ? account : undefined;
-    const street = qa?.street ?? fallback?.street ?? '';
-    const streetNumber = qa?.streetNumber ?? fallback?.streetNumber ?? '';
-    const boxNumber = qa?.boxNumber ?? fallback?.boxNumber ?? '';
-    const postal = qa?.postalCode ?? fallback?.postalCode ?? '';
-    const city = qa?.city ?? fallback?.city ?? '';
-    const country = (qa?.country ?? (enabled ? account?.country ?? 'BE' : '')).toUpperCase();
+    const fields = resolveQuotedAddressFields(qa, accountInformation?.invoiceAddress, enabled);
     setQaEnabled(enabled);
-    setQaStreet(street);
-    setQaStreetNumber(streetNumber);
-    setQaBoxNumber(boxNumber);
-    setQaPostal(postal);
-    setQaCity(city);
-    setQaCountry(country);
-    setQaBaseline(JSON.stringify({ enabled, street, streetNumber, boxNumber, postal, city, country }));
+    setQaStreet(fields.street);
+    setQaStreetNumber(fields.streetNumber);
+    setQaBoxNumber(fields.boxNumber);
+    setQaPostal(fields.postal);
+    setQaCity(fields.city);
+    setQaCountry(fields.country);
+    setQaBaseline(JSON.stringify({
+      enabled,
+      street: fields.street,
+      streetNumber: fields.streetNumber,
+      boxNumber: fields.boxNumber,
+      postal: fields.postal,
+      city: fields.city,
+      country: fields.country,
+    }));
   }, [botDetail, tenantId, hydrationKey, accountInformation, accountInformationFetched]);
 
   const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhSchedule, bhOverrides) !== bhBaseline;
@@ -442,7 +1433,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setQaBaseline(JSON.stringify(qaSnapshot));
   };
 
-  const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
+  const effectiveTone = computeEffectiveTone(tone, customTone);
 
   const currentSnapshotKey = snapshotKey({
     enabled,
@@ -536,18 +1527,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   };
 
   // Template bindings (up to 3, AND/OR) — saved immediately, separate from the
-  // auto-saved form. The query is the source of truth.
-  const bindings = templateView?.bindings ?? [];
-  const templateMode = templateView?.mode ?? 'or';
-  const availableTemplates = templateView?.available ?? [];
-  const missingModules = templateView?.missingModules ?? [];
+  // auto-saved behavioural form. The query is the source of truth.
+  const { bindings, templateMode, availableTemplates, missingModules, skillNames, variables } =
+    readTemplateView(templateView);
   const bindingsInput = bindings.map((b) => ({ templateId: b.templateId, version: b.version }));
 
   // Skill labelling + per-skill state, for the "what this speciality gives" pills.
-  const skillNames = templateView?.skillNames ?? {};
   const skillLabel = (id: string) => skillNames[id] ?? id.replace(/[_-]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-  const skillStateById: Record<string, string> = {};
-  for (const s of skillReadiness ?? []) skillStateById[s.id] = s.state;
+  const skillStateById = buildSkillStateMap(skillReadiness);
   // Short amber footnote for a skill that isn't ready to use yet.
   const skillIssue = (state?: string): string | null => {
     switch (state) {
@@ -607,391 +1594,61 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       </div>
 
       <div className={enabled ? 'space-y-8' : 'space-y-8 opacity-50 pointer-events-none'}>
-        {/* Bot Identity */}
-        <Section icon={Fingerprint} title={t('ai.bot.identity.title')} description={t('ai.bot.identity.description')}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
-              <Input
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder={orgBusinessName || t('ai.bot.identity.businessName.placeholder')}
-                disabled={readOnly}
-              />
-              <p className="text-[10px] text-text-muted mt-1">
-                {orgBusinessName
-                  ? t('ai.bot.identity.businessName.helperInherit', { name: orgBusinessName })
-                  : t('ai.bot.identity.businessName.helper')}
-              </p>
-            </div>
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.supportEmail.label')}</Label>
-              <Input
-                type="email"
-                value={supportEmail}
-                onChange={(e) => setSupportEmail(e.target.value)}
-                placeholder={t('ai.bot.identity.supportEmail.placeholder')}
-                disabled={readOnly}
-                aria-invalid={!isSupportEmailValid}
-              />
-              {isSupportEmailValid ? (
-                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
-              ) : (
-                <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
-              )}
-            </div>
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.voiceTone.label')}</Label>
-              <Select
-                value={isCustomTone ? '__custom__' : tone}
-                onValueChange={(v) => {
-                  if (v === '__custom__') setTone(customTone || 'custom');
-                  else { setTone(v); setCustomTone(''); }
-                }}
-                disabled={readOnly}
-              >
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {TONE_PRESETS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
-                  ))}
-                  <SelectItem value="__custom__">{t('ai.bot.identity.tones.custom')}</SelectItem>
-                </SelectContent>
-              </Select>
-              {isCustomTone && (
-                <Input
-                  className="mt-1.5"
-                  value={customTone}
-                  onChange={(e) => { setCustomTone(e.target.value); setTone(e.target.value || 'custom'); }}
-                  placeholder={t('ai.bot.identity.customTone.placeholder')}
-                  disabled={readOnly}
-                />
-              )}
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
-            </div>
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.language.label')}</Label>
-              <Select
-                value={language}
-                onValueChange={(v) => {
-                  const next = isBotLanguage(v) ? v : 'en';
-                  setLanguage(next);
-                  setGreetingMessage((prev) => {
-                    const stock = Object.values(STOCK_GREETINGS);
-                    if (!prev.trim() || stock.includes(prev)) return STOCK_GREETINGS[next];
-                    return prev;
-                  });
-                }}
-                disabled={readOnly}
-              >
-                <SelectTrigger className="h-9" aria-label={t('ai.bot.identity.language.label')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BOT_LANGUAGES.map((code) => (
-                    <SelectItem key={code} value={code}>
-                      {t(`ai.bot.identity.language.options.${code}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.language.helper')}</p>
-            </div>
-          </div>
-        </Section>
+        <IdentitySection
+          readOnly={readOnly}
+          orgBusinessName={orgBusinessName}
+          businessName={businessName}
+          setBusinessName={setBusinessName}
+          supportEmail={supportEmail}
+          setSupportEmail={setSupportEmail}
+          isSupportEmailValid={isSupportEmailValid}
+          isCustomTone={isCustomTone}
+          tone={tone}
+          setTone={setTone}
+          customTone={customTone}
+          setCustomTone={setCustomTone}
+          language={language}
+          setLanguage={setLanguage}
+          setGreetingMessage={setGreetingMessage}
+        />
 
-        {/* Bot Templates (specialities, managed centrally; bind up to 3, AND/OR) */}
-        <Section
-          icon={Boxes}
-          title={t('ai.bot.template.title')}
-          description={t('ai.bot.template.descriptionMulti')}
-          action={availableTemplates.length > 0 ? (
-            <span className="whitespace-nowrap text-[11px] text-text-muted">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
-          ) : undefined}
-        >
-          {availableTemplates.length === 0 ? (
-            <div className="rounded-lg border border-edge bg-surface-2 p-3 text-xs text-text-muted">
-              {t('ai.bot.template.noneAvailable')}
-            </div>
-          ) : (
-            <>
-              {/* Add a speciality — Select listing only the not-yet-selected templates (cap 3). */}
-              {(() => {
-                const unselected = availableTemplates.filter((x) => !bindings.some((b) => b.templateId === x.id));
-                const atCap = bindings.length >= 3;
-                return (
-                  <Select value="" onValueChange={(id) => toggleTemplate(id)} disabled={readOnly || bindTemplate.isPending || atCap || unselected.length === 0}>
-                    <SelectTrigger className="h-9" aria-label={t('ai.bot.template.addPlaceholder')}>
-                      <SelectValue placeholder={atCap ? t('ai.bot.template.maxReached') : t('ai.bot.template.addPlaceholder')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {unselected.map((tpl) => (
-                        <SelectItem key={tpl.id} value={tpl.id}>
-                          <span className="flex flex-col gap-0.5">
-                            <span>{tpl.displayName}</span>
-                            {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
-                            {(tpl.skills?.length ?? 0) > 0 && (
-                              <span className="text-[10px] text-text-muted">
-                                {t('ai.bot.template.gives', { defaultValue: 'Gives' })}: {(tpl.skills ?? []).map(skillLabel).join(' · ')}
-                              </span>
-                            )}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                );
-              })()}
+        <TemplatesSection
+          availableTemplates={availableTemplates}
+          bindings={bindings}
+          bindingsInput={bindingsInput}
+          templateMode={templateMode}
+          missingModules={missingModules}
+          skillReadiness={skillReadiness}
+          skillStateById={skillStateById}
+          unselectedEntitledSkills={botReadiness?.unselectedEntitledSkills}
+          readOnly={readOnly}
+          isSaving={bindTemplate.isPending}
+          toggleTemplate={toggleTemplate}
+          setVersionFor={setVersionFor}
+          saveBindings={saveBindings}
+          skillLabel={skillLabel}
+          skillIssue={skillIssue}
+        />
 
-              {/* Selected specialities as cards — name + version + remove, and the
-                  skills each one gives the bot (state-coloured pills). */}
-              {bindings.length > 0 && (
-                <div className="space-y-2">
-                  {bindings.map((b) => {
-                    const tpl = availableTemplates.find((x) => x.id === b.templateId);
-                    const skills = tpl?.skills ?? [];
-                    return (
-                      <div key={b.templateId} className="rounded-xl border border-edge bg-surface-2 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</div>
-                            {tpl?.description && <div className="truncate text-[11px] text-text-muted">{tpl.description}</div>}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            {b.publishedVersions.length > 0 && (
-                              <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || bindTemplate.isPending}>
-                                <SelectTrigger className="h-7 gap-1 rounded-full border border-edge bg-surface-3 px-2.5 text-[11px] text-text-secondary" title={b.version === 'latest' ? t('ai.bot.template.latest') : t('ai.bot.template.pinTo', { version: b.version })}>
-                                  {b.version === 'latest' ? t('ai.bot.template.latestShort', { defaultValue: 'Latest' }) : `v${b.version}`}
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
-                                  {b.publishedVersions.map((v) => (
-                                    <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                            {!readOnly && (
-                              <button type="button" onClick={() => toggleTemplate(b.templateId)} aria-label={t('ai.bot.template.removeAria')} className="rounded-full p-1 text-text-muted hover:bg-surface-3 hover:text-text-primary">
-                                <X className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {skills.length > 0 && (
-                          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-edge/50 pt-3">
-                            <span className="mr-0.5 text-[10px] uppercase tracking-wide text-text-muted">{t('ai.bot.template.gives', { defaultValue: 'Gives' })}</span>
-                            {skills.map((id) => {
-                              const issue = skillIssue(skillStateById[id]);
-                              return (
-                                <span key={id} className="inline-flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-[11px] text-text-secondary">
-                                  <span className={`h-1.5 w-1.5 rounded-full ${issue ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                                  {skillLabel(id)}
-                                  {issue && <span className="text-amber-400/90">· {issue}</span>}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+        <TemplateVariablesSection
+          variables={variables}
+          templateVarValues={templateVarValues}
+          setTemplateVarValues={setTemplateVarValues}
+          readOnly={readOnly}
+        />
 
-              {bindings.length === 0 && (
-                <div className="rounded-lg border border-dashed border-edge bg-surface-2 p-3 text-xs text-text-muted">
-                  {t('ai.bot.template.none', { defaultValue: 'No speciality bound — this bot answers generically from your knowledge base only. Add one above to give it skills like booking, lead capture, or handoff.' })}
-                </div>
-              )}
+        <SpecialtiesSection
+          availableSpecialties={availableSpecialties}
+          selectedSpecialties={selectedSpecialties}
+          toggleSpecialty={toggleSpecialty}
+        />
 
-              {bindings.filter((b) => b.pinnedButUnavailable).map((b) => (
-                <p key={'p' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
-              ))}
-              {bindings.filter((b) => b.templateUnavailable).map((b) => (
-                <p key={'u' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
-              ))}
-            </>
-          )}
-
-          {/* AND / OR — only meaningful with more than one speciality */}
-          {bindings.length > 1 && (
-            <div className="rounded-lg border border-edge p-3 space-y-2">
-              <Label className="text-text-secondary">{t('ai.bot.template.modeLabel')}</Label>
-              <div className="flex gap-2">
-                <Button type="button" size="sm" variant={templateMode === 'or' ? 'default' : 'outline'} disabled={readOnly || bindTemplate.isPending} onClick={() => saveBindings(bindingsInput, 'or')}>
-                  {t('ai.bot.template.modeOr')}
-                </Button>
-                <Button type="button" size="sm" variant={templateMode === 'and' ? 'default' : 'outline'} disabled={readOnly || bindTemplate.isPending} onClick={() => saveBindings(bindingsInput, 'and')}>
-                  {t('ai.bot.template.modeAnd')}
-                </Button>
-              </div>
-              <p className="text-[10px] text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
-            </div>
-          )}
-
-          {/* Entitled but undelivered: the plan includes a feature no bound speciality
-              hands this bot, so the runtime tool-gate silently strips it. */}
-          <SkillCoverageWarning skills={botReadiness?.unselectedEntitledSkills} />
-
-          {/* Legacy advisory — only when the composable per-skill states aren't shown. */}
-          {!COMPOSABLE_TEMPLATES_ENABLED && missingModules.length > 0 && (
-            <p className="text-[11px] text-amber-400">
-              {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
-              {t('ai.bot.template.warnings.missingModulesAction')}
-            </p>
-          )}
-
-          {/* Actionable remedies only for skills that aren't ready yet — the ready ones
-              already show as green pills on their speciality card above. */}
-          {COMPOSABLE_TEMPLATES_ENABLED && (skillReadiness ?? []).some((s) => s.state !== 'ready') && (
-            <div className="space-y-1.5">
-              {(skillReadiness ?? []).filter((s) => s.state !== 'ready').map((skill) => (
-                <SkillStateCard key={skill.id} skill={skill} />
-              ))}
-            </div>
-          )}
-        </Section>
-
-        {/* Your template details — the custom {placeholders} the bound template declares
-            for the tenant to complete. Saved into ai.templateVariables; substituted into
-            the prompt at runtime (an unfilled field falls back to the template's default). */}
-        {(templateView?.variables?.length ?? 0) > 0 && (
-          <Section
-            icon={PenLine}
-            title={t('ai.bot.templateDetails.title', { defaultValue: 'Your template details' })}
-            description={t('ai.bot.templateDetails.subtitle', { defaultValue: "Your bot's template asks for a few details — they're filled into its prompt where the template expects them." })}
-          >
-            <div className="space-y-3">
-              {(templateView?.variables ?? []).map((v) => {
-                const value = templateVarValues[v.key] ?? v.default ?? '';
-                const missing = !!v.required && !value.trim();
-                return (
-                  <div key={v.key} className="space-y-1">
-                    <label htmlFor={`tv-${v.key}`} className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-                      {v.label || v.key}
-                      {v.required && <span className="text-amber-400">*</span>}
-                    </label>
-                    <textarea
-                      id={`tv-${v.key}`}
-                      rows={2}
-                      readOnly={readOnly}
-                      value={value}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplateVarValues((prev) => ({ ...prev, [v.key]: e.target.value }))}
-                      className={`w-full rounded-lg border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-50 ${missing ? 'border-amber-500/50' : 'border-edge'}`}
-                    />
-                    {v.help && <p className="text-[11px] text-text-muted">{v.help}</p>}
-                    {missing && <p className="text-[11px] text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
-                  </div>
-                );
-              })}
-            </div>
-          </Section>
-        )}
-
-        {/* Specialties — scoped to the bot's vertical (bound template category). Only
-            shown when the vertical defines specialties. Selecting biases KB retrieval;
-            a specialty flagged requiresSpecialPrompt also injects its exception block. */}
-        {availableSpecialties.length > 0 && (
-          <Section
-            icon={Sparkles}
-            title="Specialties"
-            description="Pick what this bot specialises in. This sharpens knowledge-base answers; some specialties also add tailored handling."
-          >
-            <div className="grid gap-1.5 sm:grid-cols-2">
-              {availableSpecialties.map((s) => (
-                <label key={s.key} className="flex items-start gap-2 rounded-lg border border-edge p-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={selectedSpecialties.includes(s.key)}
-                    onChange={() => toggleSpecialty(s.key)}
-                  />
-                  <span>
-                    <span className="font-medium text-text-primary">{s.name}</span>
-                    {s.requiresSpecialPrompt && <span className="ml-1 text-[10px] text-amber-400">(special handling)</span>}
-                    {s.description && <span className="block text-xs text-text-muted">{s.description}</span>}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </Section>
-        )}
-
-
-        {/* Social & messaging — per-channel prompt overrides. Applies to WhatsApp /
-            Messenger / Instagram / Telegram only; the web widget is unaffected. */}
-        <Section
-          icon={MessagesSquare}
-          title={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
-          description={t('ai.bot.social.subtitle', { defaultValue: 'Reply differently on WhatsApp, Messenger, Instagram and Telegram. Your website widget is unaffected.' })}
-          action={
-            <Switch
-              checked={socialOverride.enabled}
-              onCheckedChange={(v) => setSocialOverride((s) => ({ ...s, enabled: v }))}
-              disabled={readOnly}
-              aria-label={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
-            />
-          }
-        >
-          {!socialOverride.enabled ? (
-            <p className="text-xs text-text-muted">
-              {t('ai.bot.social.off', { defaultValue: 'Off — messaging channels use the same voice and length as your widget, plus the built-in short-reply rule.' })}
-            </p>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <Label className="mb-1 text-text-secondary">{t('ai.bot.social.tone', { defaultValue: 'Voice tone on messaging' })}</Label>
-                  <Select
-                    value={socialOverride.tone || '__same__'}
-                    onValueChange={(v) => setSocialOverride((s) => ({ ...s, tone: v === '__same__' ? '' : v }))}
-                    disabled={readOnly}
-                  >
-                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__same__">{t('ai.bot.social.sameTone', { defaultValue: 'Same as main tone' })}</SelectItem>
-                      {TONE_PRESETS.map((p) => (
-                        <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.toneHelper', { defaultValue: 'Used only on messaging channels.' })}</p>
-                </div>
-                <div>
-                  <Label className="mb-1 text-text-secondary">{t('ai.bot.social.maxLen', { defaultValue: 'Max reply length (characters)' })}</Label>
-                  <Input
-                    type="number"
-                    min={50}
-                    max={5000}
-                    value={socialOverride.maxResponseLength ?? ''}
-                    placeholder={String(maxResponseLength)}
-                    onChange={(e) =>
-                      setSocialOverride((s) => ({ ...s, maxResponseLength: e.target.value ? Number(e.target.value) : undefined }))
-                    }
-                    disabled={readOnly}
-                  />
-                  <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.maxLenHelper', { defaultValue: 'Leave blank to use the main limit. Shorter suits phone screens.' })}</p>
-                </div>
-              </div>
-              <div>
-                <Label className="mb-1 text-text-secondary">{t('ai.bot.social.instructions', { defaultValue: 'Extra instructions for messaging' })}</Label>
-                <textarea
-                  rows={3}
-                  readOnly={readOnly}
-                  maxLength={2000}
-                  value={socialOverride.instructions}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSocialOverride((s) => ({ ...s, instructions: e.target.value }))}
-                  placeholder={t('ai.bot.social.instructionsPlaceholder', { defaultValue: 'e.g. Keep replies under two sentences and always end with a question.' })}
-                  className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-                />
-                <p className="mt-1 text-[10px] text-text-muted">
-                  {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule — it can't be removed, only tightened." })}
-                </p>
-              </div>
-            </div>
-          )}
-        </Section>
+        <SocialSection
+          socialOverride={socialOverride}
+          setSocialOverride={setSocialOverride}
+          maxResponseLength={maxResponseLength}
+          readOnly={readOnly}
+        />
 
         {/* Operational settings (tenant-owned: escalation + business hours).
             Collapsed by default to keep the page lean — most tenants won't touch it. */}
@@ -1015,211 +1672,41 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
               </div>
 
-              {/* Business hours — its own resource, saved with an explicit button. */}
-              <div className="rounded-xl border border-edge p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
-                    <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
-                    <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.alwaysOnHint')}</p>
-                  </div>
-                  <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
-                </div>
+              <BusinessHoursCard
+                readOnly={readOnly}
+                bhEnabled={bhEnabled}
+                setBhEnabled={setBhEnabled}
+                bhSchedule={bhSchedule}
+                setBhSchedule={setBhSchedule}
+                bhOverrides={bhOverrides}
+                setBhOverrides={setBhOverrides}
+                setDay={setDay}
+                bhDirty={bhDirty}
+                isSaving={updateBot.isPending}
+                saveBusinessHours={saveBusinessHours}
+              />
 
-                {bhEnabled && (
-                  <>
-                    {!readOnly && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.presetsLabel')}</span>
-                        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_WEEKDAYS)}>
-                          {t('ai.bot.operational.businessHours.presetWeekdays')}
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_EVERYDAY)}>
-                          {t('ai.bot.operational.businessHours.presetEveryday')}
-                        </Button>
-                      </div>
-                    )}
-                    <div className="space-y-1.5">
-                      {bhSchedule.map((d) => (
-                        <div key={d.day} className="flex items-center gap-2 text-sm">
-                          <span className="w-24 capitalize text-text-secondary">{d.day}</span>
-                          <Switch
-                            checked={!d.closed}
-                            onCheckedChange={(open) => setDay(d.day, { closed: !open })}
-                            disabled={readOnly}
-                            aria-label={`${d.day} open`}
-                          />
-                          {d.closed ? (
-                            <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
-                              <span className="text-text-muted">–</span>
-                              <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-2 border-t border-edge pt-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.overrides.label')}</Label>
-                          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.overrides.helper')}</p>
-                        </div>
-                        {!readOnly && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() =>
-                              setBhOverrides((prev) => [
-                                ...prev,
-                                { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_OVERRIDE_WINDOW }] },
-                              ])
-                            }
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            {t('ai.bot.operational.businessHours.overrides.add')}
-                          </Button>
-                        )}
-                      </div>
-                      {bhOverrides.length === 0 ? (
-                        <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.overrides.empty')}</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {bhOverrides.map((o, i) => (
-                            // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
-                            <div key={i} className="flex items-center gap-2 flex-wrap">
-                              <DatePicker
-                                value={o.date}
-                                onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))}
-                                className="w-44"
-                                disabled={readOnly}
-                              />
-                              <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.overrides.to')}</span>
-                              <DatePicker
-                                value={o.endDate}
-                                onChange={(v) => setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))}
-                                className="w-44"
-                                disabled={readOnly}
-                              />
-                              <label htmlFor={`bh-override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
-                                <Checkbox
-                                  id={`bh-override-closed-${i}`}
-                                  checked={o.closed}
-                                  disabled={readOnly}
-                                  onCheckedChange={(c) =>
-                                    setBhOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
-                                  }
-                                />
-                                <span className="text-xs text-text-secondary">{t('ai.bot.operational.businessHours.overrides.closed')}</span>
-                              </label>
-                              {!o.closed && (
-                                <div className="flex items-center gap-1.5">
-                                  <Input
-                                    type="time"
-                                    className="h-8 w-28"
-                                    value={o.windows[0]?.start ?? '09:00'}
-                                    disabled={readOnly}
-                                    onChange={(e) =>
-                                      setBhOverrides((prev) =>
-                                        prev.map((x, j) =>
-                                          j === i
-                                            ? { ...x, windows: [{ start: e.target.value, end: x.windows[0]?.end ?? '17:00' }] }
-                                            : x,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                  <span className="text-text-muted">–</span>
-                                  <Input
-                                    type="time"
-                                    className="h-8 w-28"
-                                    value={o.windows[0]?.end ?? '17:00'}
-                                    disabled={readOnly}
-                                    onChange={(e) =>
-                                      setBhOverrides((prev) =>
-                                        prev.map((x, j) =>
-                                          j === i
-                                            ? { ...x, windows: [{ start: x.windows[0]?.start ?? '09:00', end: e.target.value }] }
-                                            : x,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                </div>
-                              )}
-                              {!readOnly && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-400 hover:text-red-300"
-                                  aria-label={t('ai.bot.operational.businessHours.overrides.remove')}
-                                  onClick={() => setBhOverrides((prev) => prev.filter((_, j) => j !== i))}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {!readOnly && (
-                  <div className="flex justify-end">
-                    <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || updateBot.isPending}>
-                      {t('ai.bot.operational.businessHours.save')}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-edge p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-text-secondary">{t('ai.bot.operational.quotedAddress.label')}</Label>
-                    <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
-                  </div>
-                  <Switch
-                    aria-label={t('ai.bot.operational.quotedAddress.label')}
-                    checked={qaEnabled}
-                    onCheckedChange={setQuotedAddressEnabled}
-                    disabled={readOnly || !qaHydrated || updateBot.isPending}
-                    aria-busy={!qaHydrated || updateBot.isPending}
-                  />
-                </div>
-                {qaEnabled && (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <Input placeholder={t('ai.bot.operational.quotedAddress.street')} value={qaStreet} onChange={(e) => setQaStreet(e.target.value)} disabled={readOnly} />
-                      <Input placeholder={t('ai.bot.operational.quotedAddress.streetNumber')} value={qaStreetNumber} onChange={(e) => setQaStreetNumber(e.target.value)} disabled={readOnly} />
-                      <Input placeholder={t('ai.bot.operational.quotedAddress.boxNumber')} value={qaBoxNumber} onChange={(e) => setQaBoxNumber(e.target.value)} disabled={readOnly} />
-                      <Input placeholder={t('ai.bot.operational.quotedAddress.postalCode')} value={qaPostal} onChange={(e) => setQaPostal(e.target.value)} disabled={readOnly} />
-                      <Input placeholder={t('ai.bot.operational.quotedAddress.city')} value={qaCity} onChange={(e) => setQaCity(e.target.value)} disabled={readOnly} />
-                      <Input
-                        placeholder={t('ai.bot.operational.quotedAddress.country')}
-                        value={qaCountry}
-                        maxLength={2}
-                        onChange={(e) => setQaCountry(e.target.value.toUpperCase())}
-                        disabled={readOnly}
-                      />
-                    </div>
-                    {!readOnly && (
-                      <div className="flex justify-end">
-                        <Button variant="outline" size="sm" onClick={saveQuotedAddress} disabled={!qaDirty || updateBot.isPending}>
-                          {t('ai.bot.operational.quotedAddress.save')}
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
+              <QuotedAddressCard
+                readOnly={readOnly}
+                qaEnabled={qaEnabled}
+                setQuotedAddressEnabled={setQuotedAddressEnabled}
+                qaHydrated={qaHydrated}
+                qaDirty={qaDirty}
+                isSaving={updateBot.isPending}
+                saveQuotedAddress={saveQuotedAddress}
+                qaStreet={qaStreet}
+                setQaStreet={setQaStreet}
+                qaStreetNumber={qaStreetNumber}
+                setQaStreetNumber={setQaStreetNumber}
+                qaBoxNumber={qaBoxNumber}
+                setQaBoxNumber={setQaBoxNumber}
+                qaPostal={qaPostal}
+                setQaPostal={setQaPostal}
+                qaCity={qaCity}
+                setQaCity={setQaCity}
+                qaCountry={qaCountry}
+                setQaCountry={setQaCountry}
+              />
             </AccordionContent>
           </AccordionItem>
         </Accordion>

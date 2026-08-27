@@ -105,26 +105,7 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
   // Resolve the best-known tenantId for the row from the raw event metadata
   // so it can be persisted on the chatbot_stripe_webhook_events row even before the
   // handler resolves it for mutation. NULL is acceptable.
-  const rawEventForMeta = normalized.raw as
-    | {
-        data?: {
-          object?: {
-            metadata?: { tenantId?: string };
-            subscription?: { metadata?: { tenantId?: string } } | string;
-            customer?: { metadata?: { tenantId?: string } } | string;
-          };
-        };
-      }
-    | undefined;
-  const rawObj = rawEventForMeta?.data?.object;
-  const metadataTenantId =
-    (typeof rawObj?.metadata?.tenantId === 'string' ? rawObj.metadata.tenantId : null) ??
-    (rawObj?.subscription && typeof rawObj.subscription === 'object'
-      ? rawObj.subscription.metadata?.tenantId ?? null
-      : null) ??
-    (rawObj?.customer && typeof rawObj.customer === 'object'
-      ? rawObj.customer.metadata?.tenantId ?? null
-      : null);
+  const metadataTenantId = readMetadataTenantId(normalized.raw);
 
   const outcome = await runStripeWebhookIdempotent({
     eventId: normalized.providerEventId,
@@ -244,3 +225,38 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
       return;
   }
 });
+
+/** Tenant id carried on an expanded subscription/customer ref, if any. */
+function metadataTenantIdOf(
+  ref: { metadata?: { tenantId?: string } } | string | undefined,
+): string | null {
+  if (!ref || typeof ref === 'string') return null;
+  return ref.metadata?.tenantId ?? null;
+}
+
+/**
+ * Best-known tenantId for the event, read straight off the raw metadata:
+ * session/subscription metadata first, then the expanded subscription, then
+ * the expanded customer. NULL is acceptable.
+ */
+function readMetadataTenantId(rawEvent: unknown): string | null {
+  const rawEventForMeta = rawEvent as
+    | {
+        data?: {
+          object?: {
+            metadata?: { tenantId?: string };
+            subscription?: { metadata?: { tenantId?: string } } | string;
+            customer?: { metadata?: { tenantId?: string } } | string;
+          };
+        };
+      }
+    | undefined;
+  const rawObj = rawEventForMeta?.data?.object;
+  const ownTenantId =
+    typeof rawObj?.metadata?.tenantId === 'string' ? rawObj.metadata.tenantId : null;
+  return (
+    ownTenantId ??
+    metadataTenantIdOf(rawObj?.subscription) ??
+    metadataTenantIdOf(rawObj?.customer)
+  );
+}

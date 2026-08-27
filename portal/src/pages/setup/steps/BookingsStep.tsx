@@ -111,6 +111,302 @@ export function calendarRequirementMet(
   return google?.connected === true || outlook?.connected === true;
 }
 
+/** The bot the step binds a preset template to: the default one, else the first. */
+function pickAnchorBot<T extends { isDefault: boolean }>(bots?: T[]): T | undefined {
+  return bots?.find((bot) => bot.isDefault) ?? bots?.[0];
+}
+
+/**
+ * Name whichever provider is actually connected — showing a Google address to an Outlook
+ * business would read as the wrong account being linked.
+ */
+function connectedAccountEmail(
+  google: { connected?: boolean; accountEmail?: string | null } | null | undefined,
+  outlook: { accountEmail?: string | null } | null | undefined
+): string | null | undefined {
+  return google?.connected === true ? google?.accountEmail : outlook?.accountEmail;
+}
+
+/** Connect first: everything below is meaningless without somewhere to write to. */
+function CalendarConnectCard({
+  loading,
+  connected,
+  account,
+  busy,
+  googlePending,
+  outlookPending,
+  onConnectGoogle,
+  onConnectOutlook,
+}: {
+  loading: boolean;
+  connected: boolean;
+  account?: string | null;
+  busy: boolean;
+  googlePending: boolean;
+  outlookPending: boolean;
+  onConnectGoogle: () => void;
+  onConnectOutlook: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2 rounded-xl border border-edge bg-surface-2 p-4">
+      <Label>{t('setup.steps.bookings.calendarLabel')}</Label>
+      {loading ? (
+        <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
+      ) : connected ? (
+        <p className="flex items-center gap-1.5 text-sm text-status-online">
+          <CheckCircle2 className="h-4 w-4" />
+          {t('setup.steps.bookings.calendarConnected', { account: account ?? '' })}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={onConnectGoogle} disabled={busy}>
+              {googlePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t('setup.steps.bookings.connectCalendar')}
+            </Button>
+            <Button variant="outline" onClick={onConnectOutlook} disabled={busy}>
+              {outlookPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Connect Outlook Calendar
+            </Button>
+          </div>
+          <p className="text-xs text-text-muted">{t('setup.steps.bookings.calendarHint')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Which days the business opens, and the one window it keeps on each of them. */
+function OpeningHoursField({
+  openDays,
+  opensAt,
+  closesAt,
+  onToggleDay,
+  onOpensAt,
+  onClosesAt,
+}: {
+  openDays: Weekday[];
+  opensAt: string;
+  closesAt: string;
+  onToggleDay: (day: Weekday) => void;
+  onOpensAt: (value: string) => void;
+  onClosesAt: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3">
+      <Label>{t('setup.steps.bookings.availabilityLabel')}</Label>
+      <div className="flex flex-wrap gap-1.5">
+        {WEEK_DAYS.map(({ api, i18n }) => (
+          <button
+            key={api}
+            type="button"
+            onClick={() => onToggleDay(api)}
+            aria-pressed={openDays.includes(api)}
+            className={cn(
+              'rounded-lg border px-3.5 py-2.5 text-xs font-medium transition-colors',
+              openDays.includes(api)
+                ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                : 'border-edge bg-surface-2 text-text-muted hover:border-primary-500/50',
+            )}
+          >
+            {t(`setup.steps.chatbot.days.${i18n}`)}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          aria-label={t('setup.steps.chatbot.opensAt')}
+          type="time"
+          value={opensAt}
+          onChange={(e) => onOpensAt(e.target.value)}
+          className="w-32"
+        />
+        <span className="text-sm text-text-muted">{t('setup.steps.chatbot.to')}</span>
+        <Input
+          aria-label={t('setup.steps.chatbot.closesAt')}
+          type="time"
+          value={closesAt}
+          onChange={(e) => onClosesAt(e.target.value)}
+          className="w-32"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** The interval customers book in. */
+function SlotLengthField({
+  slotMinutes,
+  onSelect,
+}: {
+  slotMinutes: number;
+  onSelect: (minutes: number) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2">
+      <Label>{t('setup.steps.bookings.slotLabel')}</Label>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {SLOT_CHOICES.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            onClick={() => onSelect(minutes)}
+            className={cn(
+              'rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
+              slotMinutes === minutes
+                ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
+            )}
+          >
+            {t('setup.steps.bookings.slotMinutes', { minutes })}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-text-muted">{t('setup.steps.bookings.servicesHint')}</p>
+    </div>
+  );
+}
+
+/** The one service a business defines itself when no preset fits. */
+function CustomServiceFields({
+  name,
+  onName,
+  duration,
+  onDuration,
+  price,
+  onPrice,
+}: {
+  name: string;
+  onName: (value: string) => void;
+  duration: number;
+  onDuration: (minutes: number) => void;
+  price: string;
+  onPrice: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="space-y-1.5 sm:col-span-3">
+        <Label htmlFor="setup-service-name">{t('setup.steps.bookings.customNameLabel')}</Label>
+        <Input
+          id="setup-service-name"
+          value={name}
+          onChange={(e) => onName(e.target.value)}
+          placeholder={t('setup.steps.bookings.customNamePlaceholder')}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>{t('setup.steps.bookings.customDurationLabel')}</Label>
+        <div className="flex gap-1.5">
+          {SLOT_CHOICES.map((minutes) => (
+            <button
+              key={minutes}
+              type="button"
+              onClick={() => onDuration(minutes)}
+              className={cn(
+                'flex-1 rounded-lg border px-2 py-2 text-xs font-medium',
+                duration === minutes
+                  ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                  : 'border-edge bg-surface-2 text-text-secondary',
+              )}
+            >
+              {t('setup.steps.bookings.slotMinutes', { minutes })}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label htmlFor="setup-service-price">{t('setup.steps.bookings.customPriceLabel')}</Label>
+        <Input
+          id="setup-service-price"
+          inputMode="decimal"
+          value={price}
+          onChange={(e) => onPrice(e.target.value)}
+          placeholder="25"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Which trade to seed the service catalogue from, shown only while the catalogue is empty. */
+function TradeCatalogField({
+  trade,
+  onTrade,
+  customName,
+  onCustomName,
+  customDuration,
+  onCustomDuration,
+  customPrice,
+  onCustomPrice,
+}: {
+  trade: SetupTrade | null;
+  onTrade: (trade: SetupTrade) => void;
+  customName: string;
+  onCustomName: (value: string) => void;
+  customDuration: number;
+  onCustomDuration: (minutes: number) => void;
+  customPrice: string;
+  onCustomPrice: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3">
+      <Label>{t('setup.steps.bookings.catalogLabel')}</Label>
+      <p className="text-xs text-text-muted">{t('setup.steps.bookings.catalogHint')}</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {SETUP_TRADES.map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onTrade(key)}
+            className={cn(
+              'rounded-lg border px-3 py-2.5 text-left transition-colors',
+              trade === key
+                ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+                : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
+            )}
+          >
+            <span className="block text-sm font-medium text-text-primary">
+              {t(`setup.steps.bookings.trades.${key}.label`)}
+            </span>
+            <span className="block text-xs text-text-muted">
+              {t(`setup.steps.bookings.trades.${key}.description`)}
+            </span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onTrade('custom')}
+          className={cn(
+            'rounded-lg border px-3 py-2.5 text-left transition-colors sm:col-span-2',
+            trade === 'custom'
+              ? 'border-primary-500 bg-primary-500/10 text-text-primary'
+              : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
+          )}
+        >
+          <span className="block text-sm font-medium text-text-primary">
+            {t('setup.steps.bookings.custom')}
+          </span>
+        </button>
+      </div>
+      {trade === 'custom' && (
+        <CustomServiceFields
+          name={customName}
+          onName={onCustomName}
+          duration={customDuration}
+          onDuration={onCustomDuration}
+          price={customPrice}
+          onPrice={onCustomPrice}
+        />
+      )}
+    </div>
+  );
+}
+
 export function BookingsStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const { data: calendar, isLoading: calendarLoading } = useGoogleCalendarStatus();
@@ -131,7 +427,7 @@ export function BookingsStep({ submit }: StepProps) {
   } = useTenantSettings();
   const updateScheduler = useUpdateSchedulerConfig();
   const { data: botsData, isLoading: botsLoading } = useBots();
-  const anchorBot = botsData?.bots?.find((bot) => bot.isDefault) ?? botsData?.bots?.[0];
+  const anchorBot = pickAnchorBot(botsData?.bots);
 
   const [openDays, setOpenDays] = React.useState<Weekday[]>(DEFAULT_OPEN_DAYS);
   const [opensAt, setOpensAt] = React.useState(DEFAULT_OPENS_AT);
@@ -241,19 +537,17 @@ export function BookingsStep({ submit }: StepProps) {
   // EITHER provider satisfies the step. The engine writes through a provider-agnostic port,
   // so which one is connected changes nothing downstream.
   const connected = calendarRequirementMet(calendar, outlook);
-  // Name whichever is actually connected — showing a Google address to an Outlook business
-  // would read as the wrong account being linked.
-  const connectedAccount =
-    calendar?.connected === true ? calendar?.accountEmail : outlook?.accountEmail;
+  const connectedAccount = connectedAccountEmail(calendar, outlook);
   const calendarLoadingAny = calendarLoading || outlookLoading;
-  const busy =
-    updateScheduler.isPending ||
-    submit.isPending ||
-    connect.isPending ||
-    connectOutlook.isPending ||
-    botsLoading ||
-    applyPreset.isPending ||
-    createService.isPending;
+  const busy = [
+    updateScheduler.isPending,
+    submit.isPending,
+    connect.isPending,
+    connectOutlook.isPending,
+    botsLoading,
+    applyPreset.isPending,
+    createService.isPending,
+  ].some(Boolean);
 
   return (
     <div className="space-y-6">
@@ -269,178 +563,39 @@ export function BookingsStep({ submit }: StepProps) {
         </div>
       </div>
 
-      {/* Connect first: everything below is meaningless without somewhere to write to. */}
-      <div className="space-y-2 rounded-xl border border-edge bg-surface-2 p-4">
-        <Label>{t('setup.steps.bookings.calendarLabel')}</Label>
-        {calendarLoadingAny ? (
-          <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
-        ) : connected ? (
-          <p className="flex items-center gap-1.5 text-sm text-status-online">
-            <CheckCircle2 className="h-4 w-4" />
-            {t('setup.steps.bookings.calendarConnected', { account: connectedAccount ?? '' })}
-          </p>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => connect.mutate()} disabled={busy}>
-                {connect.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {t('setup.steps.bookings.connectCalendar')}
-              </Button>
-              <Button variant="outline" onClick={() => connectOutlook.mutate()} disabled={busy}>
-                {connectOutlook.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Connect Outlook Calendar
-              </Button>
-            </div>
-            <p className="text-xs text-text-muted">{t('setup.steps.bookings.calendarHint')}</p>
-          </div>
-        )}
-      </div>
+      <CalendarConnectCard
+        loading={calendarLoadingAny}
+        connected={connected}
+        account={connectedAccount}
+        busy={busy}
+        googlePending={connect.isPending}
+        outlookPending={connectOutlook.isPending}
+        onConnectGoogle={() => connect.mutate()}
+        onConnectOutlook={() => connectOutlook.mutate()}
+      />
 
-      <div className="space-y-3">
-        <Label>{t('setup.steps.bookings.availabilityLabel')}</Label>
-        <div className="flex flex-wrap gap-1.5">
-          {WEEK_DAYS.map(({ api, i18n }) => (
-            <button
-              key={api}
-              type="button"
-              onClick={() => toggleDay(api)}
-              aria-pressed={openDays.includes(api)}
-              className={cn(
-                'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
-                openDays.includes(api)
-                  ? 'border-primary-500 bg-primary-500/10 text-text-primary'
-                  : 'border-edge bg-surface-2 text-text-muted hover:border-primary-500/50',
-              )}
-            >
-              {t(`setup.steps.chatbot.days.${i18n}`)}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label={t('setup.steps.chatbot.opensAt')}
-            type="time"
-            value={opensAt}
-            onChange={(e) => setOpensAt(e.target.value)}
-            className="w-32"
-          />
-          <span className="text-sm text-text-muted">{t('setup.steps.chatbot.to')}</span>
-          <Input
-            aria-label={t('setup.steps.chatbot.closesAt')}
-            type="time"
-            value={closesAt}
-            onChange={(e) => setClosesAt(e.target.value)}
-            className="w-32"
-          />
-        </div>
-      </div>
+      <OpeningHoursField
+        openDays={openDays}
+        opensAt={opensAt}
+        closesAt={closesAt}
+        onToggleDay={toggleDay}
+        onOpensAt={setOpensAt}
+        onClosesAt={setClosesAt}
+      />
 
-      <div className="space-y-2">
-        <Label>{t('setup.steps.bookings.slotLabel')}</Label>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {SLOT_CHOICES.map((minutes) => (
-            <button
-              key={minutes}
-              type="button"
-              onClick={() => setSlotMinutes(minutes)}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
-                slotMinutes === minutes
-                  ? 'border-primary-500 bg-primary-500/10 text-text-primary'
-                  : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
-              )}
-            >
-              {t('setup.steps.bookings.slotMinutes', { minutes })}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-text-muted">{t('setup.steps.bookings.servicesHint')}</p>
-      </div>
+      <SlotLengthField slotMinutes={slotMinutes} onSelect={setSlotMinutes} />
 
       {existingServices.length === 0 && (
-        <div className="space-y-3">
-          <Label>{t('setup.steps.bookings.catalogLabel')}</Label>
-          <p className="text-xs text-text-muted">{t('setup.steps.bookings.catalogHint')}</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {SETUP_TRADES.map((key) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setTrade(key)}
-                className={cn(
-                  'rounded-lg border px-3 py-2.5 text-left transition-colors',
-                  trade === key
-                    ? 'border-primary-500 bg-primary-500/10 text-text-primary'
-                    : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
-                )}
-              >
-                <span className="block text-sm font-medium text-text-primary">
-                  {t(`setup.steps.bookings.trades.${key}.label`)}
-                </span>
-                <span className="block text-xs text-text-muted">
-                  {t(`setup.steps.bookings.trades.${key}.description`)}
-                </span>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setTrade('custom')}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-left transition-colors sm:col-span-2',
-                trade === 'custom'
-                  ? 'border-primary-500 bg-primary-500/10 text-text-primary'
-                  : 'border-edge bg-surface-2 text-text-secondary hover:border-primary-500/50',
-              )}
-            >
-              <span className="block text-sm font-medium text-text-primary">
-                {t('setup.steps.bookings.custom')}
-              </span>
-            </button>
-          </div>
-          {trade === 'custom' && (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5 sm:col-span-3">
-                <Label htmlFor="setup-service-name">{t('setup.steps.bookings.customNameLabel')}</Label>
-                <Input
-                  id="setup-service-name"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder={t('setup.steps.bookings.customNamePlaceholder')}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t('setup.steps.bookings.customDurationLabel')}</Label>
-                <div className="flex gap-1.5">
-                  {SLOT_CHOICES.map((minutes) => (
-                    <button
-                      key={minutes}
-                      type="button"
-                      onClick={() => setCustomDuration(minutes)}
-                      className={cn(
-                        'flex-1 rounded-lg border px-2 py-2 text-xs font-medium',
-                        customDuration === minutes
-                          ? 'border-primary-500 bg-primary-500/10 text-text-primary'
-                          : 'border-edge bg-surface-2 text-text-secondary',
-                      )}
-                    >
-                      {t('setup.steps.bookings.slotMinutes', { minutes })}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="setup-service-price">{t('setup.steps.bookings.customPriceLabel')}</Label>
-                <Input
-                  id="setup-service-price"
-                  inputMode="decimal"
-                  value={customPrice}
-                  onChange={(e) => setCustomPrice(e.target.value)}
-                  placeholder="25"
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        <TradeCatalogField
+          trade={trade}
+          onTrade={setTrade}
+          customName={customName}
+          onCustomName={setCustomName}
+          customDuration={customDuration}
+          onCustomDuration={setCustomDuration}
+          customPrice={customPrice}
+          onCustomPrice={setCustomPrice}
+        />
       )}
 
       {/*
@@ -452,7 +607,7 @@ export function BookingsStep({ submit }: StepProps) {
       <ServiceAreaField
         value={serviceArea}
         onChange={setServiceArea}
-        hasAddressService={(scheduler?.services ?? []).some(
+        hasAddressService={existingServices.some(
           (svc) => svc.isActive && svc.customerAddressRequired,
         )}
       />

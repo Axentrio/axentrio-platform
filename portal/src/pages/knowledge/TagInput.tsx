@@ -40,7 +40,7 @@ const TagInput: React.FC<TagInputProps> = ({ value, onChange, placeholder, disab
             <button
               type="button"
               onClick={() => removeTag(tag)}
-              className="hover:text-text-primary"
+              className="p-1 -m-1 hover:text-text-primary"
             >
               <X className="w-3 h-3" />
             </button>

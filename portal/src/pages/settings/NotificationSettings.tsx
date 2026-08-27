@@ -103,12 +103,12 @@ const NotificationSettings: React.FC = () => {
         <div className="space-y-6">
           {/* Channels: sound, platform, and email */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className="p-2 bg-surface-2 rounded-xl">
                   {isMuted ? <VolumeX className="w-5 h-5 text-text-secondary" /> : <Volume2 className="w-5 h-5 text-primary-400" />}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="font-medium text-text-primary">{t('settings.notifications.sound.title')}</p>
                   <p className="text-sm text-text-secondary">{t('settings.notifications.sound.description')}</p>
                 </div>
@@ -138,8 +138,8 @@ const NotificationSettings: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-              <div>
+            <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+              <div className="min-w-0">
                 <p className="font-medium text-text-primary">{t('settings.notifications.platform.title')}</p>
                 <p className="text-sm text-text-secondary">{t('settings.notifications.platform.description')}</p>
               </div>
@@ -150,8 +150,8 @@ const NotificationSettings: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-              <div>
+            <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+              <div className="min-w-0">
                 <p className="font-medium text-text-primary">{t('settings.notifications.email.title')}</p>
                 <p className="text-sm text-text-secondary">{t('settings.notifications.email.description')}</p>
               </div>
@@ -165,12 +165,12 @@ const NotificationSettings: React.FC = () => {
 
           {/* Events: handoff requests and new messages */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+              <div className="flex min-w-0 items-center gap-3">
                 <div className="p-2 bg-surface-2 rounded-xl">
                   <Bell className="w-5 h-5 text-primary-400" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="font-medium text-text-primary">{t('settings.notifications.handoffRequest.title')}</p>
                   <p className="text-sm text-text-secondary">{t('settings.notifications.handoffRequest.description')}</p>
                 </div>
@@ -182,8 +182,8 @@ const NotificationSettings: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-              <div>
+            <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+              <div className="min-w-0">
                 <p className="font-medium text-text-primary">{t('settings.notifications.newMessage.title')}</p>
                 <p className="text-sm text-text-secondary">{t('settings.notifications.newMessage.description')}</p>
               </div>
@@ -222,12 +222,12 @@ const NotificationSettings: React.FC = () => {
           </div>
 
           {/* Desktop notifications */}
-          <div className="flex items-center justify-between p-4 bg-surface-3 rounded-xl">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="p-2 bg-surface-2 rounded-xl">
                 <Monitor className="w-5 h-5 text-primary-400" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="font-medium text-text-primary">{t('settings.notifications.desktop.title')}</p>
                 <p className="text-sm text-text-secondary">{t('settings.notifications.desktop.description')}</p>
               </div>

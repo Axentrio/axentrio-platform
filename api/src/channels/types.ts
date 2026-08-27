@@ -155,96 +155,18 @@ export function formatResponseForChannel(
   switch (type) {
     case 'text':
     case 'quick_reply': {
-      const prefix = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
-      const tail = response.protectedTail ?? '';
-      const msg: OutboundChannelMessage = { type: 'text', content: prefix + tail };
-      if (response.quickReplies && capabilities.supportsQuickReplies) {
-        msg.type = 'quick_reply';
-        msg.quickReplies = response.quickReplies
-          .slice(0, capabilities.maxQuickReplies)
-          .map((qr) => typeof qr === 'string' ? { title: qr, payload: qr } : { title: qr.title, payload: qr.value || qr.title });
-      }
-      if (response.buttons && capabilities.supportsButtons) {
-        msg.buttons = response.buttons
-          .slice(0, capabilities.maxButtons)
-          .map((b) => ({ type: b.type as 'url' | 'postback', title: b.title, value: b.url || b.value || '' }));
-      }
-      if (msg.content && msg.content.length > capabilities.maxTextLength) {
-        if (tail && tail.length <= capabilities.maxTextLength - 3) {
-          // Protect the tail (the numbered address list its buttons name); truncate the prefix (#97 D2).
-          msg.content = prefix.slice(0, capabilities.maxTextLength - tail.length - 3) + '...' + tail;
-        } else if (tail) {
-          // The tail alone will not fit. Fail closed: a numbered control whose lines were cut is worse
-          // than no control, so drop the tail AND every control that referred to it.
-          msg.content = prefix.length > capabilities.maxTextLength - 3
-            ? prefix.slice(0, capabilities.maxTextLength - 3) + '...'
-            : prefix;
-          delete msg.quickReplies;
-          delete msg.buttons;
-          if (msg.type === 'quick_reply') msg.type = 'text';
-        } else {
-          msg.content = msg.content.slice(0, capabilities.maxTextLength - 3) + '...';
-        }
-      }
-      messages.push(msg);
+      messages.push(formatTextMessage(response, capabilities));
       break;
     }
     case 'image':
     case 'video':
     case 'audio':
     case 'file': {
-      if (
-        (type === 'image' && !capabilities.supportsImages) ||
-        (type === 'video' && !capabilities.supportsVideo) ||
-        (type === 'audio' && !capabilities.supportsAudio) ||
-        (type === 'file' && !capabilities.supportsFiles)
-      ) {
-        messages.push({
-          type: 'text',
-          content: typeof response.content === 'string' ? response.content : `[${type} attachment]`,
-        });
-      } else {
-        messages.push({
-          type,
-          mediaUrl: typeof response.content === 'string' ? response.content : undefined,
-          content: typeof response.content === 'string' ? response.content : undefined,
-        });
-      }
+      messages.push(formatMediaMessage(type, response, capabilities));
       break;
     }
     case 'carousel': {
-      // Carousel data comes from n8n with arbitrary shapes, cast to any
-      const attachments = (response.attachments || []) as any[];
-      if (!capabilities.supportsCarousel) {
-        for (const att of attachments.slice(0, 5)) {
-          messages.push({
-            type: 'text',
-            content: `*${att.title || ''}*\n${att.description || ''}`,
-            buttons: att.buttons?.map((b: any) => ({
-              type: b.type as 'url' | 'postback',
-              title: b.title,
-              value: b.url || b.value || '',
-            })),
-          });
-        }
-        if (messages.length === 0) {
-          messages.push({ type: 'text', content: typeof response.content === 'string' ? response.content : '[carousel]' });
-        }
-      } else {
-        messages.push({
-          type: 'carousel',
-          cards: attachments.slice(0, capabilities.maxCarouselCards).map((att: any) => ({
-            title: att.title || '',
-            subtitle: att.description,
-            imageUrl: att.url,
-            buttons: att.buttons?.slice(0, capabilities.maxButtons).map((b: any) => ({
-              type: b.type as 'url' | 'postback',
-              title: b.title,
-              value: b.url || b.value || '',
-            })),
-          })),
-        });
-      }
+      messages.push(...formatCarouselMessages(response, capabilities));
       break;
     }
     case 'typing': {
@@ -261,5 +183,119 @@ export function formatResponseForChannel(
     }
   }
 
+  return messages;
+}
+
+/** Text / quick-reply response: chips, buttons, and tail-protecting truncation. */
+function formatTextMessage(
+  response: ResponsePayload,
+  capabilities: ChannelCapabilities,
+): OutboundChannelMessage {
+  const prefix = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+  const tail = response.protectedTail ?? '';
+  const msg: OutboundChannelMessage = { type: 'text', content: prefix + tail };
+  if (response.quickReplies && capabilities.supportsQuickReplies) {
+    msg.type = 'quick_reply';
+    msg.quickReplies = response.quickReplies
+      .slice(0, capabilities.maxQuickReplies)
+      .map((qr) => typeof qr === 'string' ? { title: qr, payload: qr } : { title: qr.title, payload: qr.value || qr.title });
+  }
+  if (response.buttons && capabilities.supportsButtons) {
+    msg.buttons = response.buttons
+      .slice(0, capabilities.maxButtons)
+      .map((b) => ({ type: b.type as 'url' | 'postback', title: b.title, value: b.url || b.value || '' }));
+  }
+  if (msg.content && msg.content.length > capabilities.maxTextLength) {
+    truncateTextMessage(msg, prefix, tail, capabilities);
+  }
+  return msg;
+}
+
+/** Truncate an over-long text message, keeping the protected tail when it fits. */
+function truncateTextMessage(
+  msg: OutboundChannelMessage,
+  prefix: string,
+  tail: string,
+  capabilities: ChannelCapabilities,
+): void {
+  if (tail && tail.length <= capabilities.maxTextLength - 3) {
+    // Protect the tail (the numbered address list its buttons name); truncate the prefix (#97 D2).
+    msg.content = prefix.slice(0, capabilities.maxTextLength - tail.length - 3) + '...' + tail;
+  } else if (tail) {
+    // The tail alone will not fit. Fail closed: a numbered control whose lines were cut is worse
+    // than no control, so drop the tail AND every control that referred to it.
+    msg.content = prefix.length > capabilities.maxTextLength - 3
+      ? prefix.slice(0, capabilities.maxTextLength - 3) + '...'
+      : prefix;
+    delete msg.quickReplies;
+    delete msg.buttons;
+    if (msg.type === 'quick_reply') msg.type = 'text';
+  } else {
+    msg.content = msg.content!.slice(0, capabilities.maxTextLength - 3) + '...';
+  }
+}
+
+/** Media response: the attachment itself, or a text fallback on channels without it. */
+function formatMediaMessage(
+  type: 'image' | 'video' | 'audio' | 'file',
+  response: ResponsePayload,
+  capabilities: ChannelCapabilities,
+): OutboundChannelMessage {
+  if (
+    (type === 'image' && !capabilities.supportsImages) ||
+    (type === 'video' && !capabilities.supportsVideo) ||
+    (type === 'audio' && !capabilities.supportsAudio) ||
+    (type === 'file' && !capabilities.supportsFiles)
+  ) {
+    return {
+      type: 'text',
+      content: typeof response.content === 'string' ? response.content : `[${type} attachment]`,
+    };
+  }
+  return {
+    type,
+    mediaUrl: typeof response.content === 'string' ? response.content : undefined,
+    content: typeof response.content === 'string' ? response.content : undefined,
+  };
+}
+
+/** Carousel response: native cards, or one text message per card as a fallback. */
+function formatCarouselMessages(
+  response: ResponsePayload,
+  capabilities: ChannelCapabilities,
+): OutboundChannelMessage[] {
+  // Carousel data comes from n8n with arbitrary shapes, cast to any
+  const attachments = (response.attachments || []) as any[];
+  if (capabilities.supportsCarousel) {
+    return [{
+      type: 'carousel',
+      cards: attachments.slice(0, capabilities.maxCarouselCards).map((att: any) => ({
+        title: att.title || '',
+        subtitle: att.description,
+        imageUrl: att.url,
+        buttons: att.buttons?.slice(0, capabilities.maxButtons).map((b: any) => ({
+          type: b.type as 'url' | 'postback',
+          title: b.title,
+          value: b.url || b.value || '',
+        })),
+      })),
+    }];
+  }
+
+  const messages: OutboundChannelMessage[] = [];
+  for (const att of attachments.slice(0, 5)) {
+    messages.push({
+      type: 'text',
+      content: `*${att.title || ''}*\n${att.description || ''}`,
+      buttons: att.buttons?.map((b: any) => ({
+        type: b.type as 'url' | 'postback',
+        title: b.title,
+        value: b.url || b.value || '',
+      })),
+    });
+  }
+  if (messages.length === 0) {
+    messages.push({ type: 'text', content: typeof response.content === 'string' ? response.content : '[carousel]' });
+  }
   return messages;
 }

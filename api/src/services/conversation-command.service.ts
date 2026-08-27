@@ -519,6 +519,37 @@ async function applyRelease(
   await persistSystemEvent(manager, session, eventText);
 }
 
+/**
+ * Per-bot handoff feature gate. Paused/deleted bot config mirrors
+ * handleBotHandoff: proceed with the handoff anyway (a broken bot must not
+ * strand a customer).
+ */
+async function isHandoffDisabled(session: ChatSession): Promise<boolean> {
+  try {
+    const { settings } = await getBotConfigForSession(session);
+    return settings?.features?.handoffEnabled === false;
+  } catch (err) {
+    if (!(err instanceof BotPausedConfigError) && !(err instanceof BotNotFoundConfigError)) throw err;
+    return false;
+  }
+}
+
+/**
+ * requested_by is a NOT NULL uuid: prefer the explicit participant (bot path),
+ * else the session's user participant, else the session id itself.
+ */
+async function resolveHandoffRequester(
+  manager: EntityManager,
+  session: ChatSession,
+  explicit?: string,
+): Promise<string> {
+  if (explicit) return explicit;
+  const userParticipant = await manager.findOne(Participant, {
+    where: { sessionId: session.id, type: 'user', isDeleted: false },
+  });
+  return userParticipant?.id ?? session.id;
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 export const conversationCommands = {
@@ -538,15 +569,7 @@ export const conversationCommands = {
     return withConversation(sessionId, 'request_handoff', idempotencyKey, opts, async (manager, session) => {
       if (session.ownership === 'closed') throw new ConversationClosedError();
 
-      // Per-bot feature gate. Paused/deleted bot config mirrors handleBotHandoff:
-      // proceed with the handoff anyway (a broken bot must not strand a customer).
-      let handoffDisabled = false;
-      try {
-        const { settings } = await getBotConfigForSession(session);
-        handoffDisabled = settings?.features?.handoffEnabled === false;
-      } catch (err) {
-        if (!(err instanceof BotPausedConfigError) && !(err instanceof BotNotFoundConfigError)) throw err;
-      }
+      const handoffDisabled = await isHandoffDisabled(session);
       if (handoffDisabled) {
         logger.info(`Handoff skipped for session ${session.id} (handoff disabled)`, { reason, source });
         return {
@@ -579,15 +602,7 @@ export const conversationCommands = {
         };
       }
 
-      // requested_by is a NOT NULL uuid: prefer the explicit participant (bot
-      // path), else the session's user participant, else the session id itself.
-      let requestedBy = opts.requestedBy;
-      if (!requestedBy) {
-        const userParticipant = await manager.findOne(Participant, {
-          where: { sessionId: session.id, type: 'user', isDeleted: false },
-        });
-        requestedBy = userParticipant?.id ?? session.id;
-      }
+      const requestedBy = await resolveHandoffRequester(manager, session, opts.requestedBy);
 
       const handoff = await manager.save(
         HandoffRequest,

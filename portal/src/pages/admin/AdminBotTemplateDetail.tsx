@@ -44,7 +44,8 @@ import {
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
   usePreviewLedger, useAdminSkills,
-  forceConflict, type BotTemplateVersion, type TemplateTier, type TemplateVariable,
+  forceConflict, type AdminSkill, type BotTemplateVersion, type PreviewLedgerResponse,
+  type TemplateTier, type TemplateVariable,
 } from '../../queries/useBotTemplatesQueries';
 
 import {
@@ -57,6 +58,586 @@ import {
 } from './bot-template-detail/template-draft-types';
 import { appendChip, prettifyKey, unknownPlaceholders, renderPromptWithVars } from './bot-template-detail/template-prompt-utils';
 import { PlaceholderBar, BlockKey, FieldHint, AuthorSection, RailLabel } from './bot-template-detail/template-ui-bits';
+
+/* ------------------------------------------------------------------ */
+/*  Editor helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+/** Editor heading per draft mode (create/view/edit). */
+const EDITOR_TITLE_KEYS: Record<VersionDraft['mode'], string> = {
+  create: 'admin.botTemplates.editor.newTitle',
+  view: 'admin.botTemplates.editor.viewTitle',
+  edit: 'admin.botTemplates.editor.editTitle',
+};
+
+type PreviewTier = 'free' | 'essential' | 'pro' | 'enterprise';
+type TestMessage = { role: 'user' | 'assistant'; content: string };
+type ModuleCatalog = Array<{ id: string; displayName: string }>;
+
+/* ------------------------------------------------------------------ */
+/*  Page sections                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Live (latest published) system prompt, with its {variables} highlighted. */
+const CurrentPromptCard: React.FC<{
+  publishedVersion: BotTemplateVersion | undefined;
+  onEditNewVersion: () => void;
+}> = ({ publishedVersion, onEditNewVersion }) => {
+  const { t } = useTranslation();
+  return (
+    <Card variant="glass">
+      <CardHeader className="flex flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <CardTitle>{t('admin.botTemplates.detail.currentPrompt')}</CardTitle>
+          {publishedVersion && <Badge variant="default">{`v${publishedVersion.version}`}</Badge>}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => onEditNewVersion()}>
+          <Pencil className="h-3.5 w-3.5" />{t('admin.botTemplates.actions.editNewVersion')}
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {publishedVersion ? (
+          <>
+            {publishedVersion.body?.trim() ? (
+              <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-edge bg-surface-1 p-4 text-sm leading-relaxed text-text-secondary">
+                {renderPromptWithVars(publishedVersion.body)}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-edge bg-surface-1 p-4 text-sm text-text-muted">
+                {t('admin.botTemplates.detail.promptEmpty')}
+              </div>
+            )}
+            <div className="flex items-center gap-1.5 text-xs text-text-muted">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              {countGuardrails(publishedVersion.config) === 0
+                ? t('admin.botTemplates.detail.promptConfigDefaults')
+                : t('admin.botTemplates.detail.promptConfigSummary', { count: countGuardrails(publishedVersion.config) })}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-text-muted">{t('admin.botTemplates.detail.noPublishedPrompt')}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+/** Per-tenant access grants (only relevant when not globally available). */
+const GrantsCard: React.FC<{
+  availableToAllTenants: boolean;
+  tenants: Array<{ id: string; name: string }>;
+  selectedTenantIds: string[];
+  tenantName: (tid: string) => string;
+  onToggleTenant: (tid: string) => void;
+  pickerOpen: boolean;
+  onPickerOpenChange: (open: boolean) => void;
+  isSaving: boolean;
+  onSave: () => void;
+}> = ({
+  availableToAllTenants,
+  tenants,
+  selectedTenantIds,
+  tenantName,
+  onToggleTenant,
+  pickerOpen,
+  onPickerOpenChange,
+  isSaving,
+  onSave,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Card variant="glass">
+      <CardHeader><CardTitle>{t('admin.botTemplates.detail.grants')}</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-text-tertiary">
+          {availableToAllTenants ? t('admin.botTemplates.detail.grantsGlobalHint') : t('admin.botTemplates.detail.grantsHint')}
+        </p>
+
+        {!availableToAllTenants && (
+          <>
+            {/* Searchable tenant multi-select */}
+            <Popover open={pickerOpen} onOpenChange={onPickerOpenChange}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" className="w-full justify-between">
+                  {selectedTenantIds.length
+                    ? t('admin.botTemplates.detail.tenantsSelected', { count: selectedTenantIds.length })
+                    : t('admin.botTemplates.detail.tenantsSelectPlaceholder')}
+                  <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
+                  <CommandInput placeholder={t('admin.botTemplates.detail.tenantsSearch')} />
+                  <CommandList>
+                    <CommandEmpty>{t('admin.botTemplates.detail.tenantsNone')}</CommandEmpty>
+                    <CommandGroup>
+                      {tenants.map((tenant) => {
+                        const checked = selectedTenantIds.includes(tenant.id);
+                        return (
+                          <CommandItem key={tenant.id} value={`${tenant.name} ${tenant.id}`} onSelect={() => onToggleTenant(tenant.id)}>
+                            <Check className={`mr-2 h-4 w-4 ${checked ? 'opacity-100' : 'opacity-0'}`} />
+                            <span className="truncate">{tenant.name}</span>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+
+            {/* Selected chips */}
+            {selectedTenantIds.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selectedTenantIds.map((tid) => (
+                  <Badge key={tid} variant="secondary" className="gap-1">
+                    {tenantName(tid)}
+                    <button type="button" onClick={() => onToggleTenant(tid)} aria-label="remove">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                disabled={isSaving}
+                onClick={onSave}
+              >
+                {t('admin.botTemplates.actions.saveAccess')}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/*  Version editor sections                                             */
+/* ------------------------------------------------------------------ */
+
+/** Editor takeover header: title, unsaved badge, context line, actions. */
+const VersionEditorHeader: React.FC<{
+  editorTitle: string;
+  mode: VersionDraft['mode'];
+  dirty: boolean;
+  category: string | null;
+  latestVersion: BotTemplateVersion | undefined;
+  createPending: boolean;
+  editPending: boolean;
+  publishPending: boolean;
+  onClose: () => void;
+  onCancel: () => void;
+  onSaveDraft: () => void;
+  onPublish: () => void;
+}> = ({
+  editorTitle,
+  mode,
+  dirty,
+  category,
+  latestVersion,
+  createPending,
+  editPending,
+  publishPending,
+  onClose,
+  onCancel,
+  onSaveDraft,
+  onPublish,
+}) => {
+  const { t } = useTranslation();
+  const editorBusy = createPending || editPending || publishPending;
+  return (
+    <header className="relative flex flex-wrap items-center gap-3 border-b border-edge bg-surface-1/70 px-5 py-3 shrink-0 backdrop-blur">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-500/60 to-transparent" />
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 ring-1 ring-inset ring-primary-500/25">
+          {mode === 'view' ? <Eye className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-base font-semibold text-text-primary">{editorTitle}</h2>
+            {mode === 'view'
+              ? <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.versionStatus.published')}</Badge>
+              : dirty && (
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('admin.botTemplates.editor.unsaved')}
+                </span>
+              )}
+          </div>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-tertiary">
+            {category && (
+              <span className="truncate">{t('admin.botTemplates.detail.category')}: <span className="font-mono text-text-secondary">{category}</span></span>
+            )}
+            {mode === 'create' && latestVersion && (
+              <><span className="text-text-muted">·</span><span className="truncate">{t('admin.botTemplates.editor.prefilledFrom', { version: latestVersion.version })}</span></>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {mode === 'view' ? (
+          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
+            <Button variant="outline" onClick={onSaveDraft} disabled={editorBusy}>{t('admin.botTemplates.editor.saveDraft')}</Button>
+            <Button onClick={onPublish} disabled={editorBusy} className="gap-1.5">
+              <Check className="h-4 w-4" />{t('admin.botTemplates.actions.publish')}
+            </Button>
+          </>
+        )}
+      </div>
+    </header>
+  );
+};
+
+/** 01 — Prompt: the hero, framed as a real editor surface. */
+const PromptSection: React.FC<{
+  draft: VersionDraft;
+  setDraft: React.Dispatch<React.SetStateAction<VersionDraft>>;
+  customChips: string[];
+  onManageVariables: () => void;
+}> = ({ draft, setDraft, customChips, onManageVariables }) => {
+  const { t } = useTranslation();
+  return (
+    <AuthorSection
+      step={1}
+      icon={Sparkles}
+      title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.promptSection')}
+      hint={draft.mode !== 'view' ? (COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPromptHint') : t('admin.botTemplates.editor.bodyHint')) : undefined}
+    >
+      <div className="overflow-hidden rounded-xl border border-edge bg-surface-1 transition-colors focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/25">
+        <div className="flex items-center justify-between gap-2 border-b border-edge/70 bg-surface-2/40 px-3 py-2">
+          <Label htmlFor="d-body" className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+            {COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}
+          </Label>
+          <span className="font-mono text-[11px] tabular-nums text-text-muted">{t('admin.botTemplates.editor.charCount', { n: draft.body.length.toLocaleString() })}</span>
+        </div>
+        <Textarea
+          id="d-body"
+          rows={16}
+          className="rounded-none border-0 bg-transparent font-mono text-sm leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
+          value={draft.body}
+          readOnly={draft.mode === 'view'}
+          onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+        />
+        {/* The placeholder bar always renders. In view mode it is a
+            non-inserting REFERENCE so anyone reading a template can see which
+            placeholders exist (hiding it entirely made authors think booking
+            placeholders were "missing"). In edit mode the chips insert. */}
+        <PlaceholderBar
+          readOnly={draft.mode === 'view'}
+          customChips={customChips}
+          onManage={onManageVariables}
+          onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
+        />
+      </div>
+    </AuthorSection>
+  );
+};
+
+/** 02 — Capabilities: the modules → skills the bot actually gets. */
+const CapabilitiesSection: React.FC<{
+  draft: VersionDraft;
+  setDraft: React.Dispatch<React.SetStateAction<VersionDraft>>;
+  skillsCatalog: AdminSkill[] | undefined;
+  moduleCatalog: ModuleCatalog;
+  customChips: string[];
+  onManageVariables: () => void;
+}> = ({ draft, setDraft, skillsCatalog, moduleCatalog, customChips, onManageVariables }) => {
+  const { t } = useTranslation();
+  return (
+    <AuthorSection
+      step={2}
+      icon={Boxes}
+      title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modules') : t('admin.botTemplates.editor.expectedModules')}
+      hint={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modulesHint') : t('admin.botTemplates.editor.expectedModulesHint')}
+    >
+      {COMPOSABLE_TEMPLATES_ENABLED ? (
+        (() => {
+          const ro = draft.mode === 'view';
+          const toggleSkill = (sid: string) =>
+            setDraft((d) => ({
+              ...d,
+              selectedSkillIds: d.selectedSkillIds.includes(sid)
+                ? d.selectedSkillIds.filter((x) => x !== sid)
+                : [...d.selectedSkillIds, sid],
+            }));
+          const skills = skillsCatalog ?? [];
+          if (skills.length === 0) {
+            return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-muted">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
+          }
+          const setProse = (sid: string, val: string) =>
+            setDraft((d) => ({ ...d, skillProse: { ...d.skillProse, [sid]: val } }));
+          const resetProse = (sid: string) =>
+            setDraft((d) => { const next = { ...d.skillProse }; delete next[sid]; return { ...d, skillProse: next }; });
+          // One card per skill: tick to bind, and a bound skill reveals its prose
+          // inline (pre-filled with the code default; edit to override for this
+          // template only). Skill + its prose live together — no wall of textareas.
+          return (
+            <div className="space-y-2">
+              {skills.map((skill) => {
+                const checked = draft.selectedSkillIds.includes(skill.id);
+                const custom = draft.skillProse[skill.id] !== undefined && draft.skillProse[skill.id].trim() !== skill.defaultProse.trim();
+                return (
+                  <div
+                    key={skill.id}
+                    className={`overflow-hidden rounded-lg border transition-colors ${checked ? 'border-primary-400/50 bg-primary-500/[0.06]' : 'border-edge bg-surface-1'}`}
+                  >
+                    <label className={`flex items-start gap-2.5 p-3 ${ro ? 'pointer-events-none opacity-70' : 'cursor-pointer'} ${checked ? '' : 'hover:bg-surface-2'}`}>
+                      <Checkbox checked={checked} onCheckedChange={() => toggleSkill(skill.id)} disabled={ro} className="mt-0.5" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-medium text-text-primary">
+                          <Cpu className="h-3.5 w-3.5 shrink-0 text-text-muted" />{skill.displayName}
+                          {checked && (
+                            <span className={`rounded px-1 text-[9px] font-medium uppercase tracking-wide ${custom ? 'bg-primary-500/15 text-primary-300' : 'bg-surface-3 text-text-muted'}`}>
+                              {custom ? 'custom prose' : 'default prose'}
+                            </span>
+                          )}
+                        </span>
+                        {skill.description && (
+                          <span className="mt-0.5 block text-xs text-text-muted">{skill.description}</span>
+                        )}
+                      </span>
+                    </label>
+
+                    {checked && (
+                      <div className="space-y-1.5 border-t border-edge/60 bg-surface-0/40 p-3 pt-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">Prose · this template only</span>
+                          {!ro && custom && (
+                            <button type="button" onClick={() => resetProse(skill.id)} className="text-[11px] font-medium text-primary-400 hover:text-primary-300">
+                              Reset to default
+                            </button>
+                          )}
+                        </div>
+                        <div className="overflow-hidden rounded-md border border-edge bg-surface-1">
+                          <Textarea
+                            aria-label={`${skill.displayName} prose`}
+                            rows={3}
+                            readOnly={ro}
+                            value={draft.skillProse[skill.id] ?? skill.defaultProse}
+                            onChange={(e) => setProse(skill.id, e.target.value)}
+                            className="rounded-none border-0 bg-transparent text-xs leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
+                          />
+                          <PlaceholderBar
+                            readOnly={ro}
+                            customChips={customChips}
+                            onManage={onManageVariables}
+                            onInsert={(p) => setProse(skill.id, appendChip(draft.skillProse[skill.id] ?? skill.defaultProse, p))}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()
+      ) : (
+        (() => {
+          const ro = draft.mode === 'view';
+          const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
+          const toggleModule = (mid: string) => {
+            const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
+            setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
+          };
+          if (moduleCatalog.length === 0) return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
+          return (
+            <div className="flex flex-wrap gap-1.5">
+              {moduleCatalog.map((mod) => {
+                const selected = modulesArr.includes(mod.id);
+                return (
+                  <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-8 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
+                    {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
+                  </Button>
+                );
+              })}
+            </div>
+          );
+        })()
+      )}
+    </AuthorSection>
+  );
+};
+
+/** 05 — Test this prompt: try the current draft (body + config) before publishing. */
+const TestPromptSection: React.FC<{
+  log: TestMessage[];
+  input: string;
+  setInput: (value: string) => void;
+  isPending: boolean;
+  onRun: () => void;
+}> = ({ log, input, setInput, isPending, onRun }) => {
+  const { t } = useTranslation();
+  return (
+    <AuthorSection step={5} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
+      <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-4">
+        {log.length > 0 && (
+          <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">
+            {log.map((mtest, i) => (
+              <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
+                <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
+                  {mtest.content}
+                </span>
+              </div>
+            ))}
+            {isPending && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.testThinking')}</p>}
+          </div>
+        )}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            value={input}
+            placeholder={t('admin.botTemplates.editor.testPlaceholder')}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onRun(); } }}
+          />
+          <Button type="button" onClick={() => onRun()} disabled={isPending || !input.trim()}>
+            {t('admin.botTemplates.editor.testSend')}
+          </Button>
+        </div>
+      </div>
+    </AuthorSection>
+  );
+};
+
+/** RIGHT rail — live preview: a "monitor". Outcomes first, ledger on demand. */
+const PreviewRail: React.FC<{
+  tier: PreviewTier;
+  setTier: (value: PreviewTier) => void;
+  channel: string;
+  setChannel: (value: string) => void;
+  isPending: boolean;
+  ledger: PreviewLedgerResponse | undefined;
+  selectedSkillIds: string[];
+  skillsCatalog: AdminSkill[] | undefined;
+}> = ({ tier, setTier, channel, setChannel, isPending, ledger, selectedSkillIds, skillsCatalog }) => {
+  return (
+    <aside className="relative space-y-4 overflow-y-auto border-t border-edge bg-surface-0 p-5 lg:border-l lg:border-t-0">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 hidden h-px bg-gradient-to-r from-transparent via-primary-500/40 to-transparent lg:block" />
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-2 text-primary-300 ring-1 ring-inset ring-edge">
+          <Eye className="h-3.5 w-3.5" />
+        </span>
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
+        </div>
+      </div>
+      <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
+
+      <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-3">
+        <div>
+          <label className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+            <SlidersHorizontal className="h-3 w-3" />Plan
+          </label>
+          <Select value={tier} onValueChange={(v) => setTier(v as PreviewTier)}>
+            <SelectTrigger aria-label="Plan" className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>{(['free', 'essential', 'pro', 'enterprise'] as const).map((x) => <SelectItem key={x} value={x}>{TIER_LABELS[x]}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-text-tertiary">Preview channel</span>
+          <Select value={channel} onValueChange={setChannel}>
+            <SelectTrigger aria-label="Channel" className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <p className="text-[10px] leading-relaxed text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules. Channel only tweaks reply length and proactive contact.'}</p>
+      </div>
+
+      {isPending && (
+        <p className="flex items-center gap-2 text-xs text-text-tertiary">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-400" />Compiling…
+        </p>
+      )}
+      {ledger ? (() => {
+        const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS[b]);
+        const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS[e.key]);
+        return (
+          <>
+            <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-3">
+              <RailLabel>In this scenario the bot can</RailLabel>
+              <div className="space-y-1.5">
+                {PREVIEW_CAPABILITIES.map((cap) => {
+                  const on = ledger.allowedTools.includes(cap.tool);
+                  return (
+                    <div key={cap.tool} className={`flex items-start gap-2 text-xs ${on ? 'text-text-primary' : 'text-text-muted'}`}>
+                      {on
+                        ? <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-online/15"><Check className="h-2.5 w-2.5 text-status-online" /></span>
+                        : <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-away/15"><TriangleAlert className="h-2.5 w-2.5 text-status-away" /></span>}
+                      <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Composable-templates: per-skill state badges for the modules
+                this template binds, derived from the scenario ledger. */}
+            {COMPOSABLE_TEMPLATES_ENABLED && (() => {
+              const skills = selectedSkillIds;
+              if (skills.length === 0) {
+                return <p className="rounded-xl border border-dashed border-edge px-3 py-3 text-xs text-text-muted">Add a skill on the left to preview it.</p>;
+              }
+              return (
+                <div className="space-y-1.5">
+                  <RailLabel>Skills</RailLabel>
+                  {skills.map((sid) => {
+                    const meta = skillsCatalog?.find((s) => s.id === sid);
+                    const provides = meta?.provides ?? SKILL_PREVIEW[sid]?.tools ?? [];
+                    const readyTools = provides.filter((tn) => ledger.allowedTools.includes(tn));
+                    // A skill that needs per-bot setup (booking) reads ready only when its
+                    // tools surface; inert catalog skills (handoff, lead capture) need no
+                    // setup, so they read ready as soon as the template composes them.
+                    const state: SkillState =
+                      meta && !meta.needsSetup ? 'ready' : readyTools.length > 0 ? 'ready' : 'unconfigured';
+                    const name = meta?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
+                    return <SkillStateCard key={sid} skill={{ id: sid, name, state, remedy: stateToRemedy(state) }} readyTools={readyTools} />;
+                  })}
+                </div>
+              );
+            })()}
+
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="tech" className="rounded-xl border border-edge px-4 border-b">
+                <AccordionTrigger className="hover:no-underline text-xs font-medium">Show technical details</AccordionTrigger>
+                <AccordionContent className="space-y-3 text-xs">
+                  <TooltipProvider delayDuration={150}>
+                    <div>
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Prompt blocks included ({included.length})</div>
+                      {included.map((b) => (
+                        <div key={b} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-primary"><Check className="h-3 w-3 shrink-0 text-status-online" /><BlockKey name={b} /></div>
+                      ))}
+                    </div>
+                    {excluded.length > 0 && (
+                      <div>
+                        <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Not in this scenario ({excluded.length})</div>
+                        {excluded.map((e) => (
+                          <div key={e.key} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-tertiary"><X className="h-3 w-3 shrink-0" /><BlockKey name={e.key} /><span className="ml-auto rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-sans text-[10px]">{EXCLUDED_NOTE[e.key] ?? REASON_TEXT[e.reason] ?? e.reason}</span></div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="font-mono text-text-secondary"><span className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
+                  </TooltipProvider>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </>
+        );
+      })() : !isPending ? (
+        <div className="rounded-xl border border-dashed border-edge px-4 py-8 text-center">
+          <Eye className="mx-auto mb-2 h-5 w-5 text-text-muted" />
+          <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
+        </div>
+      ) : null}
+    </aside>
+  );
+};
 
 const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
@@ -349,13 +930,7 @@ const AdminBotTemplateDetail: React.FC = () => {
     }
   };
 
-  const editorTitle =
-    draft.mode === 'create'
-      ? t('admin.botTemplates.editor.newTitle')
-      : draft.mode === 'view'
-        ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
-        : t('admin.botTemplates.editor.editTitle', { version: draft.version });
-  const editorBusy = createVersionMut.isPending || editVersionMut.isPending || publishMut.isPending;
+  const editorTitle = t(EDITOR_TITLE_KEYS[draft.mode], { version: draft.version });
   // Unsaved-edits signal for the editor header, mirroring the discard guard.
   const dirty = draft.mode !== 'view' && draftKey(draft) !== draftBaselineRef.current;
 
@@ -434,7 +1009,7 @@ const AdminBotTemplateDetail: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 <Label>Tier</Label>
-                <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tier">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" role="group" aria-label="Tier">
                   {TIER_OPTIONS.map((tr) => (
                     <button
                       key={tr.id}
@@ -488,40 +1063,7 @@ const AdminBotTemplateDetail: React.FC = () => {
       {/* Current prompt — the live (latest published) system prompt, shown as
           readable prose with its {variables} highlighted as fill-in slots, sized to
           content instead of an empty textarea, with a clear edit path. */}
-      <Card variant="glass">
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <CardTitle>{t('admin.botTemplates.detail.currentPrompt')}</CardTitle>
-            {publishedVersion && <Badge variant="default">{`v${publishedVersion.version}`}</Badge>}
-          </div>
-          <Button size="sm" variant="outline" onClick={() => openCreate()}>
-            <Pencil className="h-3.5 w-3.5" />{t('admin.botTemplates.actions.editNewVersion')}
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {publishedVersion ? (
-            <>
-              {publishedVersion.body?.trim() ? (
-                <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-edge bg-surface-1 p-4 text-sm leading-relaxed text-text-secondary">
-                  {renderPromptWithVars(publishedVersion.body)}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-edge bg-surface-1 p-4 text-sm text-text-muted">
-                  {t('admin.botTemplates.detail.promptEmpty')}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 text-xs text-text-muted">
-                <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                {countGuardrails(publishedVersion.config) === 0
-                  ? t('admin.botTemplates.detail.promptConfigDefaults')
-                  : t('admin.botTemplates.detail.promptConfigSummary', { count: countGuardrails(publishedVersion.config) })}
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-text-muted">{t('admin.botTemplates.detail.noPublishedPrompt')}</p>
-          )}
-        </CardContent>
-      </Card>
+      <CurrentPromptCard publishedVersion={publishedVersion} onEditNewVersion={openCreate} />
 
       {/* Versions */}
       <Card variant="glass">
@@ -618,78 +1160,22 @@ const AdminBotTemplateDetail: React.FC = () => {
       </Card>
 
       {/* Grants (only relevant when not globally available) */}
-      <Card variant="glass">
-        <CardHeader><CardTitle>{t('admin.botTemplates.detail.grants')}</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-text-tertiary">
-            {template.availableToAllTenants ? t('admin.botTemplates.detail.grantsGlobalHint') : t('admin.botTemplates.detail.grantsHint')}
-          </p>
-
-          {!template.availableToAllTenants && (
-            <>
-              {/* Searchable tenant multi-select */}
-              <Popover open={tenantPickerOpen} onOpenChange={setTenantPickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" role="combobox" className="w-full justify-between">
-                    {selectedTenantIds.length
-                      ? t('admin.botTemplates.detail.tenantsSelected', { count: selectedTenantIds.length })
-                      : t('admin.botTemplates.detail.tenantsSelectPlaceholder')}
-                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                  <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
-                    <CommandInput placeholder={t('admin.botTemplates.detail.tenantsSearch')} />
-                    <CommandList>
-                      <CommandEmpty>{t('admin.botTemplates.detail.tenantsNone')}</CommandEmpty>
-                      <CommandGroup>
-                        {tenants.map((tenant) => {
-                          const checked = selectedTenantIds.includes(tenant.id);
-                          return (
-                            <CommandItem key={tenant.id} value={`${tenant.name} ${tenant.id}`} onSelect={() => toggleTenant(tenant.id)}>
-                              <Check className={`mr-2 h-4 w-4 ${checked ? 'opacity-100' : 'opacity-0'}`} />
-                              <span className="truncate">{tenant.name}</span>
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-
-              {/* Selected chips */}
-              {selectedTenantIds.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {selectedTenantIds.map((tid) => (
-                    <Badge key={tid} variant="secondary" className="gap-1">
-                      {tenantName(tid)}
-                      <button type="button" onClick={() => toggleTenant(tid)} aria-label="remove">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  disabled={grantsMut.isPending}
-                  onClick={() =>
-                    withForce(
-                      (force) => grantsMut.mutateAsync({ tenantIds: selectedTenantIds, force }).then(() => setSelectedTenants(null)),
-                      (n) => ({ title: t('admin.botTemplates.confirm.ungrantTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
-                    )
-                  }
-                >
-                  {t('admin.botTemplates.actions.saveAccess')}
-                </Button>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      <GrantsCard
+        availableToAllTenants={template.availableToAllTenants}
+        tenants={tenants}
+        selectedTenantIds={selectedTenantIds}
+        tenantName={tenantName}
+        onToggleTenant={toggleTenant}
+        pickerOpen={tenantPickerOpen}
+        onPickerOpenChange={setTenantPickerOpen}
+        isSaving={grantsMut.isPending}
+        onSave={() =>
+          withForce(
+            (force) => grantsMut.mutateAsync({ tenantIds: selectedTenantIds, force }).then(() => setSelectedTenants(null)),
+            (n) => ({ title: t('admin.botTemplates.confirm.ungrantTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
+          )
+        }
+      />
 
       {/* Version editor — full-page two-pane takeover (author | live ledger).
           Uses the Radix Dialog primitive for focus-trap / Escape / aria-modal / focus
@@ -702,200 +1188,42 @@ const AdminBotTemplateDetail: React.FC = () => {
             className="fixed inset-0 z-50 flex flex-col bg-surface-0 focus:outline-none"
           >
             <DialogPrimitive.Title className="sr-only">{editorTitle}</DialogPrimitive.Title>
-            <header className="relative flex flex-wrap items-center gap-3 border-b border-edge bg-surface-1/70 px-5 py-3 shrink-0 backdrop-blur">
-            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-500/60 to-transparent" />
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 ring-1 ring-inset ring-primary-500/25">
-                {draft.mode === 'view' ? <Eye className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="truncate text-base font-semibold text-text-primary">{editorTitle}</h2>
-                  {draft.mode === 'view'
-                    ? <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.versionStatus.published')}</Badge>
-                    : dirty && (
-                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('admin.botTemplates.editor.unsaved')}
-                      </span>
-                    )}
-                </div>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-tertiary">
-                  {template.category && (
-                    <span className="truncate">{t('admin.botTemplates.detail.category')}: <span className="font-mono text-text-secondary">{template.category}</span></span>
-                  )}
-                  {draft.mode === 'create' && versions[0] && (
-                    <><span className="text-text-muted">·</span><span className="truncate">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</span></>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              {draft.mode === 'view' ? (
-                <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
-              ) : (
-                <>
-                  <Button variant="ghost" onClick={requestCloseDraft}>{t('common.cancel')}</Button>
-                  <Button variant="outline" onClick={saveDraft} disabled={editorBusy}>{t('admin.botTemplates.editor.saveDraft')}</Button>
-                  <Button onClick={publishDraft} disabled={editorBusy} className="gap-1.5">
-                    <Check className="h-4 w-4" />{t('admin.botTemplates.actions.publish')}
-                  </Button>
-                </>
-              )}
-            </div>
-          </header>
+            <VersionEditorHeader
+              editorTitle={editorTitle}
+              mode={draft.mode}
+              dirty={dirty}
+              category={template.category}
+              latestVersion={versions[0]}
+              createPending={createVersionMut.isPending}
+              editPending={editVersionMut.isPending}
+              publishPending={publishMut.isPending}
+              onClose={() => setDraft(EMPTY_DRAFT)}
+              onCancel={requestCloseDraft}
+              onSaveDraft={saveDraft}
+              onPublish={publishDraft}
+            />
           <div className="flex-1 min-h-0 grid lg:grid-cols-[1fr_minmax(0,440px)]">
             {/* LEFT — author: numbered steps down a connecting rail. */}
             <div className="overflow-y-auto">
             <div className="mx-auto max-w-3xl px-6 py-8 lg:px-8">
 
             {/* 01 — Prompt: the hero, framed as a real editor surface. */}
-            <AuthorSection
-              step={1}
-              icon={Sparkles}
-              title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.promptSection')}
-              hint={draft.mode !== 'view' ? (COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPromptHint') : t('admin.botTemplates.editor.bodyHint')) : undefined}
-            >
-              <div className="overflow-hidden rounded-xl border border-edge bg-surface-1 transition-colors focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/25">
-                <div className="flex items-center justify-between gap-2 border-b border-edge/70 bg-surface-2/40 px-3 py-2">
-                  <Label htmlFor="d-body" className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    {COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}
-                  </Label>
-                  <span className="font-mono text-[11px] tabular-nums text-text-muted">{t('admin.botTemplates.editor.charCount', { n: draft.body.length.toLocaleString() })}</span>
-                </div>
-                <Textarea
-                  id="d-body"
-                  rows={16}
-                  className="rounded-none border-0 bg-transparent font-mono text-sm leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
-                  value={draft.body}
-                  readOnly={draft.mode === 'view'}
-                  onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-                />
-                {/* The placeholder bar always renders. In view mode it is a
-                    non-inserting REFERENCE so anyone reading a template can see which
-                    placeholders exist (hiding it entirely made authors think booking
-                    placeholders were "missing"). In edit mode the chips insert. */}
-                <PlaceholderBar
-                  readOnly={draft.mode === 'view'}
-                  customChips={draftCustomKeys().map((k) => `{${k}}`)}
-                  onManage={() => setVarsModalOpen(true)}
-                  onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
-                />
-              </div>
-            </AuthorSection>
+            <PromptSection
+              draft={draft}
+              setDraft={setDraft}
+              customChips={draftCustomKeys().map((k) => `{${k}}`)}
+              onManageVariables={() => setVarsModalOpen(true)}
+            />
 
             {/* 02 — Capabilities: the modules → skills the bot actually gets. */}
-            <AuthorSection
-              step={2}
-              icon={Boxes}
-              title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modules') : t('admin.botTemplates.editor.expectedModules')}
-              hint={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modulesHint') : t('admin.botTemplates.editor.expectedModulesHint')}
-            >
-              {COMPOSABLE_TEMPLATES_ENABLED ? (
-                (() => {
-                  const ro = draft.mode === 'view';
-                  const toggleSkill = (sid: string) =>
-                    setDraft((d) => ({
-                      ...d,
-                      selectedSkillIds: d.selectedSkillIds.includes(sid)
-                        ? d.selectedSkillIds.filter((x) => x !== sid)
-                        : [...d.selectedSkillIds, sid],
-                    }));
-                  const skills = skillsCatalog ?? [];
-                  if (skills.length === 0) {
-                    return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-muted">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
-                  }
-                  const setProse = (sid: string, val: string) =>
-                    setDraft((d) => ({ ...d, skillProse: { ...d.skillProse, [sid]: val } }));
-                  const resetProse = (sid: string) =>
-                    setDraft((d) => { const next = { ...d.skillProse }; delete next[sid]; return { ...d, skillProse: next }; });
-                  // One card per skill: tick to bind, and a bound skill reveals its prose
-                  // inline (pre-filled with the code default; edit to override for this
-                  // template only). Skill + its prose live together — no wall of textareas.
-                  return (
-                    <div className="space-y-2">
-                      {skills.map((skill) => {
-                        const checked = draft.selectedSkillIds.includes(skill.id);
-                        const custom = draft.skillProse[skill.id] !== undefined && draft.skillProse[skill.id].trim() !== skill.defaultProse.trim();
-                        return (
-                          <div
-                            key={skill.id}
-                            className={`overflow-hidden rounded-lg border transition-colors ${checked ? 'border-primary-400/50 bg-primary-500/[0.06]' : 'border-edge bg-surface-1'}`}
-                          >
-                            <label className={`flex items-start gap-2.5 p-3 ${ro ? 'pointer-events-none opacity-70' : 'cursor-pointer'} ${checked ? '' : 'hover:bg-surface-2'}`}>
-                              <Checkbox checked={checked} onCheckedChange={() => toggleSkill(skill.id)} disabled={ro} className="mt-0.5" />
-                              <span className="min-w-0 flex-1">
-                                <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-medium text-text-primary">
-                                  <Cpu className="h-3.5 w-3.5 shrink-0 text-text-muted" />{skill.displayName}
-                                  {checked && (
-                                    <span className={`rounded px-1 text-[9px] font-medium uppercase tracking-wide ${custom ? 'bg-primary-500/15 text-primary-300' : 'bg-surface-3 text-text-muted'}`}>
-                                      {custom ? 'custom prose' : 'default prose'}
-                                    </span>
-                                  )}
-                                </span>
-                                {skill.description && (
-                                  <span className="mt-0.5 block text-xs text-text-muted">{skill.description}</span>
-                                )}
-                              </span>
-                            </label>
-
-                            {checked && (
-                              <div className="space-y-1.5 border-t border-edge/60 bg-surface-0/40 p-3 pt-2.5">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">Prose · this template only</span>
-                                  {!ro && custom && (
-                                    <button type="button" onClick={() => resetProse(skill.id)} className="text-[11px] font-medium text-primary-400 hover:text-primary-300">
-                                      Reset to default
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="overflow-hidden rounded-md border border-edge bg-surface-1">
-                                  <Textarea
-                                    aria-label={`${skill.displayName} prose`}
-                                    rows={3}
-                                    readOnly={ro}
-                                    value={draft.skillProse[skill.id] ?? skill.defaultProse}
-                                    onChange={(e) => setProse(skill.id, e.target.value)}
-                                    className="rounded-none border-0 bg-transparent text-xs leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
-                                  />
-                                  <PlaceholderBar
-                                    readOnly={ro}
-                                    customChips={draftCustomKeys().map((k) => `{${k}}`)}
-                                    onManage={() => setVarsModalOpen(true)}
-                                    onInsert={(p) => setProse(skill.id, appendChip(draft.skillProse[skill.id] ?? skill.defaultProse, p))}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()
-              ) : (
-                (() => {
-                  const ro = draft.mode === 'view';
-                  const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
-                  const toggleModule = (mid: string) => {
-                    const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
-                    setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
-                  };
-                  if (moduleCatalog.length === 0) return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
-                  return (
-                    <div className="flex flex-wrap gap-1.5">
-                      {moduleCatalog.map((mod) => {
-                        const selected = modulesArr.includes(mod.id);
-                        return (
-                          <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-8 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
-                            {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  );
-                })()
-              )}
-            </AuthorSection>
+            <CapabilitiesSection
+              draft={draft}
+              setDraft={setDraft}
+              skillsCatalog={skillsCatalog}
+              moduleCatalog={moduleCatalog}
+              customChips={draftCustomKeys().map((k) => `{${k}}`)}
+              onManageVariables={() => setVarsModalOpen(true)}
+            />
 
             {/* 03 — Guardrails: template-owned policy (tone stays bot-owned). */}
             <AuthorSection
@@ -991,156 +1319,27 @@ const AdminBotTemplateDetail: React.FC = () => {
             </AuthorSection>
 
             {/* 05 — Test this prompt: try the current draft (body + config) before publishing. */}
-            <AuthorSection step={5} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
-              <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-4">
-                {testLog.length > 0 && (
-                  <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">
-                    {testLog.map((mtest, i) => (
-                      <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
-                        <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
-                          {mtest.content}
-                        </span>
-                      </div>
-                    ))}
-                    {testChat.isPending && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.testThinking')}</p>}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <Input
-                    value={testInput}
-                    placeholder={t('admin.botTemplates.editor.testPlaceholder')}
-                    onChange={(e) => setTestInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void runTest(); } }}
-                  />
-                  <Button type="button" onClick={() => void runTest()} disabled={testChat.isPending || !testInput.trim()}>
-                    {t('admin.botTemplates.editor.testSend')}
-                  </Button>
-                </div>
-              </div>
-            </AuthorSection>
+            <TestPromptSection
+              log={testLog}
+              input={testInput}
+              setInput={setTestInput}
+              isPending={testChat.isPending}
+              onRun={() => void runTest()}
+            />
 
             </div>
             </div>
             {/* RIGHT — live preview: a "monitor" rail. Outcomes first, ledger on demand. */}
-            <aside className="relative space-y-4 overflow-y-auto border-t border-edge bg-surface-0 p-5 lg:border-l lg:border-t-0">
-              <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 hidden h-px bg-gradient-to-r from-transparent via-primary-500/40 to-transparent lg:block" />
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-2 text-primary-300 ring-1 ring-inset ring-edge">
-                  <Eye className="h-3.5 w-3.5" />
-                </span>
-                <div>
-                  <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
-                </div>
-              </div>
-              <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
-
-              <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-3">
-                <div>
-                  <label className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
-                    <SlidersHorizontal className="h-3 w-3" />Plan
-                  </label>
-                  <Select value={pvTier} onValueChange={(v) => setPvTier(v as typeof pvTier)}>
-                    <SelectTrigger aria-label="Plan" className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>{(['free', 'essential', 'pro', 'enterprise'] as const).map((x) => <SelectItem key={x} value={x}>{TIER_LABELS[x]}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-text-tertiary">Preview channel</span>
-                  <Select value={pvChannel} onValueChange={setPvChannel}>
-                    <SelectTrigger aria-label="Channel" className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <p className="text-[10px] leading-relaxed text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules. Channel only tweaks reply length and proactive contact.'}</p>
-              </div>
-
-              {preview.isPending && (
-                <p className="flex items-center gap-2 text-xs text-text-tertiary">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-400" />Compiling…
-                </p>
-              )}
-              {preview.data ? (() => {
-                const ledger = preview.data;
-                const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS[b]);
-                const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS[e.key]);
-                return (
-                  <>
-                    <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-3">
-                      <RailLabel>In this scenario the bot can</RailLabel>
-                      <div className="space-y-1.5">
-                        {PREVIEW_CAPABILITIES.map((cap) => {
-                          const on = ledger.allowedTools.includes(cap.tool);
-                          return (
-                            <div key={cap.tool} className={`flex items-start gap-2 text-xs ${on ? 'text-text-primary' : 'text-text-muted'}`}>
-                              {on
-                                ? <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-online/15"><Check className="h-2.5 w-2.5 text-status-online" /></span>
-                                : <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-away/15"><TriangleAlert className="h-2.5 w-2.5 text-status-away" /></span>}
-                              <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Composable-templates: per-skill state badges for the modules
-                        this template binds, derived from the scenario ledger. */}
-                    {COMPOSABLE_TEMPLATES_ENABLED && (() => {
-                      const skills = draft.selectedSkillIds;
-                      if (skills.length === 0) {
-                        return <p className="rounded-xl border border-dashed border-edge px-3 py-3 text-xs text-text-muted">Add a skill on the left to preview it.</p>;
-                      }
-                      return (
-                        <div className="space-y-1.5">
-                          <RailLabel>Skills</RailLabel>
-                          {skills.map((sid) => {
-                            const meta = skillsCatalog?.find((s) => s.id === sid);
-                            const provides = meta?.provides ?? SKILL_PREVIEW[sid]?.tools ?? [];
-                            const readyTools = provides.filter((tn) => ledger.allowedTools.includes(tn));
-                            // A skill that needs per-bot setup (booking) reads ready only when its
-                            // tools surface; inert catalog skills (handoff, lead capture) need no
-                            // setup, so they read ready as soon as the template composes them.
-                            const state: SkillState =
-                              meta && !meta.needsSetup ? 'ready' : readyTools.length > 0 ? 'ready' : 'unconfigured';
-                            const name = meta?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
-                            return <SkillStateCard key={sid} skill={{ id: sid, name, state, remedy: stateToRemedy(state) }} readyTools={readyTools} />;
-                          })}
-                        </div>
-                      );
-                    })()}
-
-                    <Accordion type="single" collapsible className="w-full">
-                      <AccordionItem value="tech" className="rounded-xl border border-edge px-4 border-b">
-                        <AccordionTrigger className="hover:no-underline text-xs font-medium">Show technical details</AccordionTrigger>
-                        <AccordionContent className="space-y-3 text-xs">
-                          <TooltipProvider delayDuration={150}>
-                            <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Prompt blocks included ({included.length})</div>
-                              {included.map((b) => (
-                                <div key={b} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-primary"><Check className="h-3 w-3 shrink-0 text-status-online" /><BlockKey name={b} /></div>
-                              ))}
-                            </div>
-                            {excluded.length > 0 && (
-                              <div>
-                                <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Not in this scenario ({excluded.length})</div>
-                                {excluded.map((e) => (
-                                  <div key={e.key} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-tertiary"><X className="h-3 w-3 shrink-0" /><BlockKey name={e.key} /><span className="ml-auto rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-sans text-[10px]">{EXCLUDED_NOTE[e.key] ?? REASON_TEXT[e.reason] ?? e.reason}</span></div>
-                                ))}
-                              </div>
-                            )}
-                            <div className="font-mono text-text-secondary"><span className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
-                          </TooltipProvider>
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  </>
-                );
-              })() : !preview.isPending ? (
-                <div className="rounded-xl border border-dashed border-edge px-4 py-8 text-center">
-                  <Eye className="mx-auto mb-2 h-5 w-5 text-text-muted" />
-                  <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
-                </div>
-              ) : null}
-            </aside>
+            <PreviewRail
+              tier={pvTier}
+              setTier={setPvTier}
+              channel={pvChannel}
+              setChannel={setPvChannel}
+              isPending={preview.isPending}
+              ledger={preview.data}
+              selectedSkillIds={draft.selectedSkillIds}
+              skillsCatalog={skillsCatalog}
+            />
           </div>
     
             {/* Manage all custom template variables — opened from any Insert bar's
@@ -1210,7 +1409,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                           })
                         )}
                       </div>
-                      <div className="flex items-center gap-2 border-t border-edge/60 pt-3">
+                      <div className="flex flex-wrap items-center gap-2 border-t border-edge/60 pt-3">
                         <span className="shrink-0 text-xs text-text-muted">Add variable</span>
                         <div className="relative flex-1">
                           <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>

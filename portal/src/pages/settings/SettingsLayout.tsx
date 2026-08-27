@@ -54,7 +54,7 @@ const SettingsLayout: React.FC = () => {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-4 md:p-6">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-text-primary">{t('settings.header.title')}</h1>
@@ -70,7 +70,7 @@ const SettingsLayout: React.FC = () => {
                 to={item.path}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors',
+                    'flex items-center gap-1.5 px-3 py-2.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors',
                     isActive
                       ? 'bg-primary-600/10 text-primary-400'
                       : 'text-text-secondary hover:text-text-primary'

@@ -169,17 +169,76 @@ export async function associateLeadSession(input: {
 }
 
 /**
+ * The identity fields exactly as they are written. Kept together so the normalisation
+ * the dedupe key sees and the normalisation the row stores cannot drift apart.
+ */
+function normalizeIdentity(input: UpsertLeadInput): {
+  email: string | null;
+  phone: string | null;
+  name: string | null;
+  notes: string | null;
+} {
+  const email = normalizeEmail(input.email);
+  // WhatsApp's externalUserId IS the phone — surface it as a real phone too.
+  const rawPhone = input.phone ?? (input.channel === 'whatsapp' ? input.externalUserId : null);
+  return {
+    email,
+    phone: normalizePhone(rawPhone),
+    name: input.name?.trim() || null,
+    notes: input.notes?.trim() || null,
+  };
+}
+
+/**
+ * Post-write fan-out for one upserted row. A brand-new lead, a request landing on a
+ * contact-only lead, and a plain re-touch are three different events to a consumer, so
+ * the branch that fires here decides what the tenant actually receives.
+ */
+function notifyUpsert(
+  input: UpsertLeadInput,
+  row: { id: string; inserted: boolean; old_notes: string | null },
+  lead: LeadEmitFields,
+  channel: string | null,
+): void {
+  if (row.inserted) {
+    logger.info('[leads] captured', { tenantId: input.tenantId, leadId: row.id, channel, source: input.source });
+    // Full fan-out (webhook + email + notification) on a genuinely NEW lead.
+    void emitLeadCreated(input, lead).catch(() => {});
+    return;
+  }
+
+  if (lead.notes && !row.old_notes) {
+    // Channel case: the request summary just landed on a lead the inbound hook
+    // created earlier WITHOUT it (lead.created webhook/email already fired then,
+    // contact-only). Re-notify the OPERATOR — once — with the request so the
+    // channel alert is actionable, with a distinct dedupe key so the first
+    // notification doesn't suppress it.
+    //
+    // We still do NOT re-fire `lead.created` (that would duplicate the
+    // first-contact event), but we now DO emit `lead.updated`. Without it the
+    // outbound payload was a lossy one-shot: it fired at first contact, before
+    // the conversation had said what the customer actually wanted, so a CRM
+    // received a bare phone number and never learned the request.
+    logger.debug('[leads] request landed on existing lead', { tenantId: input.tenantId, leadId: row.id, source: input.source });
+    void createLeadNotification(
+      input,
+      { leadId: row.id, name: lead.name, email: lead.email, phone: lead.phone },
+      { dedupeSuffix: 'request' },
+    ).catch(() => {});
+    void emitLeadUpdated(input, lead, ['notes']).catch(() => {});
+    return;
+  }
+
+  logger.debug('[leads] updated', { tenantId: input.tenantId, leadId: row.id, source: input.source });
+}
+
+/**
  * Upsert a Lead from whatever identity the conversation provided. Returns
  * `null` when capture is gated off (entitlement) or there is no identifier to
  * key on — both are no-ops, never an error.
  */
 export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResult | null> {
-  const email = normalizeEmail(input.email);
-  // WhatsApp's externalUserId IS the phone — surface it as a real phone too.
-  const rawPhone = input.phone ?? (input.channel === 'whatsapp' ? input.externalUserId : null);
-  const phone = normalizePhone(rawPhone);
-  const name = input.name?.trim() || null;
-  const notes = input.notes?.trim() || null;
+  const { email, phone, name, notes } = normalizeIdentity(input);
 
   const dedupeKey = computeDedupeKey({
     channel: input.channel,
@@ -260,28 +319,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
     const row = rows[0];
     if (!row) return null;
 
-    if (row.inserted) {
-      logger.info('[leads] captured', { tenantId: input.tenantId, leadId: row.id, channel, source: input.source });
-      // Full fan-out (webhook + email + notification) on a genuinely NEW lead.
-      void emitLeadCreated(input, { leadId: row.id, dedupeKey, name, email, phone, notes }).catch(() => {});
-    } else if (notes && !row.old_notes) {
-      // Channel case: the request summary just landed on a lead the inbound hook
-      // created earlier WITHOUT it (lead.created webhook/email already fired then,
-      // contact-only). Re-notify the OPERATOR — once — with the request so the
-      // channel alert is actionable, with a distinct dedupe key so the first
-      // notification doesn't suppress it.
-      //
-      // We still do NOT re-fire `lead.created` (that would duplicate the
-      // first-contact event), but we now DO emit `lead.updated`. Without it the
-      // outbound payload was a lossy one-shot: it fired at first contact, before
-      // the conversation had said what the customer actually wanted, so a CRM
-      // received a bare phone number and never learned the request.
-      logger.debug('[leads] request landed on existing lead', { tenantId: input.tenantId, leadId: row.id, source: input.source });
-      void createLeadNotification(input, { leadId: row.id, name, email, phone }, { dedupeSuffix: 'request' }).catch(() => {});
-      void emitLeadUpdated(input, { leadId: row.id, dedupeKey, name, email, phone, notes }, ['notes']).catch(() => {});
-    } else {
-      logger.debug('[leads] updated', { tenantId: input.tenantId, leadId: row.id, source: input.source });
-    }
+    notifyUpsert(input, row, { leadId: row.id, dedupeKey, name, email, phone, notes }, channel);
 
     // Link this conversation to the lead — on EVERY capture, insert or update, and
     // independently of the fan-out above. This is what gives a returning customer a

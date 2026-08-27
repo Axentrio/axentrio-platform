@@ -18,16 +18,28 @@ export function centsToEuros(cents: number): number {
   return Math.round(cents) / CENTS;
 }
 
-function vatPercentFromLine(line: StripeInvoiceLineLike): number {
+function modernVatPercent(line: StripeInvoiceLineLike): number | null {
   const modern = line.taxes?.[0]?.tax_rate_details?.percentage_decimal;
   if (modern != null && modern !== '') {
     const parsed = Number(modern);
     if (Number.isFinite(parsed)) return parsed;
   }
+  return null;
+}
+
+function legacyVatPercent(line: StripeInvoiceLineLike): number | null {
   const legacy = line.tax_amounts?.[0]?.tax_rate;
   if (legacy && typeof legacy === 'object' && legacy.percentage != null) {
     return Number(legacy.percentage);
   }
+  return null;
+}
+
+function vatPercentFromLine(line: StripeInvoiceLineLike): number {
+  const modern = modernVatPercent(line);
+  if (modern != null) return modern;
+  const legacy = legacyVatPercent(line);
+  if (legacy != null) return legacy;
   const excl = line.amount_excluding_tax ?? null;
   const tax = line.taxes?.[0]?.amount ?? line.tax_amounts?.[0]?.amount ?? null;
   if (excl && excl !== 0 && tax != null) {

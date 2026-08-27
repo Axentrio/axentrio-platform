@@ -18,7 +18,9 @@ import {
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
 import { useHasFeature } from '../queries/useEntitlementsQueries';
 // Wire types from the api's contract module (type-only, erased at build).
-import type { OutcomesResponse, OutcomeSeriesPoint } from '@contracts/analytics';
+import type { OutcomeAggregates, OutcomesResponse, OutcomeSeriesPoint } from '@contracts/analytics';
+import type { TFunction } from 'i18next';
+import type { NavigateFunction } from 'react-router-dom';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
   PieChart,
@@ -35,7 +37,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus, Moon } from 'lucide-react';
+import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus, Moon, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -104,6 +106,113 @@ const chartTooltipStyle = {
   borderRadius: '12px',
   color: '#f1f3f9',
 };
+
+interface StatCard {
+  label: string;
+  value: string;
+  change: string;
+  icon: LucideIcon;
+  color: string;
+  bgColor: string;
+  onClick?: () => void;
+}
+
+/** The two dashboard-sourced fields the KPI strip reads. */
+interface DashboardStatSource {
+  avgResponseTimeSeconds?: number;
+  csatScore?: number;
+}
+
+/**
+ * Business-outcome cards for the selected range, each with a vs-previous-period
+ * delta. The bookings card follows the existing `bookings` feature flag (an
+ * Essential tenant has no bookings module, so the card would only ever read 0).
+ */
+function outcomeStatCards(args: {
+  t: TFunction;
+  navigate: NavigateFunction;
+  hasBookings: boolean;
+  outcomes?: OutcomesResponse;
+  formatDelta: (current?: number, previous?: number) => string;
+}): StatCard[] {
+  const { t, navigate, hasBookings, outcomes, formatDelta } = args;
+  const cur: OutcomeAggregates | undefined = outcomes?.current;
+  const prev: OutcomeAggregates | undefined = outcomes?.previous;
+  return [
+    {
+      label: t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' }),
+      value: cur ? cur.conversations.total.toLocaleString() : '—',
+      change: formatDelta(cur?.conversations.total, prev?.conversations.total),
+      icon: MessageSquare,
+      color: 'text-primary-400',
+      bgColor: 'bg-primary-600/10',
+      onClick: () => navigate('/inbox'),
+    },
+    ...(hasBookings
+      ? [{
+          label: t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' }),
+          value: cur ? cur.bookings.total.toLocaleString() : '—',
+          change: formatDelta(cur?.bookings.total, prev?.bookings.total),
+          icon: CalendarCheck,
+          color: 'text-status-online',
+          bgColor: 'bg-status-online/10',
+          onClick: () => navigate('/bookings'),
+        }]
+      : []),
+    {
+      label: t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' }),
+      value: cur ? cur.leads.total.toLocaleString() : '—',
+      change: formatDelta(cur?.leads.total, prev?.leads.total),
+      icon: UserPlus,
+      color: 'text-accent-400',
+      bgColor: 'bg-accent-500/10',
+      onClick: () => navigate('/leads'),
+    },
+    // Only meaningful for tenants with scheduler business hours (null otherwise).
+    ...(cur?.afterHours != null
+      ? [{
+          label: t('analytics.outcomes.kpis.afterHours', { defaultValue: 'After-hours conversations' }),
+          value: cur.afterHours.count.toLocaleString(),
+          change: formatDelta(cur.afterHours.count, prev?.afterHours?.count),
+          icon: Moon,
+          color: 'text-chat-bot',
+          bgColor: 'bg-chat-bot/10',
+        }]
+      : []),
+  ];
+}
+
+/**
+ * Avg Response Time and CSAT stay hidden until their data sources are actually
+ * populated (response-time instrumentation / rating collection) and reappear
+ * automatically.
+ */
+function dashboardStatCards(t: TFunction, dashboard?: DashboardStatSource): StatCard[] {
+  const responseTimeSeconds = dashboard?.avgResponseTimeSeconds ?? 0;
+  const csatScore = dashboard?.csatScore;
+  return [
+    ...(responseTimeSeconds > 0
+      ? [{
+          label: t('analytics.kpis.avgResponseTime'),
+          value: `${responseTimeSeconds}s`,
+          change: '',
+          icon: Clock,
+          color: 'text-chat-bot',
+          bgColor: 'bg-chat-bot/10',
+        }]
+      : []),
+    ...(csatScore != null
+      ? [{
+          label: t('analytics.kpis.csatScore'),
+          value: `${csatScore}/5`,
+          change: '',
+          icon: Star,
+          color: 'text-accent-400',
+          bgColor: 'bg-accent-500/10',
+        }]
+      : []),
+  ];
+}
 
 const Analytics: React.FC = () => {
   const { t } = useTranslation();
@@ -197,103 +306,27 @@ const Analytics: React.FC = () => {
     ];
   }, [metrics, t]);
 
-  // Stats cards — business outcomes for the selected range, each with a
-  // vs-previous-period delta. The bookings card follows the existing
-  // `bookings` feature flag (an Essential tenant has no bookings module, so
-  // the card would only ever read 0). Avg Response Time and CSAT stay hidden
-  // until their data sources are actually populated (response-time
-  // instrumentation / rating collection) and reappear automatically.
-  const hasResponseTimeData = (dashboard?.avgResponseTimeSeconds ?? 0) > 0;
-  const hasCsatData = dashboard?.csatScore != null;
-  const cur = outcomes?.current;
-  const prev = outcomes?.previous;
-  const stats: Array<{
-    label: string;
-    value: string;
-    change: string;
-    icon: React.FC<any>;
-    color: string;
-    bgColor: string;
-    onClick?: () => void;
-  }> = [
-    {
-      label: t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' }),
-      value: cur ? cur.conversations.total.toLocaleString() : '—',
-      change: formatDelta(cur?.conversations.total, prev?.conversations.total),
-      icon: MessageSquare,
-      color: 'text-primary-400',
-      bgColor: 'bg-primary-600/10',
-      onClick: () => navigate('/inbox'),
-    },
-    ...(hasBookings
-      ? [{
-          label: t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' }),
-          value: cur ? cur.bookings.total.toLocaleString() : '—',
-          change: formatDelta(cur?.bookings.total, prev?.bookings.total),
-          icon: CalendarCheck,
-          color: 'text-status-online',
-          bgColor: 'bg-status-online/10',
-          onClick: () => navigate('/bookings'),
-        }]
-      : []),
-    {
-      label: t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' }),
-      value: cur ? cur.leads.total.toLocaleString() : '—',
-      change: formatDelta(cur?.leads.total, prev?.leads.total),
-      icon: UserPlus,
-      color: 'text-accent-400',
-      bgColor: 'bg-accent-500/10',
-      onClick: () => navigate('/leads'),
-    },
-    // Only meaningful for tenants with scheduler business hours (null otherwise).
-    ...(cur?.afterHours != null
-      ? [{
-          label: t('analytics.outcomes.kpis.afterHours', { defaultValue: 'After-hours conversations' }),
-          value: cur.afterHours.count.toLocaleString(),
-          change: formatDelta(cur.afterHours.count, prev?.afterHours?.count),
-          icon: Moon,
-          color: 'text-chat-bot',
-          bgColor: 'bg-chat-bot/10',
-        }]
-      : []),
-    ...(hasResponseTimeData
-      ? [{
-          label: t('analytics.kpis.avgResponseTime'),
-          value: `${dashboard.avgResponseTimeSeconds}s`,
-          change: '',
-          icon: Clock,
-          color: 'text-chat-bot',
-          bgColor: 'bg-chat-bot/10',
-        }]
-      : []),
-    ...(hasCsatData
-      ? [{
-          label: t('analytics.kpis.csatScore'),
-          value: `${dashboard.csatScore}/5`,
-          change: '',
-          icon: Star,
-          color: 'text-accent-400',
-          bgColor: 'bg-accent-500/10',
-        }]
-      : []),
+  const stats: StatCard[] = [
+    ...outcomeStatCards({ t, navigate, hasBookings, outcomes, formatDelta }),
+    ...dashboardStatCards(t, dashboard),
   ];
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className="h-full overflow-y-auto p-4 md:p-6 space-y-6">
       {/* Onboarding */}
       <OnboardingBanner />
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">{t('analytics.header.title')}</h1>
           <p className="text-text-secondary">{t('analytics.header.subtitle')}</p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex w-full items-center gap-4 sm:w-auto">
           {/* Date Range Selector */}
           <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder={t('analytics.timeRange.placeholder')} />
             </SelectTrigger>
             <SelectContent>

@@ -16,6 +16,37 @@ import {
 } from "../services/bot-config.service";
 import type { BotSettings } from "../database/entities/Bot";
 
+type BrandVoice = NonNullable<BotSettings["ai"]>["brandVoice"];
+type Automations = NonNullable<BotSettings["automations"]>;
+
+/**
+ * Brand voice counts as configured only if the user actually personalised it:
+ * custom instructions, a business name, a non-default tone, or a name that
+ * differs from the generated default (and the legacy default literal).
+ */
+function isBrandVoiceConfigured(
+  bv: Partial<BrandVoice> | undefined,
+  defaultBrandName: string | null,
+) {
+  return !!(
+    bv?.customInstructions?.trim() ||
+    bv?.businessName?.trim() ||
+    (bv?.tone && bv.tone !== "friendly") ||
+    (bv?.name &&
+      bv.name !== "Organization Assistant" &&
+      bv.name !== defaultBrandName)
+  );
+}
+
+function areAutomationsConfigured(automations: Automations) {
+  const email = automations.emailNotifications;
+  return !!(
+    email?.bookingConfirmation?.enabled ||
+    email?.newLeadAlert?.enabled ||
+    email?.conversationSummary?.enabled
+  );
+}
+
 export function computeOnboardingStatus(
   tenant: any,
   kbDocCount: number,
@@ -38,20 +69,9 @@ export function computeOnboardingStatus(
   // Cal.com is shelved, so the former `calcomConnected` onboarding step is gone.
   const steps = {
     aiEnabled: !!ai.enabled,
-    brandVoiceConfigured: !!(
-      bv?.customInstructions?.trim() ||
-      bv?.businessName?.trim() ||
-      (bv?.tone && bv.tone !== "friendly") ||
-      (bv?.name &&
-        bv.name !== "Organization Assistant" &&
-        bv.name !== defaultBrandName)
-    ),
+    brandVoiceConfigured: isBrandVoiceConfigured(bv, defaultBrandName),
     knowledgeBaseHasDocs: kbDocCount > 0,
-    automationsConfigured: !!(
-      automations.emailNotifications?.bookingConfirmation?.enabled ||
-      automations.emailNotifications?.newLeadAlert?.enabled ||
-      automations.emailNotifications?.conversationSummary?.enabled
-    ),
+    automationsConfigured: areAutomationsConfigured(automations),
     // The point of onboarding is a *working* bot, not just a configured one — so
     // track whether the bot has actually answered at least once (a persisted bot
     // reply exists; see the route handler for the exact signal). This is the

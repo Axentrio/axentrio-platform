@@ -131,45 +131,10 @@ function normalizeMessage(
   const timestamp = new Date(Number(msg.timestamp) * 1000);
   const dedupeKey = `wa:${phoneNumberId}:${msg.id}`;
 
-  // Interactive reply (button or list) → postback
-  if (msg.type === 'interactive' && msg.interactive) {
-    const reply = msg.interactive.button_reply || msg.interactive.list_reply;
-    if (reply) {
-      return {
-        type: 'postback',
-        postback: { payload: reply.id, title: reply.title },
-        sender,
-        dedupeKey,
-        timestamp,
-        rawEventType: `interactive.${msg.interactive.type}`,
-        externalMessageId: msg.id,
-      };
-    }
-  }
+  const base: WhatsAppEventBase = { sender, dedupeKey, timestamp };
 
-  // Template quick-reply button → postback
-  if (msg.type === 'button' && msg.button) {
-    return {
-      type: 'postback',
-      postback: { payload: msg.button.payload, title: msg.button.text },
-      sender,
-      dedupeKey,
-      timestamp,
-      rawEventType: 'button',
-      externalMessageId: msg.id,
-    };
-  }
-
-  // Reaction → status (no content side-effect)
-  if (msg.type === 'reaction' && msg.reaction) {
-    return {
-      type: 'status',
-      sender,
-      dedupeKey: `${dedupeKey}:reaction`,
-      timestamp,
-      rawEventType: 'reaction',
-    };
-  }
+  const control = whatsAppControlEvent(msg, base);
+  if (control) return control;
 
   // Text
   if (msg.type === 'text' && msg.text) {
@@ -184,30 +149,8 @@ function normalizeMessage(
     };
   }
 
-  // Media. WhatsApp delivers a media id, not a URL — the id must be resolved
-  // via GET /{media-id} before download, so we stash it in mediaMetadata.
-  const mediaType = mapMediaType(msg.type);
-  if (mediaType) {
-    const media = (msg as unknown as Record<string, WhatsAppMedia | undefined>)[msg.type];
-    return {
-      type: 'message',
-      message: {
-        type: mediaType,
-        content: media?.caption || '',
-        mediaMetadata: {
-          mediaId: media?.id,
-          mimeType: media?.mime_type,
-          filename: media?.filename,
-        },
-        replyToExternalId: msg.context?.id,
-      },
-      sender,
-      dedupeKey,
-      timestamp,
-      rawEventType: `message.${msg.type}`,
-      externalMessageId: msg.id,
-    };
-  }
+  const media = whatsAppMediaEvent(msg, base);
+  if (media) return media;
 
   // Location
   if (msg.type === 'location' && msg.location) {
@@ -239,6 +182,88 @@ function normalizeMessage(
 
   // Unsupported / unknown message type — skip
   return null;
+}
+
+type WhatsAppEventBase = {
+  sender: NormalizedEvent['sender'];
+  dedupeKey: string;
+  timestamp: Date;
+};
+
+/**
+ * Interactive reply, template quick-reply button, or reaction. Returns null when
+ * the message is none of those (or an interactive event carries no reply).
+ */
+function whatsAppControlEvent(
+  msg: WhatsAppMessage,
+  base: WhatsAppEventBase,
+): NormalizedEvent | null {
+  // Interactive reply (button or list) → postback
+  if (msg.type === 'interactive' && msg.interactive) {
+    const reply = msg.interactive.button_reply || msg.interactive.list_reply;
+    if (reply) {
+      return {
+        type: 'postback',
+        postback: { payload: reply.id, title: reply.title },
+        ...base,
+        rawEventType: `interactive.${msg.interactive.type}`,
+        externalMessageId: msg.id,
+      };
+    }
+  }
+
+  // Template quick-reply button → postback
+  if (msg.type === 'button' && msg.button) {
+    return {
+      type: 'postback',
+      postback: { payload: msg.button.payload, title: msg.button.text },
+      ...base,
+      rawEventType: 'button',
+      externalMessageId: msg.id,
+    };
+  }
+
+  // Reaction → status (no content side-effect)
+  if (msg.type === 'reaction' && msg.reaction) {
+    return {
+      type: 'status',
+      ...base,
+      dedupeKey: `${base.dedupeKey}:reaction`,
+      rawEventType: 'reaction',
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Media message. WhatsApp delivers a media id, not a URL — the id must be resolved
+ * via GET /{media-id} before download, so we stash it in mediaMetadata.
+ */
+function whatsAppMediaEvent(
+  msg: WhatsAppMessage,
+  base: WhatsAppEventBase,
+): NormalizedEvent | null {
+  const mediaType = mapMediaType(msg.type);
+  if (!mediaType) return null;
+
+  const media = (msg as unknown as Record<string, WhatsAppMedia | undefined>)[msg.type];
+  return {
+    type: 'message',
+    message: {
+      type: mediaType,
+      content: media?.caption || '',
+      mediaMetadata: {
+        mediaId: media?.id,
+        mimeType: media?.mime_type,
+        filename: media?.filename,
+      },
+      replyToExternalId: msg.context?.id,
+    },
+    ...base,
+    rawEventType: `message.${msg.type}`,
+    externalMessageId: msg.id,
+  };
 }
 
 function mapMediaType(

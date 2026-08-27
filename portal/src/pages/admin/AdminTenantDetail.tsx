@@ -162,6 +162,351 @@ function formatAction(action: string): string {
   return action.replace(/\./g, ' ').replace(/_/g, ' ');
 }
 
+type LegalInvoiceRow = NonNullable<TenantDetailData['legalInvoices']>[number];
+
+interface TierSubmitInput {
+  tier: ManualTier;
+  stripeDisposition: StripeDisposition | null;
+  dispositionReason: string | null;
+}
+
+const TenantApiKeyCard: React.FC<{
+  apiKeyMasked: string;
+  showApiKey: boolean;
+  revealedApiKey: string | null;
+  isRevealing: boolean;
+  onToggle: () => void;
+  onRotate: () => void;
+}> = ({ apiKeyMasked, showApiKey, revealedApiKey, isRevealing, onToggle, onRotate }) => {
+  const { t } = useTranslation();
+  return (
+    <Card variant="glass" className="p-5">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-surface-3 flex items-center justify-center">
+          <Key className="w-5 h-5 text-text-muted" />
+        </div>
+        <div>
+          <p className="text-sm font-mono text-text-secondary truncate max-w-[140px]">
+            {showApiKey && revealedApiKey ? revealedApiKey : apiKeyMasked}
+          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggle}
+              disabled={isRevealing}
+              className="h-6 w-6 text-text-muted hover:text-text-secondary"
+              aria-label={showApiKey ? t('admin.tenantDetail.apiKey.hide') : t('admin.tenantDetail.apiKey.reveal')}
+            >
+              {isRevealing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : showApiKey ? (
+                <EyeOff className="w-3 h-3" />
+              ) : (
+                <Eye className="w-3 h-3" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRotate}
+              className="h-6 w-6 text-text-muted hover:text-text-secondary"
+            >
+              <RotateCw className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+const LegalInvoicesCard: React.FC<{
+  invoices: LegalInvoiceRow[] | undefined;
+  isRetrying: boolean;
+  onRetry: (invoiceId: string) => void;
+}> = ({ invoices, isRetrying, onRetry }) => {
+  const { t } = useTranslation();
+  const rows = invoices ?? [];
+  return (
+    <Card variant="glass" className="overflow-hidden">
+      <div className="px-6 py-4 border-b border-edge">
+        <h3 className="font-semibold text-text-primary">{t('admin.tenantDetail.legalInvoices.title')}</h3>
+      </div>
+      {rows.length === 0 ? (
+        <div className="px-6 py-8 text-text-muted text-center text-sm">
+          {t('admin.tenantDetail.legalInvoices.empty')}
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('admin.tenantDetail.legalInvoices.columns.number')}</TableHead>
+              <TableHead>{t('admin.legalInvoices.columns.status')}</TableHead>
+              <TableHead>{t('admin.legalInvoices.columns.error')}</TableHead>
+              <TableHead>{t('admin.tenantDetail.legalInvoices.columns.stripe')}</TableHead>
+              <TableHead className="text-right">{t('admin.tenantDetail.legalInvoices.columns.actions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const canRetry = row.retryable
+                ?? (row.invoiceStatus === 'failed'
+                  || row.invoiceStatus === 'manual_review'
+                  || row.invoiceStatus === 'draft'
+                  || row.peppolStatus === 'failed'
+                  || row.peppolStatus === 'not_available');
+              return (
+                <TableRow key={row.id}>
+                  <TableCell className="font-mono text-xs">
+                    {row.billitInvoiceNumber ?? '—'}
+                  </TableCell>
+                  <TableCell>
+                    <LegalInvoiceStatusPills
+                      paymentStatus={row.paymentStatus}
+                      invoiceStatus={row.invoiceStatus}
+                      peppolStatus={row.peppolStatus}
+                    />
+                  </TableCell>
+                  <TableCell className="text-xs text-status-busy max-w-[200px]">
+                    {row.lastError ?? '—'}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{row.stripeInvoiceId ?? '—'}</TableCell>
+                  <TableCell className="text-right">
+                    {canRetry ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isRetrying}
+                        onClick={() => onRetry(row.id)}
+                      >
+                        {t('admin.tenantDetail.legalInvoices.retry')}
+                      </Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </Card>
+  );
+};
+
+const TenantTierDialog: React.FC<{
+  open: boolean;
+  tenantName: string;
+  tenantTier: string;
+  hasActiveStripeSubscription: boolean | undefined;
+  pendingTier: ManualTier | null;
+  setPendingTier: (tier: ManualTier | null) => void;
+  disposition: StripeDisposition | null;
+  setDisposition: (value: StripeDisposition | null) => void;
+  dispositionReason: string;
+  setDispositionReason: (value: string) => void;
+  isPending: boolean;
+  onSubmit: (input: TierSubmitInput) => void;
+  onClose: () => void;
+}> = ({
+  open,
+  tenantName,
+  tenantTier,
+  hasActiveStripeSubscription,
+  pendingTier,
+  setPendingTier,
+  disposition,
+  setDisposition,
+  dispositionReason,
+  setDispositionReason,
+  isPending,
+  onSubmit,
+  onClose,
+}) => {
+  const { t } = useTranslation();
+
+  const selectTier = (tier: ManualTier) => {
+    setPendingTier(tier);
+    setDisposition(null);
+    setDispositionReason('');
+  };
+
+  const submit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!pendingTier) return;
+    const requiresDisposition = pendingTier === 'free' && !!hasActiveStripeSubscription;
+    onSubmit({
+      tier: pendingTier,
+      stripeDisposition: requiresDisposition ? disposition : null,
+      dispositionReason:
+        requiresDisposition && disposition === 'leave_active'
+          ? dispositionReason.trim()
+          : null,
+    });
+  };
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <AlertDialogContent>
+        <div className="relative">
+          <LoadingOverlay
+            isLoading={isPending}
+            message={t('admin.tenantDetail.tierDialog.updating')}
+          />
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('admin.tenantDetail.tierDialog.descriptionBefore')} <strong>{tenantName}</strong>{t('admin.tenantDetail.tierDialog.descriptionAfter')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              {(['free', 'essential', 'pro', 'enterprise'] as ManualTier[]).map((tier) => (
+                <TenantTierOption
+                  key={tier}
+                  tier={tier}
+                  isCurrent={tenantTier === tier}
+                  isSelected={pendingTier === tier}
+                  onSelect={selectTier}
+                />
+              ))}
+            </div>
+
+            {pendingTier === 'free' && hasActiveStripeSubscription ? (
+              <StripeDispositionField
+                disposition={disposition}
+                onDispositionChange={setDisposition}
+                reason={dispositionReason}
+                onReasonChange={setDispositionReason}
+              />
+            ) : (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
+                <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong> {t('admin.tenantDetail.tierDialog.stripeWarning')}
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={submit}
+              disabled={
+                !pendingTier ||
+                isPending ||
+                (pendingTier === 'free' &&
+                  !!hasActiveStripeSubscription &&
+                  !dispositionComplete(disposition, dispositionReason))
+              }
+              className="bg-accent-500 hover:bg-accent-500/90"
+            >
+              <TierDialogActionLabel isPending={isPending} pendingTier={pendingTier} />
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+const TenantTierOption: React.FC<{
+  tier: ManualTier;
+  isCurrent: boolean;
+  isSelected: boolean;
+  onSelect: (tier: ManualTier) => void;
+}> = ({ tier, isCurrent, isSelected, onSelect }) => {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (isCurrent) return;
+        onSelect(tier);
+      }}
+      disabled={isCurrent}
+      className={`
+                        text-left rounded-lg border px-3 py-2.5 transition-colors
+                        ${isCurrent ? 'border-edge bg-surface-3 opacity-60 cursor-not-allowed' : ''}
+                        ${isSelected ? 'border-accent-500/60 bg-accent-500/10' : ''}
+                        ${!isCurrent && !isSelected ? 'border-edge hover:border-edge-strong hover:bg-surface-3' : ''}
+                      `}
+    >
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-text-primary capitalize">{tier}</span>
+        {isCurrent && (
+          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
+        )}
+        {isSelected && (
+          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
+        )}
+      </div>
+      <p className="text-xs text-text-muted mt-1">
+        {tier === 'free' && t('admin.tenantDetail.tierDialog.tierDescriptions.free')}
+        {tier === 'essential' && t('admin.tenantDetail.tierDialog.tierDescriptions.essential')}
+        {tier === 'pro' && t('admin.tenantDetail.tierDialog.tierDescriptions.pro')}
+        {tier === 'enterprise' && t('admin.tenantDetail.tierDialog.tierDescriptions.enterprise')}
+      </p>
+    </button>
+  );
+};
+
+const TierDialogActionLabel: React.FC<{
+  isPending: boolean;
+  pendingTier: ManualTier | null;
+}> = ({ isPending, pendingTier }) => {
+  const { t } = useTranslation();
+  if (isPending) return <Loader2 className="w-4 h-4 animate-spin" />;
+  if (pendingTier) {
+    return (
+      <>
+        {t('admin.tenantDetail.tierDialog.setTo', { tier: pendingTier.charAt(0).toUpperCase() + pendingTier.slice(1) })}
+      </>
+    );
+  }
+  return <>{t('admin.tenantDetail.tierDialog.pickATier')}</>;
+};
+
+const RotateApiKeyDialog: React.FC<{
+  open: boolean;
+  isPending: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}> = ({ open, isPending, onConfirm, onClose }) => {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <AlertDialogContent>
+        <div className="relative">
+          <LoadingOverlay isLoading={isPending} message={t('admin.tenantDetail.rotateDialog.rotating')} />
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('admin.tenantDetail.rotateDialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('admin.tenantDetail.rotateDialog.description')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); onConfirm(); }}
+              disabled={isPending}
+              className="bg-status-busy hover:bg-status-busy/90"
+            >
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('admin.tenantDetail.rotateDialog.confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
 const AdminTenantDetail: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -246,6 +591,18 @@ const AdminTenantDetail: React.FC = () => {
     revealMutation.mutate();
   };
 
+  const closeTierDialog = () => {
+    setShowTierDialog(false);
+    setPendingTier(null);
+    setDisposition(null);
+    setDispositionReason('');
+  };
+
+  const submitTierChange = (input: TierSubmitInput) => {
+    if (!id) return;
+    setTierMutation.mutate({ id, ...input }, { onSuccess: closeTierDialog });
+  };
+
   const tenant = data as TenantDetailData | undefined;
   const auditLogs = (auditData as TenantDetailData['recentAuditLogs'] | undefined) ?? tenant?.recentAuditLogs ?? [];
 
@@ -272,7 +629,7 @@ const AdminTenantDetail: React.FC = () => {
           <ArrowLeft className="w-4 h-4" />
           {t('admin.tenantDetail.breadcrumb.allTenants')}
         </Link>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-text-primary">{tenant.name}</h1>
             <Badge className={tierBadgeClass(tenant.tier)}>
@@ -365,44 +722,14 @@ const AdminTenantDetail: React.FC = () => {
             </div>
           </div>
         </Card>
-        <Card variant="glass" className="p-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-surface-3 flex items-center justify-center">
-              <Key className="w-5 h-5 text-text-muted" />
-            </div>
-            <div>
-              <p className="text-sm font-mono text-text-secondary truncate max-w-[140px]">
-                {showApiKey && revealedApiKey ? revealedApiKey : tenant.apiKeyMasked}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleToggleApiKey}
-                  disabled={revealMutation.isPending}
-                  className="h-6 w-6 text-text-muted hover:text-text-secondary"
-                  aria-label={showApiKey ? t('admin.tenantDetail.apiKey.hide') : t('admin.tenantDetail.apiKey.reveal')}
-                >
-                  {revealMutation.isPending ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : showApiKey ? (
-                    <EyeOff className="w-3 h-3" />
-                  ) : (
-                    <Eye className="w-3 h-3" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowRotateDialog(true)}
-                  className="h-6 w-6 text-text-muted hover:text-text-secondary"
-                >
-                  <RotateCw className="w-3 h-3" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
+        <TenantApiKeyCard
+          apiKeyMasked={tenant.apiKeyMasked}
+          showApiKey={showApiKey}
+          revealedApiKey={revealedApiKey}
+          isRevealing={revealMutation.isPending}
+          onToggle={handleToggleApiKey}
+          onRotate={() => setShowRotateDialog(true)}
+        />
       </div>
 
       {/* Entitlement controls — feature overrides + bespoke modules */}
@@ -410,7 +737,7 @@ const AdminTenantDetail: React.FC = () => {
 
       {/* Members */}
       <Card variant="glass" className="overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
+        <div className="flex items-center justify-between flex-wrap gap-2 px-6 py-4 border-b border-edge">
           <h3 className="font-semibold text-text-primary">
             {t('admin.tenantDetail.members.title')} <span className="text-text-muted font-normal">({tenant.userCount})</span>
           </h3>
@@ -438,7 +765,7 @@ const AdminTenantDetail: React.FC = () => {
         </div>
         {showInviteForm && (
           <div className="px-6 py-4 border-b border-edge">
-            <form onSubmit={handleInvite} className="flex items-end gap-3">
+            <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div className="flex-1">
                 <Label className="mb-1 text-text-secondary">{t('admin.tenantDetail.members.invite.emailLabel')}</Label>
                 <Input
@@ -564,68 +891,11 @@ const AdminTenantDetail: React.FC = () => {
         </Card>
       )}
 
-      <Card variant="glass" className="overflow-hidden">
-        <div className="px-6 py-4 border-b border-edge">
-          <h3 className="font-semibold text-text-primary">{t('admin.tenantDetail.legalInvoices.title')}</h3>
-        </div>
-        {(tenant.legalInvoices ?? []).length === 0 ? (
-          <div className="px-6 py-8 text-text-muted text-center text-sm">
-            {t('admin.tenantDetail.legalInvoices.empty')}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('admin.tenantDetail.legalInvoices.columns.number')}</TableHead>
-                <TableHead>{t('admin.legalInvoices.columns.status')}</TableHead>
-                <TableHead>{t('admin.legalInvoices.columns.error')}</TableHead>
-                <TableHead>{t('admin.tenantDetail.legalInvoices.columns.stripe')}</TableHead>
-                <TableHead className="text-right">{t('admin.tenantDetail.legalInvoices.columns.actions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(tenant.legalInvoices ?? []).map((row) => {
-                const canRetry = row.retryable
-                  ?? (row.invoiceStatus === 'failed'
-                    || row.invoiceStatus === 'manual_review'
-                    || row.invoiceStatus === 'draft'
-                    || row.peppolStatus === 'failed'
-                    || row.peppolStatus === 'not_available');
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">
-                      {row.billitInvoiceNumber ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <LegalInvoiceStatusPills
-                        paymentStatus={row.paymentStatus}
-                        invoiceStatus={row.invoiceStatus}
-                        peppolStatus={row.peppolStatus}
-                      />
-                    </TableCell>
-                    <TableCell className="text-xs text-status-busy max-w-[200px]">
-                      {row.lastError ?? '—'}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{row.stripeInvoiceId ?? '—'}</TableCell>
-                    <TableCell className="text-right">
-                      {canRetry ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retryLegalInvoice.isPending}
-                          onClick={() => retryLegalInvoice.mutate(row.id)}
-                        >
-                          {t('admin.tenantDetail.legalInvoices.retry')}
-                        </Button>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+      <LegalInvoicesCard
+        invoices={tenant.legalInvoices}
+        isRetrying={retryLegalInvoice.isPending}
+        onRetry={(invoiceId) => retryLegalInvoice.mutate(invoiceId)}
+      />
 
       {/* Audit Log */}
       <Card variant="glass" className="overflow-hidden">
@@ -667,163 +937,29 @@ const AdminTenantDetail: React.FC = () => {
       </Card>
 
       {/* Set Tier (manual) Dialog */}
-      <AlertDialog
+      <TenantTierDialog
         open={showTierDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowTierDialog(false);
-            setPendingTier(null);
-            setDisposition(null);
-            setDispositionReason('');
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <div className="relative">
-            <LoadingOverlay
-              isLoading={setTierMutation.isPending}
-              message={t('admin.tenantDetail.tierDialog.updating')}
-            />
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('admin.tenantDetail.tierDialog.descriptionBefore')} <strong>{tenant.name}</strong>{t('admin.tenantDetail.tierDialog.descriptionAfter')}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-
-            <div className="space-y-3 py-2">
-              <div className="grid grid-cols-2 gap-2">
-                {(['free', 'essential', 'pro', 'enterprise'] as ManualTier[]).map((tier) => {
-                  const isCurrent = tenant.tier === tier;
-                  const isSelected = pendingTier === tier;
-                  return (
-                    <button
-                      key={tier}
-                      type="button"
-                      onClick={() => {
-                        if (isCurrent) return;
-                        setPendingTier(tier);
-                        setDisposition(null);
-                        setDispositionReason('');
-                      }}
-                      disabled={isCurrent}
-                      className={`
-                        text-left rounded-lg border px-3 py-2.5 transition-colors
-                        ${isCurrent ? 'border-edge bg-surface-3 opacity-60 cursor-not-allowed' : ''}
-                        ${isSelected ? 'border-accent-500/60 bg-accent-500/10' : ''}
-                        ${!isCurrent && !isSelected ? 'border-edge hover:border-edge-strong hover:bg-surface-3' : ''}
-                      `}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-text-primary capitalize">{tier}</span>
-                        {isCurrent && (
-                          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
-                        )}
-                        {isSelected && (
-                          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-text-muted mt-1">
-                        {tier === 'free' && t('admin.tenantDetail.tierDialog.tierDescriptions.free')}
-                        {tier === 'essential' && t('admin.tenantDetail.tierDialog.tierDescriptions.essential')}
-                        {tier === 'pro' && t('admin.tenantDetail.tierDialog.tierDescriptions.pro')}
-                        {tier === 'enterprise' && t('admin.tenantDetail.tierDialog.tierDescriptions.enterprise')}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {pendingTier === 'free' && tenant.hasActiveStripeSubscription ? (
-                <StripeDispositionField
-                  disposition={disposition}
-                  onDispositionChange={setDisposition}
-                  reason={dispositionReason}
-                  onReasonChange={setDispositionReason}
-                />
-              ) : (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
-                  <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong> {t('admin.tenantDetail.tierDialog.stripeWarning')}
-                </div>
-              )}
-            </div>
-
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={setTierMutation.isPending}>
-                {t('common.cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (!id || !pendingTier) return;
-                  const requiresDisposition =
-                    pendingTier === 'free' && !!tenant.hasActiveStripeSubscription;
-                  setTierMutation.mutate(
-                    {
-                      id,
-                      tier: pendingTier,
-                      stripeDisposition: requiresDisposition ? disposition : null,
-                      dispositionReason:
-                        requiresDisposition && disposition === 'leave_active'
-                          ? dispositionReason.trim()
-                          : null,
-                    },
-                    {
-                      onSuccess: () => {
-                        setShowTierDialog(false);
-                        setPendingTier(null);
-                        setDisposition(null);
-                        setDispositionReason('');
-                      },
-                    },
-                  );
-                }}
-                disabled={
-                  !pendingTier ||
-                  setTierMutation.isPending ||
-                  (pendingTier === 'free' &&
-                    !!tenant.hasActiveStripeSubscription &&
-                    !dispositionComplete(disposition, dispositionReason))
-                }
-                className="bg-accent-500 hover:bg-accent-500/90"
-              >
-                {setTierMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : pendingTier ? (
-                  t('admin.tenantDetail.tierDialog.setTo', { tier: pendingTier.charAt(0).toUpperCase() + pendingTier.slice(1) })
-                ) : (
-                  t('admin.tenantDetail.tierDialog.pickATier')
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
+        tenantName={tenant.name}
+        tenantTier={tenant.tier}
+        hasActiveStripeSubscription={tenant.hasActiveStripeSubscription}
+        pendingTier={pendingTier}
+        setPendingTier={setPendingTier}
+        disposition={disposition}
+        setDisposition={setDisposition}
+        dispositionReason={dispositionReason}
+        setDispositionReason={setDispositionReason}
+        isPending={setTierMutation.isPending}
+        onSubmit={submitTierChange}
+        onClose={closeTierDialog}
+      />
 
       {/* Rotate API Key Dialog */}
-      <AlertDialog open={showRotateDialog} onOpenChange={(open) => !open && setShowRotateDialog(false)}>
-        <AlertDialogContent>
-          <div className="relative">
-            <LoadingOverlay isLoading={rotateMutation.isPending} message={t('admin.tenantDetail.rotateDialog.rotating')} />
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('admin.tenantDetail.rotateDialog.title')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('admin.tenantDetail.rotateDialog.description')}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={rotateMutation.isPending}>{t('common.cancel')}</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(e) => { e.preventDefault(); rotateMutation.mutate(); }}
-                disabled={rotateMutation.isPending}
-                className="bg-status-busy hover:bg-status-busy/90"
-              >
-                {rotateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('admin.tenantDetail.rotateDialog.confirm')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RotateApiKeyDialog
+        open={showRotateDialog}
+        isPending={rotateMutation.isPending}
+        onConfirm={() => rotateMutation.mutate()}
+        onClose={() => setShowRotateDialog(false)}
+      />
     </div>
   );
 };

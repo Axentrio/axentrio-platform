@@ -120,6 +120,190 @@ function formatDate(iso: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Change Tier dialog (manual override)                                */
+/* ------------------------------------------------------------------ */
+
+interface TierChangeInput {
+  id: string;
+  tier: ManualTier;
+  stripeDisposition: StripeDisposition | null;
+  dispositionReason: string | null;
+}
+
+interface TierDialogProps {
+  target: AdminTenant | null;
+  pendingTier: TenantTier | null;
+  setPendingTier: (tier: TenantTier | null) => void;
+  disposition: StripeDisposition | null;
+  setDisposition: (value: StripeDisposition | null) => void;
+  dispositionReason: string;
+  setDispositionReason: (value: string) => void;
+  isPending: boolean;
+  onSubmit: (input: TierChangeInput) => void;
+  onReset: () => void;
+}
+
+const TierDialog: React.FC<TierDialogProps> = ({
+  target,
+  pendingTier,
+  setPendingTier,
+  disposition,
+  setDisposition,
+  dispositionReason,
+  setDispositionReason,
+  isPending,
+  onSubmit,
+  onReset,
+}) => {
+  const { t } = useTranslation();
+
+  const selectTier = (tier: TenantTier) => {
+    setPendingTier(tier);
+    setDisposition(null);
+    setDispositionReason('');
+  };
+
+  const submit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!target || !pendingTier) return;
+    const requiresDisposition =
+      pendingTier === 'free' && !!target.hasActiveStripeSubscription;
+    onSubmit({
+      id: target.id,
+      tier: pendingTier as ManualTier,
+      stripeDisposition: requiresDisposition ? disposition : null,
+      dispositionReason:
+        requiresDisposition && disposition === 'leave_active'
+          ? dispositionReason.trim()
+          : null,
+    });
+  };
+
+  return (
+    <AlertDialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!open) onReset();
+      }}
+    >
+      <AlertDialogContent>
+        <div className="relative">
+          <LoadingOverlay
+            isLoading={isPending}
+            message={t('admin.tenantDetail.tierDialog.updating')}
+          />
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('admin.tenantDetail.tierDialog.descriptionBefore')}{' '}
+              <strong>{target?.name}</strong>
+              {t('admin.tenantDetail.tierDialog.descriptionAfter')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-2">
+              {TIER_OPTIONS.map((tier) => (
+                <TierOptionButton
+                  key={tier}
+                  tier={tier}
+                  isCurrent={target?.tier === tier}
+                  isSelected={pendingTier === tier}
+                  onSelect={selectTier}
+                />
+              ))}
+            </div>
+
+            {pendingTier === 'free' && target?.hasActiveStripeSubscription ? (
+              <StripeDispositionField
+                disposition={disposition}
+                onDispositionChange={setDisposition}
+                reason={dispositionReason}
+                onReasonChange={setDispositionReason}
+              />
+            ) : (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
+                <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong>{' '}
+                {t('admin.tenantDetail.tierDialog.stripeWarning')}
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={submit}
+              disabled={
+                !pendingTier ||
+                isPending ||
+                (pendingTier === 'free' &&
+                  !!target?.hasActiveStripeSubscription &&
+                  !dispositionComplete(disposition, dispositionReason))
+              }
+              className="bg-accent-500 hover:bg-accent-500/90"
+            >
+              <TierDialogActionLabel pending={isPending} pendingTier={pendingTier} />
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+const TierOptionButton: React.FC<{
+  tier: TenantTier;
+  isCurrent: boolean;
+  isSelected: boolean;
+  onSelect: (tier: TenantTier) => void;
+}> = ({ tier, isCurrent, isSelected, onSelect }) => {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (isCurrent) return;
+        onSelect(tier);
+      }}
+      disabled={isCurrent}
+      className={cn(
+        'text-left rounded-lg border px-3 py-2.5 transition-colors',
+        isCurrent && 'border-edge bg-surface-3 opacity-60 cursor-not-allowed',
+        isSelected && 'border-accent-500/60 bg-accent-500/10',
+        !isCurrent && !isSelected && 'border-edge hover:border-edge-strong hover:bg-surface-3',
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-text-primary">{t(`admin.tenants.tiers.${tier}`)}</span>
+        {isCurrent && (
+          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
+        )}
+        {isSelected && (
+          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
+        )}
+      </div>
+      <p className="text-xs text-text-muted mt-1">
+        {t(`admin.tenantDetail.tierDialog.tierDescriptions.${tier}`)}
+      </p>
+    </button>
+  );
+};
+
+const TierDialogActionLabel: React.FC<{
+  pending: boolean;
+  pendingTier: TenantTier | null;
+}> = ({ pending, pendingTier }) => {
+  const { t } = useTranslation();
+  if (pending) return <Loader2 className="w-4 h-4 animate-spin" />;
+  if (pendingTier) {
+    return <>{t('admin.tenantDetail.tierDialog.setTo', { tier: t(`admin.tenants.tiers.${pendingTier}`) })}</>;
+  }
+  return <>{t('admin.tenantDetail.tierDialog.pickATier')}</>;
+};
+
+/* ------------------------------------------------------------------ */
 /*  Component                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -172,11 +356,22 @@ const AdminTenants: React.FC = () => {
       return next;
     });
 
+  const resetTierDialog = () => {
+    setTierTarget(null);
+    setPendingTier(null);
+    setDisposition(null);
+    setDispositionReason('');
+  };
+
+  const submitTierChange = (input: TierChangeInput) => {
+    setTierMutation.mutate(input, { onSuccess: resetTierDialog });
+  };
+
   /* ---- Render ---- */
   return (
     <div className="h-full overflow-y-auto p-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">{t('admin.tenants.header.title')}</h1>
           <p className="text-text-secondary mt-1">{t('admin.tenants.header.subtitle')}</p>
@@ -469,140 +664,18 @@ const AdminTenants: React.FC = () => {
       </AlertDialog>
 
       {/* Change Tier Dialog (manual override) */}
-      <AlertDialog
-        open={tierTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setTierTarget(null);
-            setPendingTier(null);
-            setDisposition(null);
-            setDispositionReason('');
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <div className="relative">
-            <LoadingOverlay
-              isLoading={setTierMutation.isPending}
-              message={t('admin.tenantDetail.tierDialog.updating')}
-            />
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('admin.tenantDetail.tierDialog.descriptionBefore')}{' '}
-                <strong>{tierTarget?.name}</strong>
-                {t('admin.tenantDetail.tierDialog.descriptionAfter')}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-
-            <div className="space-y-3 py-2">
-              <div className="grid grid-cols-2 gap-2">
-                {TIER_OPTIONS.map((tier) => {
-                  const isCurrent = tierTarget?.tier === tier;
-                  const isSelected = pendingTier === tier;
-                  return (
-                    <button
-                      key={tier}
-                      type="button"
-                      onClick={() => {
-                        if (isCurrent) return;
-                        setPendingTier(tier);
-                        setDisposition(null);
-                        setDispositionReason('');
-                      }}
-                      disabled={isCurrent}
-                      className={cn(
-                        'text-left rounded-lg border px-3 py-2.5 transition-colors',
-                        isCurrent && 'border-edge bg-surface-3 opacity-60 cursor-not-allowed',
-                        isSelected && 'border-accent-500/60 bg-accent-500/10',
-                        !isCurrent && !isSelected && 'border-edge hover:border-edge-strong hover:bg-surface-3',
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-text-primary">{t(`admin.tenants.tiers.${tier}`)}</span>
-                        {isCurrent && (
-                          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
-                        )}
-                        {isSelected && (
-                          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-text-muted mt-1">
-                        {t(`admin.tenantDetail.tierDialog.tierDescriptions.${tier}`)}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {pendingTier === 'free' && tierTarget?.hasActiveStripeSubscription ? (
-                <StripeDispositionField
-                  disposition={disposition}
-                  onDispositionChange={setDisposition}
-                  reason={dispositionReason}
-                  onReasonChange={setDispositionReason}
-                />
-              ) : (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
-                  <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong>{' '}
-                  {t('admin.tenantDetail.tierDialog.stripeWarning')}
-                </div>
-              )}
-            </div>
-
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={setTierMutation.isPending}>
-                {t('common.cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (!tierTarget || !pendingTier) return;
-                  const requiresDisposition =
-                    pendingTier === 'free' && !!tierTarget.hasActiveStripeSubscription;
-                  setTierMutation.mutate(
-                    {
-                      id: tierTarget.id,
-                      tier: pendingTier as ManualTier,
-                      stripeDisposition: requiresDisposition ? disposition : null,
-                      dispositionReason:
-                        requiresDisposition && disposition === 'leave_active'
-                          ? dispositionReason.trim()
-                          : null,
-                    },
-                    {
-                      onSuccess: () => {
-                        setTierTarget(null);
-                        setPendingTier(null);
-                        setDisposition(null);
-                        setDispositionReason('');
-                      },
-                    },
-                  );
-                }}
-                disabled={
-                  !pendingTier ||
-                  setTierMutation.isPending ||
-                  (pendingTier === 'free' &&
-                    !!tierTarget?.hasActiveStripeSubscription &&
-                    !dispositionComplete(disposition, dispositionReason))
-                }
-                className="bg-accent-500 hover:bg-accent-500/90"
-              >
-                {setTierMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : pendingTier ? (
-                  t('admin.tenantDetail.tierDialog.setTo', {
-                    tier: t(`admin.tenants.tiers.${pendingTier}`),
-                  })
-                ) : (
-                  t('admin.tenantDetail.tierDialog.pickATier')
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </div>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TierDialog
+        target={tierTarget}
+        pendingTier={pendingTier}
+        setPendingTier={setPendingTier}
+        disposition={disposition}
+        setDisposition={setDisposition}
+        dispositionReason={dispositionReason}
+        setDispositionReason={setDispositionReason}
+        isPending={setTierMutation.isPending}
+        onSubmit={submitTierChange}
+        onReset={resetTierDialog}
+      />
     </div>
   );
 };

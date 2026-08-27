@@ -188,44 +188,57 @@ export function validateConfig(value: unknown): BotTemplateConfig {
   }
 
   if (v.guardrails !== undefined) {
-    if (typeof v.guardrails !== 'object' || v.guardrails === null || Array.isArray(v.guardrails)) {
-      throw new ValidationError('config.guardrails must be an object');
-    }
-    const g = v.guardrails as Record<string, unknown>;
-    const out_g: NonNullable<BotTemplateConfig['guardrails']> = {};
-
-    if (g.topicsToAvoid !== undefined) {
-      if (!Array.isArray(g.topicsToAvoid)) throw new ValidationError('config.guardrails.topicsToAvoid must be an array');
-      if (g.topicsToAvoid.length > TOPICS_MAX) throw new ValidationError(`config.guardrails.topicsToAvoid exceeds ${TOPICS_MAX} entries`);
-      out_g.topicsToAvoid = g.topicsToAvoid.map((t) => {
-        if (typeof t !== 'string' || !t.trim()) throw new ValidationError('config.guardrails.topicsToAvoid entries must be non-empty strings');
-        return t.trim();
-      });
-    }
-
-    for (const key of ['greetingMessage', 'fallbackMessage', 'offHoursMessage'] as const) {
-      if (g[key] !== undefined) {
-        if (typeof g[key] !== 'string') throw new ValidationError(`config.guardrails.${key} must be a string`);
-        if ((g[key] as string).length > GUARDRAIL_TEXT_MAX) throw new ValidationError(`config.guardrails.${key} exceeds ${GUARDRAIL_TEXT_MAX} characters`);
-        out_g[key] = g[key] as string;
-      }
-    }
-
-    if (g.confidenceThreshold !== undefined) {
-      const n = g.confidenceThreshold;
-      if (typeof n !== 'number' || Number.isNaN(n) || n < 0 || n > 1) throw new ValidationError('config.guardrails.confidenceThreshold must be a number between 0 and 1');
-      out_g.confidenceThreshold = n;
-    }
-    if (g.maxResponseLength !== undefined) {
-      const n = g.maxResponseLength;
-      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10000) throw new ValidationError('config.guardrails.maxResponseLength must be an integer between 1 and 10000');
-      out_g.maxResponseLength = n;
-    }
-
+    const out_g = validateGuardrails(v.guardrails);
     if (Object.keys(out_g).length > 0) out.guardrails = out_g;
   }
 
   return out;
+}
+
+type TemplateGuardrails = NonNullable<BotTemplateConfig['guardrails']>;
+
+/** Validates the guardrails sub-object; only the keys the admin set come back. */
+function validateGuardrails(value: unknown): TemplateGuardrails {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ValidationError('config.guardrails must be an object');
+  }
+  const g = value as Record<string, unknown>;
+  const out_g: TemplateGuardrails = {};
+
+  if (g.topicsToAvoid !== undefined) {
+    if (!Array.isArray(g.topicsToAvoid)) throw new ValidationError('config.guardrails.topicsToAvoid must be an array');
+    if (g.topicsToAvoid.length > TOPICS_MAX) throw new ValidationError(`config.guardrails.topicsToAvoid exceeds ${TOPICS_MAX} entries`);
+    out_g.topicsToAvoid = g.topicsToAvoid.map((t) => {
+      if (typeof t !== 'string' || !t.trim()) throw new ValidationError('config.guardrails.topicsToAvoid entries must be non-empty strings');
+      return t.trim();
+    });
+  }
+
+  for (const key of ['greetingMessage', 'fallbackMessage', 'offHoursMessage'] as const) {
+    if (g[key] !== undefined) {
+      if (typeof g[key] !== 'string') throw new ValidationError(`config.guardrails.${key} must be a string`);
+      if ((g[key] as string).length > GUARDRAIL_TEXT_MAX) throw new ValidationError(`config.guardrails.${key} exceeds ${GUARDRAIL_TEXT_MAX} characters`);
+      out_g[key] = g[key] as string;
+    }
+  }
+
+  validateGuardrailNumbers(g, out_g);
+
+  return out_g;
+}
+
+/** The two numeric guardrail caps, validated in place. */
+function validateGuardrailNumbers(g: Record<string, unknown>, out_g: TemplateGuardrails): void {
+  if (g.confidenceThreshold !== undefined) {
+    const n = g.confidenceThreshold;
+    if (typeof n !== 'number' || Number.isNaN(n) || n < 0 || n > 1) throw new ValidationError('config.guardrails.confidenceThreshold must be a number between 0 and 1');
+    out_g.confidenceThreshold = n;
+  }
+  if (g.maxResponseLength !== undefined) {
+    const n = g.maxResponseLength;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10000) throw new ValidationError('config.guardrails.maxResponseLength must be an integer between 1 and 10000');
+    out_g.maxResponseLength = n;
+  }
 }
 
 // ── Replacement / impacted-bot helpers (T21) ─────────────────────────────────

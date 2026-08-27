@@ -238,12 +238,9 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
       outcome = 'agent_loop_exceeded';
     }
   } catch (err) {
-    error = err instanceof Error ? err : new Error(String(err));
-    if (turnAbort.signal.aborted && turnAbort.signal.reason !== 'agent_loop_exceeded') {
-      outcome = 'aborted';
-    } else {
-      outcome = outcome === 'pending' ? 'error' : outcome;
-    }
+    const classified = classifyLoopThrow(err, outcome, turnAbort.signal);
+    error = classified.error;
+    outcome = classified.outcome;
     logger.warn('Copilot agent loop threw', {
       tenantId: args.tenantId,
       userId: args.userId,
@@ -286,26 +283,13 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
   // -----------------------------------------------------------------
   // 5. Emit terminal SSE event.
   // -----------------------------------------------------------------
-  if (outcome === 'success') {
-    args.sink.emit({
-      event: 'complete',
-      data: {
-        turnId: pair.assistantMessageId,
-        conversationId: pair.conversationId,
-        tokensIn: tokensInTotal,
-        tokensOut: tokensOutTotal,
-        latencyMs,
-      },
-    });
-  } else {
-    const errorCode =
-      outcome === 'aborted'
-        ? 'aborted'
-        : outcome === 'agent_loop_exceeded'
-          ? 'agent_loop_exceeded'
-          : 'llm_error';
-    args.sink.emit({ event: 'error', data: { code: errorCode } });
-  }
+  emitTerminalEvent(args.sink, outcome, {
+    turnId: pair.assistantMessageId,
+    conversationId: pair.conversationId,
+    tokensIn: tokensInTotal,
+    tokensOut: tokensOutTotal,
+    latencyMs,
+  });
 
   return {
     conversationId: pair.conversationId,
@@ -319,6 +303,63 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
     latencyMs,
     toolsCalled,
   };
+}
+
+// -------------------------------------------------------------------
+// Outcome mapping + terminal SSE event.
+// -------------------------------------------------------------------
+
+/**
+ * Normalise a thrown value and pick the terminal outcome. A throw is
+ * an abort only when the caller (or the drawer close) aborted; the
+ * hard timeout keeps 'agent_loop_exceeded'. 'pending' never settles,
+ * so it becomes 'error'.
+ */
+function classifyLoopThrow(
+  err: unknown,
+  outcome: CopilotMessageOutcome,
+  signal: AbortSignal,
+): { error: Error; outcome: CopilotMessageOutcome } {
+  const error = err instanceof Error ? err : new Error(String(err));
+  if (signal.aborted && signal.reason !== 'agent_loop_exceeded') {
+    return { error, outcome: 'aborted' };
+  }
+  return { error, outcome: outcome === 'pending' ? 'error' : outcome };
+}
+
+interface TerminalEventArgs {
+  turnId: string;
+  conversationId: string;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+}
+
+function emitTerminalEvent(
+  sink: CopilotSSESink,
+  outcome: CopilotMessageOutcome,
+  a: TerminalEventArgs,
+): void {
+  if (outcome === 'success') {
+    sink.emit({
+      event: 'complete',
+      data: {
+        turnId: a.turnId,
+        conversationId: a.conversationId,
+        tokensIn: a.tokensIn,
+        tokensOut: a.tokensOut,
+        latencyMs: a.latencyMs,
+      },
+    });
+    return;
+  }
+  const errorCode =
+    outcome === 'aborted'
+      ? 'aborted'
+      : outcome === 'agent_loop_exceeded'
+        ? 'agent_loop_exceeded'
+        : 'llm_error';
+  sink.emit({ event: 'error', data: { code: errorCode } });
 }
 
 // -------------------------------------------------------------------

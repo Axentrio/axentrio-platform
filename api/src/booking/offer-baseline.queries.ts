@@ -208,10 +208,46 @@ export interface ScorerGate {
   versions: string[];
 }
 
+type ScorerSummaryRow = {
+  offers: string;
+  cheaper: string;
+  elements: string;
+  mean_ms: string | null;
+  max_ms: string | null;
+};
+type ScorerSlotRow = { scored: string; total: string };
+
+/** `AVG`/`MAX` return null on an empty window, which is not a latency of zero. */
+function scorerLatency(row?: ScorerSummaryRow): ScorerGate['latency'] {
+  return {
+    meanMs: row?.mean_ms == null ? null : Math.round(Number(row.mean_ms)),
+    maxMs: row?.max_ms == null ? null : Number(row.max_ms),
+  };
+}
+
+function scorerGateResult(
+  summary: ScorerSummaryRow[],
+  slots: ScorerSlotRow[],
+  versions: Array<{ scorer_version: string }>,
+): ScorerGate {
+  const offers = Number(summary[0]?.offers ?? 0);
+  return {
+    scoredOffers: offers,
+    cheaperAlternative: ratio(Number(summary[0]?.cheaper ?? 0), offers),
+    slotCoverage: ratio(Number(slots[0]?.scored ?? 0), Number(slots[0]?.total ?? 0)),
+    elements: {
+      total: Number(summary[0]?.elements ?? 0),
+      perOffer: offers > 0 ? Number(summary[0]?.elements ?? 0) / offers : null,
+    },
+    latency: scorerLatency(summary[0]),
+    versions: versions.map((v) => v.scorer_version),
+  };
+}
+
 export async function scorerGate(window: BaselineWindow): Promise<ScorerGate> {
   const [summary, slots, versions]: [
-    Array<{ offers: string; cheaper: string; elements: string; mean_ms: string | null; max_ms: string | null }>,
-    Array<{ scored: string; total: string }>,
+    ScorerSummaryRow[],
+    ScorerSlotRow[],
     Array<{ scorer_version: string }>,
   ] = (await Promise.all([
     AppDataSource.query(
@@ -252,21 +288,7 @@ export async function scorerGate(window: BaselineWindow): Promise<ScorerGate> {
     ),
   ])) as never;
 
-  const offers = Number(summary[0]?.offers ?? 0);
-  return {
-    scoredOffers: offers,
-    cheaperAlternative: ratio(Number(summary[0]?.cheaper ?? 0), offers),
-    slotCoverage: ratio(Number(slots[0]?.scored ?? 0), Number(slots[0]?.total ?? 0)),
-    elements: {
-      total: Number(summary[0]?.elements ?? 0),
-      perOffer: offers > 0 ? Number(summary[0]?.elements ?? 0) / offers : null,
-    },
-    latency: {
-      meanMs: summary[0]?.mean_ms == null ? null : Math.round(Number(summary[0].mean_ms)),
-      maxMs: summary[0]?.max_ms == null ? null : Number(summary[0].max_ms),
-    },
-    versions: versions.map((v) => v.scorer_version),
-  };
+  return scorerGateResult(summary, slots, versions);
 }
 
 /**

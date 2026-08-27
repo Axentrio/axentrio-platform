@@ -475,9 +475,226 @@ function statusPill(status: string): { label: string; cls: string } {
   }
 }
 
-function BookingRow({
+/** The date, time and status line at the top of a row. */
+function BookingRowHeader({ booking, timezone }: { booking: AdminBooking; timezone: string }) {
+  const pill = statusPill(booking.status);
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-sm font-medium text-text-primary">
+        {dayLabel(booking.startTime, timezone)}
+      </span>
+      <span className="text-sm text-text-secondary">
+        {timeLabel(booking.startTime, timezone)} – {timeLabel(booking.endTime, timezone)}
+      </span>
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${pill.cls}`}>
+        {pill.label}
+      </span>
+      {/* A confirmed booking whose calendar mirror failed used to look identical to a
+          healthy one: green pill, nothing on the calendar, and for a channel booking no
+          email either — so the owner only found out by noticing the absence. */}
+      {booking.calendarSync === 'failed' && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+          <AlertTriangle className="h-3 w-3" /> Not on your calendar
+        </span>
+      )}
+      {booking.calendarSync === 'pending' && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
+          Syncing…
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Who the appointment is with, and where it came from. */
+function BookingRowWho({ booking, showAgent }: { booking: AdminBooking; showAgent: boolean }) {
+  return (
+    <div className="mt-1 text-sm text-text-secondary">
+      {booking.attendeeName || 'Guest'}
+      {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
+      {booking.serviceName ? ` · ${booking.serviceName}` : ''}
+      {booking.sourceChannel ? ` · via ${booking.sourceChannel}` : ''}
+      {showAgent && booking.agentName ? ` · ${booking.agentName}` : ''}
+    </div>
+  );
+}
+
+/** Everything the row has to say about the appointment before its own content. */
+function BookingRowNotices({ booking, isRequest }: { booking: AdminBooking; isRequest: boolean }) {
+  return (
+    <>
+      {booking.calendarSync === 'failed' && (
+        <div className="mt-1 text-xs text-red-400">
+          This appointment was confirmed to the customer but could not be written to your connected calendar.
+          Reconnect the calendar in Setup, then add it manually if it is soon.
+        </div>
+      )}
+      {booking.aiSummary && (
+        <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.aiSummary}</div>
+      )}
+      {(booking.customerPhone || booking.customerAddress) && (
+        <div className="mt-1 text-sm text-text-secondary">
+          {[booking.customerPhone, booking.customerAddress].filter(Boolean).join(' · ')}
+        </div>
+      )}
+      {/*
+        The service-area verdict. Only ever shown when it is NOT 'inside' — an in-area job
+        is the unremarkable case and labelling it would bury the two that matter. Until now
+        this existed only as a server log line, so an owner could hold back work for months
+        and never learn the area they drew was costing them.
+      */}
+      {/*
+        Both sentences are advice about a decision the owner has not taken yet, but the
+        column survives Accept untouched — so a CONFIRMED booking, with a calendar invite
+        and a confirmation email already sent, sat under a green pill being told it was not
+        committed to. The flag stays either way; only the wording turns on whether the
+        decision is still open.
+      */}
+      {booking.serviceAreaMatch === 'outside' && (
+        <div className="mt-1 text-xs text-amber-400">
+          {isRequest
+            ? 'Outside your service area — you have not committed to this one.'
+            : 'Outside your service area — accepted anyway.'}
+        </div>
+      )}
+      {booking.serviceAreaMatch === 'unknown' && (
+        <div className="mt-1 text-xs text-amber-400">
+          {isRequest
+            ? 'Address could not be matched to your service area — worth checking before you confirm.'
+            : 'Address could not be matched to your service area.'}
+        </div>
+      )}
+      <BookingRowTravelCheck booking={booking} isRequest={isRequest} />
+    </>
+  );
+}
+
+/**
+ * WHY this Request is sitting here, which until now lived only in a server log.
+ *
+ * A Request the travel gate captured looked identical to one captured for any other
+ * reason, and the case that needs the warning arrives with no other signal: when Google
+ * answers `ROUTE_NOT_FOUND` the gate degrades to a Request rather than refusing, because
+ * that answer means "no route for these coordinates with today's data" — a geocode in a
+ * canal or a road closed this week produces it as readily as an island does. Turning a
+ * paying customer away on a third party's data quality was the wrong call, but the
+ * Request it becomes is only useful if the owner can see what it is. ADR-0015 names the
+ * failure exactly: an owner drowning in Requests rubber-stamps them, which buys back the
+ * wrongness the strictness was meant to buy off.
+ *
+ * The wording turns on the decision, not on the status, which is the lesson the
+ * service-area note above had to learn the hard way: a sentence phrased as advice about
+ * a choice still open reads as nonsense once the choice is made. `overridden` is the
+ * same fact after Accept, and it stays on screen — a confirmed booking whose journey was
+ * never verified is precisely the one worth remembering on the morning of the job.
+ *
+ * `ok` and `degraded` are not rendered. Both are successful checks, and `degraded` is
+ * provenance rather than a fault — the ordinary state of a business whose jobs sit close
+ * together, where the flat gap settled the drive for free. Flagging it would put a
+ * warning on most of a good day and teach the owner to ignore all of them.
+ */
+function BookingRowTravelCheck({
   booking,
-  timezone,
+  isRequest,
+}: {
+  booking: AdminBooking;
+  isRequest: boolean;
+}) {
+  if (booking.travelCheck !== 'captured' && booking.travelCheck !== 'overridden') return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-400" data-testid="travel-captured">
+      <span>
+        {booking.travelCheck === 'overridden'
+          ? 'Travel could not clear this time — accepted anyway.'
+          : isRequest
+            ? 'Travel could not clear this time. Check the journey before accepting.'
+            : 'Travel could not clear this time — the journey was never verified.'}
+      </span>
+      {/* A verdict IS Google-derived content, even on a row carrying no distance. */}
+      <GoogleAttribution />
+    </div>
+  );
+}
+
+/**
+ * What the owner is about to override. A RANGE, and wide on purpose: nothing has routed
+ * anything, so this is a straight line at the two speed bounds the gate reasons with. A
+ * single figure would be a guess wearing the clothes of a measurement, handed to the one
+ * person who must not be given one.
+ */
+function BookingRowTravelEstimate({
+  travel,
+  isRequest,
+}: {
+  travel: AdminBooking['travelEstimate'];
+  isRequest: boolean;
+}) {
+  if (!isRequest || !travel) return null;
+  return (
+    <div className="mt-1 text-xs text-text-secondary" data-testid="travel-estimate">
+      {[
+        travel.before && `${travel.before.km} km from the job before (${travel.before.fastestMin}-${travel.before.slowestMin} min)`,
+        travel.after && `${travel.after.km} km to the job after (${travel.after.fastestMin}-${travel.after.slowestMin} min)`,
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+      <span className="text-text-secondary/70"> · straight-line distance, not a measured drive</span>
+      {/*
+        INSIDE the same container as the number it attributes, which is what the Maps
+        terms require — an attribution in a page footer does not cover content rendered
+        in a row. These kilometres are computed from coordinates Google placed, so they
+        carry the obligation even though nothing here came back from a routing call.
+      */}
+      <span className="ml-2"><GoogleAttribution /></span>
+    </div>
+  );
+}
+
+/** The booking's own content: notes, intake answers, attachments and the meeting link. */
+function BookingRowDetails({ booking }: { booking: AdminBooking }) {
+  return (
+    <>
+      {booking.notes && (
+        <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
+      )}
+      {booking.intakeAnswers && booking.intakeAnswers.length > 0 && (
+        <dl className="mt-1.5 space-y-0.5">
+          {booking.intakeAnswers.map((qa, i) => (
+            // Index, not label: duplicate labels are explicitly permitted (two questions
+            // may legitimately read "Notes"), so keying on the label collides and React
+            // drops one of the rows.
+            // eslint-disable-next-line react/no-array-index-key -- labels are not unique
+            <div key={`${qa.label}-${i}`} className="text-sm">
+              <dt className="inline text-text-muted">{qa.label}: </dt>
+              <dd className="inline text-text-secondary whitespace-pre-wrap">{qa.answer}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {booking.uploadedFiles && booking.uploadedFiles.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {booking.uploadedFiles.map((f) => (
+            <BookingAttachedFile key={f.fileSessionId} file={f} />
+          ))}
+        </div>
+      )}
+      {booking.meetingUrl && /^https?:\/\//i.test(booking.meetingUrl) && (
+        <a
+          href={booking.meetingUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300"
+        >
+          <Video className="h-3 w-3" />
+          Join Meet
+        </a>
+      )}
+    </>
+  );
+}
+
+/** Manage buttons for a confirmed appointment, or the accept/decline pair for a Request. */
+function BookingRowActions({
   canManage,
   isRequest,
   acting,
@@ -485,197 +702,17 @@ function BookingRow({
   onReschedule,
   onAccept,
   onDecline,
-  showAgent,
 }: {
-  booking: AdminBooking;
-  timezone: string;
   canManage: boolean;
   isRequest: boolean;
-  /** True only when this page holds more than one Agent's appointments - see the call site. */
-  showAgent: boolean;
   acting: boolean;
   onCancel: () => void;
   onReschedule: () => void;
   onAccept: () => void;
   onDecline: () => void;
 }) {
-  const pill = statusPill(booking.status);
-  // Comes down WITH the list, not fetched per row. It has to be on the row — accepting is an
-  // owner override and the button is right here — but a fetch inside this component turned
-  // thirty requests into thirty calls to learn thirty times that travel is off.
-  const travel = booking.travelEstimate;
   return (
-    <li className="flex items-start gap-4 px-4 py-4">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium text-text-primary">
-            {dayLabel(booking.startTime, timezone)}
-          </span>
-          <span className="text-sm text-text-secondary">
-            {timeLabel(booking.startTime, timezone)} – {timeLabel(booking.endTime, timezone)}
-          </span>
-          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${pill.cls}`}>
-            {pill.label}
-          </span>
-          {/* A confirmed booking whose calendar mirror failed used to look identical to a
-              healthy one: green pill, nothing on the calendar, and for a channel booking no
-              email either — so the owner only found out by noticing the absence. */}
-          {booking.calendarSync === 'failed' && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-              <AlertTriangle className="h-3 w-3" /> Not on your calendar
-            </span>
-          )}
-          {booking.calendarSync === 'pending' && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
-              Syncing…
-            </span>
-          )}
-        </div>
-        <div className="mt-1 text-sm text-text-secondary">
-          {booking.attendeeName || 'Guest'}
-          {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
-          {booking.serviceName ? ` · ${booking.serviceName}` : ''}
-          {booking.sourceChannel ? ` · via ${booking.sourceChannel}` : ''}
-          {showAgent && booking.agentName ? ` · ${booking.agentName}` : ''}
-        </div>
-        {booking.calendarSync === 'failed' && (
-          <div className="mt-1 text-xs text-red-400">
-            This appointment was confirmed to the customer but could not be written to your connected calendar.
-            Reconnect the calendar in Setup, then add it manually if it is soon.
-          </div>
-        )}
-        {booking.aiSummary && (
-          <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.aiSummary}</div>
-        )}
-        {(booking.customerPhone || booking.customerAddress) && (
-          <div className="mt-1 text-sm text-text-secondary">
-            {[booking.customerPhone, booking.customerAddress].filter(Boolean).join(' · ')}
-          </div>
-        )}
-        {/*
-          The service-area verdict. Only ever shown when it is NOT 'inside' — an in-area job
-          is the unremarkable case and labelling it would bury the two that matter. Until now
-          this existed only as a server log line, so an owner could hold back work for months
-          and never learn the area they drew was costing them.
-        */}
-        {/*
-          Both sentences are advice about a decision the owner has not taken yet, but the
-          column survives Accept untouched — so a CONFIRMED booking, with a calendar invite
-          and a confirmation email already sent, sat under a green pill being told it was not
-          committed to. The flag stays either way; only the wording turns on whether the
-          decision is still open.
-        */}
-        {booking.serviceAreaMatch === 'outside' && (
-          <div className="mt-1 text-xs text-amber-400">
-            {isRequest
-              ? 'Outside your service area — you have not committed to this one.'
-              : 'Outside your service area — accepted anyway.'}
-          </div>
-        )}
-        {booking.serviceAreaMatch === 'unknown' && (
-          <div className="mt-1 text-xs text-amber-400">
-            {isRequest
-              ? 'Address could not be matched to your service area — worth checking before you confirm.'
-              : 'Address could not be matched to your service area.'}
-          </div>
-        )}
-        {/*
-          WHY this Request is sitting here, which until now lived only in a server log.
-
-          A Request the travel gate captured looked identical to one captured for any other
-          reason, and the case that needs the warning arrives with no other signal: when Google
-          answers `ROUTE_NOT_FOUND` the gate degrades to a Request rather than refusing, because
-          that answer means "no route for these coordinates with today's data" — a geocode in a
-          canal or a road closed this week produces it as readily as an island does. Turning a
-          paying customer away on a third party's data quality was the wrong call, but the
-          Request it becomes is only useful if the owner can see what it is. ADR-0015 names the
-          failure exactly: an owner drowning in Requests rubber-stamps them, which buys back the
-          wrongness the strictness was meant to buy off.
-
-          The wording turns on the decision, not on the status, which is the lesson the
-          service-area note above had to learn the hard way: a sentence phrased as advice about
-          a choice still open reads as nonsense once the choice is made. `overridden` is the
-          same fact after Accept, and it stays on screen — a confirmed booking whose journey was
-          never verified is precisely the one worth remembering on the morning of the job.
-
-          `ok` and `degraded` are not rendered. Both are successful checks, and `degraded` is
-          provenance rather than a fault — the ordinary state of a business whose jobs sit close
-          together, where the flat gap settled the drive for free. Flagging it would put a
-          warning on most of a good day and teach the owner to ignore all of them.
-        */}
-        {(booking.travelCheck === 'captured' || booking.travelCheck === 'overridden') && (
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-400" data-testid="travel-captured">
-            <span>
-              {booking.travelCheck === 'overridden'
-                ? 'Travel could not clear this time — accepted anyway.'
-                : isRequest
-                  ? 'Travel could not clear this time. Check the journey before accepting.'
-                  : 'Travel could not clear this time — the journey was never verified.'}
-            </span>
-            {/* A verdict IS Google-derived content, even on a row carrying no distance. */}
-            <GoogleAttribution />
-          </div>
-        )}
-        {/*
-          What the owner is about to override. A RANGE, and wide on purpose: nothing has routed
-          anything, so this is a straight line at the two speed bounds the gate reasons with. A
-          single figure would be a guess wearing the clothes of a measurement, handed to the one
-          person who must not be given one.
-        */}
-        {isRequest && travel && (
-          <div className="mt-1 text-xs text-text-secondary" data-testid="travel-estimate">
-            {[
-              travel.before && `${travel.before.km} km from the job before (${travel.before.fastestMin}-${travel.before.slowestMin} min)`,
-              travel.after && `${travel.after.km} km to the job after (${travel.after.fastestMin}-${travel.after.slowestMin} min)`,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-            <span className="text-text-secondary/70"> · straight-line distance, not a measured drive</span>
-            {/*
-              INSIDE the same container as the number it attributes, which is what the Maps
-              terms require — an attribution in a page footer does not cover content rendered
-              in a row. These kilometres are computed from coordinates Google placed, so they
-              carry the obligation even though nothing here came back from a routing call.
-            */}
-            <span className="ml-2"><GoogleAttribution /></span>
-          </div>
-        )}
-        {booking.notes && (
-          <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
-        )}
-        {booking.intakeAnswers && booking.intakeAnswers.length > 0 && (
-          <dl className="mt-1.5 space-y-0.5">
-            {booking.intakeAnswers.map((qa, i) => (
-              // Index, not label: duplicate labels are explicitly permitted (two questions
-              // may legitimately read "Notes"), so keying on the label collides and React
-              // drops one of the rows.
-              // eslint-disable-next-line react/no-array-index-key -- labels are not unique
-              <div key={`${qa.label}-${i}`} className="text-sm">
-                <dt className="inline text-text-muted">{qa.label}: </dt>
-                <dd className="inline text-text-secondary whitespace-pre-wrap">{qa.answer}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {booking.uploadedFiles && booking.uploadedFiles.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {booking.uploadedFiles.map((f) => (
-              <BookingAttachedFile key={f.fileSessionId} file={f} />
-            ))}
-          </div>
-        )}
-        {booking.meetingUrl && /^https?:\/\//i.test(booking.meetingUrl) && (
-          <a
-            href={booking.meetingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300"
-          >
-            <Video className="h-3 w-3" />
-            Join Meet
-          </a>
-        )}
-      </div>
+    <>
       {canManage && (
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={onReschedule}>
@@ -711,6 +748,56 @@ function BookingRow({
           </Button>
         </div>
       )}
+    </>
+  );
+}
+
+function BookingRow({
+  booking,
+  timezone,
+  canManage,
+  isRequest,
+  acting,
+  onCancel,
+  onReschedule,
+  onAccept,
+  onDecline,
+  showAgent,
+}: {
+  booking: AdminBooking;
+  timezone: string;
+  canManage: boolean;
+  isRequest: boolean;
+  /** True only when this page holds more than one Agent's appointments - see the call site. */
+  showAgent: boolean;
+  acting: boolean;
+  onCancel: () => void;
+  onReschedule: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  // Comes down WITH the list, not fetched per row. It has to be on the row — accepting is an
+  // owner override and the button is right here — but a fetch inside this component turned
+  // thirty requests into thirty calls to learn thirty times that travel is off.
+  const travel = booking.travelEstimate;
+  return (
+    <li className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-start sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <BookingRowHeader booking={booking} timezone={timezone} />
+        <BookingRowWho booking={booking} showAgent={showAgent} />
+        <BookingRowNotices booking={booking} isRequest={isRequest} />
+        <BookingRowTravelEstimate travel={travel} isRequest={isRequest} />
+        <BookingRowDetails booking={booking} />
+      </div>
+      <BookingRowActions
+        canManage={canManage}
+        isRequest={isRequest}
+        acting={acting}
+        onCancel={onCancel}
+        onReschedule={onReschedule}
+        onAccept={onAccept}
+        onDecline={onDecline}
+      />
     </li>
   );
 }
@@ -742,6 +829,196 @@ export function travelVerdictLookup(travel?: {
     unreachable.has(start) ? 'unreachable' : requestable.has(start) ? 'requestable' : null;
 }
 
+/** The 30-day search window for one open dialog, or null while it is closed. */
+function rescheduleWindow(booking: AdminBooking | null): { start: string; end: string } | null {
+  if (!booking) return null;
+  const start = new Date();
+  const end = new Date(start.getTime() + 30 * 24 * 3600_000);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+/** Group slots by day (in the owner's timezone). */
+function groupSlotsByDay(
+  slots: { start: string }[] | undefined,
+  timezone: string,
+): [string, { start: string }[]][] {
+  const out = new Map<string, { start: string }[]>();
+  for (const s of slots ?? []) {
+    const key = dayLabel(s.start, timezone);
+    if (!out.has(key)) out.set(key, []);
+    out.get(key)!.push(s);
+  }
+  return Array.from(out.entries());
+}
+
+/**
+ * Did travel put ANYTHING Google-derived on this screen — a verdict on a chip, a tooltip, or
+ * the banner explaining that nothing could be judged? That is what carries the attribution
+ * obligation, and it is a different question from "is travel switched on".
+ */
+function travelAnnotated(travel?: {
+  unavailableReason?: string;
+  unreachableSlots?: { start: string }[];
+  requestableSlots?: { start: string }[];
+}): boolean {
+  return (
+    !!travel?.unavailableReason ||
+    (travel?.unreachableSlots?.length ?? 0) > 0 ||
+    (travel?.requestableSlots?.length ?? 0) > 0
+  );
+}
+
+/**
+ * The fourth state, and the one easiest to drop: the check could not run at all, so NOTHING
+ * below was assessed. Without saying so the picker implies a verification that never
+ * happened — which is exactly the state travel is in during a Google outage, when the owner
+ * most needs to know they are on their own judgement.
+ */
+function RescheduleUnassessedNotice({ reason }: { reason: string }) {
+  return (
+    <p
+      data-testid="travel-unassessed"
+      className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-text-primary"
+    >
+      {reason === 'no_address'
+        ? 'This booking has no address on it, so none of these times have been checked for travel.'
+        : reason === 'not_placeable'
+          ? 'This booking’s address could not be located, so none of these times have been checked for travel.'
+          : 'Travel could not be checked just now, so none of these times have been checked for it.'}{' '}
+      You can still pick any of them.
+    </p>
+  );
+}
+
+/** One clickable time. Never disabled on a travel verdict — the owner decides. */
+function RescheduleSlotButton({
+  start,
+  timezone,
+  verdict,
+  disabled,
+  onPick,
+}: {
+  start: string;
+  timezone: string;
+  verdict: SlotTravelVerdict;
+  disabled: boolean;
+  onPick: (start: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={
+        verdict === 'unreachable'
+          ? 'Too far from the job before or after it — this drive does not fit'
+          : verdict === 'requestable'
+            ? 'The drive may not fit; nothing has measured it'
+            : undefined
+      }
+      data-travel={verdict ?? undefined}
+      onClick={() => onPick(start)}
+      className={`rounded-lg border px-3 py-1.5 text-sm text-text-primary disabled:opacity-50 ${
+        verdict === 'unreachable'
+          ? 'border-red-500/50 bg-red-500/10 hover:border-red-400'
+          : verdict === 'requestable'
+            ? 'border-amber-500/50 bg-amber-500/10 hover:border-amber-400'
+            : 'border-edge bg-surface-2 hover:border-primary-500 hover:bg-primary-500/10'
+      }`}
+    >
+      {timeLabel(start, timezone)}
+      {verdict === 'unreachable' && <span className="ml-1 text-red-400">·&nbsp;too far</span>}
+      {verdict === 'requestable' && <span className="ml-1 text-amber-400">·&nbsp;tight</span>}
+    </button>
+  );
+}
+
+/** One day's worth of times. */
+function RescheduleDayGroup({
+  day,
+  slots,
+  timezone,
+  verdictOf,
+  disabled,
+  onPick,
+}: {
+  day: string;
+  slots: { start: string }[];
+  timezone: string;
+  verdictOf: (start: string) => SlotTravelVerdict;
+  disabled: boolean;
+  onPick: (start: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
+        {day}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {slots.map((s) => (
+          <RescheduleSlotButton
+            key={s.start}
+            start={s.start}
+            timezone={timezone}
+            verdict={verdictOf(s.start)}
+            disabled={disabled}
+            onPick={onPick}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The scrolling body of the dialog: loading, empty, or the days on offer. */
+function RescheduleSlotPicker({
+  isLoading,
+  grouped,
+  unassessed,
+  timezone,
+  verdictOf,
+  disabled,
+  onPick,
+}: {
+  isLoading: boolean;
+  grouped: [string, { start: string }[]][];
+  unassessed?: string;
+  timezone: string;
+  verdictOf: (start: string) => SlotTravelVerdict;
+  disabled: boolean;
+  onPick: (start: string) => void;
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8 text-text-secondary">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+  if (grouped.length === 0) {
+    return (
+      <p className="p-6 text-center text-sm text-text-secondary">
+        No available slots in the next 30 days.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {unassessed && <RescheduleUnassessedNotice reason={unassessed} />}
+      {grouped.map(([day, slots]) => (
+        <RescheduleDayGroup
+          key={day}
+          day={day}
+          slots={slots}
+          timezone={timezone}
+          verdictOf={verdictOf}
+          disabled={disabled}
+          onPick={onPick}
+        />
+      ))}
+    </div>
+  );
+}
+
 function RescheduleDialog({
   booking,
   timezone,
@@ -754,12 +1031,7 @@ function RescheduleDialog({
   const reschedule = useRescheduleBooking();
 
   // 30-day window from now; computed once per open to keep the query key stable.
-  const window = useMemo(() => {
-    if (!booking) return null;
-    const start = new Date();
-    const end = new Date(start.getTime() + 30 * 24 * 3600_000);
-    return { start: start.toISOString(), end: end.toISOString() };
-  }, [booking]);
+  const window = useMemo(() => rescheduleWindow(booking), [booking]);
 
   const { data, isLoading } = useBookingAvailability(
     window?.start ?? '',
@@ -772,16 +1044,7 @@ function RescheduleDialog({
     booking?.id,
   );
 
-  // Group slots by day (in the owner's timezone).
-  const grouped = useMemo(() => {
-    const out = new Map<string, { start: string }[]>();
-    for (const s of data?.slots ?? []) {
-      const key = dayLabel(s.start, timezone);
-      if (!out.has(key)) out.set(key, []);
-      out.get(key)!.push(s);
-    }
-    return Array.from(out.entries());
-  }, [data, timezone]);
+  const grouped = useMemo(() => groupSlotsByDay(data?.slots, timezone), [data, timezone]);
 
   /**
    * What travel time made of each slot the owner is being shown.
@@ -796,18 +1059,12 @@ function RescheduleDialog({
    */
   const travelVerdict = useMemo(() => travelVerdictLookup(data?.travel), [data]);
 
-  // The fourth state, and the one easiest to drop: the check could not run at all, so NOTHING
-  // below was assessed. Without saying so the picker implies a verification that never
-  // happened — which is exactly the state travel is in during a Google outage, when the owner
-  // most needs to know they are on their own judgement.
-  const unassessed = data?.travel?.unavailableReason;
-  // Did travel put ANYTHING Google-derived on this screen — a verdict on a chip, a tooltip, or
-  // the banner explaining that nothing could be judged? That is what carries the attribution
-  // obligation, and it is a different question from "is travel switched on".
-  const travelAnnotated =
-    !!unassessed ||
-    (data?.travel?.unreachableSlots?.length ?? 0) > 0 ||
-    (data?.travel?.requestableSlots?.length ?? 0) > 0;
+  const travel = data?.travel;
+
+  const pickSlot = (start: string) => {
+    if (!booking) return;
+    reschedule.mutate({ id: booking.id, newStartTime: start }, { onSuccess: onClose });
+  };
 
   return (
     <Dialog open={!!booking} onOpenChange={(o) => !o && onClose()}>
@@ -826,77 +1083,15 @@ function RescheduleDialog({
         </DialogHeader>
 
         <div className="max-h-[50vh] overflow-y-auto pr-1">
-          {isLoading ? (
-            <div className="flex items-center justify-center p-8 text-text-secondary">
-              <Loader2 className="h-5 w-5 animate-spin" />
-            </div>
-          ) : grouped.length === 0 ? (
-            <p className="p-6 text-center text-sm text-text-secondary">
-              No available slots in the next 30 days.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {unassessed && (
-                <p
-                  data-testid="travel-unassessed"
-                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-text-primary"
-                >
-                  {unassessed === 'no_address'
-                    ? 'This booking has no address on it, so none of these times have been checked for travel.'
-                    : unassessed === 'not_placeable'
-                      ? 'This booking’s address could not be located, so none of these times have been checked for travel.'
-                      : 'Travel could not be checked just now, so none of these times have been checked for it.'}{' '}
-                  You can still pick any of them.
-                </p>
-              )}
-              {grouped.map(([day, slots]) => (
-                <div key={day}>
-                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    {day}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {slots.map((s) => {
-                      const verdict = travelVerdict(s.start);
-                      return (
-                        <button
-                          type="button"
-                          key={s.start}
-                          // Never disabled on a travel verdict. The owner decides.
-                          disabled={reschedule.isPending}
-                          title={
-                            verdict === 'unreachable'
-                              ? 'Too far from the job before or after it — this drive does not fit'
-                              : verdict === 'requestable'
-                                ? 'The drive may not fit; nothing has measured it'
-                                : undefined
-                          }
-                          data-travel={verdict ?? undefined}
-                          onClick={() => {
-                            if (!booking) return;
-                            reschedule.mutate(
-                              { id: booking.id, newStartTime: s.start },
-                              { onSuccess: onClose },
-                            );
-                          }}
-                          className={`rounded-lg border px-3 py-1.5 text-sm text-text-primary disabled:opacity-50 ${
-                            verdict === 'unreachable'
-                              ? 'border-red-500/50 bg-red-500/10 hover:border-red-400'
-                              : verdict === 'requestable'
-                                ? 'border-amber-500/50 bg-amber-500/10 hover:border-amber-400'
-                                : 'border-edge bg-surface-2 hover:border-primary-500 hover:bg-primary-500/10'
-                          }`}
-                        >
-                          {timeLabel(s.start, timezone)}
-                          {verdict === 'unreachable' && <span className="ml-1 text-red-400">·&nbsp;too far</span>}
-                          {verdict === 'requestable' && <span className="ml-1 text-amber-400">·&nbsp;tight</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <RescheduleSlotPicker
+            isLoading={isLoading}
+            grouped={grouped}
+            unassessed={travel?.unavailableReason}
+            timezone={timezone}
+            verdictOf={travelVerdict}
+            disabled={reschedule.isPending}
+            onPick={pickSlot}
+          />
         </div>
         {/*
           ONE attribution for the whole picker, at the foot of the container that holds the
@@ -908,7 +1103,7 @@ function RescheduleDialog({
         */}
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-text-secondary">Times shown in {timezone}.</p>
-          {travelAnnotated && <GoogleAttribution />}
+          {travelAnnotated(travel) && <GoogleAttribution />}
         </div>
       </DialogContent>
     </Dialog>

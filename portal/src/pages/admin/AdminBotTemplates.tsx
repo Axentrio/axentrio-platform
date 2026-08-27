@@ -207,7 +207,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
 
   return (
     <div className={embedded ? 'space-y-8' : 'h-full overflow-y-auto p-6 space-y-8'}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         {embedded ? (
           <p className="text-sm text-text-secondary">{t('admin.botTemplates.header.subtitle')}</p>
         ) : (
@@ -305,7 +305,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
             </div>
             <div className="space-y-1.5">
               <Label>Tier</Label>
-              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tier">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" role="group" aria-label="Tier">
                 {TIERS.map((tr) => (
                   <button
                     key={tr.id}
@@ -362,7 +362,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
             <div className="space-y-1.5">
               <Label>Tier</Label>
               {/* The per-subscription case: same prompt, different tier. */}
-              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tier">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" role="group" aria-label="Tier">
                 {TIERS.map((tr) => (
                   <button
                     key={tr.id}

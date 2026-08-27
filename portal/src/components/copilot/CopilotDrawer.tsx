@@ -32,6 +32,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type MutableRefObject,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Send, Trash2, X, Wrench } from 'lucide-react';
@@ -51,7 +52,7 @@ import { AssistantText } from './AssistantText';
 import { CopilotSuggestions } from './CopilotSuggestions';
 import { EscalateToHuman } from './EscalateToHuman';
 
-const MOBILE_BREAKPOINT_QUERY = '(max-width: 640px)';
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
 
 export function CopilotDrawer() {
   const { t } = useTranslation();
@@ -175,26 +176,14 @@ export function CopilotDrawer() {
             <CopilotLockedPreview />
           ) : (
             <>
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                {transcript.isLoading && (
-                  <p className="text-sm text-text-tertiary">{t('copilot.drawer.loading')}</p>
-                )}
-                {!transcript.isLoading &&
-                  (transcript.data?.messages.length ?? 0) === 0 &&
-                  !inflight && (
-                    <CopilotWelcome onAsk={setComposerValue} />
-                  )}
-                {transcript.data?.messages.map((m) => <PersistedMessage key={m.id} msg={m} />)}
-                {inflight && <InflightAssistant inflight={inflight} />}
-                {rateLimitNotice && (
-                  <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
-                    {t('copilot.drawer.rateLimited', {
-                      seconds: rateLimitNotice.retryAfterSeconds,
-                    })}
-                  </div>
-                )}
-                <div ref={scrollAnchorRef} />
-              </div>
+              <CopilotTranscript
+                messages={transcript.data?.messages}
+                isLoading={transcript.isLoading}
+                inflight={inflight}
+                rateLimitNotice={rateLimitNotice}
+                onAsk={setComposerValue}
+                scrollAnchorRef={scrollAnchorRef}
+              />
 
               <form
                 onSubmit={handleSend}
@@ -231,6 +220,46 @@ export function CopilotDrawer() {
         </div>
       </aside>
     </>
+  );
+}
+
+/** The scrolling message list: loading hint, welcome, transcript, inflight turn. */
+function CopilotTranscript({
+  messages,
+  isLoading,
+  inflight,
+  rateLimitNotice,
+  onAsk,
+  scrollAnchorRef,
+}: {
+  messages?: CopilotConversationMessage[];
+  isLoading: boolean;
+  inflight: CopilotInflightTurn | null;
+  rateLimitNotice: { message: string; retryAfterSeconds: number } | null;
+  onAsk: (question: string) => void;
+  scrollAnchorRef: MutableRefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useTranslation();
+  const persisted = messages ?? [];
+  return (
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {isLoading && (
+        <p className="text-sm text-text-tertiary">{t('copilot.drawer.loading')}</p>
+      )}
+      {!isLoading && persisted.length === 0 && !inflight && (
+        <CopilotWelcome onAsk={onAsk} />
+      )}
+      {persisted.map((m) => <PersistedMessage key={m.id} msg={m} />)}
+      {inflight && <InflightAssistant inflight={inflight} />}
+      {rateLimitNotice && (
+        <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+          {t('copilot.drawer.rateLimited', {
+            seconds: rateLimitNotice.retryAfterSeconds,
+          })}
+        </div>
+      )}
+      <div ref={scrollAnchorRef} />
+    </div>
   );
 }
 

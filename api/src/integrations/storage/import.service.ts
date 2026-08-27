@@ -1,7 +1,7 @@
 /**
  * Enqueue cloud-storage file imports. HTTP path never downloads bytes.
  */
-import { In } from "typeorm";
+import { In, type Repository } from "typeorm";
 import { AppDataSource } from "../../database/data-source";
 import { StorageConnection } from "../../database/entities/StorageConnection";
 import { StorageImportJob } from "../../database/entities/StorageImportJob";
@@ -28,7 +28,7 @@ export interface ImportFileInput {
   driveId?: string;
 }
 
-export async function enqueueStorageImport(opts: {
+interface StorageImportRequest {
   tenantId: string;
   userId: string;
   kbId?: string;
@@ -36,11 +36,10 @@ export async function enqueueStorageImport(opts: {
   files: ImportFileInput[];
   googleAccessToken?: string;
   oneDriveAccessToken?: string;
-}): Promise<{
-  provider: string;
-  jobs: Array<{ id: string; fileId: string; status: string }>;
-  skipped: Array<{ id: string; reason: string }>;
-}> {
+}
+
+/** Service-level and selection-level gates that must hold before any DB work. */
+function assertImportPreconditions(opts: StorageImportRequest): void {
   if (!config.clamav.enabled) {
     throw new ApiError(
       "Virus scanning is unavailable",
@@ -63,7 +62,15 @@ export async function enqueueStorageImport(opts: {
       `Import at most ${MAX_IMPORT_FILES} files at a time`,
     );
   }
+}
 
+/**
+ * Loads the active connection and proves the picker token belongs to the same
+ * cloud account the connection was created with.
+ */
+async function loadImportConnection(
+  opts: StorageImportRequest,
+): Promise<StorageConnection> {
   const connRepo = AppDataSource.getRepository(StorageConnection);
   const connection = await connRepo.findOne({
     where: {
@@ -99,6 +106,111 @@ export async function enqueueStorageImport(opts: {
       pickerAccessToken: opts.oneDriveAccessToken,
     });
   }
+  return connection;
+}
+
+/** A picked file either lands in the queue, or is reported back as skipped. */
+type ImportFileOutcome =
+  | { kind: "skipped"; entry: { id: string; reason: string } }
+  | { kind: "created"; entry: { id: string; fileId: string; status: string } };
+
+/** Upserts the job row for one picked file and queues its download. */
+async function enqueueImportFile(ctx: {
+  opts: StorageImportRequest;
+  file: ImportFileInput;
+  kbId: string;
+  connection: StorageConnection;
+  jobRepo: Repository<StorageImportJob>;
+}): Promise<ImportFileOutcome> {
+  const { opts, file, kbId, connection, jobRepo } = ctx;
+  if (!file.id || typeof file.id !== "string") {
+    throw new BadRequestError("Each file needs an id");
+  }
+  // Skip unsupported files (folders, images, ...) instead of failing the
+  // whole selection — users pick stray items without noticing.
+  if (file.mimeType && !planForMime(file.mimeType)) {
+    return { kind: "skipped", entry: { id: file.id, reason: "unsupported_type" } };
+  }
+  const targetKey = `knowledge/${opts.tenantId}/${kbId}/${connection.provider}/${file.id}/v1`;
+  let job = await jobRepo.findOne({
+    where: {
+      knowledgeBaseId: kbId,
+      provider: connection.provider,
+      fileId: file.id,
+    },
+    order: { createdAt: "DESC" },
+  });
+  if (!job || job.status === "document_created" || job.status === "failed") {
+    job = jobRepo.create({
+      tenantId: opts.tenantId,
+      knowledgeBaseId: kbId,
+      storageConnectionId: connection.id,
+      provider: connection.provider,
+      fileId: file.id,
+      targetKey,
+      status: "queued",
+      error: null,
+      documentId: null,
+    });
+    job = await jobRepo.save(job);
+  } else if (
+    job.status === "queued" ||
+    job.status === "downloading" ||
+    job.status === "scanning" ||
+    job.status === "stored"
+  ) {
+    return { kind: "created", entry: { id: job.id, fileId: file.id, status: job.status } };
+  }
+  const jobId = `import-${kbId}-${connection.provider}-${file.id}`;
+  // The deterministic jobId stays stable across re-imports (spec), but Bull
+  // keeps completed/failed job hashes (removeOnComplete: 100) and silently
+  // ignores a duplicate jobId. Drop any stale job with this id first, or the
+  // fresh row would sit "queued" forever.
+  await removeJob(STORAGE_IMPORT_QUEUE, jobId);
+  try {
+    await addJob(
+      STORAGE_IMPORT_QUEUE,
+      {
+        jobRowId: job.id,
+        tenantId: opts.tenantId,
+        kbId,
+        storageConnectionId: connection.id,
+        provider: connection.provider,
+        fileId: file.id,
+        driveId: file.driveId ?? null,
+        importedBy: opts.userId,
+      },
+      { jobId },
+    );
+  } catch (error) {
+    logger.error("[storage-import] queue failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new ApiError(
+      "Could not queue the cloud import",
+      503,
+      "queue_unavailable",
+    );
+  }
+  return { kind: "created", entry: { id: job.id, fileId: file.id, status: job.status } };
+}
+
+export async function enqueueStorageImport(opts: {
+  tenantId: string;
+  userId: string;
+  kbId?: string;
+  storageConnectionId: string;
+  files: ImportFileInput[];
+  googleAccessToken?: string;
+  oneDriveAccessToken?: string;
+}): Promise<{
+  provider: string;
+  jobs: Array<{ id: string; fileId: string; status: string }>;
+  skipped: Array<{ id: string; reason: string }>;
+}> {
+  assertImportPreconditions(opts);
+
+  const connection = await loadImportConnection(opts);
 
   const knowledge = new KnowledgeService(AppDataSource);
   const kb = await knowledge.resolveKnowledgeBase(opts.tenantId, opts.kbId);
@@ -134,78 +246,18 @@ export async function enqueueStorageImport(opts: {
   const created: Array<{ id: string; fileId: string; status: string }> = [];
   const skipped: Array<{ id: string; reason: string }> = [];
   for (const file of opts.files) {
-    if (!file.id || typeof file.id !== "string") {
-      throw new BadRequestError("Each file needs an id");
-    }
-    // Skip unsupported files (folders, images, ...) instead of failing the
-    // whole selection — users pick stray items without noticing.
-    if (file.mimeType && !planForMime(file.mimeType)) {
-      skipped.push({ id: file.id, reason: "unsupported_type" });
-      continue;
-    }
-    const targetKey = `knowledge/${opts.tenantId}/${kb.id}/${connection.provider}/${file.id}/v1`;
-    let job = await jobRepo.findOne({
-      where: {
-        knowledgeBaseId: kb.id,
-        provider: connection.provider,
-        fileId: file.id,
-      },
-      order: { createdAt: "DESC" },
+    const outcome = await enqueueImportFile({
+      opts,
+      file,
+      kbId: kb.id,
+      connection,
+      jobRepo,
     });
-    if (!job || job.status === "document_created" || job.status === "failed") {
-      job = jobRepo.create({
-        tenantId: opts.tenantId,
-        knowledgeBaseId: kb.id,
-        storageConnectionId: connection.id,
-        provider: connection.provider,
-        fileId: file.id,
-        targetKey,
-        status: "queued",
-        error: null,
-        documentId: null,
-      });
-      job = await jobRepo.save(job);
-    } else if (
-      job.status === "queued" ||
-      job.status === "downloading" ||
-      job.status === "scanning" ||
-      job.status === "stored"
-    ) {
-      created.push({ id: job.id, fileId: file.id, status: job.status });
-      continue;
+    if (outcome.kind === "skipped") {
+      skipped.push(outcome.entry);
+    } else {
+      created.push(outcome.entry);
     }
-    const jobId = `import-${kb.id}-${connection.provider}-${file.id}`;
-    // The deterministic jobId stays stable across re-imports (spec), but Bull
-    // keeps completed/failed job hashes (removeOnComplete: 100) and silently
-    // ignores a duplicate jobId. Drop any stale job with this id first, or the
-    // fresh row would sit "queued" forever.
-    await removeJob(STORAGE_IMPORT_QUEUE, jobId);
-    try {
-      await addJob(
-        STORAGE_IMPORT_QUEUE,
-        {
-          jobRowId: job.id,
-          tenantId: opts.tenantId,
-          kbId: kb.id,
-          storageConnectionId: connection.id,
-          provider: connection.provider,
-          fileId: file.id,
-          driveId: file.driveId ?? null,
-          importedBy: opts.userId,
-        },
-        { jobId },
-      );
-    } catch (error) {
-      logger.error("[storage-import] queue failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new ApiError(
-        "Could not queue the cloud import",
-        503,
-        "queue_unavailable",
-      );
-    }
-    created.push({ id: job.id, fileId: file.id, status: job.status });
   }
   if (created.length === 0) {
     throw new BadRequestError("No importable files in that selection");

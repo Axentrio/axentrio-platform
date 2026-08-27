@@ -53,7 +53,7 @@ export default function SuccessMeter() {
   return (
     <div className="h-full overflow-y-auto">
       <Tabs defaultValue="outcomes" className="h-full">
-        <div className="px-6 pt-4 flex items-center justify-between gap-3">
+        <div className="px-6 pt-4 flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="outcomes">
               {t('insights.surface.outcomesTab', { defaultValue: 'Outcomes' })}

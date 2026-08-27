@@ -366,6 +366,11 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
   // configured. agent.service passes bookingConfigured=false for an entitled-but-
   // unconfigured bot (Pro defaults bookings ON, so the tools load before setup).
   const canBook = hasBookingTools && ctx.bookingConfigured !== false;
+  // capture_lead only records the customer's contact details. Its presence gates
+  // the INSTRUCTION to call it; it never licenses a promise that a request was
+  // submitted or the team will follow up (capture_lead can no-op yet still report
+  // success, and a captured lead is not an appointment request record).
+  const hasCaptureLead = tools.some((t) => t.name === 'capture_lead');
 
   const sections: string[] = [];
 
@@ -540,7 +545,7 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   }
 
   // Lead capture — same failure mode as KB, so a hard rule.
-  if (tools.some((t) => t.name === 'capture_lead')) {
+  if (hasCaptureLead) {
     const contactRule =
       `\n## CONTACT DETAILS\nThe moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.`;
     // On a messaging channel the customer's contact is already known (the channel
@@ -602,23 +607,37 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // nothing is scheduled).
   if (!canBook) {
     // The one block owns the whole no-booking ladder, in order: (1) cannot book
-    // here, (2) come in person if a venue exists, (3) capture contact / connect
-    // team, (4) if still insisting, ask about a human then escalate.
+    // here, (2) come in person if a venue exists, (3) optionally take contact
+    // details WHEN capture_lead exists, (4) if still insisting, ask about a human
+    // then escalate. No appointment request can be created here (request_appointment
+    // is not loaded), so the block forbids any request-submitted / team-review claim.
     // (2) is venue-gated AND travel-gated: a mobile-only business has no premises
     // to invite anyone to, and a travel service must not be told "come to our shop"
     // (the address may be a billing address). Opening hours ride along only when
-    // known — the invite should name when visiting actually works.
+    // known — the invite should name when visiting actually works. Written as its
+    // own sentence so the ladder parts stay independent of one another.
     const visitInvite = ctx.venueLine && !ctx.hasTravelServices
-      ? ` tell them they are welcome to visit us in person at ${ctx.venueLine}${ctx.openingHours ? ` during our opening hours: ${ctx.openingHours}` : ''},`
+      ? ` They are welcome to visit us in person at ${ctx.venueLine}${ctx.openingHours ? ` during our opening hours: ${ctx.openingHours}` : ''}.`
+      : '';
+    // (3) capture_lead only records contact details for a general follow-up; it is
+    // NOT an appointment request. Offer it only when the tool is loaded, and never
+    // dress it up as a submitted booking request.
+    const captureClause = hasCaptureLead
+      ? ` If the customer wants the business to have their contact details, you may take them with capture_lead.`
       : '';
     // (4) only when the escalate tool is actually loaded — otherwise the sentence
     // instructs a tool call that cannot happen (phantom-tool instruction).
     const insistLadder = canEscalate
       ? ` If the customer keeps insisting on booking after you have said you cannot, ask whether they would like you to connect them with a human. If they say yes, call the escalate_to_human tool.`
       : '';
+    // Honesty backstop for THIS bug: no request row is ever written here, so every
+    // branch must refuse the "your request was sent / the team will review it"
+    // reply. This does not block honestly acknowledging saved contact details or a
+    // live human handoff — it blocks claiming an appointment request that exists nowhere.
+    const noForwardRule = ` No appointment request is recorded here. NEVER tell the customer that their request or appointment has been sent, forwarded, submitted, recorded, or that the team will review it, get back to them, or follow up on it — no such record exists, so the claim is false. If you cannot help further, say plainly it cannot be booked through the chat.`;
     sections.push(
       `\n## BOOKING (NOT AVAILABLE)
-You cannot book, reschedule, cancel, or check availability for appointments — those tools are not enabled for you. NEVER offer to schedule a slot, ask for booking details, or imply an appointment has been made. If the customer wants to book, briefly say you can't schedule appointments here,${visitInvite} then capture their contact details (if you can) or offer to connect them with the team.${insistLadder}`
+You cannot book, reschedule, cancel, or check availability for appointments — those tools are not enabled for you. NEVER offer to schedule a slot, ask for booking details, or imply an appointment has been made. If the customer wants to book, briefly say you can't book appointments through the chat.${visitInvite}${captureClause}${insistLadder}${noForwardRule}`
     );
     // Distinguish "entitled-but-unconfigured" (tools loaded, no availability/service)
     // from "not capable at all" (no booking tools) — the one sanctioned two-gate.

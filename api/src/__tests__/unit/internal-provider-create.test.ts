@@ -780,16 +780,23 @@ describe('InternalProvider.createBooking', () => {
     expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hidden', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
-  it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a dead end', async () => {
+  it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a phantom forward', async () => {
     // A customer who already confirmed must not be told the service is unavailable and sent
-    // away. The message the model reads has to name a recovery that survives ANY toolset —
-    // capture_lead/escalate are entitlement-gated, so the fallback also names the plain ask
-    // (name + phone, team follows up). The bare "Booking not configured" was the dead end the
-    // report reproduced.
+    // away. But no request row is written here, so the message must NOT tell the model to
+    // promise the team will review/follow up — that was the false "request forwarded" reply
+    // the report reproduced. The recovery that survives ANY toolset is: use a capture/handoff
+    // tool if present, otherwise say the business handles it directly.
     serviceTypeFind.mockResolvedValue([]);
-    await expect(
-      provider.createBooking(ctx, 'idem-nc-copy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
-    ).rejects.toThrow(/name and phone number/i);
+    const err = await provider
+      .createBooking(ctx, 'idem-nc-copy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+      .then(() => null, (e: unknown) => e);
+    const message = err instanceof Error ? err.message : String(err);
+    expect(message).toMatch(/contact the business directly/i);
+    expect(message).toMatch(/no request record is created/i);
+    // The message must instruct the model NOT to promise a forward/review/follow-up.
+    expect(message).toMatch(/Do NOT tell the customer their request was submitted, forwarded/i);
+    // The recovery is customer-initiated, never an implied internal follow-up.
+    expect(message).not.toMatch(/business will handle it/i);
   });
 
   it('SERVICE_NOT_FOUND coaches re-identifying the service, not a dead end', async () => {

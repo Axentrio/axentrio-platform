@@ -122,6 +122,8 @@ export const requestTooFar = (startDate: string, endDate: string): string =>
 export const requestServiceDayFull = (startDate: string, endDate: string): string =>
   `This service already has its maximum number of bookings for that date, so it cannot be booked OR requested ` +
   `- the owner has already set that limit, so there is nothing for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ` +
-  `on it. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
+  `on it. SAY THE REASON: tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these ` +
+  `appointments it takes per day. Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date. ` +
+  `Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
   `customer the times it returns, and book one outright: this service books automatically. ` +
   `Offer ONLY times that call gives you. Do not retry the same date.`;

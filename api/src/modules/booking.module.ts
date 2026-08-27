@@ -508,7 +508,7 @@ Then follow these rules IN ORDER:
   }${
     hasCapacity
       ? `
-6. If create_booking returns CAPACITY_REACHED, that time cannot be taken — the day is full, this service has reached its maximum bookings for that date, the business has no working time left that day, or the slot sits too close to another appointment. Read the message, offer a different time or the next available day, and do NOT retry the same one. Never tell the customer the business is closed. For an AUTO-BOOK service this is NOT a request: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off.`
+6. If create_booking returns CAPACITY_REACHED, that time cannot be taken — the day is full, this service has reached its maximum bookings for that date, the business has no working time left that day, or the slot sits too close to another appointment. Read the message and say WHY: when this service has reached its daily maximum, tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these appointments it takes per day, and do not say only the time they asked for is unavailable. Then offer the next available day, and do NOT retry the same date. Never tell the customer the business is closed. For an AUTO-BOOK service this is NOT a request: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off.`
       : ''
   }${
     hasDuration

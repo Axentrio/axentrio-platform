@@ -914,6 +914,23 @@ describe('check_availability — a service at its daily cap is not a request', (
     expect(res.data.guidance).not.toMatch(/location/i);
   });
 
+  /**
+   * The half of the report the first fix missed. Live, the bot answered "14:00 is not
+   * available" and offered the next Wednesday - true, and useless: a customer reads that as
+   * "try 15:00", and the ticket asks for the REASON. The whole date is gone for this service
+   * because the owner capped it, so the sentence has to say so.
+   */
+  it('tells the model to say the whole DATE is full for this service, and why', async () => {
+    const res = await load(dayFull);
+    const g = res.data.guidance as string;
+    expect(g).toMatch(/fully booked for that whole date/i);
+    expect(g).toMatch(/limits how many of these appointments it takes per day/i);
+    // The exact wrong answer that shipped: only the requested hour called unavailable.
+    expect(g).toMatch(/do NOT say only the time they asked for is unavailable/i);
+    expect(g).toMatch(/do NOT offer another time on that same date/i);
+    expect(g).toMatch(/NO time on that date can be booked/i);
+  });
+
   it('sends the model to a LATER range, without naming a time of its own', async () => {
     const res = await load(dayFull);
     expect(res.data.guidance).toContain('startDate 2026-10-22 and endDate 2026-10-28');

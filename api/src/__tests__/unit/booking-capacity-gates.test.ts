@@ -143,6 +143,11 @@ describe('enforceServiceDayCapacity', () => {
     expect(r).toMatch(/do NOT capture it/i);
     expect(r).toMatch(/team will come back on it/i);
     expect(r).toContain('startDate 2026-06-11 and endDate 2026-06-17');
+    // The ticket's second half: the customer has to be told WHY, and must not be left
+    // thinking only the hour they named was taken.
+    expect(r).toMatch(/fully booked for that whole date/i);
+    expect(r).toMatch(/limits how many of these appointments it takes per day/i);
+    expect(r).toMatch(/do NOT say only the time they asked for is unavailable/i);
 
     const under = fakeManager([{ n: 2 }]);
     await expect(enforceServiceDayCapacity(under.manager, svc(), window60.start, TZ)).resolves.toBeUndefined();

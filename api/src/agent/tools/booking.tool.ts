@@ -463,10 +463,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
                 ? 'That range is too soon: this business needs more notice than that.'
                 : outOfWindow.reason === 'too_far'
                   ? 'That range is further ahead than this business takes bookings.'
-                  : 'This service already has its maximum number of bookings for that date.') +
+                  : 'This service already has its maximum number of bookings for that date, so NO time on that date can be booked - not the one they asked for and not any other hour.') +
               ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
               (outOfWindow.reason === 'service_day_full'
-                ? ' Checking the same date again returns the same nothing, so do not repeat it.' +
+                ? ' SAY THE REASON: tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these appointments it takes per day.' +
+                  ' Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date - a second time on that date is refused for the same reason.' +
+                  ' Checking the same date again returns the same nothing, so do not repeat it.' +
                   ' Offer ONLY times that call gives you.' +
                   ' This does NOT mean the business is closed, so do not say that.'
                 : ' Checking the same range again returns the same nothing, so do not repeat it.' +

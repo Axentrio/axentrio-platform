@@ -32,6 +32,9 @@ export { FaqItem } from './FaqItem';
 export { DemandSignal } from './DemandSignal';
 export { Lead, type LeadSource } from './Lead';
 export { LeadConversation, type LeadEnrichState } from './LeadConversation';
+export { CustomerMemory } from './CustomerMemory';
+export { CustomerMemoryFact } from './CustomerMemoryFact';
+export { CustomerMemoryRun, type CustomerMemoryRunState } from './CustomerMemoryRun';
 export { CopilotDoc, type CopilotLocale } from './CopilotDoc';
 export { CopilotConversation } from './CopilotConversation';
 export {

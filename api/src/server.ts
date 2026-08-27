@@ -878,6 +878,24 @@ async function startServer(): Promise<void> {
       logger.info("[lead-enrich] sweep enabled (5m tick)");
     }
 
+    // Customer-memory sweep. DEFAULT ON: only CUSTOMER_MEMORY_ENABLED=false disables it.
+    {
+      const { isCustomerMemoryEnabled } = await import("./memory/memory-config");
+      if (isCustomerMemoryEnabled()) {
+        const { runCustomerMemorySweep } = await import(
+          "./memory/memory-sweep.job"
+        );
+        setInterval(() => {
+          void runCustomerMemorySweep().catch((err) => {
+            logger.error("[customer-memory] sweep failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }, 5 * 60 * 1000);
+        logger.info("[customer-memory] sweep enabled (5m tick)");
+      }
+    }
+
     // Agent-trace retention (30 days). The schedule lives in the service - see
     // startAgentTraceRetentionSweep for why it must also run at boot.
     //
@@ -887,6 +905,12 @@ async function startServer(): Promise<void> {
       "./agent/trace-retention.service"
     );
     startAgentTraceRetentionSweep();
+    const {
+      startCustomerMemoryRetentionSweep,
+      startStuckMemoryRunWatcher,
+    } = await import("./memory/memory-retention.service");
+    startCustomerMemoryRetentionSweep();
+    startStuckMemoryRunWatcher();
 
     // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
     // env flag, because it is a NO-OP for every tenant that has not chosen a period,

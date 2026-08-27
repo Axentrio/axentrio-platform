@@ -43,6 +43,9 @@ import { FaqItem } from './entities/FaqItem';
 import { DemandSignal } from './entities/DemandSignal';
 import { Lead } from './entities/Lead';
 import { LeadConversation } from './entities/LeadConversation';
+import { CustomerMemory } from './entities/CustomerMemory';
+import { CustomerMemoryFact } from './entities/CustomerMemoryFact';
+import { CustomerMemoryRun } from './entities/CustomerMemoryRun';
 import { CopilotDoc } from './entities/CopilotDoc';
 import { CopilotConversation } from './entities/CopilotConversation';
 import { CopilotMessage } from './entities/CopilotMessage';
@@ -129,6 +132,9 @@ export const AppDataSource = new DataSource({
     DemandSignal,
     Lead,
     LeadConversation,
+    CustomerMemory,
+    CustomerMemoryFact,
+    CustomerMemoryRun,
     CopilotDoc,
     CopilotConversation,
     CopilotMessage,

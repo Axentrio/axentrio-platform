@@ -41,6 +41,11 @@ export interface AgentTrace {
    * migration.
    */
   corrections?: string[];
+  /**
+   * Whether returning-customer memory was injected into this turn's system prompt.
+   * Nests in the existing `trace` jsonb — no column, no migration.
+   */
+  customerMemory?: { injected: boolean; chars: number; factCount: number };
 }
 
 /**

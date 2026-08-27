@@ -42,6 +42,7 @@ import type { DataSource } from 'typeorm';
 import { emitLeadDeleted } from './lead-capture.service';
 import { ERASED_PREFIX, isErasedDedupeKey } from './lead-tombstone';
 import { logger } from '../utils/logger';
+import { returningRows } from '../utils/raw-sql';
 
 // Tombstone vocabulary lives in its own module so the capture path can share it
 // without the two services importing each other. Re-exported for convenience.
@@ -56,6 +57,7 @@ export interface ErasureResult {
     webhookLogs: number;
     /** Traces carry `capture_lead`'s arguments — the contact and the request. */
     agentTraces: number;
+    customerMemoryRows: number;
   };
   /** Always true today — see the SCOPE BOUNDARY note above. */
   transcriptRetained: boolean;
@@ -150,6 +152,19 @@ export async function eraseLead(
       );
     }
 
+    const mem = await manager.query(
+      `DELETE FROM chatbot_customer_memory
+        WHERE tenant_id = $1
+          AND (
+            ($2::varchar IS NOT NULL AND person_key = $2)
+            OR ($3::varchar IS NOT NULL AND subject_key = $3)
+          )
+        RETURNING id`,
+      [tenantId, groupRow?.person_key ?? null, priorDedupeKey],
+    );
+    const customerMemoryRows = returningRows<{ id: string }>(mem).length;
+
+
     // 2. Per-conversation rows: every extracted field is personal data (address,
     //    verbatim request, evidence quotes). `enrich_state='erased'` is terminal so
     //    the enrichment sweep can never pick these up and re-derive them.
@@ -220,6 +235,7 @@ export async function eraseLead(
         notifications: rowCount(notif),
         webhookLogs: rowCount(hooks),
         agentTraces: rowCount(traces),
+        customerMemoryRows,
       },
     };
   });

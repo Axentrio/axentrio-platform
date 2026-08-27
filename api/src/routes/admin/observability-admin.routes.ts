@@ -48,6 +48,11 @@ interface TraceShape {
 }
 import { sendSuccess } from '../../utils/response';
 import { logger } from '../../utils/logger';
+import { decrypt } from '../../utils/encryption';
+import { isCustomerMemoryEnabled } from '../../memory/memory-config';
+import { MEMORY_FACT_KEYS, isMemoryFactKey, type MemoryFactKey } from '../../memory/fact-keys';
+import { hashSubjectKey } from '../../memory/subject-key';
+import type { CustomerMemoryRunState } from '../../database/entities/CustomerMemoryRun';
 
 const router = Router();
 
@@ -450,6 +455,249 @@ router.get(
           })),
         })),
       },
+    });
+  }),
+);
+
+const MEMORY_RUN_STATES: CustomerMemoryRunState[] = [
+  'pending',
+  'claimed',
+  'extracted',
+  'abstained',
+  'failed',
+  'skipped_disabled',
+  'skipped_no_subject',
+];
+
+function clampDays(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 7;
+  return Math.min(90, Math.max(1, Math.trunc(n)));
+}
+
+function countN(rows: Array<{ n?: number }> | undefined): number {
+  return Number(rows?.[0]?.n ?? 0);
+}
+
+function tallyRuns(rows: Array<{ state: string; n: number }>): Record<CustomerMemoryRunState, number> {
+  const runsByState = Object.fromEntries(MEMORY_RUN_STATES.map((s) => [s, 0])) as Record<CustomerMemoryRunState, number>;
+  for (const row of rows) {
+    if ((MEMORY_RUN_STATES as string[]).includes(row.state)) {
+      runsByState[row.state as CustomerMemoryRunState] = Number(row.n);
+    }
+  }
+  return runsByState;
+}
+
+function tallyFactKeys(rows: Array<{ fact_key: string; n: number }>): Record<MemoryFactKey, number> {
+  const factsByKey = Object.fromEntries(MEMORY_FACT_KEYS.map((k) => [k, 0])) as Record<MemoryFactKey, number>;
+  for (const row of rows) {
+    if (isMemoryFactKey(row.fact_key)) factsByKey[row.fact_key] = Number(row.n);
+  }
+  return factsByKey;
+}
+
+async function customerMemorySnapshot(days: number) {
+  const window = String(days);
+  const [subjects, withPerson, liveFacts, superseded, runRows, factKeyRows, injections, extractStats, stuck] =
+    await Promise.all([
+      safe('memory.subjects', AppDataSource.query(`SELECT count(*)::int AS n FROM chatbot_customer_memory`), [{ n: 0 }]),
+      safe(
+        'memory.subjectsWithPersonKey',
+        AppDataSource.query(`SELECT count(*)::int AS n FROM chatbot_customer_memory WHERE person_key IS NOT NULL`),
+        [{ n: 0 }],
+      ),
+      safe(
+        'memory.liveFacts',
+        AppDataSource.query(`SELECT count(*)::int AS n FROM chatbot_customer_facts WHERE superseded_at IS NULL`),
+        [{ n: 0 }],
+      ),
+      safe(
+        'memory.supersededFacts',
+        AppDataSource.query(`SELECT count(*)::int AS n FROM chatbot_customer_facts WHERE superseded_at IS NOT NULL`),
+        [{ n: 0 }],
+      ),
+      safe(
+        'memory.runsByState',
+        AppDataSource.query(`SELECT state, count(*)::int AS n FROM chatbot_customer_memory_runs GROUP BY state`),
+        [] as Array<{ state: string; n: number }>,
+      ),
+      safe(
+        'memory.factsByKey',
+        AppDataSource.query(
+          `SELECT fact_key, count(*)::int AS n FROM chatbot_customer_facts WHERE superseded_at IS NULL GROUP BY fact_key`,
+        ),
+        [] as Array<{ fact_key: string; n: number }>,
+      ),
+      safe(
+        'memory.injections',
+        AppDataSource.query(
+          `SELECT count(*)::int AS turns,
+                  count(*) FILTER (WHERE trace->'customerMemory'->>'injected' = 'true')::int AS with_memory
+             FROM agent_traces
+            WHERE "createdAt" >= now() - ($1 || ' days')::interval`,
+          [window],
+        ),
+        [{ turns: 0, with_memory: 0 }],
+      ),
+      safe(
+        'memory.extractStats',
+        AppDataSource.query(
+          `SELECT count(*) FILTER (WHERE state = 'extracted')::int AS extracted,
+                  count(*) FILTER (WHERE state = 'abstained')::int AS abstained,
+                  coalesce(avg(facts_written) FILTER (WHERE state = 'extracted'), 0)::float AS avg_facts
+             FROM chatbot_customer_memory_runs
+            WHERE updated_at >= now() - ($1 || ' days')::interval`,
+          [window],
+        ),
+        [{ extracted: 0, abstained: 0, avg_facts: 0 }],
+      ),
+      safe(
+        'memory.stuck',
+        AppDataSource.query(
+          `SELECT
+             (SELECT count(*)::int FROM chatbot_customer_memory_runs
+               WHERE state = 'claimed' AND claimed_until IS NOT NULL
+                 AND claimed_until < now() - interval '10 minutes') AS expired_leases,
+             (SELECT count(*)::int FROM chatbot_customer_memory_runs
+               WHERE state = 'failed' AND attempts >= 3) AS exhausted_attempts`,
+        ),
+        [{ expired_leases: 0, exhausted_attempts: 0 }],
+      ),
+    ]);
+
+  const extracted = Number(extractStats[0].extracted);
+  const abstained = Number(extractStats[0].abstained);
+  return {
+    enabled: isCustomerMemoryEnabled(),
+    subjects: countN(subjects),
+    subjectsWithPersonKey: countN(withPerson),
+    liveFacts: countN(liveFacts),
+    supersededFacts: countN(superseded),
+    runsByState: tallyRuns(runRows),
+    factsByKey: tallyFactKeys(factKeyRows),
+    injections: {
+      turns: Number(injections[0].turns),
+      withMemory: Number(injections[0].with_memory),
+    },
+    abstainRate: extracted + abstained === 0 ? 0 : abstained / (extracted + abstained),
+    avgFactsPerExtractedRun: Number(extractStats[0].avg_facts),
+    stuck: {
+      expiredLeases: Number(stuck[0].expired_leases),
+      exhaustedAttempts: Number(stuck[0].exhausted_attempts),
+    },
+  };
+}
+
+router.get(
+  '/observability/customer-memory',
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await customerMemorySnapshot(clampDays(req.query.days)));
+  }),
+);
+
+router.get(
+  '/observability/customer-memory/subjects',
+  asyncHandler(async (req: Request, res: Response) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.min(20, Math.max(1, Math.trunc(limitRaw))) : 20;
+    if (!q) {
+      sendSuccess(res, { subjects: [] });
+      return;
+    }
+    const rows: Array<{
+      id: string;
+      tenant_id: string;
+      channel: string | null;
+      first_seen_at: Date;
+      last_seen_at: Date;
+      session_count: number;
+      live_fact_count: number;
+      person_key: string | null;
+    }> = await AppDataSource.query(
+      `SELECT id, tenant_id, channel, first_seen_at, last_seen_at, session_count, live_fact_count, person_key
+         FROM chatbot_customer_memory
+        WHERE subject_key = $1 OR person_key = $1
+        LIMIT $2`,
+      [q, limit],
+    );
+    sendSuccess(res, {
+      key: q,
+      subjects: rows.map((row) => ({
+        id: row.id,
+        tenantId: row.tenant_id,
+        channel: row.channel,
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+        sessionCount: Number(row.session_count),
+        liveFactCount: Number(row.live_fact_count),
+        hasPersonKey: row.person_key != null,
+      })),
+    });
+  }),
+);
+
+router.get(
+  '/observability/customer-memory/subjects/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const [subject] = await AppDataSource.query(
+      `SELECT id, tenant_id, channel, subject_key, first_seen_at, last_seen_at,
+              session_count, live_fact_count, person_key
+         FROM chatbot_customer_memory WHERE id = $1`,
+      [req.params.id],
+    );
+    if (!subject) throw new NotFoundError('Customer memory subject not found');
+    logger.info('[customer-memory] admin read', {
+      memoryId: subject.id,
+      actorId: req.userId ?? (req as { user?: { id?: string } }).user?.id,
+    });
+    const facts: Array<{
+      fact_key: string;
+      value_enc: string;
+      value_encrypted: boolean;
+      confidence: number;
+      evidence_span: string | null;
+      source_session_id: string | null;
+      first_seen_at: Date;
+      last_confirmed_at: Date;
+      superseded_at: Date | null;
+    }> = await AppDataSource.query(
+      `SELECT fact_key, value_enc, value_encrypted, confidence, evidence_span, source_session_id,
+              first_seen_at, last_confirmed_at, superseded_at
+         FROM chatbot_customer_facts
+        WHERE memory_id = $1
+        ORDER BY last_confirmed_at DESC, created_at DESC`,
+      [subject.id],
+    );
+    sendSuccess(res, {
+      id: subject.id,
+      tenantId: subject.tenant_id,
+      channel: subject.channel,
+      subjectKeyHash: hashSubjectKey(subject.subject_key),
+      firstSeenAt: subject.first_seen_at,
+      lastSeenAt: subject.last_seen_at,
+      sessionCount: Number(subject.session_count),
+      liveFactCount: Number(subject.live_fact_count),
+      hasPersonKey: subject.person_key != null,
+      facts: facts.map((f) => {
+        let value = '';
+        try {
+          value = f.value_encrypted ? decrypt(f.value_enc) : f.value_enc;
+        } catch {
+          value = '';
+        }
+        return {
+          factKey: f.fact_key,
+          value,
+          confidence: Number(f.confidence),
+          evidenceSpan: f.evidence_span,
+          sourceSessionId: f.source_session_id,
+          firstSeenAt: f.first_seen_at,
+          lastConfirmedAt: f.last_confirmed_at,
+          supersededAt: f.superseded_at,
+        };
+      }),
     });
   }),
 );

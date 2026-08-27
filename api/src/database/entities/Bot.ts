@@ -48,6 +48,8 @@ export interface BotSettings {
   features?: {
     fileUploadEnabled: boolean;
     handoffEnabled: boolean;
+    /** Long-term customer memory. Absent ⇒ ON. */
+    customerMemoryEnabled?: boolean;
   };
   /**
    * #153 — optional address the Agent quotes. Default on; a blank address

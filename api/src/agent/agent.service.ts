@@ -50,6 +50,7 @@ import {
   containsCurrencyAmount,
   type OutputValidationContext,
 } from '../guardrails/output-validation';
+import { renderMemoryForPrompt } from '../memory/memory-store';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -1063,8 +1064,10 @@ export class AgentService {
     // the bot keeps helping and never announces "closed" as a reason to disengage.
     const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
     const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, booking.bookingTimezone, booking.bookingConfigured, session.channel, specialties, skillProse, { services: booking.bookingServices, openingHours: booking.openingHours, bookingHours: booking.bookingHours, serviceArea, venueLine, hasTravelServices: booking.hasTravelServices }, { proactiveAsk, outsideBusinessHours });
+    const memoryBlock = await renderMemoryForPrompt(session);
+    const systemPromptWithMemory = memoryBlock ? `${systemPrompt}\n\n${memoryBlock}` : systemPrompt;
     const priceContextLoaded = containsCurrencyAmount(
-      [systemPrompt, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
+      [systemPromptWithMemory, ...conversationHistory.map((m) => contentToText(m.content))].join('\n'),
     );
     // Merge the composer's block ledger with agent.service's module knowledge
     // (the composer can't name modules) onto the trace — nests in trace.jsonb,
@@ -1076,8 +1079,13 @@ export class AgentService {
       resolvedTemplateId: resolvedTemplates[0]?.templateId,
       resolvedTemplateVersion: resolvedTemplates[0]?.resolvedVersion,
     });
+    trace.customerMemory = {
+      injected: memoryBlock.length > 0,
+      chars: memoryBlock.length,
+      factCount: memoryBlock.split('\n').filter((line) => /^[a-z_]+: /.test(line)).length,
+    };
     const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: systemPromptWithMemory },
       ...conversationHistory,
       { role: 'user', content: buildUserContent(message, images) },
     ];

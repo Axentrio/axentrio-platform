@@ -26,11 +26,10 @@
  */
 import { AppDataSource } from '../../database/data-source';
 import { returningRows } from '../../utils/raw-sql';
-import { decrypt } from '../../utils/encryption';
 import { getEntitlements } from '../../billing/entitlements';
 import { logger } from '../../utils/logger';
 import { extractLead, ENRICHMENT_VERSION } from './extractor.service';
-import type { TranscriptMessage } from './validate';
+import { loadSessionTranscript } from '../../memory/transcript';
 
 /** A conversation must be quiet this long before we read it as finished. */
 const QUIET_MINUTES = 20;
@@ -51,34 +50,6 @@ interface ClaimedRow {
   enrich_attempts: number;
 }
 
-/**
- * Load a session transcript as plaintext.
- *
- * The decrypt branch is NOT optional and is copied deliberately from
- * `insights/refresh-insights.job.ts`: the first prod run of the insights judge read
- * ciphertext and confidently reported "no questions" for every session. Skipping it
- * here would ship plausible-looking extractions computed over encrypted bytes.
- */
-async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
-  const rows: Array<{ id: string; content: string; contentEncrypted: boolean; sender: string; createdAt: Date }> =
-    await AppDataSource.query(
-      `SELECT m.id, m.content, m.content_encrypted AS "contentEncrypted",
-              p.type AS sender, m.created_at AS "createdAt"
-         FROM messages m
-         JOIN participants p ON p.id = m.participant_id
-        WHERE m.session_id = $1 AND m.type = 'text'
-        ORDER BY m.created_at DESC
-        LIMIT 80`,
-      [sessionId],
-    );
-  rows.reverse();
-  return rows.map((r) => ({
-    id: r.id,
-    content: r.contentEncrypted ? decrypt(r.content) : r.content,
-    sender: (['user', 'agent', 'bot', 'system'].includes(r.sender) ? r.sender : 'system') as TranscriptMessage['sender'],
-    createdAt: r.createdAt,
-  })) as TranscriptMessage[];
-}
 
 /** Claim due, quiet, unclaimed conversations. Lease + SKIP LOCKED = replica-safe. */
 async function claimBatch(): Promise<ClaimedRow[]> {
@@ -180,7 +151,7 @@ export async function enrichOne(row: ClaimedRow): Promise<{ calledModel: boolean
     return { calledModel: false };
   }
 
-  const messages = await loadTranscript(row.session_id);
+  const messages = await loadSessionTranscript(row.session_id);
   if (messages.length === 0) {
     await AppDataSource.query(
       `UPDATE chatbot_lead_conversations SET enrich_state = 'abstained', enrich_claimed_until = NULL, updated_at = now() WHERE id = $1`,

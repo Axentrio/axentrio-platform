@@ -93,10 +93,6 @@ async function downloadFile(fileSessionId: string): Promise<void> {
   }
 }
 
-function isImageFile(file: { fileName: string; mimeType?: string }): boolean {
-  if (file.mimeType && file.mimeType.startsWith('image/')) return true;
-  return /\.(jpe?g|png|gif|webp)$/i.test(file.fileName);
-}
 
 function BookingAttachedFile({
   file,
@@ -105,7 +101,8 @@ function BookingAttachedFile({
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const image = isImageFile(file);
+  const image = !!file.mimeType && file.mimeType.startsWith('image/');
+
 
   useEffect(() => {
     if (!image) return;

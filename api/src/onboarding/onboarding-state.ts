@@ -166,6 +166,27 @@ export function requiresOnboarding(state: OnboardingState | null | undefined): b
   return !isComplete(state);
 }
 
+/**
+ * Re-open setup from the first step so a finished workspace can change answers.
+ *
+ * Keeps language and company so the wizard can prefill. Clears step outcomes and
+ * completedAt so the gate shows the wizard again. Does not touch documents,
+ * billing, or feature toggles — those change only when a step is answered.
+ *
+ * Drops `grandfathered`: that stamp exists to skip the wizard, and a customer
+ * who asked to walk it again is no longer that case.
+ */
+export function restartOnboarding(state: OnboardingState): OnboardingState {
+  return {
+    version: ONBOARDING_VERSION,
+    startedAt: state.startedAt || new Date().toISOString(),
+    completedAt: null,
+    language: state.language ?? null,
+    company: state.company ?? null,
+    steps: {},
+  };
+}
+
 export type StepRejection = { ok: false; reason: string };
 export type StepAcceptance = { ok: true };
 

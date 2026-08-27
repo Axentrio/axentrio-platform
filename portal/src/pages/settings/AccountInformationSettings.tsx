@@ -7,13 +7,25 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Building2, Save, Check, Loader2 } from 'lucide-react';
+import { Building2, Save, Check, Loader2, RotateCcw } from 'lucide-react';
 import { api, extractApiErrorMessage } from '@services/apiClient';
 import { toast } from 'sonner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useAppAuth } from '@auth/useAppAuth';
+import { useRestartSetup } from '@/queries/useOnboardingQueries';
 
 export interface InvoiceAddress {
   street: string;
@@ -262,6 +274,8 @@ const AccountInformationSettings: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      <RestartSetupCard />
     </div>
   );
 };
@@ -298,4 +312,66 @@ const Field: React.FC<{
   </div>
 );
 
+
+function RestartSetupCard() {
+  const { t } = useTranslation();
+  const { isRole } = useAppAuth();
+  const isAdmin = isRole(['admin', 'super_admin']);
+  const restart = useRestartSetup();
+  const [open, setOpen] = useState(false);
+
+  if (!isAdmin) return null;
+
+  const handleRestart = async () => {
+    try {
+      await restart.mutateAsync();
+      setOpen(false);
+    } catch (err) {
+      toast.error(extractApiErrorMessage(err) ?? t('settings.account.restartSetup.failed'));
+    }
+  };
+
+  return (
+    <>
+      <Card variant="glass">
+        <CardHeader>
+          <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+            <RotateCcw className="w-5 h-5" />
+            {t('settings.account.restartSetup.title')}
+          </h2>
+          <p className="text-sm text-text-muted mt-1">{t('settings.account.restartSetup.helper')}</p>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => setOpen(true)} disabled={restart.isPending}>
+            {restart.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+            {t('settings.account.restartSetup.button')}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={open} onOpenChange={(next) => !restart.isPending && setOpen(next)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.account.restartSetup.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('settings.account.restartSetup.confirmBody')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restart.isPending}>
+              {t('settings.account.restartSetup.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void handleRestart();
+              }}
+              disabled={restart.isPending}
+            >
+              {t('settings.account.restartSetup.confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
 export default AccountInformationSettings;

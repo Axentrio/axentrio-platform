@@ -12,6 +12,7 @@ import {
   isComplete,
   nextStep,
   requiresOnboarding,
+  restartOnboarding,
   validateStepSubmission,
   ONBOARDING_STEPS,
   REQUIRED_STEPS,
@@ -183,5 +184,45 @@ describe('nextStep and isComplete cannot disagree', () => {
     for (const state of [emptyState(), partial, finished]) {
       expect(isComplete(state)).toBe(nextStep(state) === null);
     }
+  });
+});
+
+describe('restartOnboarding — re-open the wizard without wiping the workspace', () => {
+  it('sends a finished workspace back to the first step and keeps language and company', () => {
+    const s = finished();
+    s.completedAt = '2026-01-01T00:00:00.000Z';
+    const restarted = restartOnboarding(s);
+
+    expect(restarted.completedAt).toBeNull();
+    expect(restarted.steps).toEqual({});
+    expect(restarted.language).toBe('nl');
+    expect(restarted.company).toEqual(company);
+    expect(nextStep(restarted)).toBe('language');
+    expect(requiresOnboarding(restarted)).toBe(true);
+    expect(isComplete(restarted)).toBe(false);
+  });
+
+  it('drops the grandfathered stamp so the customer actually walks the wizard', () => {
+    const s = emptyState();
+    s.completedAt = '2026-01-01T00:00:00.000Z';
+    s.grandfathered = true;
+    const restarted = restartOnboarding(s);
+
+    expect(restarted.grandfathered).toBeUndefined();
+    expect(restarted.completedAt).toBeNull();
+    expect(nextStep(restarted)).toBe('language');
+    expect(requiresOnboarding(restarted)).toBe(true);
+  });
+
+  it('clears in-progress step outcomes so start-over begins at language', () => {
+    const s = emptyState();
+    s.language = 'fr';
+    s.steps.language = 'done';
+    s.steps.logo = 'skipped';
+    const restarted = restartOnboarding(s);
+
+    expect(restarted.steps).toEqual({});
+    expect(restarted.language).toBe('fr');
+    expect(nextStep(restarted)).toBe('language');
   });
 });

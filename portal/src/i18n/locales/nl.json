@@ -348,6 +348,16 @@
       "city": "Gemeente",
       "country": "Landcode",
       "saveFailed": "Accountgegevens konden niet worden opgeslagen. Probeer opnieuw.",
+      "restartSetup": {
+        "title": "Setup opnieuw doen",
+        "helper": "Wijzig antwoorden van de eerste setup, of doe de stappen opnieuw.",
+        "button": "Setup opnieuw doen",
+        "confirmTitle": "Setup opnieuw doen?",
+        "confirmBody": "Je doorloopt elke setupstap vanaf het begin. Je documenten, chats en facturatie blijven zoals ze zijn. Als je een functie overslaat in de setup, zet het platform die functie uit. Je team kan de portal niet gebruiken tot een beheerder de stappen afrondt.",
+        "confirm": "Start setup opnieuw",
+        "cancel": "Huidige setup behouden",
+        "failed": "Setup opnieuw starten is niet gelukt."
+      },
       "validation": {
         "required": "Dit veld is verplicht",
         "email": "Voer een geldig e-mailadres in",

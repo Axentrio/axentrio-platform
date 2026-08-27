@@ -139,6 +139,14 @@ export function useCompleteSetup() {
   });
 }
 
+export function useRestartSetup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<SetupStatus>('/onboarding/restart'),
+    onSuccess: (status) => qc.setQueryData(queryKeys.onboarding.setup(), status),
+  });
+}
+
 export type CompanyLookupStatus =
   | 'found'
   | 'not_found'

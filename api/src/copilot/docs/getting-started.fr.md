@@ -18,3 +18,5 @@ Les trois premières choses à faire après votre inscription :
 3. **Recueillez votre premier lead.** Dès qu'un visiteur donne son e-mail ou son téléphone, il apparaît dans *Leads*.
 
 Tout le reste — réservations via agenda, réseaux sociaux, apparence personnalisée — se trouve dans le menu latéral une fois ces trois étapes faites.
+
+Pour parcourir la configuration à nouveau, ouvrez *Paramètres → Informations du compte* et choisissez **Recommencer la configuration**. Les documents, les conversations et la facturation restent. Ignorer une fonction dans la configuration désactive cette fonction.

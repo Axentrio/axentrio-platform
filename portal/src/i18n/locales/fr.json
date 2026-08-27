@@ -348,6 +348,16 @@
       "city": "Ville",
       "country": "Code pays",
       "saveFailed": "Impossible d'enregistrer les informations du compte. Réessayez.",
+      "restartSetup": {
+        "title": "Recommencer la configuration",
+        "helper": "Modifiez les réponses de la première configuration, ou recommencez les étapes.",
+        "button": "Recommencer la configuration",
+        "confirmTitle": "Recommencer la configuration ?",
+        "confirmBody": "Vous allez parcourir chaque étape de configuration depuis le début. Vos documents, conversations et facturation restent inchangés. Si vous ignorez une fonction dans la configuration, la plateforme désactive cette fonction. Votre équipe ne peut pas utiliser le portail tant qu'un administrateur n'a pas terminé les étapes.",
+        "confirm": "Démarrer la configuration",
+        "cancel": "Garder la configuration actuelle",
+        "failed": "Impossible de recommencer la configuration."
+      },
       "validation": {
         "required": "Ce champ est obligatoire",
         "email": "Saisissez une adresse e-mail valide",

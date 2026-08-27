@@ -6,6 +6,8 @@
  *   GET  /status          what the wizard renders and what the routing guard reads.
  *   PUT  /step            record one answer and advance.
  *   POST /complete        finish, refused while anything required is outstanding.
+ *   POST /restart         re-open the wizard from the first step, without wiping
+ *                         documents, chats, or billing.
  *
  * The state itself is data on the tenant, not a table: it is written once during setup,
  * read on every page load, and never queried across tenants. The RULES live in
@@ -33,6 +35,7 @@ import {
   emptyState,
   isComplete,
   nextStep,
+  restartOnboarding,
   validateStepSubmission,
   SKIP_DISABLES,
   type OnboardingState,
@@ -325,6 +328,31 @@ router.post(
     });
 
     sendSuccess(res, { state, nextStep: null, complete: true });
+  }),
+);
+
+/**
+ * POST /onboarding/restart
+ * Re-open the wizard from the first step. Admin-only, same as the writes
+ * above: this is what the routing guard reads, so a non-admin posting it
+ * would lock their own team out of a product they cannot finish.
+ *
+ * Does not delete documents, chats, or billing. Feature toggles stay as they
+ * are until the customer answers a skip or done step again.
+ */
+router.post(
+  '/restart',
+  requireRole('admin'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    const previous = await loadState(tenantId);
+    const state = restartOnboarding(previous);
+    await saveState(tenantId, state);
+    await logAudit(req.userId!, 'tenant.onboarding_restarted', 'tenant', tenantId, tenantId, {
+      wasComplete: isComplete(previous),
+      wasGrandfathered: previous.grandfathered === true,
+    });
+    sendSuccess(res, { state, nextStep: nextStep(state), complete: isComplete(state) });
   }),
 );
 

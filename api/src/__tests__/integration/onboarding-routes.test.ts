@@ -515,6 +515,70 @@ describe('POST /onboarding/complete', () => {
   });
 });
 
+describe('POST /onboarding/restart', () => {
+  it('re-opens a finished workspace at language and keeps company facts', async () => {
+    const tenant = await signedInTenant();
+    await answerAllSteps(tenant.id);
+    await request(app).post('/api/v1/onboarding/complete');
+    const docsBefore = await AppDataSource.getRepository(KnowledgeDocument).count({
+      where: { tenantId: tenant.id },
+    });
+
+    const res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      complete: false,
+      nextStep: 'language',
+      state: { language: 'nl', completedAt: null, steps: {} },
+    });
+    expect(res.body.data.state.company).toMatchObject({
+      vatNumber: 'BE0400378485',
+      name: 'Colruyt Group',
+    });
+    expect((await storedState(tenant.id)).completedAt).toBeNull();
+    expect(await AppDataSource.getRepository(KnowledgeDocument).count({
+      where: { tenantId: tenant.id },
+    })).toBe(docsBefore);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      'tenant.onboarding_restarted',
+      'tenant',
+      tenant.id,
+      tenant.id,
+      expect.objectContaining({ wasComplete: true }),
+    );
+  });
+
+  it('lets a grandfathered tenant walk the wizard without deleting feature toggles', async () => {
+    const tenant = await signedInTenant({
+      featureToggles: { bookings: true } as never,
+      settings: {
+        onboarding: {
+          version: 1,
+          grandfathered: true,
+          completedAt: '2026-01-01T00:00:00.000Z',
+          steps: {},
+        },
+      } as never,
+    });
+
+    const res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ complete: false, nextStep: 'language' });
+    expect((await storedState(tenant.id)).grandfathered).toBeUndefined();
+    expect((await reload(tenant.id)).featureToggles).toMatchObject({ bookings: true });
+  });
+
+  it('is admin-only', async () => {
+    const tenant = await signedInTenant();
+    const agent = await createTestUser(tenant.id, { role: 'agent' });
+    auth.userId = agent.id;
+    auth.role = 'agent';
+
+    expect((await request(app).post('/api/v1/onboarding/restart')).status).toBe(403);
+  });
+});
+
 describe('PUT /onboarding/step — a required step needs the real thing, not a claim', () => {
   it('refuses `documents: done` from a workspace with no documents', async () => {
     // Otherwise the requirement is decorative: the wizard would simply post it and

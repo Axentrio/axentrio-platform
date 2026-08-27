@@ -18,3 +18,5 @@ De eerste drie dingen die je doet na je registratie:
 3. **Leg je eerste lead vast.** Zodra een bezoeker zijn e-mailadres of telefoonnummer geeft, verschijnt die bij *Leads*.
 
 Al de rest — agendaboekingen, social media, een eigen uitzicht — staat in de zijbalk zodra die drie klaar zijn.
+
+Om de setup opnieuw te doorlopen, open *Instellingen → Accountgegevens* en kies **Setup opnieuw doen**. Documenten, chats en facturatie blijven. Een functie overslaan in de setup zet die functie uit.

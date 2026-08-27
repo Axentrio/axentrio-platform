@@ -498,6 +498,30 @@ describe("the plan step", () => {
     );
     expect(apiPost).not.toHaveBeenCalled();
   });
+
+  it("continues an existing Essential plan without starting checkout", async () => {
+    apiGet.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/billing/state"
+          ? { tier: "essential", status: "active" }
+          : statusAt("plan"),
+      ),
+    );
+    renderWizard();
+
+    expect(
+      await screen.findByText(/your current plan is already active/i),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+        step: "plan",
+        outcome: "done",
+      }),
+    );
+    expect(apiPost).not.toHaveBeenCalled();
+  });
 });
 
 describe("the bookings step", () => {

@@ -350,6 +350,16 @@
       "city": "City",
       "country": "Country code",
       "saveFailed": "Could not save account information. Please try again.",
+      "restartSetup": {
+        "title": "Do setup again",
+        "helper": "Change answers from first-run setup, or start the steps again.",
+        "button": "Do setup again",
+        "confirmTitle": "Do setup again?",
+        "confirmBody": "You will walk through every setup step from the start. Your documents, chats, and billing stay as they are. If you skip a feature in setup, the platform turns that feature off. Your team cannot use the portal until an admin finishes the steps.",
+        "confirm": "Start setup again",
+        "cancel": "Keep current setup",
+        "failed": "Could not start setup again."
+      },
       "validation": {
         "required": "This field is required",
         "email": "Enter a valid email address",

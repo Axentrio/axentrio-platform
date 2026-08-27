@@ -45,8 +45,8 @@ export function PlanStep({ submit }: StepProps) {
   const [selected, setSelected] = React.useState<CheckoutablePlan | null>(null);
   const alreadyCovered =
     billing?.status === 'trialing' ||
-    ((billing?.tier === 'pro' || billing?.tier === 'enterprise') &&
-      billing.status === 'active');
+    billing?.status === 'active' ||
+    billing?.status === 'past_due';
 
   const buy = (planId: CheckoutablePlan) => {
     setSelected(planId);
@@ -76,7 +76,7 @@ export function PlanStep({ submit }: StepProps) {
           <p className="text-sm text-text-secondary">
             {onTrial
               ? 'You’re on a 14-day Pro trial. Bookings and the assistant are on. Add a card later in Billing.'
-              : `Your ${billing?.tier === 'enterprise' ? 'Enterprise' : 'Pro'} plan is already active. Bookings and the assistant are on.`}
+              : 'Your current plan is already active. You can change it later in Billing.'}
           </p>
         </div>
         <div className="flex justify-end">

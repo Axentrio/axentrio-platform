@@ -18,3 +18,5 @@ The first three things to do after signing up:
 3. **Capture your first lead.** When a visitor gives the bot their email or phone, it's saved to *Lead Capture → Leads*.
 
 Everything else — calendar bookings, social channels, custom appearance — is in the sidebar once those three are set.
+
+To walk through setup again, open *Settings → Account Information* and choose **Do setup again**. Documents, chats, and billing stay. Skipping a feature in setup turns that feature off.

@@ -312,6 +312,47 @@ describe('admin observability — agent traces', () => {
     expect(res.status).toBe(404);
   });
 
+  /**
+   * WHICH GUARDS HAD TO STEP IN.
+   *
+   * Three in-loop guards rewrite or re-run a turn, and each recorded that with nothing but a
+   * `logger.warn`. So "is that guard firing in production, and how often" meant grepping a log
+   * nobody greps. It matters most for the newest one - a dated closure the model never checked -
+   * whose trigger is a model misbehaviour that cannot be reproduced on demand, so the only
+   * honest evidence it works in the wild is a counter that goes up.
+   */
+  const withCorrections = (corrections: string[]) =>
+    seedTrace({ trace: { corrections, iterations: [] } as never });
+
+  it('reports which guards corrected the turn, on the LIST', async () => {
+    await withCorrections(['availability_unchecked_claim']);
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
+    expect(res.body.data.traces[0].corrections).toEqual(['availability_unchecked_claim']);
+  });
+
+  it('reports an empty list for a clean turn, never undefined', async () => {
+    // A caller counting firings must be able to read the field on every row.
+    await seedTrace();
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
+    expect(res.body.data.traces[0].corrections).toEqual([]);
+  });
+
+  it('filters by guard, so "is it firing at all" is one request', async () => {
+    await seedTrace();
+    await withCorrections(['unrecorded_booking_claim']);
+    await withCorrections(['availability_unchecked_claim']);
+
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}&correction=availability_unchecked_claim`);
+    expect(res.body.data.traces).toHaveLength(1);
+    expect(res.body.data.traces[0].corrections).toEqual(['availability_unchecked_claim']);
+  });
+
+  it('keeps repeats, so two firings of one guard are two', async () => {
+    await withCorrections(['availability_unchecked_claim', 'unrecorded_booking_claim']);
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}&correction=unrecorded_booking_claim`);
+    expect(res.body.data.traces[0].corrections).toHaveLength(2);
+  });
+
   it('is super-admin only', async () => {
     await seedTrace();
     configureMockAuth(auth, { userId: crypto.randomUUID(), tenantId, role: 'admin' });

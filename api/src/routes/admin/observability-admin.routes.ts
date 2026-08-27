@@ -39,6 +39,8 @@ import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
 interface TraceShape {
   prompt?: Record<string, unknown>;
   terminal?: { result?: string; error?: { kind?: string; message?: string } };
+  /** Guards that made the model try again. Names only — see `AgentTrace.corrections`. */
+  corrections?: string[];
   iterations?: Array<{
     llmCall?: { model?: string; latencyMs?: number; promptTokens?: number; completionTokens?: number };
     toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean } }>;
@@ -339,7 +341,7 @@ router.get(
 router.get(
   '/observability/traces',
   asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId, sessionId, finishReason } = req.query as Record<string, string | undefined>;
+    const { tenantId, sessionId, finishReason, correction } = req.query as Record<string, string | undefined>;
     const limit = Math.min(Number(req.query.limit) || 50, 200);
 
     const qb = AppDataSource.getRepository(AgentTrace)
@@ -351,6 +353,13 @@ router.get(
     // The reason to open this page is usually "something went wrong", so make the
     // failures filterable rather than something to scroll for.
     if (finishReason) qb.andWhere('t."finishReason" = :finishReason', { finishReason });
+    // "Is that guard firing, and for whom" in one request. Containment on the jsonb array, so
+    // the name is a bound parameter and never concatenated into the SQL.
+    if (correction) {
+      qb.andWhere(`t.trace -> 'corrections' @> :correction::jsonb`, {
+        correction: JSON.stringify([correction]),
+      });
+    }
 
     const rows = await qb.getMany();
     const traces = rows.map((r) => {
@@ -369,6 +378,10 @@ router.get(
         // asked of this page, and opening fifty rows to answer it is not an answer.
         terminalErrorKind: t.terminal?.error?.kind ?? null,
         iterationCount: iterations.length,
+        // WHICH GUARDS HAD TO STEP IN. On the list, not just the detail, because the question
+        // this answers is "is that guard firing at all" - and opening rows one at a time to
+        // find out is how a guard nobody can observe stays unobserved.
+        corrections: t.corrections ?? [],
         // The single most diagnostic number on the list: a turn that answered a
         // factual question with zero tool calls never consulted the knowledge base.
         toolCallCount: iterations.reduce((n, it) => n + (it.toolCalls?.length ?? 0), 0),
@@ -397,6 +410,8 @@ router.get(
         finishReason: row.finishReason ?? null,
         totalTokens: row.totalTokens ?? null,
         totalLatencyMs: row.totalLatencyMs ?? null,
+        // Which guards had to step in, in the order they fired.
+        corrections: t.corrections ?? [],
         // The prompt ledger is the payload here: block keys and the REASON each
         // was excluded. No prompt text, so nothing tenant-authored leaks.
         prompt: t.prompt ?? null,

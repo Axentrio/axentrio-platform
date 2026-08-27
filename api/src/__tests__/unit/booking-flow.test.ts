@@ -505,6 +505,27 @@ describe('Booking Flow — Full Agent Loop', () => {
     expect(mockChat).toHaveBeenCalledOnce();
   });
 
+  it('records the correction on the trace, so the guard is observable in production', async () => {
+    // The trigger is a model misbehaviour nobody can summon on demand, so a live reproduction
+    // is not available to prove this guard works in the wild. A counter that goes up is.
+    const { AppDataSource } = await import('../../database/data-source');
+    const mockRepo = (AppDataSource as any).getRepository();
+
+    mockChat
+      .mockResolvedValueOnce(llmTextResponse('Op 16 september zijn we gesloten.'))
+      .mockResolvedValueOnce(llmTextResponse('Even kijken wanneer het wel kan.'));
+
+    await agent.run(
+      'Kan ik op 16 september 2026 terecht?',
+      session as ChatSession,
+      tenant as Tenant,
+      [],
+    );
+
+    const savedTrace = mockRepo.create.mock.calls[0][0];
+    expect(savedTrace.trace.corrections).toEqual(['availability_unchecked_claim']);
+  });
+
   it('handles Cal.com API failure gracefully', async () => {
     // check_availability fails (Cal.com is down)
     mockCheckAvailability.mockRejectedValueOnce(new Error('Cal.com is currently unavailable'));

@@ -452,6 +452,16 @@ const PROMISED_CHECK_FALLBACK =
 const CHECK_FAILED_FALLBACK =
   'I cannot see the diary at the moment. Which day and time would suit you? I will pass your preference to the business.';
 
+/**
+ * Safe reply when the diary WAS read, had nothing confirmable, and the model promised to look.
+ *
+ * Says only what is true: nothing can be confirmed for that period. It must never say "closed" or
+ * "fully booked" - `check_availability`'s own guidance forbids that reading of an empty result -
+ * and it must ask, because the request path needs the customer's preference to capture.
+ */
+const NO_CONFIRMABLE_TIMES_FALLBACK =
+  'I have no times I can confirm for that period. Which day and time would suit you? I will pass your preference to the business.';
+
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */
 const BOOKING_SAFE_FALLBACK =
@@ -1094,19 +1104,33 @@ export class AgentService {
                 ...(escalationRequested ? { handoffRequested: true } : {}),
               };
             }
-            // The call ran. With slots in hand the chips are already attached, so a clumsy "let me
-            // check" beside them is not a dead end and ships as written. With nothing in hand it
-            // is, and no retry can help.
-            if (!pendingAvailability) {
+            // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the
+            // tool sets `availability` for every success, `slots: []` included - so object
+            // truthiness says nothing about whether the customer can see a time. What decides that
+            // is the CONFIRMABLE array, because `buildSlotQuickReplies` reads exactly that: with
+            // one slot the chips are on screen and a clumsy "let me check" beside them is not a
+            // dead end. With none - an empty diary, or a travel result where every time needs the
+            // owner's say-so - there is nothing on screen and the promise is the dead end again.
+            if (!pendingAvailability || pendingAvailability.slots.length === 0) {
               trace.finishReason = 'completed';
               trace.terminal = { result: 'completed' };
               void this.traceLogger.save(trace);
-              logger.warn('[agent] reply promised a check after the check had already failed', {
+              // TWO DIFFERENT FACTS, so two sentences. A call that THREW means the diary could not
+              // be read; a call that succeeded with nothing confirmable means it was read and had
+              // nothing to offer. Saying "I cannot see the diary" about a diary we just read would
+              // be a fresh lie, and neither sentence may say "closed" or "fully booked" - the
+              // tool's own guidance forbids exactly that.
+              const promiseReplacement = pendingAvailability
+                ? NO_CONFIRMABLE_TIMES_FALLBACK
+                : CHECK_FAILED_FALLBACK;
+              logger.warn('[agent] reply promised a check with nothing to offer; replacing it', {
                 sessionId: session.id,
+                checked: true,
+                succeeded: !!pendingAvailability,
               });
               return {
                 type: 'response',
-                content: await inCustomerLanguage(CHECK_FAILED_FALLBACK, message, session),
+                content: await inCustomerLanguage(promiseReplacement, message, session),
                 ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
                 ...(escalationRequested ? { handoffRequested: true } : {}),
               };

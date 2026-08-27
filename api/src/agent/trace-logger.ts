@@ -24,6 +24,19 @@ export interface AgentTrace {
   prompt?: PromptTrace;
   /** WHY the run ended, not just the shape of the ending. See `TerminalOutcome`. */
   terminal?: TerminalOutcome;
+  /**
+   * IN-LOOP CORRECTIONS: guards that caught a reply and made the model try again.
+   *
+   * These three (unrecorded booking claim, mismatched booking address, dated closure nobody
+   * checked) each rewrote or re-ran a turn, and each recorded that fact with nothing but a
+   * `logger.warn`. So the only way to answer "is this guard firing in production, and how
+   * often" was to grep a log nobody greps - and the answer matters most for the newest guard,
+   * whose trigger is a model misbehaviour that cannot be summoned on demand.
+   *
+   * Names, not prose, and the array keeps repeats so two firings of one guard are visible as
+   * two. It nests into the existing `trace` jsonb, so there is no column and no migration.
+   */
+  corrections?: string[];
 }
 
 /**

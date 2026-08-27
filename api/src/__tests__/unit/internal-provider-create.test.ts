@@ -927,39 +927,37 @@ describe('InternalProvider.createBooking', () => {
     ...over,
   });
 
-  it('throws FILE_UPLOAD_NOT_ALLOWED when files are attached to a no-upload service (before any session load)', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: false }]);
-    await expect(
-      provider.createBooking(ctx, 'idem-f1', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1'] })
-    ).rejects.toMatchObject({ code: 'FILE_UPLOAD_NOT_ALLOWED' });
-    expect(getUploadSession).not.toHaveBeenCalled(); // no oracle
-  });
-
-  it('snapshots a ready, tenant+session-matched file into uploaded_files', async () => {
+  it('snapshots a ready, tenant+session-matched auto-collected file into uploaded_files', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    getReadyFileIds.mockResolvedValue(['f-1', 'f-1']);
     getUploadSession.mockResolvedValue(readySession());
-    await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1', 'f-1'] });
+    await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const files = JSON.parse(insertParam(insert as any, 'uploaded_files') as string);
+    const files = JSON.parse(insertParam(insert as [string, unknown[]], 'uploaded_files') as string);
     expect(files).toEqual([{ fileSessionId: 'f-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
 
-  it('throws FILE_NOT_READY for an unscanned / foreign-tenant / wrong-session file', async () => {
+  it('skips an unscanned / foreign-tenant / wrong-session auto-collected file and still books', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    getReadyFileIds.mockResolvedValue(['f-1']);
     for (const bad of [{ status: 'scanning' }, { tenantId: 'other' }, { chatSessionId: 'other-sess' }]) {
       getUploadSession.mockResolvedValueOnce(readySession(bad));
-      await expect(
-        provider.createBooking(ctx, `idem-bad-${JSON.stringify(bad)}`, OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1'] })
-      ).rejects.toMatchObject({ code: 'FILE_NOT_READY' });
+      const res = await provider.createBooking(ctx, `idem-bad-${JSON.stringify(bad)}`, OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+      expect(res.success).toBe(true);
+      const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+      expect(insertParam(insert as [string, unknown[]], 'uploaded_files')).toBeNull();
     }
   });
 
-  it('throws TOO_MANY_FILES for more than 5 distinct files', async () => {
+
+  it('throws TOO_MANY_FILES for more than 5 distinct auto-collected files', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    getReadyFileIds.mockResolvedValue(['a','b','c','d','e','f']);
     await expect(
-      provider.createBooking(ctx, 'idem-many', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['a','b','c','d','e','f'] })
+      provider.createBooking(ctx, 'idem-many', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'TOO_MANY_FILES' });
   });
+
 
   it('auto-collects the chat session ready uploads for a file-accepting service when the tool passes none', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
@@ -978,6 +976,8 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
     expect(getReadyFileIds).not.toHaveBeenCalled();
   });
+
+
 });
 
 describe('InternalProvider.requestAppointment (P2a)', () => {

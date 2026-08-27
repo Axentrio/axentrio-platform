@@ -1136,9 +1136,10 @@ export class InternalProvider implements BookingProvider {
     // is a no-op when the service needs no address or no enforceable place is configured, and
     // recording 'inside' for those would claim a check that never ran.
     const { match: areaMatch } = await evaluateServiceArea(ctx, service, contact.address);
-    // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
-    const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
+    // P5e: snapshot ready uploads from this chat (the model never sees file ids).
+    const fileSessionIds = await this.resolveFileSessionIds(ctx, service);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
+
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
@@ -1590,9 +1591,10 @@ export class InternalProvider implements BookingProvider {
         outcome: placement.applies ? placement.outcome : 'n/a',
       });
     }
-    // P5e: validate + snapshot attached files for the request row too.
-    const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
+    // P5e: snapshot ready uploads from this chat (the model never sees file ids).
+    const fileSessionIds = await this.resolveFileSessionIds(ctx, service);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
+
     let bookingId: string;
     const requestAreaMatch = (await evaluateServiceArea(ctx, service, contact.address ?? null)).match;
     try {
@@ -1915,33 +1917,28 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
-   * P5e — validate the customer's attached files against the RESOLVED service and snapshot
-   * them for `Booking.uploaded_files`. Ordered checks (security-first):
-   * 1. service-disallow FIRST (before any session load → no existence/timing oracle);
-   * 2. dedupe by id, then cap ≤5;
-   * 3. per id: status='ready' (scanned clean) AND tenant match AND chatSession match AND
-   *    well-formed snapshot fields — else FILE_NOT_READY.
-   * Returns the JSON array (immutable snapshot) or null when no files were attached.
+   * Auto-collect the chat session's ready uploads for a file-accepting service.
+   * The model never sees upload ids; this is how a customer's file reaches the
+   * booking. A no-file service auto-collects nothing, so a stray upload
+   * elsewhere in the chat cannot block a booking.
    */
-  /**
-   * Resolve which file-session ids to attach. If the tool passed explicit ids, use
-   * them (strict-validated below). Otherwise, for a file-accepting service,
-   * auto-collect the chat session's ready uploads — the agent never surfaces
-   * upload ids to the LLM, so this is how a customer's uploaded file actually
-   * reaches the booking. A no-file service auto-collects nothing, so a stray
-   * upload elsewhere in the chat can't block a booking with FILE_UPLOAD_NOT_ALLOWED.
-   */
+
   private async resolveFileSessionIds(
     ctx: BookingContext,
     service: ServiceType,
-    explicit?: string[]
   ): Promise<string[] | undefined> {
-    if (Array.isArray(explicit) && explicit.length) return explicit;
     if (!service.fileUploadAllowed) return undefined;
     const { getUploadService } = await import('../../file-handling/upload.service');
     const ids = await getUploadService().getReadySessionFileIds(ctx.session.id, ctx.tenant.id);
     return ids.length ? ids : undefined;
   }
+
+  /**
+   * Snapshot ready uploads from this chat onto the booking. Auto-collect is the
+   * only source of ids, so a malformed row is skipped (and logged) rather than
+   * thrown: FILE_NOT_READY would poison every later booking in this chat.
+   * Returns the JSON array or null when nothing well-formed was attached.
+   */
 
   private async validateUploadedFiles(
     ctx: BookingContext,
@@ -1972,17 +1969,23 @@ export class InternalProvider implements BookingProvider {
         typeof session.mimeType === 'string' && !!session.mimeType &&
         typeof session.fileSize === 'number' && session.fileSize > 0;
       if (!wellFormed) {
-        throw new BookingError('Attached file is not available', 'FILE_NOT_READY', 400);
+        logger.warn('[Booking] skipping auto-collected file that is not ready', {
+          fileSessionId: id,
+          tenantId: ctx.tenant.id,
+          sessionId: ctx.session.id,
+          status: session?.status ?? 'missing',
+        });
+        continue;
       }
       out.push({
         fileSessionId: id,
-        fileName: session!.originalName,
-        mimeType: session!.mimeType,
-        fileSize: session!.fileSize,
-        fileKey: session!.fileKey,
+        fileName: session.originalName,
+        mimeType: session.mimeType,
+        fileSize: session.fileSize,
+        fileKey: session.fileKey,
       });
     }
-    return out;
+    return out.length ? out : null;
   }
 
   /**

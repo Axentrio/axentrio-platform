@@ -95,6 +95,14 @@ vi.mock('../../billing/enforce', () => ({
   enforceCountLimit: vi.fn(),
 }));
 
+const getWhatsAppAccessToken = vi.fn((): string | null => null);
+vi.mock('../../channels/credential-utils', () => ({
+  getWhatsAppAccessToken: () => getWhatsAppAccessToken(),
+  getMetaPageAccessToken: vi.fn(),
+}));
+
+
+
 // performScan.
 const performScan = vi.fn();
 vi.mock('../../file-handling/virus-scan-trigger', () => ({
@@ -204,6 +212,19 @@ describe('UploadService.ingestRemoteFile', () => {
     expect(safeOutboundRequest).toHaveBeenCalledTimes(2);
     expect(safeOutboundRequest.mock.calls[1][0].url).toBe('https://scontent.example/real.png');
   });
+
+  it('re-applies auth headers on every redirect hop', async () => {
+    safeOutboundRequest.mockReset();
+    safeOutboundRequest
+      .mockResolvedValueOnce({ status: 302, headers: { location: 'https://scontent.example/real.png' }, data: new ArrayBuffer(0) })
+      .mockResolvedValueOnce({ status: 200, data: PNG_AB });
+    const svc = makeService();
+    const result = await svc.ingestRemoteFile(baseInput({ headers: { Authorization: 'Bearer wa-token' } }));
+    expect(result).not.toBeNull();
+    expect(safeOutboundRequest.mock.calls[0][0].headers).toEqual({ Authorization: 'Bearer wa-token' });
+    expect(safeOutboundRequest.mock.calls[1][0].headers).toEqual({ Authorization: 'Bearer wa-token' });
+  });
+
 
   it('returns null if redirects never resolve to a 2xx (loop bound)', async () => {
     safeOutboundRequest.mockReset();
@@ -362,8 +383,51 @@ describe('maybeIngestInboundMedia gate', () => {
     expect(ingestSpy).not.toHaveBeenCalled();
   });
 
-  it('skips whatsapp', async () => {
+  it('skips whatsapp without a media id', async () => {
     await maybeIngestInboundMedia(makeEvent(), conn('whatsapp'), sess());
+    expect(ingestSpy).not.toHaveBeenCalled();
+  });
+
+  it('ingests a whatsapp image after resolving the media id', async () => {
+    getWhatsAppAccessToken.mockReturnValue('wa-token');
+    safeOutboundRequest.mockResolvedValueOnce({
+      status: 200,
+      data: { url: 'https://lookaside.example/wa.jpg' },
+    });
+    await maybeIngestInboundMedia(
+      makeEvent({ message: { type: 'image', content: '', mediaUrl: undefined, mediaMetadata: { mediaId: 'MEDIA_1', filename: 'damage.jpg' } } }),
+      conn('whatsapp'),
+      sess(),
+    );
+    expect(ingestSpy).toHaveBeenCalledTimes(1);
+    expect(ingestSpy.mock.calls[0][0]).toMatchObject({
+      url: 'https://lookaside.example/wa.jpg',
+      headers: { Authorization: 'Bearer wa-token' },
+      fileName: 'damage.jpg',
+      namePrefix: 'whatsapp',
+      chatSessionId: 'chat-1',
+    });
+    expect(performScan).toHaveBeenCalledWith('sid', 'fk');
+  });
+
+  it('skips whatsapp when the access token is missing', async () => {
+    getWhatsAppAccessToken.mockReturnValue(null);
+    await maybeIngestInboundMedia(
+      makeEvent({ message: { type: 'image', content: '', mediaUrl: undefined, mediaMetadata: { mediaId: 'MEDIA_1' } } }),
+      conn('whatsapp'),
+      sess(),
+    );
+    expect(ingestSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips whatsapp when media-id resolve fails', async () => {
+    getWhatsAppAccessToken.mockReturnValue('wa-token');
+    safeOutboundRequest.mockRejectedValueOnce(new Error('graph down'));
+    await maybeIngestInboundMedia(
+      makeEvent({ message: { type: 'image', content: '', mediaUrl: undefined, mediaMetadata: { mediaId: 'MEDIA_1' } } }),
+      conn('whatsapp'),
+      sess(),
+    );
     expect(ingestSpy).not.toHaveBeenCalled();
   });
 

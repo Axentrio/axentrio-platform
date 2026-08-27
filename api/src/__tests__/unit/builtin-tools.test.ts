@@ -506,6 +506,34 @@ describe('CreateBookingTool', () => {
     expect(tool.preconditions).toBeUndefined();
   });
 
+  it('does not expose fileSessionIds to the model', () => {
+    const create = new CreateBookingTool();
+    const request = new RequestAppointmentTool();
+    expect(create.parameters.properties).not.toHaveProperty('fileSessionIds');
+    expect(request.parameters.properties).not.toHaveProperty('fileSessionIds');
+  });
+
+  it('drops a hallucinated fileSessionIds argument instead of forwarding it', async () => {
+    const tool = new CreateBookingTool();
+    const ctx = makeCtx({ runId: 'run-abc', sessionId: 'sess-1' });
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-1' } });
+
+    await tool.execute(
+      {
+        startTime: '2026-04-01T10:00:00Z',
+        attendeeName: 'Alice',
+        attendeeEmail: 'alice@test.com',
+        fileSessionIds: ['invented-id'],
+      },
+      ctx
+    );
+
+    const extras = mockCreateBooking.mock.calls[0]?.[8] as Record<string, unknown> | undefined;
+    expect(extras).toBeDefined();
+    expect(extras).not.toHaveProperty('fileSessionIds');
+  });
+
+
   it('generates a stable session+service idempotency key (not per-runId, so re-confirms dedupe)', async () => {
     const tool = new CreateBookingTool();
     const ctx = makeCtx({ runId: 'run-abc', sessionId: 'sess-1' });

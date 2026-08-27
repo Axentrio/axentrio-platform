@@ -484,6 +484,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             suggestedAction: 'request_appointment',
             guidance:
               'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked. Do not turn the customer away and do not hand off: ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
+
           }),
         };
       }
@@ -554,12 +555,6 @@ export class CreateBookingTool implements ToolAdapter {
         type: 'number',
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes — pass the SAME value you checked availability with. Omit for fixed-duration services. If omitted on a range service, the tool returns DURATION_REQUIRED: ask the customer, then retry. Never treat that as a calendar or technical failure.",
-      },
-      fileSessionIds: {
-        type: 'array',
-        items: { type: 'string' },
-        description:
-          'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
       },
       aiSummary: {
         type: 'string',
@@ -684,8 +679,8 @@ export class CreateBookingTool implements ToolAdapter {
           addressBinding: booked.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
-          fileSessionIds: args.fileSessionIds as string[] | undefined,
           aiSummary: args.aiSummary as string | undefined,
+
         }
       );
 
@@ -851,12 +846,6 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Pass a single number (e.g. 60). Omit for fixed-duration services.",
       },
-      fileSessionIds: {
-        type: 'array',
-        items: { type: 'string' },
-        description:
-          'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
-      },
     },
     required: ['preferredTime', 'attendeeName'],
   };
@@ -902,7 +891,6 @@ export class RequestAppointmentTool implements ToolAdapter {
           addressBinding: requested.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
-          fileSessionIds: args.fileSessionIds as string[] | undefined,
         }
       );
       // This tool produced the SECOND live instance of the wrong-address sentence: the row said

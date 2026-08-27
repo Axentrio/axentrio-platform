@@ -43,14 +43,19 @@ const INGEST_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface IngestRemoteFileInput {
   url: string;
+  /** Re-applied on every redirect hop (WhatsApp download URLs are token-gated). */
+  headers?: Record<string, string>;
   tenantId: string;
   chatSessionId: string;
   botId: string;
   externalUserId: string;
   fileName?: string;
+  /** Fallback original-name prefix when Meta sends no filename. Default messenger. */
+  namePrefix?: string;
   eventDedupeKey: string;
   eventTimestamp: Date;
 }
+
 
 export interface IngestRemoteFileResult {
   sessionId: string;
@@ -696,17 +701,18 @@ export class UploadService {
   }
 
   /**
-   * Download a remote image (an inbound Meta Messenger/Instagram attachment),
-   * sniff + validate it, store it under a deterministic key, and persist a
-   * `pending` UploadSession so the existing scan + booking-attach path can take
-   * over. Returns `null` on any rejection (unconfigured S3, SSRF/over-cap/
-   * non-2xx download, non-image, over-quota). Never throws.
+   * Download a remote image (an inbound Messenger, Instagram, or WhatsApp
+   * attachment), sniff + validate it, store it under a deterministic key, and
+   * persist a `pending` UploadSession so the existing scan + booking-attach
+   * path can take over. Returns `null` on any rejection (unconfigured S3,
+   * SSRF/over-cap/non-2xx download, non-image, over-quota). Never throws.
    *
    * Idempotent: the session id + key are derived from `eventDedupeKey`, so a
    * webhook retry re-uses the same row/object. An already-existing row is never
    * re-downloaded/re-put/re-quota'd — `needsScan` only reflects whether it still
    * needs scanning (terminal `ready`/`quarantined` → false; otherwise true).
    */
+
   async ingestRemoteFile(input: IngestRemoteFileInput): Promise<IngestRemoteFileResult | null> {
     const sessionId = uuidv5(input.eventDedupeKey, CHANNEL_MEDIA_NAMESPACE);
 
@@ -735,10 +741,12 @@ export class UploadService {
           url,
           method: 'GET',
           responseType: 'arraybuffer',
+          headers: input.headers,
           timeout: 15_000,
           maxContentLength: INGEST_MAX_BYTES,
           maxBodyLength: INGEST_MAX_BYTES,
         });
+
         if (response.status >= 300 && response.status < 400) {
           const location = (response.headers as Record<string, string> | undefined)?.location;
           if (!location) break; // 3xx with no Location → treat as failure below
@@ -790,7 +798,9 @@ export class UploadService {
     const fileHash = createHash('sha256').update(buffer).digest('hex').substring(0, 16);
     const originalName = input.fileName
       ? this.sanitizeFileName(input.fileName)
-      : `messenger-${sessionId.slice(0, 8)}.${ext}`;
+      : `${input.namePrefix ?? 'messenger'}-${sessionId.slice(0, 8)}.${ext}`;
+
+
 
     const metadata: Record<string, string> = {
       'tenant-id': input.tenantId,

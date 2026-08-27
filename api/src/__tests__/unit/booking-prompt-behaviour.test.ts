@@ -163,6 +163,16 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(p).toMatch(/Never describe DURATION_REQUIRED as a technical problem or a calendar failure/i);
   });
 
+
+  it('invites a file on an accepts-files service and never asks the model for ids', () => {
+    const p = buildServicesSection([svc({ fileUploadAllowed: true })])!;
+    expect(p).toMatch(/accepts files/);
+    expect(p).toMatch(/invite the customer to attach/i);
+    expect(p).toMatch(/already sent in this chat attach on their own/i);
+    expect(p).not.toMatch(/fileSessionIds/);
+    expect(p).not.toMatch(/FILE_NOT_READY|FILE_UPLOAD_NOT_ALLOWED|TOO_MANY_FILES/);
+  });
+
   it('says nothing about length for a fixed service', () => {
     const p = buildServicesSection([svc()])!;
     expect(line(p)).toContain('60 min');
@@ -248,6 +258,7 @@ describe('check_availability — the empty result carries its own instruction', 
     expect(res.data.guidance).toMatch(/do not turn the customer away/i);
     expect(res.data.guidance).toMatch(/request_appointment/);
   });
+
 
   it('adds nothing when slots exist', async () => {
     const res = await load([{ start: '2026-08-10T08:00:00.000Z', end: '2026-08-10T08:30:00.000Z' }]);
@@ -671,6 +682,8 @@ describe('travel time — asking for the address before the times', () => {
     expect(section).not.toMatch(/BEFORE you call check_availability/);
   });
 });
+
+
 
 describe('#149 — customer chooses location', () => {
   it('flags the Service and tells the agent to ask which location they want', () => {

@@ -30,7 +30,9 @@ import { upsertLead } from '../leads/lead-capture.service';
 import { Not, IsNull } from 'typeorm';
 import { applyChannelAddressControl } from './address-controls';
 import { fetchMetaProfile } from './meta/profile.service';
-import { getMetaPageAccessToken } from './credential-utils';
+import { getMetaPageAccessToken, getWhatsAppAccessToken } from './credential-utils';
+import { FB_GRAPH_API } from './meta/graph-api';
+import { safeOutboundRequest } from '../security/ssrf-guard';
 import { trimmedName } from '../realtime/conversation-serializer';
 
 /**
@@ -697,47 +699,69 @@ export async function botHasActiveFileService(tenantId: string, botId: string): 
 /**
  * Gate + ingest an inbound channel image into a `ready` upload_session.
  *
- * Ingest only when ALL hold: a media URL is present and normalized
- * `type === 'image'` and it is NOT a sticker; the channel is messenger or
- * instagram; the tenant is entitled to file upload; and the bot has an active
- * file-accepting service. On a successful new/interrupted ingest, runs the scan
- * so the row converges to `ready`. Launched fire-and-forget by the caller.
+ * Ingest only when ALL hold: normalized `type === 'image'` and it is NOT a
+ * sticker; the channel is messenger, instagram, or whatsapp; the tenant is
+ * entitled to file upload; and the bot has an active file-accepting service.
+ * Messenger/Instagram need a CDN `mediaUrl`. WhatsApp needs a `mediaId` that
+ * this gate resolves to a token-gated URL. On a successful new/interrupted
+ * ingest, runs the scan so the row converges to `ready`. Launched
+ * fire-and-forget by the caller.
  */
 export async function maybeIngestInboundMedia(
   event: NormalizedEvent,
   connection: ChannelConnection,
   session: ChatSession,
 ): Promise<void> {
-  // (a) media + image + not a sticker (cheapest)
   const msg = event.message;
-  if (!msg?.mediaUrl || msg.type !== 'image' || msg.mediaMetadata?.stickerId) {
+  if (!msg || msg.type !== 'image' || msg.mediaMetadata?.stickerId) {
     return;
   }
 
-  // (b) channel
-  if (connection.channel !== 'messenger' && connection.channel !== 'instagram') {
+  const channel = connection.channel;
+  const isMetaCdn = channel === 'messenger' || channel === 'instagram';
+  const isWhatsApp = channel === 'whatsapp';
+  if (!isMetaCdn && !isWhatsApp) {
     return;
   }
 
-  // (c) entitlement — requireFeature throws if not entitled.
   try {
     await requireFeature(connection.tenantId, 'fileUpload', 'plan_limit_file_upload');
   } catch {
     return;
   }
 
-  // (d) bot has an active file-accepting service.
   if (!(await botHasActiveFileService(connection.tenantId, session.botId))) {
     return;
   }
 
+  let url: string | undefined;
+  let headers: Record<string, string> | undefined;
+  if (isWhatsApp) {
+    const resolved = await resolveWhatsAppMediaForIngest(connection, msg.mediaMetadata);
+    if (!resolved) return;
+    url = resolved.url;
+    headers = resolved.headers;
+  } else if (msg.mediaUrl) {
+    url = msg.mediaUrl;
+  } else {
+    return;
+  }
+
+  const meta = msg.mediaMetadata;
+  const fileName =
+    typeof meta?.fileName === 'string' ? meta.fileName
+    : typeof meta?.filename === 'string' ? meta.filename
+    : undefined;
+
   const result = await getUploadService().ingestRemoteFile({
-    url: msg.mediaUrl,
+    url,
+    headers,
     tenantId: connection.tenantId,
     chatSessionId: session.id,
     botId: session.botId,
     externalUserId: event.sender.externalUserId,
-    fileName: typeof msg.mediaMetadata?.fileName === 'string' ? msg.mediaMetadata.fileName : undefined,
+    fileName,
+    namePrefix: isWhatsApp ? 'whatsapp' : 'messenger',
     eventDedupeKey: event.dedupeKey,
     eventTimestamp: event.timestamp,
   });
@@ -750,6 +774,48 @@ export async function maybeIngestInboundMedia(
     await performScan(result.sessionId, result.fileKey);
   }
 }
+
+async function resolveWhatsAppMediaForIngest(
+  connection: ChannelConnection,
+  mediaMetadata: Record<string, unknown> | undefined,
+): Promise<{ url: string; headers: Record<string, string> } | null> {
+  const mediaId = mediaMetadata?.mediaId;
+  if (typeof mediaId !== 'string' || !mediaId) return null;
+  const accessToken = getWhatsAppAccessToken(connection.credentials ?? {});
+  if (!accessToken) {
+    logger.warn('[inbound] WhatsApp ingest skipped: no access token');
+    return null;
+  }
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  try {
+    const meta = await safeOutboundRequest({
+      url: `${FB_GRAPH_API}/${encodeURIComponent(mediaId)}`,
+      method: 'GET',
+      headers,
+      timeout: 15_000,
+    });
+    const url = graphDownloadUrl(meta.data);
+
+    if (!url) {
+      logger.warn('[inbound] WhatsApp ingest skipped: media-id resolve returned no url');
+      return null;
+    }
+    return { url, headers };
+  } catch (err) {
+    logger.warn('[inbound] WhatsApp ingest skipped: media-id resolve failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+function graphDownloadUrl(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object' || !('url' in data)) return undefined;
+  const url = data.url;
+  return typeof url === 'string' && url ? url : undefined;
+}
+
+
 
 /**
  * Map normalized message type to our internal Message type.

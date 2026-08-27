@@ -339,8 +339,6 @@ export interface BookingExtras {
   customerPhone?: string;
   /** P5c — chosen/estimated length for a range/ai service (ignored for fixed). */
   durationMin?: number;
-  /** P5e — UploadSession ids the customer attached (validated + snapshotted at booking). */
-  fileSessionIds?: string[];
   /**
    * A one-line summary of the job for the owner. Routed through extras rather than the
    * provider signature so CalcomProvider is untouched. The request path has always had

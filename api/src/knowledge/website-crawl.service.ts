@@ -1,6 +1,6 @@
 import type { KnowledgeService } from "./knowledge.service";
 import { clampMaxPages } from "./website-crawl";
-import { canonicalSourceUrl } from "./website-url";
+import { normalizeWebsiteUrl } from "./website-url";
 import { assertSafeOutboundUrl, SsrfError } from "../security/ssrf-guard";
 import { addJob } from "../queue/message-queue";
 import { WEBSITE_CRAWL_QUEUE } from "./website-crawl.worker";
@@ -26,7 +26,7 @@ export async function startWebsiteImport(
 }> {
   let origin: string;
   try {
-    origin = canonicalSourceUrl(input.url);
+    origin = normalizeWebsiteUrl(input.url);
     assertSafeOutboundUrl(origin);
   } catch (error) {
     if (error instanceof SsrfError) {

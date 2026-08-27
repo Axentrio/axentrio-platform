@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeWebsiteUrl } from "../knowledge/website-url";
 
 export const updateKnowledgeBaseSchema = z.object({
   chunkSize: z.number().min(100).max(5000).optional(),
@@ -20,16 +21,33 @@ export const updateDocumentSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+const websiteUrl = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .transform((value, ctx) => {
+    try {
+      return normalizeWebsiteUrl(value);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid website URL",
+      });
+      return z.NEVER;
+    }
+  });
+
 export const importWebsiteSchema = z.object({
-  url: z.string().url().max(2048),
+  url: websiteUrl,
   followLinks: z.boolean().optional().default(true),
   maxPages: z.number().int().min(1).max(50).optional(),
   kbId: z.string().uuid().optional(),
-  extraUrls: z.array(z.string().url().max(2048)).max(20).optional(),
+  extraUrls: z.array(websiteUrl).max(20).optional(),
 });
 
 export const discoverWebsiteSchema = z.object({
-  url: z.string().url().max(2048),
+  url: websiteUrl,
 });
 
 export const listDocumentsSchema = z.object({

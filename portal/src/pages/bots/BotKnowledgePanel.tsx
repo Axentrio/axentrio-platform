@@ -19,6 +19,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { normalizeWebsiteUrl } from "@/lib/websiteUrl";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -246,9 +247,16 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Input
-                type="url"
+                type="text"
+                inputMode="url"
+                autoComplete="url"
+                spellCheck={false}
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
+                onBlur={() => {
+                  const next = normalizeWebsiteUrl(websiteUrl);
+                  if (next) setWebsiteUrl(next);
+                }}
                 placeholder={t(
                   "ai.knowledge.modal.fields.websiteUrl.placeholder",
                 )}

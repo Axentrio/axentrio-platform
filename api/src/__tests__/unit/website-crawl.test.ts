@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   canonicalSourceUrl,
+  normalizeWebsiteUrl,
   isSameHost,
   isMediaUrl,
   originFromSourceUrl,
@@ -17,6 +18,37 @@ describe("canonicalSourceUrl", () => {
   it("strips the hash, lowercases the host, and drops a trailing slash on paths", () => {
     expect(canonicalSourceUrl("https://Plumber.Example/services/#top")).toBe(
       "https://plumber.example/services",
+    );
+  });
+});
+
+describe("normalizeWebsiteUrl", () => {
+  it("accepts a bare domain and a www host without a scheme", () => {
+    expect(normalizeWebsiteUrl("valyro.be")).toBe("https://valyro.be/");
+    expect(normalizeWebsiteUrl("www.valyro.be")).toBe(
+      "https://www.valyro.be/",
+    );
+  });
+
+  it("adds https to a bare host with a port", () => {
+    expect(normalizeWebsiteUrl("valyro.be:8080")).toBe(
+      "https://valyro.be:8080/",
+    );
+  });
+
+  it("keeps a full https URL", () => {
+    expect(normalizeWebsiteUrl("https://www.valyro.be")).toBe(
+      "https://www.valyro.be/",
+    );
+  });
+
+  it("upgrades http to https", () => {
+    expect(normalizeWebsiteUrl("http://valyro.be")).toBe("https://valyro.be/");
+  });
+
+  it("rejects a non-http scheme", () => {
+    expect(() => normalizeWebsiteUrl("javascript:alert(1)")).toThrow(
+      "Invalid website URL",
     );
   });
 });

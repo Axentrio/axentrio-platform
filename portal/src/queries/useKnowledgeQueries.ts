@@ -7,6 +7,7 @@ import {
 import { api } from "../services/apiClient";
 import { queryKeys } from "./queryKeys";
 import { toast } from "sonner";
+import { normalizeWebsiteUrl } from "../lib/websiteUrl";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -124,15 +125,16 @@ export type DiscoveredWebsiteHost = {
 };
 
 export function useDiscoverWebsiteHosts(url: string, enabled: boolean) {
+  const normalized = normalizeWebsiteUrl(url);
   return useQuery({
-    queryKey: ["knowledge", "discover", url],
+    queryKey: ["knowledge", "discover", normalized],
     queryFn: () =>
       api.get<{
         origin: string;
         apex: string;
         hosts: DiscoveredWebsiteHost[];
-      }>("/knowledge/documents/website/discover", { params: { url } }),
-    enabled: enabled && /^https:\/\/[^\s]+$/i.test(url),
+      }>("/knowledge/documents/website/discover", { params: { url: normalized } }),
+    enabled: enabled && /^https:\/\/[^\s]+$/i.test(normalized),
     staleTime: 60_000,
     retry: false,
   });
@@ -147,7 +149,12 @@ export function useImportWebsite() {
       maxPages?: number;
       kbId?: string;
       extraUrls?: string[];
-    }) => api.post("/knowledge/documents/website", data),
+    }) =>
+      api.post("/knowledge/documents/website", {
+        ...data,
+        url: normalizeWebsiteUrl(data.url),
+        extraUrls: data.extraUrls?.map(normalizeWebsiteUrl),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),

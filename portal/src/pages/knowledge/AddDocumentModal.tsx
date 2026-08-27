@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { normalizeWebsiteUrl } from "@/lib/websiteUrl";
 import {
   useCreateDocument,
   useUpdateDocument,
@@ -334,9 +335,16 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({
               {t("ai.knowledge.modal.fields.websiteUrl.label")}
             </Label>
             <Input
-              type="url"
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              spellCheck={false}
               value={websiteUrl}
               onChange={(e) => setWebsiteUrl(e.target.value)}
+              onBlur={() => {
+                const next = normalizeWebsiteUrl(websiteUrl);
+                if (next) setWebsiteUrl(next);
+              }}
               placeholder={t(
                 "ai.knowledge.modal.fields.websiteUrl.placeholder",
               )}

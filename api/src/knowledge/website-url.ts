@@ -1,3 +1,25 @@
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/** User-typed website: add https when the scheme is missing, then canonicalize. */
+export function normalizeWebsiteUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("Invalid website URL");
+  let candidate = trimmed;
+  if (candidate.startsWith("//")) candidate = `https:${candidate}`;
+  else if (!HAS_SCHEME.test(candidate)) candidate = `https://${candidate}`;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("Invalid website URL");
+  }
+  if (url.protocol === "http:") url.protocol = "https:";
+  if (url.protocol !== "https:") {
+    throw new Error("Invalid website URL");
+  }
+  return canonicalSourceUrl(url.toString());
+}
+
 /** Canonical page identity for a KnowledgeDocument of type url. */
 export function canonicalSourceUrl(raw: string): string {
   let url: URL;

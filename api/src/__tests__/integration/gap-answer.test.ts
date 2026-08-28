@@ -14,7 +14,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../knowledge/embedding.service', () => ({
   embed: vi.fn(async () => Array(1536).fill(0.01)),
-  embedBatch: vi.fn(async (texts: string[]) => texts.map(() => Array(1536).fill(0.01))),
+  embedBatch: vi.fn(async (_tenantId: string | undefined, texts: string[]) =>
+    texts.map(() => Array(1536).fill(0.01)),
+  ),
 }));
 
 const preprocessSpy = vi.hoisted(() => ({ calls: 0 }));

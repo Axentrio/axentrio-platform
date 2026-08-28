@@ -2709,7 +2709,12 @@ export class InternalProvider implements BookingProvider {
     return !!owning?.visitorId && owning.visitorId === visitor;
   }
 
-  async rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult> {
+  async rescheduleBooking(
+    ctx: BookingContext,
+    bookingId: string,
+    newStartTime: string,
+    opts?: { durationMin?: number }
+  ): Promise<RescheduleResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     if (booking.status !== 'confirmed') {
       throw new BookingError('Only confirmed bookings can be rescheduled', 'BOOKING_NOT_RESCHEDULABLE', 409);
@@ -2727,7 +2732,7 @@ export class InternalProvider implements BookingProvider {
     }
     // P5c: carry the booking's FROZEN length forward (grandfathered — never re-validated
     // against the service's current bounds). Legacy rows fall back to service.durationMin.
-    const effectiveDuration = booking.bookedDurationMin ?? service.durationMin;
+    const effectiveDuration = opts?.durationMin ?? booking.bookedDurationMin ?? service.durationMin;
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
@@ -2853,7 +2858,9 @@ export class InternalProvider implements BookingProvider {
           // the same line, in the path that was missing it.
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
-                  calendar_key=$5, travel_check=$8, sequence=sequence+1, updated_at=now()
+                  calendar_key=$5, travel_check=$8,
+                  booked_duration_min = COALESCE($9, booked_duration_min),
+                  sequence=sequence+1, updated_at=now()
             WHERE id=$6 AND tenant_id=$7 AND status='confirmed'
             RETURNING sequence`,
           [
@@ -2868,6 +2875,7 @@ export class InternalProvider implements BookingProvider {
             // whose service or Agent stopped needing one. A check nobody ran must not be
             // inherited from a time nobody is keeping.
             travelCheck,
+            opts?.durationMin ?? null,
           ]
         ));
         if (!rows.length) {
@@ -3279,7 +3287,7 @@ export class InternalProvider implements BookingProvider {
       description: buildCustomerEventDescription({
         serviceName: service.name,
         serviceDescription: service.description,
-        durationMin: booking.bookedDurationMin,
+        durationMin: effectiveDuration,
         meetUrl,
         preparationInstructions: service.preparationInstructions,
         manageUrl: buildManageUrl(booking.id),

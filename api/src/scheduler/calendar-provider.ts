@@ -20,6 +20,8 @@ import {
   updateCalendarEvent,
   deleteCalendarEvent,
   resolveCalendarIdentity,
+  getCalendarEvent,
+  listChangedGoogleEvents,
   type CalendarEventInput,
   type CalendarEventResult,
   type CreateEventOpts,
@@ -30,12 +32,29 @@ import {
   createOutlookEvent,
   updateOutlookEvent,
   deleteOutlookEvent,
+  getOutlookEvent,
+  listChangedOutlookEvents,
 } from '../integrations/microsoft/outlook-events.service';
 import { resolveOutlookIdentity } from '../integrations/microsoft/outlook-calendar.service';
 
 export type { CalendarEventInput, CalendarEventResult, CreateEventOpts, BusyInterval };
 export type UpdateEventResult = 'ok' | 'not_found' | 'no_access' | 'no_connection';
 export type DeleteEventResult = 'ok' | 'no_access' | 'no_connection';
+
+export type ExternalEventState =
+  | { kind: 'found'; startISO: string | null; endISO: string | null; cancelled: boolean }
+  | { kind: 'not_found' }
+  | { kind: 'no_access' }
+  | { kind: 'no_connection' };
+
+export interface ExternalChangeBatch {
+  /** Provider event ids touched since `cursor`. Empty on a bootstrap round. */
+  eventIds: string[];
+  /** Cursor to persist for the next round. */
+  cursor: string;
+  /** True when there was no usable cursor and this round only captured one. */
+  bootstrapped: boolean;
+}
 
 export interface CalendarProvider {
   readonly providerType: CalendarProviderType;
@@ -55,6 +74,13 @@ export interface CalendarProvider {
   deleteEvent(botId: string, eventId: string, calendarId?: string): Promise<DeleteEventResult>;
   /** Account-unique identity for the conflict key, or null. */
   resolveIdentity(botId: string): Promise<string | null>;
+  getEvent(botId: string, eventId: string, calendarId?: string): Promise<ExternalEventState>;
+  /** `window` is honoured by Microsoft only; Google's syncToken forbids a time window. */
+  listChanges(
+    botId: string,
+    cursor: string | null,
+    window: { startISO: string; endISO: string }
+  ): Promise<ExternalChangeBatch | null>;
 }
 
 const googleProvider: CalendarProvider = {
@@ -64,6 +90,8 @@ const googleProvider: CalendarProvider = {
   updateEvent: updateCalendarEvent,
   deleteEvent: deleteCalendarEvent,
   resolveIdentity: resolveCalendarIdentity,
+  getEvent: getCalendarEvent,
+  listChanges: (botId, cursor, window) => listChangedGoogleEvents(botId, cursor, window.startISO),
 };
 
 const microsoftProvider: CalendarProvider = {
@@ -74,6 +102,8 @@ const microsoftProvider: CalendarProvider = {
   updateEvent: (botId, eventId, input) => updateOutlookEvent(botId, eventId, input),
   deleteEvent: (botId, eventId) => deleteOutlookEvent(botId, eventId),
   resolveIdentity: resolveOutlookIdentity,
+  getEvent: (botId, eventId) => getOutlookEvent(botId, eventId),
+  listChanges: listChangedOutlookEvents,
 };
 
 /** The provider for a given CalendarCredential provider value. */

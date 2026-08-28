@@ -389,6 +389,11 @@ export interface BookingProvider {
     intakeAnswers?: unknown,
     extras?: BookingExtras
   ): Promise<CreateBookingResult>;
-  rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult>;
+  rescheduleBooking(
+    ctx: BookingContext,
+    bookingId: string,
+    newStartTime: string,
+    opts?: { durationMin?: number }
+  ): Promise<RescheduleResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;
 }

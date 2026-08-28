@@ -1060,6 +1060,22 @@ async function startServer(): Promise<void> {
       5 * 60 * 1000,
     ); // Every 5 minutes
 
+    // Pull owner edits made directly in the connected calendar back into the booking.
+    // Kill switch: INBOUND_CALENDAR_SYNC_ENABLED=false.
+    if (process.env.INBOUND_CALENDAR_SYNC_ENABLED !== "false") {
+      const { syncExternalCalendarChanges } = await import(
+        "./scheduler/inbound-calendar-sync"
+      );
+      setInterval(
+        () => {
+          syncExternalCalendarChanges().catch((error) =>
+            logger.error("Inbound calendar sync failed", { error }),
+          );
+        },
+        5 * 60 * 1000,
+      ); // Every 5 minutes
+    }
+
     // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
     // silently-broken one (expired token, revoked permission, page disconnect)
     // flips to error + notifies even with no outbound traffic to trigger the

@@ -23,6 +23,7 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
+import { applyExternalRemoval } from './inbound-calendar-sync';
 import { returningRows } from '../utils/raw-sql';
 import { buildBookingEventContent } from '../booking/booking-providers/booking-content';
 import { buildManageUrl } from './booking-token';
@@ -220,17 +221,8 @@ async function processOne(row: ClaimedRow): Promise<void> {
       return terminal(row, `reconnect needed: no active ${ref.providerType} credential for stored ref`);
     }
     if (res === 'not_found') {
-      // Event was deleted in the calendar → recreate (deterministic id) on its home.
-      const ev = await provider.createEvent(row.bot_id, input, {
-        eventId: googleEventId(row.id),
-        calendarId: ref.externalCalendarId,
-      });
-      if (ev) {
-        ref.externalEventId = ev.eventId;
-        ref.externalCalendarId = ev.calendarId;
-        ref.meetingUrl = ev.meetUrl;
-        await refRepo.save(ref);
-      }
+      await applyExternalRemoval({ tenantId: row.tenant_id, botId: row.bot_id, bookingId: row.id });
+      return clear(row);
     }
     return clear(row);
   }

@@ -77,6 +77,8 @@ vi.mock('../../scheduler/calendar-provider', () => {
     updateEvent: (...a: any[]) => providerUpdateEvent(...a),
     deleteEvent: vi.fn().mockResolvedValue('ok'),
     resolveIdentity: vi.fn().mockResolvedValue(null),
+    getEvent: vi.fn(),
+    listChanges: vi.fn(),
   };
   return {
     resolveCalendarProvider: async () => adapter,
@@ -358,6 +360,17 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 1, uid: 'uid-1@axentrio' });
     expect(logSave).toHaveBeenCalledOnce();
   });
+
+  it('mails the new duration when reschedule stretches the booking', async () => {
+    ruleFindOne.mockResolvedValue({
+      ...RULE,
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
+    });
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START, { durationMin: 120 });
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ durationMin: 120 });
+    expect(sendBookingEmail.mock.calls[0][0].description).toContain('Duration: 120 min');
+  });
+
 
   it('moves calendar_key with the booking, so the row lands on the diary it was validated against', async () => {
     // The gap #60 recorded and left. Everything above the UPDATE resolves the itinerary key

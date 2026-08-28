@@ -27,12 +27,16 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   updateCalendarEvent: vi.fn(),
   deleteCalendarEvent: vi.fn(),
   resolveCalendarIdentity: vi.fn(),
+  getCalendarEvent: vi.fn(),
+  listChangedGoogleEvents: vi.fn(),
 }));
 vi.mock('../../integrations/microsoft/outlook-events.service', () => ({
   getOutlookBusyForBot: vi.fn(),
   createOutlookEvent: vi.fn(),
   updateOutlookEvent: vi.fn(),
   deleteOutlookEvent: vi.fn(),
+  getOutlookEvent: vi.fn(),
+  listChangedOutlookEvents: vi.fn(),
 }));
 vi.mock('../../integrations/microsoft/outlook-calendar.service', () => ({
   resolveOutlookIdentity: vi.fn(),

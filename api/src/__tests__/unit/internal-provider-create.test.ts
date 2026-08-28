@@ -89,6 +89,8 @@ vi.mock('../../scheduler/calendar-provider', () => {
     updateEvent: (...a: any[]) => updateCalendarEvent(...a),
     deleteEvent: (...a: any[]) => deleteCalendarEvent(...a),
     resolveIdentity: (...a: any[]) => resolveCalendarIdentity(...a),
+    getEvent: vi.fn(),
+    listChanges: vi.fn(),
   };
   return {
     resolveCalendarProvider: async () => googleAdapter,

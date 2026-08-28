@@ -58,6 +58,8 @@ vi.mock('../../scheduler/calendar-provider', () => {
     updateEvent: (...a: any[]) => updateCalendarEvent(...a),
     deleteEvent: (...a: any[]) => deleteCalendarEvent(...a),
     resolveIdentity: vi.fn(),
+    getEvent: vi.fn(),
+    listChanges: vi.fn(),
   };
   return {
     resolveCalendarProvider: async () => googleAdapter,
@@ -66,6 +68,12 @@ vi.mock('../../scheduler/calendar-provider', () => {
     isCalendarSyncAllowed: async () => true,
   };
 });
+
+const applyExternalRemoval = vi.fn();
+vi.mock('../../scheduler/inbound-calendar-sync', () => ({
+  applyExternalRemoval: (...a: unknown[]) => applyExternalRemoval(...a),
+}));
+
 
 import { reconcilePendingBookingSyncs } from '../../scheduler/sync-reconciler';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
@@ -111,7 +119,7 @@ beforeEach(() => {
 // Empty-claim shape: what the DB returns when nothing is pending.
 const EMPTY_UPDATE: [unknown[], number] = [[], 0];
 
-const baseRow = { id: BID, bot_id: 'b1', start_utc: '2026-07-01T10:00:00Z', end_utc: '2026-07-01T10:30:00Z', event_type_id: null, sync_attempts: 0, updated_at: '2026-06-09 05:00:00+00' };
+const baseRow = { id: BID, tenant_id: 't1', bot_id: 'b1', start_utc: '2026-07-01T10:00:00Z', end_utc: '2026-07-01T10:30:00Z', event_type_id: null, sync_attempts: 0, updated_at: '2026-06-09 05:00:00+00' };
 
 describe('reconcilePendingBookingSyncs', () => {
   it('creates a Google event for a confirmed booking with no reference (deterministic id)', async () => {
@@ -143,16 +151,15 @@ describe('reconcilePendingBookingSyncs', () => {
     expect(cleared()).toBe(true);
   });
 
-  it('recreates the event when the existing one is gone (404)', async () => {
+  it('cancels the booking when the existing event is gone (404)', async () => {
     claim({ ...baseRow, status: 'confirmed' });
     refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
     updateCalendarEvent.mockResolvedValue('not_found');
-    createCalendarEvent.mockResolvedValue({ eventId: EVID, calendarId: 'primary', meetUrl: null });
 
     await reconcilePendingBookingSyncs();
 
-    expect(createCalendarEvent).toHaveBeenCalledWith('b1', expect.any(Object), { eventId: EVID, calendarId: 'primary' });
-    expect(refSave).toHaveBeenCalled();
+    expect(applyExternalRemoval).toHaveBeenCalledWith({ tenantId: 't1', botId: 'b1', bookingId: BID });
+    expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(cleared()).toBe(true);
   });
 

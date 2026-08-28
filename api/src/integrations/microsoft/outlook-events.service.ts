@@ -24,6 +24,7 @@ import type {
   CreateEventOpts,
   GoogleBusyInterval as BusyInterval,
 } from '../../integrations/google/google-calendar.service';
+import type { ExternalEventState, ExternalChangeBatch } from '../../scheduler/calendar-provider';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const PREFER_IMMUTABLE_UTC = 'IdType="ImmutableId", outlook.timezone="UTC"';
@@ -106,6 +107,7 @@ export async function getOutlookBusyForBot(
 interface GraphEvent {
   id?: string;
   isCancelled?: boolean;
+  isAllDay?: boolean;
   showAs?: string;
   start?: { dateTime?: string };
   end?: { dateTime?: string };
@@ -231,5 +233,95 @@ export async function deleteOutlookEvent(
     if (status === 404 || status === 410) return 'ok';
     if (status === 403) return 'no_access';
     throw err;
+  }
+}
+
+export async function getOutlookEvent(botId: string, eventId: string): Promise<ExternalEventState> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return { kind: 'no_connection' };
+  const token = await getValidAccessTokenMicrosoft(cred);
+  try {
+    const { data } = await withGraphRetry(() =>
+      axios.get<GraphEvent>(`${GRAPH}/me/events/${encodeURIComponent(eventId)}`, {
+        headers: { Authorization: `Bearer ${token}`, Prefer: PREFER_IMMUTABLE_UTC },
+        timeout: 12000,
+      })
+    );
+    const allDay = data.isAllDay === true;
+    return {
+      kind: 'found',
+      startISO: allDay || !data.start?.dateTime ? null : parseGraphUtc(data.start.dateTime).toISOString(),
+      endISO: allDay || !data.end?.dateTime ? null : parseGraphUtc(data.end.dateTime).toISOString(),
+      cancelled: data.isCancelled === true,
+    };
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 404 || status === 410) return { kind: 'not_found' };
+    if (status === 403) return { kind: 'no_access' };
+    throw err;
+  }
+}
+
+interface GraphDeltaPage {
+  value?: Array<{ id?: string }>;
+  '@odata.nextLink'?: string;
+  '@odata.deltaLink'?: string;
+}
+
+async function followOutlookDelta(
+  token: string,
+  url: string
+): Promise<{ eventIds: string[]; cursor: string }> {
+  const eventIds: string[] = [];
+  let next: string | undefined = url;
+  let deltaLink: string | undefined;
+  while (next) {
+    const current = next;
+    const { data } = await withGraphRetry(() =>
+      axios.get<GraphDeltaPage>(current, {
+        headers: { Authorization: `Bearer ${token}`, Prefer: PREFER_IMMUTABLE_UTC },
+        timeout: 12000,
+      })
+    );
+    for (const item of data.value ?? []) {
+      if (item.id) eventIds.push(item.id);
+    }
+    next = data['@odata.nextLink'];
+    deltaLink = data['@odata.deltaLink'] ?? deltaLink;
+  }
+  if (!deltaLink) {
+    throw new Error('Outlook calendar sync returned no deltaLink');
+  }
+  return { eventIds, cursor: deltaLink };
+}
+
+export async function listChangedOutlookEvents(
+  botId: string,
+  cursor: string | null,
+  window: { startISO: string; endISO: string }
+): Promise<ExternalChangeBatch | null> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return null;
+  const token = await getValidAccessTokenMicrosoft(cred);
+  const bootstrapUrl =
+    `${GRAPH}/me/calendarView/delta` +
+    `?startDateTime=${encodeURIComponent(window.startISO)}` +
+    `&endDateTime=${encodeURIComponent(window.endISO)}`;
+
+  const bootstrap = async (): Promise<ExternalChangeBatch> => {
+    const page = await followOutlookDelta(token, bootstrapUrl);
+    return { eventIds: [], cursor: page.cursor, bootstrapped: true };
+  };
+
+  if (!cursor) return bootstrap();
+
+  try {
+    const page = await followOutlookDelta(token, cursor);
+    return { eventIds: page.eventIds, cursor: page.cursor, bootstrapped: false };
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    const code = (err as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+    if (status !== 410 && code !== 'syncStateNotFound') throw err;
+    return bootstrap();
   }
 }

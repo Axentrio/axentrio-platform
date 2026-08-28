@@ -65,6 +65,22 @@ export class CalendarCredential {
   @Column({ type: 'varchar', length: 320, name: 'calendar_id', default: 'primary' })
   calendarId!: string;
 
+  /** Opaque provider cursor: Google `nextSyncToken`, Graph `@odata.deltaLink`. Not a credential. */
+  @Column({ type: 'text', name: 'inbound_sync_cursor', nullable: true })
+  inboundSyncCursor?: string | null;
+
+  @Column({ type: 'timestamptz', name: 'inbound_synced_at', nullable: true })
+  inboundSyncedAt?: Date | null;
+
+  @Column({ type: 'timestamptz', name: 'inbound_claimed_until', nullable: true })
+  inboundClaimedUntil?: Date | null;
+
+  @Column({ type: 'int', name: 'inbound_attempts', default: 0 })
+  inboundAttempts!: number;
+
+  @Column({ type: 'text', name: 'inbound_last_error', nullable: true })
+  inboundLastError?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

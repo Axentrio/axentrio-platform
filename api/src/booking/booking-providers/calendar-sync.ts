@@ -157,7 +157,9 @@ export async function syncCalendarReschedule(
       const provider = providerFor(ref.providerType as 'google' | 'microsoft');
       const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
       if (res === 'not_found') {
-        // Owner deleted it in the calendar → recreate (deterministic id) on its home.
+        // Live reschedule instruction: recreate the mirror. The background
+        // reconciler takes the opposite branch (cancel the booking) when the
+        // owner deleted the event with no Axentrio action in flight.
         const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
           eventId: googleEventId(bookingId),
           calendarId: ref.externalCalendarId,

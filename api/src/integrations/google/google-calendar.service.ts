@@ -16,6 +16,7 @@ import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
 import { conflictKeyFor, rekeyBotBookings } from '../../scheduler/calendar-rekey';
+import type { ExternalEventState, ExternalChangeBatch } from '../../scheduler/calendar-provider';
 
 // Scopes:
 // - calendar.events: read events (busy via events.list) + write them.
@@ -590,6 +591,118 @@ export async function deleteCalendarEvent(
     if (status === 403) return 'no_access';
     if (status !== 404 && status !== 410) throw err;
     return 'ok';
+  }
+}
+
+interface GoogleEventTimes {
+  status?: string;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+}
+
+/**
+ * Fresh read of one event. Callers must not act on a delta payload - Graph can
+ * report a move as `@removed`, and a stale notification can describe a state
+ * that no longer holds.
+ */
+export async function getCalendarEvent(
+  botId: string,
+  eventId: string,
+  calendarId?: string
+): Promise<ExternalEventState> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return { kind: 'no_connection' };
+  const target = calendarId || cred.calendarId;
+  const accessToken = await getValidAccessToken(cred);
+  try {
+    const { data } = await withGoogleRetry(() =>
+      axios.get<GoogleEventTimes>(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+      )
+    );
+    return {
+      kind: 'found',
+      startISO: data.start?.dateTime ?? null,
+      endISO: data.end?.dateTime ?? null,
+      cancelled: data.status === 'cancelled',
+    };
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 404 || status === 410) return { kind: 'not_found' };
+    if (status === 403) return { kind: 'no_access' };
+    throw err;
+  }
+}
+
+interface GoogleEventsPage {
+  items?: Array<{ id?: string }>;
+  nextPageToken?: string;
+  nextSyncToken?: string;
+}
+
+async function listGoogleEventPages(
+  accessToken: string,
+  calendarId: string,
+  extraParams: Record<string, string | number | boolean>
+): Promise<{ eventIds: string[]; cursor: string }> {
+  const eventIds: string[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
+  do {
+    const { data } = await withGoogleRetry(() =>
+      axios.get<GoogleEventsPage>(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: {
+            showDeleted: true,
+            singleEvents: true,
+            maxResults: 2500,
+            ...extraParams,
+            ...(pageToken ? { pageToken } : {}),
+          },
+          timeout: 10000,
+        }
+      )
+    );
+    for (const item of data.items ?? []) {
+      if (item.id) eventIds.push(item.id);
+    }
+    pageToken = data.nextPageToken;
+    nextSyncToken = data.nextSyncToken;
+  } while (pageToken);
+  if (!nextSyncToken) {
+    throw new Error('Google calendar sync returned no nextSyncToken');
+  }
+  return { eventIds, cursor: nextSyncToken };
+}
+
+export async function listChangedGoogleEvents(
+  botId: string,
+  cursor: string | null,
+  bootstrapFromISO: string
+): Promise<ExternalChangeBatch | null> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return null;
+  const accessToken = await getValidAccessToken(cred);
+
+  const bootstrap = () =>
+    listGoogleEventPages(accessToken, cred.calendarId, { timeMin: bootstrapFromISO });
+
+  if (!cursor) {
+    const page = await bootstrap();
+    return { eventIds: [], cursor: page.cursor, bootstrapped: true };
+  }
+
+  try {
+    const page = await listGoogleEventPages(accessToken, cred.calendarId, { syncToken: cursor });
+    return { eventIds: page.eventIds, cursor: page.cursor, bootstrapped: false };
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 410) throw err;
+    const page = await bootstrap();
+    return { eventIds: [], cursor: page.cursor, bootstrapped: true };
   }
 }
 

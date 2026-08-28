@@ -723,6 +723,26 @@ export async function adminRescheduleBooking(caller: BookingCaller, tenantId: st
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
+/** Apply an owner's external-calendar edit. Callers MUST have already passed
+ *  isCalendarSyncAllowed(tenantId) - the entitlement taxonomy forces calendarSync
+ *  off whenever bookings is off, so no second feature gate is needed here. */
+export async function externalRescheduleBooking(
+  tenantId: string,
+  bookingId: string,
+  newStartTime: string,
+  durationMin: number
+) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, { durationMin });
+}
+
+export async function externalCancelBooking(tenantId: string, bookingId: string, reason: string) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.cancelBooking(ctx, bookingId, reason);
+}
+
 export async function adminAcceptRequest(
   caller: BookingCaller,
   tenantId: string,

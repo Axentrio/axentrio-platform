@@ -340,6 +340,40 @@ export async function sendRequestNotificationEmail(params: RequestNotificationPa
   });
 }
 
+export interface CalendarChangeRejectedParams {
+  ownerEmail: string;
+  serviceName: string;
+  attemptedStart: Date;
+  restoredStart: Date;
+  timezone: string;
+  attendeeName: string;
+  /** Customer-safe short reason, e.g. 'That time overlaps another appointment.' */
+  reason: string;
+}
+
+/**
+ * Owner-only notice that an edit in the connected calendar was undone.
+ * No ICS and no customer copy - the booking did not move.
+ */
+export async function sendCalendarChangeRejectedEmail(
+  params: CalendarChangeRejectedParams
+): Promise<void> {
+  const who = params.attendeeName.trim() ? esc(params.attendeeName.trim()) : 'A customer';
+  const body =
+    `<p>We did not apply the change you made in your calendar. The event is back at the original time.</p>` +
+    `<p><strong>${esc(params.serviceName)}</strong><br/>` +
+    `Customer: ${who}<br/>` +
+    `Attempted time: ${esc(formatWhen(params.attemptedStart, params.timezone))}<br/>` +
+    `Restored time: ${esc(formatWhen(params.restoredStart, params.timezone))}</p>` +
+    `<p>${esc(params.reason)}</p>` +
+    `<p>Move this booking from the Axentrio bookings page instead.</p>`;
+  await sendOrReport('calendar change rejected email', {}, {
+    to: params.ownerEmail,
+    subject: `Calendar change not applied: ${params.serviceName}`,
+    body,
+  });
+}
+
 /** Test seam — reset the memoized EmailService. */
 export function __resetBookingEmailService(): void {
   emailService = null;

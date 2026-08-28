@@ -241,6 +241,9 @@ function CopilotTranscript({
 }) {
   const { t } = useTranslation();
   const persisted = messages ?? [];
+  const hideInflight =
+    Boolean(inflight?.assistantMessageId) &&
+    persisted.some((m) => m.id === inflight?.assistantMessageId);
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       {isLoading && (
@@ -250,7 +253,7 @@ function CopilotTranscript({
         <CopilotWelcome onAsk={onAsk} />
       )}
       {persisted.map((m) => <PersistedMessage key={m.id} msg={m} />)}
-      {inflight && <InflightAssistant inflight={inflight} />}
+      {inflight && !hideInflight && <InflightAssistant inflight={inflight} />}
       {rateLimitNotice && (
         <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
           {t('copilot.drawer.rateLimited', {

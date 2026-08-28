@@ -222,6 +222,15 @@ describe('runCopilotTurn', () => {
     expect(traces).toHaveLength(1);
     expect(traces[0].outcome).toBe('success');
     expect(traces[0].turnId).toBe(result.assistantMessageId);
+
+    // One POST persists one user+assistant pair and one trace. A live UI
+    // duplicate that vanishes on reopen is overlay state, not a second bill.
+    const rows = await AppDataSource.getRepository(CopilotMessage).find({
+      where: { conversationId: result.conversationId },
+      order: { turn: 'ASC' },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.role)).toEqual(['user', 'assistant']);
   });
 
   it('tool-calling loop: LLM requests a tool, result feeds the next iteration', async () => {

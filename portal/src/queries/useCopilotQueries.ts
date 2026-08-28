@@ -187,9 +187,10 @@ export function useSendCopilotMessageHandler() {
           }
         }
       } finally {
-        // Refresh the persisted transcript so the canonical row (with
-        // toolsCalled, outcome, tokens, latency) shows up on next mount.
-        qc.invalidateQueries({ queryKey: queryKeys.copilot.conversation() });
+        // Fire-and-forget: the drawer hides the overlay when the matching
+        // saved row arrives. Awaiting this fetch kept isStreaming true after
+        // SSE complete and blocked the composer (up to 40 pages).
+        void qc.invalidateQueries({ queryKey: queryKeys.copilot.conversation() });
       }
     },
     [qc, getToken],

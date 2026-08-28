@@ -54,6 +54,8 @@ export interface CopilotInflightTurn {
   /** Echo of the user message — used when no persisted row exists yet. */
   userMessage: string;
   assistant: CopilotInflightAssistant;
+  /** Assistant row id from `complete`; used to hide the overlay once persisted. */
+  assistantMessageId?: string;
 }
 
 export interface CopilotSuggestion {
@@ -140,6 +142,7 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
   }, [suggestionKey]);
   const close = useCallback(() => {
     abortRef.current?.abort();
+    setInflight(null);
     setIsOpen(false);
   }, []);
   const abort = useCallback(() => abortRef.current?.abort(), []);
@@ -200,11 +203,12 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
                   assistant: { ...prev.assistant, toolBadges: badges },
                 };
               }),
-            onComplete: () =>
+            onComplete: (data) =>
               setInflight((prev) =>
                 prev
                   ? {
                       ...prev,
+                      assistantMessageId: data.turnId,
                       assistant: { ...prev.assistant, outcome: 'success' },
                     }
                   : prev,

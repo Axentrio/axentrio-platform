@@ -276,13 +276,14 @@ async function followOutlookDelta(
   let next: string | undefined = url;
   let deltaLink: string | undefined;
   while (next) {
-    const current = next;
-    const { data } = await withGraphRetry(() =>
+    const current: string = next;
+    const resp = await withGraphRetry(() =>
       axios.get<GraphDeltaPage>(current, {
         headers: { Authorization: `Bearer ${token}`, Prefer: PREFER_IMMUTABLE_UTC },
         timeout: 12000,
       })
     );
+    const data: GraphDeltaPage = resp.data;
     for (const item of data.value ?? []) {
       if (item.id) eventIds.push(item.id);
     }

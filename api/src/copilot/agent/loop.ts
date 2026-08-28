@@ -37,6 +37,8 @@
  */
 import type { DataSource } from 'typeorm';
 import { logger } from '../../utils/logger';
+import { recordLlmUsage } from '../../llm/usage-recorder';
+import { DEFAULT_MODEL } from '../../llm/defaults';
 import { CopilotMessage, CopilotMessageOutcome, CopilotToolCallSummary } from '../../database/entities/CopilotMessage';
 import { CopilotReadOnlyManager } from '../manager/read-only-manager';
 import type { CopilotKnowledgeSource, Locale } from '../knowledge/types';
@@ -94,7 +96,7 @@ export interface RunCopilotTurnResult {
 export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopilotTurnResult> {
   const start = Date.now();
   const locale: Locale = args.locale ?? 'en';
-  const model = args.model ?? process.env.COPILOT_LLM_MODEL ?? 'gpt-4o-mini';
+  const model = args.model ?? process.env.COPILOT_LLM_MODEL ?? DEFAULT_MODEL;
 
   // -----------------------------------------------------------------
   // 1. Atomic pair insert. May throw ConversationClearedMidSendError.
@@ -278,6 +280,12 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
     outcome: outcome === 'pending' ? 'error' : outcome,
     retrievalMode: 'lexical',
     llmModel: model,
+  });
+  await recordLlmUsage({
+    tenantId: args.tenantId,
+    path: 'copilot',
+    model,
+    usage: { promptTokens: tokensInTotal, completionTokens: tokensOutTotal },
   });
 
   // -----------------------------------------------------------------

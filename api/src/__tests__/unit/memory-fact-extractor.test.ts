@@ -46,7 +46,7 @@ describe('extractMemoryFacts grounding', () => {
         span: ADDRESS,
       },
     });
-    const result = await extractMemoryFacts([USER]);
+    const result = await extractMemoryFacts('t1', [USER]);
     expect(result.abstained).toBe(false);
     expect(result.facts).toHaveLength(1);
     expect(result.facts[0]).toMatchObject({ factKey: 'address', value: ADDRESS, confidence: 90 });
@@ -61,7 +61,7 @@ describe('extractMemoryFacts grounding', () => {
         span: ADDRESS,
       },
     });
-    const result = await extractMemoryFacts([USER, BOT]);
+    const result = await extractMemoryFacts('t1', [USER, BOT]);
     expect(result.facts).toHaveLength(0);
     expect(result.abstained).toBe(true);
   });
@@ -75,7 +75,7 @@ describe('extractMemoryFacts grounding', () => {
         span: ADDRESS,
       },
     });
-    const result = await extractMemoryFacts([USER]);
+    const result = await extractMemoryFacts('t1', [USER]);
     expect(result.facts).toHaveLength(0);
     expect(result.abstained).toBe(true);
   });
@@ -89,7 +89,7 @@ describe('extractMemoryFacts grounding', () => {
         span: ADDRESS,
       },
     });
-    const result = await extractMemoryFacts([USER]);
+    const result = await extractMemoryFacts('t1', [USER]);
     expect(result.facts).toHaveLength(0);
     expect(result.abstained).toBe(true);
   });
@@ -104,7 +104,7 @@ describe('extractMemoryFacts grounding', () => {
         span,
       },
     });
-    const result = await extractMemoryFacts([USER]);
+    const result = await extractMemoryFacts('t1', [USER]);
     expect(result.facts).toHaveLength(0);
     expect(result.abstained).toBe(true);
   });

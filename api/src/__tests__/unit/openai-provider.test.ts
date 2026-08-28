@@ -201,4 +201,63 @@ describe('OpenAIProvider', () => {
       },
     });
   });
+
+  it('sends gpt-5 reasoning_effort from the call site and omits temperature and max_tokens', async () => {
+    delete process.env.PLATFORM_LLM_REASONING;
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+
+    await provider.chat([{ role: 'user', content: 'Hi' }], {
+      model: 'gpt-5.6-luna',
+      maxTokens: 1000,
+      temperature: 0.3,
+      jsonMode: false,
+      reasoningEffort: 'low',
+    });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.reasoning_effort).toBe('low');
+    expect(callArgs.max_completion_tokens).toBe(1000);
+    expect(callArgs.temperature).toBeUndefined();
+    expect(callArgs.max_tokens).toBeUndefined();
+  });
+
+  it('defaults gpt-5 reasoning_effort to none when the field and env are omitted', async () => {
+    delete process.env.PLATFORM_LLM_REASONING;
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+
+    await provider.chat([{ role: 'user', content: 'Hi' }], {
+      model: 'gpt-5.6-luna',
+      maxTokens: 16,
+      temperature: 0,
+      jsonMode: false,
+    });
+
+    expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe('none');
+  });
+
+  it('sends max_tokens and temperature for gpt-4o-mini', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+
+    await provider.chat([{ role: 'user', content: 'Hi' }], {
+      model: 'gpt-4o-mini',
+      maxTokens: 1000,
+      temperature: 0.3,
+      jsonMode: false,
+    });
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    expect(callArgs.max_tokens).toBe(1000);
+    expect(callArgs.temperature).toBe(0.3);
+    expect(callArgs.max_completion_tokens).toBeUndefined();
+    expect(callArgs.reasoning_effort).toBeUndefined();
+  });
 });

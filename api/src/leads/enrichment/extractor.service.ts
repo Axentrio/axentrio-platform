@@ -17,7 +17,7 @@
  *    that is the correct answer.
  */
 import { getProvider } from '../../llm/provider-factory';
-import { DEFAULT_PROVIDER } from '../../llm/defaults';
+import { DEFAULT_MODEL } from '../../llm/defaults';
 import { logger } from '../../utils/logger';
 import {
   groundField,
@@ -39,7 +39,6 @@ import {
 export const ENRICHMENT_VERSION = 1;
 export const PROMPT_VERSION = 'lead-extract-v1';
 
-const MODEL = 'gpt-4.1-mini';
 /** Long conversations are truncated to the most recent turns; see `buildPrompt`. */
 const MAX_MESSAGES = 60;
 const MAX_CHARS_PER_MESSAGE = 1200;
@@ -142,7 +141,7 @@ function abstain(truncated = false): ExtractedLead {
     enrichment: {},
     evidence: [],
     abstained: true,
-    model: MODEL,
+    model: DEFAULT_MODEL,
     promptVersion: PROMPT_VERSION,
     enrichmentVersion: ENRICHMENT_VERSION,
     language: null,
@@ -271,7 +270,7 @@ export function validateExtraction(
     enrichment,
     evidence,
     abstained,
-    model: MODEL,
+    model: DEFAULT_MODEL,
     promptVersion: PROMPT_VERSION,
     enrichmentVersion: ENRICHMENT_VERSION,
     language,
@@ -283,22 +282,22 @@ export function validateExtraction(
  * Run one extraction. Never throws — a failure abstains, because a broken extractor
  * must degrade to empty columns rather than blocking the sweep or persisting garbage.
  *
- * Deliberately does NOT pass a tenantId to `getProvider`: this is platform-side batch
- * work and must not consume the tenant's daily LLM quota, which protects their live bot.
+ * tenantId is for spend attribution only. This batch job must not consume
+ * the tenant's daily LLM quota, which protects their live bot.
  */
-export async function extractLead(messages: TranscriptMessage[]): Promise<ExtractedLead> {
+export async function extractLead(tenantId: string, messages: TranscriptMessage[]): Promise<ExtractedLead> {
   // Nothing the customer said → nothing to extract. Saves the call entirely.
   if (!messages.some((m) => m.sender === 'user')) return abstain();
 
   const { system, user, used, truncated } = buildPrompt(messages);
   try {
-    const provider = getProvider(DEFAULT_PROVIDER);
+    const provider = getProvider({ path: 'lead_extract', tenantId });
     const response = await provider.chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      { model: MODEL, maxTokens: 700, temperature: 0, jsonMode: true },
+      { model: DEFAULT_MODEL, maxTokens: 700, temperature: 0, jsonMode: true, reasoningEffort: 'low' },
     );
 
     let parsed: Record<string, unknown>;

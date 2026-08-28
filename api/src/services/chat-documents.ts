@@ -283,7 +283,7 @@ async function processChatDocument(
       return;
     }
     if (await channelScanBlocked(bytes, kind, message, session, sessionId, source)) return;
-    await persistReadyDocument(bytes, kind, messageId, sessionId);
+    await persistReadyDocument(bytes, kind, messageId, sessionId, session.tenantId);
   } catch (err) {
     await recoverProcessorFailure(messageId, sessionId, err);
   }
@@ -323,8 +323,9 @@ async function persistReadyDocument(
   kind: ExtractionKind,
   messageId: string,
   sessionId: string,
+  tenantId: string,
 ): Promise<void> {
-  const extracted = await extractByKind(bytes, kind);
+  const extracted = await extractByKind(tenantId, bytes, kind);
   const truncated = extracted.text.length > DOC_EXTRACT_MAX_CHARS
     ? extracted.text.slice(0, DOC_EXTRACT_MAX_CHARS)
     : extracted.text;
@@ -478,6 +479,7 @@ function mimeForKind(kind: ExtractionKind): string {
 }
 
 async function extractByKind(
+  tenantId: string,
   buffer: Buffer,
   kind: ExtractionKind,
 ): Promise<{ text: string; pages?: number; method: 'text' | 'vision' }> {
@@ -487,12 +489,12 @@ async function extractByKind(
   if (kind === 'pptx') return { text: await extractPptx(buffer), method: 'text' };
   if (kind === 'image') {
     const mime = getValidationService().detectMimeTypeFromBuffer(buffer) || 'image/jpeg';
-    return { text: await ocrImageWithVision(buffer, mime), method: 'vision' };
+    return { text: await ocrImageWithVision(tenantId, buffer, mime), method: 'vision' };
   }
   const digital = await extractPdfDetailed(buffer);
   const scanned = digital.text.trim().length < 40 * Math.max(digital.pages, 1);
   if (!scanned) return { text: digital.text, pages: digital.pages, method: 'text' };
-  const ocr = await ocrPdfWithVision(buffer, { maxPages: DOC_OCR_MAX_PAGES });
+  const ocr = await ocrPdfWithVision(tenantId, buffer, { maxPages: DOC_OCR_MAX_PAGES });
   return { text: ocr.text, pages: ocr.pages, method: 'vision' };
 }
 

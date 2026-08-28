@@ -132,7 +132,7 @@ a slide-in drawer. Click it, type a question, watch tokens stream in.
 **Prerequisites for end-to-end testing:**
 
 - `OPENAI_API_KEY` must be set in the API environment (Railway). The
-  Copilot uses gpt-4o-mini by default; override with
+  Copilot uses the platform default model (`gpt-5.6-luna`); override with
   `COPILOT_LLM_MODEL` env var. Without an OpenAI key the route still
   passes auth/feature gates and validation, but the agent loop will
   error on first token and the SSE stream emits

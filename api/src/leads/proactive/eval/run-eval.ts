@@ -19,7 +19,7 @@
  * no database, but run it with an explicit env if in doubt.
  */
 import { getProvider } from '../../../llm/provider-factory';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../../llm/defaults';
+import { DEFAULT_MODEL } from '../../../llm/defaults';
 import { PROACTIVE_ASK_RULE } from '../should-ask';
 import {
   PROACTIVE_EVAL_CASES,
@@ -99,7 +99,7 @@ interface CaseResult {
 }
 
 async function runCase(c: ProactiveEvalCase): Promise<CaseResult> {
-  const provider = getProvider(DEFAULT_PROVIDER);
+  const provider = getProvider({ path: 'lead_extract' });
   const system = c.askEnabled ? BASE_PROMPT + PROACTIVE_ASK_RULE : BASE_PROMPT;
   const response = await provider.chat(
     [

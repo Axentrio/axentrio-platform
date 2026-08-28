@@ -29,7 +29,7 @@
 
 import { getProvider } from './provider-factory';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from './defaults';
+import { DEFAULT_MODEL } from './defaults';
 import { ChatSession } from '../database/entities/ChatSession';
 import { validateOutput } from '../guardrails/output-validation';
 import { logger } from '../utils/logger';
@@ -90,7 +90,12 @@ export async function localizeMessage(
     const { apiKey } = await getLlmRuntimeConfigForSession(session);
     // apiKey is the stored ENCRYPTED key (2nd param); pass tenantId so this call
     // is still subject to the provider factory's rate/cost controls (codex).
-    const llm = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined, undefined, session.tenantId);
+    const llm = getProvider({
+      path: 'localize',
+      encryptedApiKey: apiKey ?? undefined,
+      tenantId: session.tenantId,
+      enforceDailyCap: true,
+    });
 
     // 1) Detect the customer's language AND the message's language in one call.
     const detResp = await llm.chat(

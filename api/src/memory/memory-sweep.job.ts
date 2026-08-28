@@ -264,7 +264,7 @@ export async function extractOne(row: ClaimedRun): Promise<{ calledModel: boolea
       return finish(false, 0, true);
     }
 
-    const result = await extractMemoryFacts(messages);
+    const result = await extractMemoryFacts(session.tenantId, messages);
     const calledModel = messages.some((m) => m.sender === 'user');
     const { id: memoryId } = await upsertMemorySubject({
       tenantId: session.tenantId,

@@ -33,7 +33,10 @@ async function runAgentLoop(
   const promptBuilder = new PromptBuilder();
   const { prompt: systemPrompt } = promptBuilder.build(tenant as any, (tenant.settings ?? {}) as any, tools);
 
-  const provider = getProvider(aiSettings.provider, aiSettings.apiKey);
+  const provider = getProvider({
+    path: 'agent_reply',
+    encryptedApiKey: aiSettings.apiKey ?? undefined,
+  });
   const model = aiSettings.model;
 
   const messages: ChatMessage[] = [

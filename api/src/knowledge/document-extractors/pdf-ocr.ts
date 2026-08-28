@@ -1,7 +1,7 @@
 import type { Canvas, SKRSContext2D } from '@napi-rs/canvas';
 import { logger } from '../../utils/logger';
 import { getProvider } from '../../llm/provider-factory';
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from '../../llm/defaults';
+import { DEFAULT_MODEL } from '../../llm/defaults';
 import type { ChatMessage } from '../../llm/llm.types';
 
 const OCR_SYS =
@@ -65,12 +65,12 @@ export function isPdfOcrAvailable(): boolean {
   return loadCanvas() !== null;
 }
 
-async function transcribeJpeg(base64: string, mimeType: string): Promise<string> {
+async function transcribeJpeg(tenantId: string | undefined, base64: string, mimeType: string): Promise<string> {
   const messages: ChatMessage[] = [
     { role: 'system', content: OCR_SYS },
     { role: 'user', content: [{ type: 'image', mimeType, data: base64 }] },
   ];
-  const provider = getProvider(DEFAULT_PROVIDER);
+  const provider = getProvider({ path: 'doc_ocr', tenantId });
   try {
     const first = await provider.chat(messages, OCR_OPTIONS);
     return (first.content || '').trim();
@@ -80,8 +80,8 @@ async function transcribeJpeg(base64: string, mimeType: string): Promise<string>
   }
 }
 
-export async function ocrImageWithVision(buffer: Buffer, mimeType: string): Promise<string> {
-  const text = await transcribeJpeg(buffer.toString('base64'), mimeType);
+export async function ocrImageWithVision(tenantId: string | undefined, buffer: Buffer, mimeType: string): Promise<string> {
+  const text = await transcribeJpeg(tenantId, buffer.toString('base64'), mimeType);
   if (!text) throw new Error('image OCR returned empty text');
   return text;
 }
@@ -160,6 +160,7 @@ export async function rasterizePdfPages(
 }
 
 export async function ocrPdfWithVision(
+  tenantId: string | undefined,
   buffer: Buffer,
   opts?: { maxPages?: number },
 ): Promise<{ text: string; pages: number }> {
@@ -172,7 +173,7 @@ export async function ocrPdfWithVision(
       continue;
     }
     try {
-      const text = await transcribeJpeg(jpeg.toString('base64'), 'image/jpeg');
+      const text = await transcribeJpeg(tenantId, jpeg.toString('base64'), 'image/jpeg');
       parts.push(`\n\n<!-- Page ${n} -->\n\n${text || `[Page ${n} could not be read]`}`);
       if (text) ok += 1;
     } catch {

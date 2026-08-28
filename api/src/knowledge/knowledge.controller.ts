@@ -490,7 +490,12 @@ export async function testChat(req: Request, res: Response) {
   } else {
     const { getProvider } = await import("../llm/provider-factory");
     // Secret apiKey path — still sourced from tenant (per architectural rule).
-    const llm = getProvider(provider, tenantApiKey ?? undefined);
+    const llm = getProvider({
+      path: 'test_chat',
+      provider,
+      encryptedApiKey: tenantApiKey ?? undefined,
+      tenantId,
+    });
 
     const systemPrompt = buildSystemPrompt(aiEff, {
       businessName: tenant.name,

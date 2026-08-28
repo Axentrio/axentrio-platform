@@ -276,7 +276,12 @@ export async function botTestChat(req: Request, res: Response) {
     });
   } else {
     const { getProvider } = await import('../llm/provider-factory');
-    const llm = getProvider(provider, tenantApiKey ?? undefined);
+    const llm = getProvider({
+      path: 'test_chat',
+      provider,
+      encryptedApiKey: tenantApiKey ?? undefined,
+      tenantId,
+    });
     const systemPrompt = buildSystemPrompt(aiEff, { businessName: tenant.name, templateBody });
     const messages = [
       { role: 'system' as const, content: systemPrompt },

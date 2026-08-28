@@ -160,7 +160,7 @@ export async function enrichOne(row: ClaimedRow): Promise<{ calledModel: boolean
     return { calledModel: false };
   }
 
-  const result = await extractLead(messages);
+  const result = await extractLead(row.tenant_id, messages);
 
   // COMPARE-AND-SWAP. The subquery is evaluated inside the UPDATE, so there is no
   // window between checking the revision and writing — unlike a read-then-write.

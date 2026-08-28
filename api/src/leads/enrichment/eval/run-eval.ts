@@ -14,6 +14,7 @@
  * no database, but run it with an explicit env if in doubt.
  */
 import { extractLead } from '../extractor.service';
+import { PLATFORM_TENANT_SENTINEL } from '../../../database/entities/LlmUsageDaily';
 import { EVAL_CASES, EVAL_THRESHOLDS, type EvalCase } from './fixtures';
 import type { ExtractedLead } from '../extractor.service';
 
@@ -86,7 +87,7 @@ function scoreCase(c: EvalCase, out: ExtractedLead): CaseResult {
 export async function runEval(): Promise<{ pass: boolean; results: CaseResult[]; summary: string }> {
   const results: CaseResult[] = [];
   for (const c of EVAL_CASES) {
-    const out = await extractLead(c.messages);
+    const out = await extractLead(PLATFORM_TENANT_SENTINEL, c.messages);
     results.push(scoreCase(c, out));
   }
 

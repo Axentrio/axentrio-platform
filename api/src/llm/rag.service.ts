@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import { DataSource } from 'typeorm';
 import { embed } from '../knowledge/embedding.service';
 import { getProvider } from './provider-factory';
@@ -6,7 +5,7 @@ import { ChatMessage } from './llm.types';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { composeSystemPrompt } from './compose-system-prompt';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from './defaults';
+import { DEFAULT_MODEL } from './defaults';
 
 interface TenantAiSettings {
   provider?: 'openai' | 'anthropic' | null;
@@ -64,21 +63,21 @@ export function needsQueryRewrite(
 }
 
 async function rewriteQuery(
+  tenantId: string,
   message: string,
   history: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<string> {
   if (!needsQueryRewrite(message, history)) return message;
 
   try {
-    const openai = new OpenAI({ apiKey: config.rag.openaiApiKey });
+    const provider = getProvider({ path: 'rag_query_rewrite', tenantId });
     const historyText = history
       .slice(-4) // last 2 exchanges max
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n');
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
+    const response = await provider.chat(
+      [
         {
           role: 'system',
           content: 'Rewrite the user\'s latest message as a standalone search query that includes all necessary context from the conversation. Output ONLY the rewritten query, nothing else. If the message is already self-contained, return it unchanged.',
@@ -88,11 +87,10 @@ async function rewriteQuery(
           content: `Conversation:\n${historyText}\n\nLatest message: ${message}`,
         },
       ],
-      temperature: 0,
-      max_tokens: 150,
-    });
+      { model: DEFAULT_MODEL, maxTokens: 150, temperature: 0, jsonMode: false },
+    );
 
-    const rewritten = response.choices[0]?.message?.content?.trim();
+    const rewritten = response.content?.trim();
     if (rewritten && rewritten !== message) {
       logger.debug(`[RAG] Query rewritten: "${message}" → "${rewritten}"`);
       return rewritten;
@@ -199,7 +197,7 @@ export async function searchKnowledge(
     return { chunks: [], totalChunks: 0 };
   }
 
-  const searchQuery = await rewriteQuery(query, conversationHistory);
+  const searchQuery = await rewriteQuery(tenantId, query, conversationHistory);
   logger.debug(`[RAG Search] Query: "${searchQuery}" | tenant: ${tenantId}`);
 
   // Bias the embedding (semantic) toward specialty vocabulary; leave the keyword
@@ -207,7 +205,7 @@ export async function searchKnowledge(
   const embedInput = specialtyTerms && specialtyTerms.length > 0
     ? `${searchQuery} ${specialtyTerms.join(' ')}`
     : searchQuery;
-  const queryEmbedding = await embed(embedInput);
+  const queryEmbedding = await embed(tenantId, embedInput);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
   const chunks = await retrieveHybridChunks(
@@ -239,9 +237,9 @@ export async function generateResponse(
   const noKnowledge = knowledgeBaseIds !== undefined && knowledgeBaseIds.length === 0;
 
   // Rewrite contextual follow-ups into standalone queries
-  const searchQuery = await rewriteQuery(customerMessage, conversationHistory);
+  const searchQuery = await rewriteQuery(tenantId, customerMessage, conversationHistory);
   logger.debug(`[RAG] Query: "${searchQuery}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
-  const queryEmbedding = await embed(searchQuery);
+  const queryEmbedding = await embed(tenantId, searchQuery);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
   logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);
 
@@ -302,13 +300,13 @@ export async function generateResponse(
   // pluck the secret from there to seed the provider. NEVER move this read
   // to bot.settings.ai.apiKey — that key is never set there.
   // Model/provider are platform-standardised — always the platform default.
-  const provider = getProvider(
-    DEFAULT_PROVIDER,
-    aiSettings.apiKey ?? undefined,
-    undefined,
+  const provider = getProvider({
+    path: 'rag_generate',
+    encryptedApiKey: aiSettings.apiKey ?? undefined,
     tenantId,
-    tenantOverride,
-  );
+    enforceDailyCap: true,
+    dailyCapOverride: tenantOverride,
+  });
   // chat() will throw LlmRateLimitError → HTTP 429 if the daily cap is reached.
   const llmResponse = await provider.chat(messages, {
     model: DEFAULT_MODEL,

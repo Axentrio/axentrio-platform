@@ -16,7 +16,7 @@ import { InsightDigest } from "../database/entities/InsightDigest";
 import { InsightExperiment } from "../database/entities/InsightExperiment";
 import { getEntitlements } from "../billing/entitlements";
 import { getProvider } from "../llm/provider-factory";
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from "../llm/defaults";
+import { DEFAULT_MODEL } from "../llm/defaults";
 import { logger } from "../utils/logger";
 import type { DigestMetrics } from "../contracts/insights";
 
@@ -116,6 +116,7 @@ function deltaPhrase(label: string, current: number, previous: number): string {
  * deterministic summary if the model call fails, so generation never throws.
  */
 async function narrate(
+  tenantId: string,
   metrics: DigestMetrics,
   topExperiment: string | null,
 ): Promise<string> {
@@ -140,7 +141,7 @@ async function narrate(
   const deterministic = `This week: ${facts}. These are observed figures, not predictions.`;
 
   try {
-    const provider = getProvider(DEFAULT_PROVIDER);
+    const provider = getProvider({ path: "insights_digest", tenantId });
     const response = await provider.chat(
       [
         {
@@ -208,7 +209,7 @@ export async function generateDigest(
       (a, b) =>
         (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3),
     )[0] ?? null;
-  const summaryMd = await narrate(metrics, topExp?.title ?? null);
+  const summaryMd = await narrate(tenantId, metrics, topExp?.title ?? null);
 
   const tenant = await AppDataSource.getRepository(Tenant).findOne({
     where: { id: tenantId },

@@ -2,7 +2,7 @@ import { AppDataSource } from "../database/data-source";
 import { CanonicalTopic } from "../database/entities/CanonicalTopic";
 import { Gap } from "../database/entities/Gap";
 import { Judgment } from "../database/entities/Judgment";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../llm/defaults";
+import { DEFAULT_MODEL } from "../llm/defaults";
 import { getProvider } from "../llm/provider-factory";
 import { logger } from "../utils/logger";
 import type { UsageTally } from "./judge.service";
@@ -76,7 +76,10 @@ export async function generateGapRecommendations(
       if (evidence.length === 0) continue;
       attempts += 1;
 
-      const response = await getProvider(DEFAULT_PROVIDER).chat(
+      const response = await getProvider({
+        path: "insights_gap_recommendation",
+        tenantId,
+      }).chat(
         [
           {
             role: "system",

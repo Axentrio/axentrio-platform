@@ -6,18 +6,18 @@
  * super-admin from admin.routes.ts.
  *
  *   GET /admin/observability/overview?days=N   (N clamped 1..90, default 7)
+ *   GET /admin/observability/llm-cost?days=N   (same clamp; reads llm_usage_daily)
  *
  * Each aggregate is independent + fail-safe: a single failing metric degrades to
  * 0/[] rather than blanking the whole snapshot. Counts are simple grouped
  * aggregates over (tenant_id, created_at)-indexed tables, run via QueryBuilder so
  * entity→column mapping handles the mixed snake_case / camelCase column naming.
  *
- * Intentionally OUT of v1 (see plan-platform-usage-readiness.md): per-call
- * cost/token spend (no durable per-call usage table — needs new instrumentation)
- * and coalescer lag. Per-tenant deliveryFailures is omitted too — message_deliveries
- * has no tenant column, so only the platform total is reported. If volume grows,
- * add a Postgres statement_timeout + a message_deliveries (status, "createdAt")
- * index for the failure query.
+ * Intentionally OUT of v1 (see plan-platform-usage-readiness.md): coalescer lag.
+ * Per-call cost/token spend lives in llm_usage_daily. Per-tenant deliveryFailures
+ * is omitted too — message_deliveries has no tenant column, so only the platform
+ * total is reported. If volume grows, add a Postgres statement_timeout + a
+ * message_deliveries (status, "createdAt") index for the failure query.
  */
 import { Router, Request, Response } from 'express';
 import { In, ObjectLiteral, Repository } from 'typeorm';
@@ -30,6 +30,7 @@ import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { MessageDelivery } from '../../database/entities/MessageDelivery';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { Tenant } from '../../database/entities/Tenant';
+import { PLATFORM_TENANT_SENTINEL } from '../../database/entities/LlmUsageDaily';
 import { AgentTrace } from '../../database/entities/AgentTrace';
 import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
 
@@ -698,6 +699,87 @@ router.get(
           supersededAt: f.superseded_at,
         };
       }),
+    });
+  }),
+);
+
+router.get(
+  '/observability/llm-cost',
+  asyncHandler(async (req: Request, res: Response) => {
+    const days = clampDays(req.query.days);
+
+    type PathRow = {
+      path: string;
+      model: string;
+      calls: string | number;
+      promptTokens: string | number;
+      completionTokens: string | number;
+      costUsd: string | number;
+    };
+    type TenantCostRow = {
+      tenantId: string;
+      name: string | null;
+      calls: string | number;
+      costUsd: string | number;
+    };
+
+    const [byPathRaw, byTenantRaw] = await Promise.all([
+      safe(
+        'llmCostByPath',
+        AppDataSource.query(
+          `SELECT path, model,
+                  SUM(calls) AS calls,
+                  SUM(prompt_tokens) AS "promptTokens",
+                  SUM(completion_tokens) AS "completionTokens",
+                  SUM(cost_usd) AS "costUsd"
+             FROM llm_usage_daily
+            WHERE day >= CURRENT_DATE - ($1::int - 1)
+            GROUP BY path, model
+            ORDER BY SUM(cost_usd) DESC`,
+          [days],
+        ) as Promise<PathRow[]>,
+        [] as PathRow[],
+      ),
+      safe(
+        'llmCostByTenant',
+        AppDataSource.query(
+          `SELECT u.tenant_id AS "tenantId",
+                  t.name AS name,
+                  SUM(u.calls) AS calls,
+                  SUM(u.cost_usd) AS "costUsd"
+             FROM llm_usage_daily u
+             LEFT JOIN tenants t ON t.id = u.tenant_id
+            WHERE u.day >= CURRENT_DATE - ($1::int - 1)
+            GROUP BY u.tenant_id, t.name
+            ORDER BY SUM(u.cost_usd) DESC
+            LIMIT 50`,
+          [days],
+        ) as Promise<TenantCostRow[]>,
+        [] as TenantCostRow[],
+      ),
+    ]);
+
+    const byPath = byPathRaw.map((row) => ({
+      path: row.path,
+      model: row.model,
+      calls: Number(row.calls),
+      promptTokens: Number(row.promptTokens),
+      completionTokens: Number(row.completionTokens),
+      costUsd: Number(row.costUsd),
+    }));
+    const byTenant = byTenantRaw.map((row) => ({
+      tenantId: row.tenantId === PLATFORM_TENANT_SENTINEL ? null : row.tenantId,
+      name: row.tenantId === PLATFORM_TENANT_SENTINEL ? 'platform' : row.name,
+      calls: Number(row.calls),
+      costUsd: Number(row.costUsd),
+    }));
+    const totalCostUsd = byPath.reduce((sum, row) => sum + row.costUsd, 0);
+
+    sendSuccess(res, {
+      days,
+      totalCostUsd,
+      byPath,
+      byTenant,
     });
   }),
 );

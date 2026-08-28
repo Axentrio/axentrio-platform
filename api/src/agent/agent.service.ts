@@ -12,7 +12,7 @@ import { getProvider } from '../llm/provider-factory';
 import { buildPromptTrace } from '../llm/block-ledger';
 import { localizeMessage } from '../llm/localize';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvider, type LLMOptions, type LLMResponse, type ToolCall } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import type { Bot, BotSettings } from '../database/entities/Bot';
@@ -892,7 +892,11 @@ export class AgentService {
         botId: bot.id,
         // Model/provider are platform-standardised — always the platform default,
         // never per-bot/tenant (see llm/defaults).
-        provider: getProvider(DEFAULT_PROVIDER, apiKey ?? undefined),
+        provider: getProvider({
+          path: 'agent_reply',
+          tenantId: tenant.id,
+          encryptedApiKey: apiKey ?? undefined,
+        }),
         model: DEFAULT_MODEL,
         tools: prepared.tools,
         trace,

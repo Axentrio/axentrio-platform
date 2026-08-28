@@ -371,7 +371,7 @@ router.post(
 
     const systemPrompt = buildSystemPrompt(ai, { businessName: 'Your Business', templateBody: body });
     const { getProvider } = await import('../../llm/provider-factory');
-    const llm = getProvider(DEFAULT_PROVIDER);
+    const llm = getProvider({ path: 'admin_template_preview' });
     const messages = [
       { role: 'system' as const, content: systemPrompt },
       ...history,

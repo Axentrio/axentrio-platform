@@ -6,9 +6,9 @@
  *     existing LLMProvider.chat() returns as a single Promise<full
  *     response>. Bolting `stream: true` onto LLMProvider would change
  *     every caller.
- *   - The Copilot model + provider are env-pinned (gpt-4o-mini in
- *     v1) — we don't need the per-tenant key/provider switching the
- *     existing `getProvider()` factory does.
+ *   - The Copilot model + provider are env-pinned (platform default
+ *     in v1, overridable via COPILOT_LLM_MODEL) — we don't need the
+ *     per-tenant key/provider switching the existing `getProvider()` factory does.
  *   - This abstraction is the one place the agent loop touches the
  *     LLM. Unit tests mock this interface; the OpenAI impl is the
  *     only prod-shaped class.
@@ -55,6 +55,7 @@ export interface CopilotLlmStreamOptions {
   model: string;
   maxTokens: number;
   temperature: number;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   tools?: CopilotLlmToolDefinition[];
   /** Tied to the SSE socket so abort propagates upstream. */
   signal: AbortSignal;

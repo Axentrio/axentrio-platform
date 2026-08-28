@@ -259,6 +259,7 @@ async function judgeAndPersistSession(
   layer1.judged += 1;
 
   const verdict = await judgeTranscript(
+    tenantId,
     transcript,
     session.status === "handoff",
     tally,

@@ -145,6 +145,7 @@ function applyChunkUsage(chunk: OpenAI.Chat.ChatCompletionChunk, totals: UsageTo
 
 /** Fold one chunk into `acc`; returns the delta text to emit, if any. */
 function consumeChunk(chunk: OpenAI.Chat.ChatCompletionChunk, acc: StreamAccumulator): string | undefined {
+  applyChunkUsage(chunk, acc.usage);
   const choice = chunk.choices?.[0];
   if (!choice) return undefined;
   const delta = choice.delta as OpenAIChoiceDelta;
@@ -153,7 +154,6 @@ function consumeChunk(chunk: OpenAI.Chat.ChatCompletionChunk, acc: StreamAccumul
     accumulateToolCallDeltas(acc.toolsByIndex, delta.tool_calls);
   }
   acc.finishReason = resolveFinishReason(acc.finishReason, choice.finish_reason);
-  applyChunkUsage(chunk, acc.usage);
 
   return delta?.content;
 }
@@ -195,12 +195,14 @@ export class OpenAICopilotLlmStream implements CopilotLlmStream {
     messages: CopilotLlmMessage[],
     options: CopilotLlmStreamOptions,
   ): AsyncIterable<CopilotLlmStreamEvent> {
+    const isGpt5 = /^gpt-5/.test(options.model);
     const stream = await this.client.chat.completions.create(
       {
         model: options.model,
         messages: messages.map(toOpenAIMessage) as OpenAI.Chat.ChatCompletionMessageParam[],
-        max_tokens: options.maxTokens,
-        temperature: options.temperature,
+        ...(isGpt5
+          ? { max_completion_tokens: options.maxTokens, reasoning_effort: options.reasoningEffort ?? 'none' }
+          : { max_tokens: options.maxTokens, temperature: options.temperature }),
         tools: toOpenAITools(options),
         stream: true,
         // Without `include_usage` the streamed response carries no

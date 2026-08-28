@@ -19,7 +19,7 @@
  * few minutes costs a rounding error against a single customer conversation.
  */
 import { getProvider } from './provider-factory';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from './defaults';
+import { DEFAULT_MODEL } from './defaults';
 import { isUpstreamQuotaExhausted, isUpstreamRateLimit } from './upstream-error';
 import { getEmailService } from '../automations';
 import { logger } from '../utils/logger';
@@ -46,7 +46,7 @@ export async function probeProviderHealth(): Promise<ProviderHealth> {
   try {
     // No tenantId: skip the per-tenant rate-limit wrapper, so a busy tenant's
     // budget can never make the platform look unhealthy.
-    const provider = getProvider(DEFAULT_PROVIDER);
+    const provider = getProvider({ path: 'health_probe' });
     await provider.chat([{ role: 'user', content: 'ping' }], {
       model: DEFAULT_MODEL,
       // Not 1. A gpt-5 model rejects a 1-token ceiling outright ("Could not

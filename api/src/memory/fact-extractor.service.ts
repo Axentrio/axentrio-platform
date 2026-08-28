@@ -5,7 +5,7 @@
  * platform provider (no tenant key), JSON transcript, temperature 0, fail-closed.
  */
 import { getProvider } from '../llm/provider-factory';
-import { DEFAULT_PROVIDER } from '../llm/defaults';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { logger } from '../utils/logger';
 import { sanitizeForLine } from '../llm/compose-system-prompt';
 import { normalizePersonEmail, normalizePersonPhone } from '../leads/person-key';
@@ -24,7 +24,6 @@ import {
 export const MEMORY_EXTRACTION_VERSION = 1;
 export const MEMORY_PROMPT_VERSION = 'customer-memory-v1';
 
-const MODEL = 'gpt-4.1-mini';
 const MAX_MESSAGES = 60;
 const MAX_CHARS_PER_MESSAGE = 1200;
 const CONFIDENCE_FLOOR = 60;
@@ -63,7 +62,7 @@ function abstain(): ExtractedMemory {
   return {
     facts: [],
     abstained: true,
-    model: MODEL,
+    model: DEFAULT_MODEL,
     promptVersion: MEMORY_PROMPT_VERSION,
     extractionVersion: MEMORY_EXTRACTION_VERSION,
   };
@@ -116,7 +115,7 @@ export function groundMemoryFacts(
   return facts;
 }
 
-export async function extractMemoryFacts(messages: TranscriptMessage[]): Promise<ExtractedMemory> {
+export async function extractMemoryFacts(tenantId: string, messages: TranscriptMessage[]): Promise<ExtractedMemory> {
   if (!messages.some((m) => m.sender === 'user')) return abstain();
 
   const truncated = messages.length > MAX_MESSAGES;
@@ -129,13 +128,13 @@ export async function extractMemoryFacts(messages: TranscriptMessage[]): Promise
   const user = JSON.stringify({ conversation: payload });
 
   try {
-    const provider = getProvider(DEFAULT_PROVIDER);
+    const provider = getProvider({ path: 'memory_extract', tenantId });
     const response = await provider.chat(
       [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: user },
       ],
-      { model: MODEL, maxTokens: 900, temperature: 0, jsonMode: true },
+      { model: DEFAULT_MODEL, maxTokens: 900, temperature: 0, jsonMode: true, reasoningEffort: 'low' },
     );
 
     let parsed: Record<string, unknown>;
@@ -159,7 +158,7 @@ export async function extractMemoryFacts(messages: TranscriptMessage[]): Promise
     return {
       facts,
       abstained: facts.length === 0,
-      model: MODEL,
+      model: DEFAULT_MODEL,
       promptVersion: MEMORY_PROMPT_VERSION,
       extractionVersion: MEMORY_EXTRACTION_VERSION,
     };

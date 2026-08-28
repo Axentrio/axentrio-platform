@@ -58,13 +58,14 @@ function buildApp(tenantId: string, limit: number) {
 
   app.post('/llm', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const provider = getProvider(
-        'openai',
-        undefined,
-        'test-key',         // bypass encrypted-key path
-        tenantId,           // <- enables the rate-limit wrapper
-        limit,              // <- per-tenant override used as the cap
-      );
+      const provider = getProvider({
+        provider: 'openai',
+        rawApiKey: 'test-key',
+        tenantId,
+        enforceDailyCap: true,
+        dailyCapOverride: limit,
+        path: 'test_chat',
+      });
       const msgs: ChatMessage[] = [{ role: 'user', content: req.body?.message ?? 'hi' }];
       const result = await provider.chat(msgs, {
         model: 'gpt-4o-mini',

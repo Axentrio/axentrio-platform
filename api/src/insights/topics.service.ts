@@ -10,7 +10,7 @@
 import { AppDataSource } from '../database/data-source';
 import { CanonicalTopic } from '../database/entities/CanonicalTopic';
 import { getProvider } from '../llm/provider-factory';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { normalizeTopic, validateTopic, TopicRejectReason } from './topic-validation';
 import type { UsageTally } from './judge.service';
 import { logger } from '../utils/logger';
@@ -60,7 +60,7 @@ export async function canonicalizeTopic(
   }
 
   // Registry miss with existing entries → one merge-or-create LLM call.
-  const provider = getProvider(DEFAULT_PROVIDER);
+  const provider = getProvider({ path: 'insights_topic_merge', tenantId });
   const response = await provider.chat(
     [
       { role: 'system', content: MERGE_PROMPT },
@@ -73,7 +73,13 @@ export async function canonicalizeTopic(
         }),
       },
     ],
-    { model: DEFAULT_MODEL, maxTokens: 200, temperature: 0, jsonMode: true },
+    {
+      model: DEFAULT_MODEL,
+      maxTokens: 200,
+      temperature: 0,
+      jsonMode: true,
+      reasoningEffort: 'low',
+    },
   );
 
   if (tally) {

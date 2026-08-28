@@ -51,11 +51,11 @@ async function extractDocumentText(
  * Document-level summary chunk for broad queries. The embedding is null when the
  * content is too short to be worth embedding.
  */
-async function buildSummaryChunk(title: string, summaryText: string) {
+async function buildSummaryChunk(tenantId: string, title: string, summaryText: string) {
   const content = summaryText
     ? `[Document: ${title}] ${summaryText}`
     : `[Document: ${title}]`;
-  const embedding = content.length > 10 ? await embed(content) : null;
+  const embedding = content.length > 10 ? await embed(tenantId, content) : null;
   return { content, embedding };
 }
 
@@ -101,7 +101,7 @@ export function createIngestionProcessor(
       const verbatim = doc.metadata?.verbatim === true;
       const preprocessResult = verbatim
         ? passthrough(text, 'Verbatim document, published exactly as written.')
-        : await preprocess(text);
+        : await preprocess(tenantId, text);
       const processedText = preprocessResult.transformedText;
       logger.info(
         `[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})${verbatim ? ' [verbatim]' : ''}`,
@@ -151,7 +151,7 @@ export function createIngestionProcessor(
         chunks = chunks.slice(0, config.rag.maxChunksPerDoc);
       }
 
-      const embeddings = await embedBatch(chunks.map((c) => c.content));
+      const embeddings = await embedBatch(tenantId, chunks.map((c) => c.content));
 
       const freshDoc = await docRepo.findOne({
         where: { id: documentId, tenantId },
@@ -166,6 +166,7 @@ export function createIngestionProcessor(
       // Create document-level summary chunk for broad queries
       const { content: summaryContent, embedding: summaryEmbedding } =
         await buildSummaryChunk(
+          tenantId,
           doc.title,
           preprocessResult.qualityReport.contentSummary,
         );

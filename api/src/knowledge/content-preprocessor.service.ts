@@ -1,12 +1,13 @@
 /**
  * Content Preprocessor Service
  * Classifies document content and transforms non-prose sections into
- * searchable prose using gpt-4o-mini. Produces a quality report.
+ * searchable prose using the platform default model. Produces a quality report.
  */
 
-import OpenAI from 'openai';
-import { config } from '../config/environment';
 import { logger } from '../utils/logger';
+import { getProvider } from '../llm/provider-factory';
+import { DEFAULT_MODEL } from '../llm/defaults';
+import type { LLMProvider } from '../llm/llm.types';
 import {
   CLASSIFICATION_PROMPT,
   TRANSFORMATION_PROMPT,
@@ -59,27 +60,9 @@ export interface PreprocessResult {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MODEL = 'gpt-4o-mini';
 const CLASSIFICATION_SAMPLE_CHARS = 2000;
 const MIN_CHARS_FOR_PREPROCESSING = 200;  // Skip classification for very short docs
 const MAX_CHARS_PER_LLM_CALL = 50000;
-
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
-
-let openaiClient: OpenAI | null = null;
-
-function getClient(): OpenAI {
-  if (!openaiClient) {
-    const apiKey = config.rag.openaiApiKey;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is required for content preprocessing');
-    }
-    openaiClient = new OpenAI({ apiKey });
-  }
-  return openaiClient;
-}
 
 /**
  * The result for text that must reach the index exactly as written.
@@ -116,7 +99,7 @@ export function passthrough(rawText: string, qualityReason: string): PreprocessR
  * Classifies content type and transforms non-prose sections into searchable prose.
  * Returns transformed text and a quality report (minus chunksCreated, which is set later).
  */
-export async function preprocess(rawText: string): Promise<PreprocessResult> {
+export async function preprocess(tenantId: string, rawText: string): Promise<PreprocessResult> {
   const originalCharCount = rawText.length;
 
   // Skip preprocessing for very short documents — not worth the LLM call
@@ -126,12 +109,13 @@ export async function preprocess(rawText: string): Promise<PreprocessResult> {
   }
 
   try {
+    const provider = getProvider({ path: 'kb_preprocess', tenantId });
     // Step 1: Classify
-    const classification = await classify(rawText);
+    const classification = await classify(provider, rawText);
     logger.info(`[Preprocessor] Classified as "${classification.contentType}" (confidence: ${classification.confidence})`);
 
     // Step 2: Transform based on classification
-    const { transformedText, stats } = await transform(rawText, classification);
+    const { transformedText, stats } = await transform(provider, rawText, classification);
 
     // Step 3: Build quality report
     const processedCharCount = transformedText.length;
@@ -180,22 +164,18 @@ export async function preprocess(rawText: string): Promise<PreprocessResult> {
 // Classification
 // ---------------------------------------------------------------------------
 
-async function classify(rawText: string): Promise<ClassificationResult> {
+async function classify(provider: LLMProvider, rawText: string): Promise<ClassificationResult> {
   const sample = rawText.slice(0, CLASSIFICATION_SAMPLE_CHARS);
-  const client = getClient();
 
-  const response = await client.chat.completions.create({
-    model: MODEL,
-    messages: [
+  const response = await provider.chat(
+    [
       { role: 'system', content: 'You are a document classifier. Respond with ONLY valid JSON.' },
       { role: 'user', content: CLASSIFICATION_PROMPT + sample },
     ],
-    temperature: 0.1,
-    max_tokens: 1000,
-    response_format: { type: 'json_object' },
-  });
+    { model: DEFAULT_MODEL, maxTokens: 1000, temperature: 0.1, jsonMode: true },
+  );
 
-  const content = response.choices[0]?.message?.content;
+  const content = response.content;
   if (!content) {
     throw new Error('Empty classification response from LLM');
   }
@@ -224,6 +204,7 @@ interface TransformStats {
 }
 
 async function transform(
+  provider: LLMProvider,
   rawText: string,
   classification: ClassificationResult
 ): Promise<{ transformedText: string; stats: TransformStats }> {
@@ -285,7 +266,7 @@ async function transform(
         // Split into batches if section is too large
         const batches = splitIntoBatches(sectionText, MAX_CHARS_PER_LLM_CALL);
         for (const batch of batches) {
-          const transformed = await callLLM(prompt + batch);
+          const transformed = await callLLM(provider, prompt + batch);
           parts.push(transformed);
           stats.transformedInputChars += batch.length;
           stats.transformedOutputChars += transformed.length;
@@ -316,17 +297,13 @@ async function transform(
   };
 }
 
-async function callLLM(prompt: string): Promise<string> {
-  const client = getClient();
+async function callLLM(provider: LLMProvider, prompt: string): Promise<string> {
+  const response = await provider.chat(
+    [{ role: 'user', content: prompt }],
+    { model: DEFAULT_MODEL, maxTokens: 4000, temperature: 0.3, jsonMode: false },
+  );
 
-  const response = await client.chat.completions.create({
-    model: MODEL,
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.3,
-    max_tokens: 4000,
-  });
-
-  return response.choices[0]?.message?.content?.trim() || '';
+  return response.content.trim() || '';
 }
 
 function splitIntoBatches(text: string, maxChars: number): string[] {

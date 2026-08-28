@@ -5,32 +5,40 @@ import { AnthropicProvider } from './anthropic.provider';
 import { config } from '../config/environment';
 import { decrypt } from '../utils/encryption';
 import { checkAndIncrement } from './llm-rate-limit';
+import { DEFAULT_PROVIDER } from './defaults';
+import { recordLlmUsage } from './usage-recorder';
+import type { LlmCallPath } from './pricing';
 
 const providerCache = new Map<string, LLMProvider>();
 
-/**
- * Returns an LLMProvider for the given provider key.
- *
- * When `tenantId` is supplied, the returned provider is wrapped so that
- * every `chat()` call first consults the per-tenant daily LLM rate limit
- * (see ./llm-rate-limit.ts). On limit reached the wrapper throws an
- * LlmRateLimitError, which the global error handler serializes as HTTP 429.
- *
- * Callers without a tenant context (e.g. internal utility calls) may omit
- * tenantId — those calls bypass the per-tenant cap. Future passes should
- * thread tenantId through agent.service.ts and knowledge.controller's
- * testChat path so the cap covers every LLM exit point.
- */
-export function getProvider(
-  provider: 'openai' | 'anthropic',
-  encryptedApiKey?: string,
-  rawApiKey?: string,
-  tenantId?: string,
-  tenantLimitOverride?: number | null,
-): LLMProvider {
-  const base = getBaseProvider(provider, encryptedApiKey, rawApiKey);
-  if (!tenantId) return base;
-  return wrapWithRateLimit(base, tenantId, tenantLimitOverride);
+export function getProvider(opts: {
+  provider?: 'openai' | 'anthropic';
+  encryptedApiKey?: string;
+  rawApiKey?: string;
+  /** Tenant the spend is attributed to. Omit only for platform work with no tenant. */
+  tenantId?: string;
+  /** Apply the per-tenant daily LLM CALL cap. Requires tenantId. */
+  enforceDailyCap?: boolean;
+  dailyCapOverride?: number | null;
+  path: LlmCallPath;
+}): LLMProvider {
+  const provider = opts.provider ?? DEFAULT_PROVIDER;
+  const base = getBaseProvider(provider, opts.encryptedApiKey, opts.rawApiKey);
+  return {
+    async chat(messages: ChatMessage[], options: LLMOptions): Promise<LLMResponse> {
+      if (opts.enforceDailyCap && opts.tenantId) {
+        await checkAndIncrement(opts.tenantId, opts.dailyCapOverride);
+      }
+      const res = await base.chat(messages, options);
+      await recordLlmUsage({
+        tenantId: opts.tenantId,
+        path: opts.path,
+        model: options.model,
+        usage: res.usage,
+      });
+      return res;
+    },
+  };
 }
 
 function getBaseProvider(
@@ -63,23 +71,4 @@ function getBaseProvider(
 
   providerCache.set(cacheKey, instance);
   return instance;
-}
-
-/**
- * Decorate an LLMProvider so chat() checks the per-tenant daily cap first.
- * The wrapper is intentionally NOT cached — the tenantId differs per request
- * and the underlying base provider IS cached, so this is cheap.
- */
-function wrapWithRateLimit(
-  base: LLMProvider,
-  tenantId: string,
-  tenantLimitOverride?: number | null,
-): LLMProvider {
-  return {
-    async chat(messages: ChatMessage[], options: LLMOptions): Promise<LLMResponse> {
-      // Throws LlmRateLimitError on cap reached; fails open on Redis errors.
-      await checkAndIncrement(tenantId, tenantLimitOverride);
-      return base.chat(messages, options);
-    },
-  };
 }

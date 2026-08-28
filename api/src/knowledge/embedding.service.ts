@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
+import { recordLlmUsage } from '../llm/usage-recorder';
 
 const EMBEDDING_MODEL = 'text-embedding-3-large';
 const EMBEDDING_DIMENSIONS = 1536; // Reduced from 3072 for pgvector HNSW index compatibility
@@ -18,7 +19,7 @@ function getClient(): OpenAI {
   return openaiClient;
 }
 
-export async function embed(text: string): Promise<number[]> {
+export async function embed(tenantId: string | undefined, text: string): Promise<number[]> {
   const truncated = text.slice(0, MAX_INPUT_CHARS);
   const client = getClient();
   const response = await client.embeddings.create({
@@ -26,10 +27,16 @@ export async function embed(text: string): Promise<number[]> {
     input: truncated,
     dimensions: EMBEDDING_DIMENSIONS,
   });
+  await recordLlmUsage({
+    tenantId,
+    path: 'embed_query',
+    model: EMBEDDING_MODEL,
+    usage: { promptTokens: response.usage?.prompt_tokens ?? 0, completionTokens: 0 },
+  });
   return response.data[0].embedding;
 }
 
-export async function embedBatch(texts: string[]): Promise<number[][]> {
+export async function embedBatch(tenantId: string | undefined, texts: string[]): Promise<number[][]> {
   const client = getClient();
   const batchSize = config.rag.embeddingBatchSize;
   const results: number[][] = [];
@@ -40,6 +47,12 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
       model: EMBEDDING_MODEL,
       input: batch,
       dimensions: EMBEDDING_DIMENSIONS,
+    });
+    await recordLlmUsage({
+      tenantId,
+      path: 'embed_ingest',
+      model: EMBEDDING_MODEL,
+      usage: { promptTokens: response.usage?.prompt_tokens ?? 0, completionTokens: 0 },
     });
     for (const item of response.data) {
       results.push(item.embedding);

@@ -100,6 +100,7 @@ describe('AgentService', () => {
     if (result.type === 'response') expect(result.content).toBe('Hello! How can I help?');
     expect(mockMeteringRecord).toHaveBeenCalled();
     expect(mockTraceSave).toHaveBeenCalled();
+    expect((mockProvider.chat as any).mock.calls[0][1].reasoningEffort).toBeUndefined();
   });
 
   it('persists the prompt-build ledger on the saved trace', async () => {

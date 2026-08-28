@@ -50,6 +50,7 @@ export interface LLMOptions {
   maxTokens: number;
   temperature: number;
   jsonMode: boolean;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   tools?: ToolDefinition[];
 }
 

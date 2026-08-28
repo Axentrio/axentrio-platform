@@ -73,8 +73,8 @@ export class OpenAIProvider implements LLMProvider {
       ...(isGpt5
         ? {
             max_completion_tokens: options.maxTokens,
-            reasoning_effort: (process.env.PLATFORM_LLM_REASONING || 'none') as
-              'none' | 'low' | 'medium' | 'high',
+            reasoning_effort: options.reasoningEffort ?? ((process.env.PLATFORM_LLM_REASONING || 'none') as
+              'none' | 'low' | 'medium' | 'high'),
           }
         : {
             max_tokens: options.maxTokens,

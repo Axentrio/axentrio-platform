@@ -8,7 +8,7 @@
  * (ADR-0010) and are validated per ADR-0009 before any registry contact.
  */
 import { getProvider } from '../llm/provider-factory';
-import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { logger } from '../utils/logger';
 
 export interface TranscriptMessage {
@@ -144,22 +144,27 @@ function extractSentimentTheme(
  * pending (it does — the watermark only advances past judged sessions).
  */
 export async function judgeTranscript(
+  tenantId: string,
   messages: TranscriptMessage[],
   isHandoff: boolean,
   tally?: UsageTally,
   opts?: { withSentiment?: boolean; withSentimentThemes?: boolean },
 ): Promise<JudgeVerdict> {
-  // Deliberately NOT passing tenantId to getProvider: the nightly judge is
-  // platform-side batch work and must not consume the tenant's dailyLlmCalls
-  // quota (which protects their live bot). Cost is tracked via the tally
-  // (ADR-0006: "monitor token spend via billing telemetry").
-  const provider = getProvider(DEFAULT_PROVIDER);
+  // tenantId is for spend attribution only. The nightly judge must not consume
+  // the tenant's dailyLlmCalls quota, which protects their live bot.
+  const provider = getProvider({ path: 'insights_judge', tenantId });
   const response = await provider.chat(
     [
       { role: 'system', content: selectSystemPrompt(opts) },
       { role: 'user', content: renderTranscript(messages) },
     ],
-    { model: DEFAULT_MODEL, maxTokens: 500, temperature: 0, jsonMode: true },
+    {
+      model: DEFAULT_MODEL,
+      maxTokens: 500,
+      temperature: 0,
+      jsonMode: true,
+      reasoningEffort: 'low',
+    },
   );
 
   if (tally) {

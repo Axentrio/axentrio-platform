@@ -331,6 +331,7 @@ describe("refreshTenantInsights — sentiment tiers", () => {
     await refreshTenantInsights(T, NOW);
 
     expect(judgeMock).toHaveBeenCalledWith(
+      T,
       expect.any(Array),
       false,
       expect.any(Object),
@@ -419,7 +420,7 @@ describe("refreshTenantInsights — watermark semantics", () => {
       session("fail", "2026-06-11T11:00:00Z"),
       session("ok2", "2026-06-11T12:00:00Z"),
     ];
-    judgeMock.mockImplementation(async (transcript: Array<{ id: string }>) => {
+    judgeMock.mockImplementation(async (_tenantId: string, transcript: Array<{ id: string }>) => {
       if (transcript[0]?.id === "m-fail") throw new Error("LLM exploded");
       return {
         hadQuestion: false,
@@ -573,7 +574,7 @@ describe("refreshTenantInsights — transcript decryption", () => {
       ],
     };
     await refreshTenantInsights(T, NOW);
-    const transcript = judgeMock.mock.calls[0][0];
+    const transcript = judgeMock.mock.calls[0][1];
     expect(transcript[0].content).toBe("plain:CIPHER");
     expect(transcript[1].content).toBe("already-plain");
   });

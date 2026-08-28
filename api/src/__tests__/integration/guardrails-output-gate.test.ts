@@ -63,6 +63,30 @@ describe('guardrails · applyOutputGuardrails (integration)', () => {
     expect(logs.length).toBe(0);
   });
 
+  it('strips asterisks from a clean reply and does not log', async () => {
+    const { tenant, session } = await setup(true);
+    const r = await applyOutputGuardrails({
+      tenantId: tenant.id, session, channel: 'whatsapp',
+      content: 'De dienst *Prijs test vast* kost *€75 inclusief btw* en duurt 30 minuten.',
+      fallbackMessage: FALLBACK, generationPath: 'coalescer',
+    });
+    expect(r.blocked).toBe(false);
+    expect(r.content).toBe('De dienst Prijs test vast kost €75 inclusief btw en duurt 30 minuten.');
+
+    const logs = await logRepo().find({ where: { conversationId: session.id } });
+    expect(logs.length).toBe(0);
+  });
+
+  it('does not strip asterisks from the enforced fallback', async () => {
+    const { tenant, session } = await setup(true);
+    const r = await applyOutputGuardrails({
+      tenantId: tenant.id, session, channel: 'whatsapp',
+      content: BAD_REPLY, fallbackMessage: 'Hold on *please*', generationPath: 'coalescer',
+    });
+    expect(r.blocked).toBe(true);
+    expect(r.content).toBe('Hold on *please*');
+  });
+
   it('ENFORCE: blocks a fake booking confirmation when no booking was recorded', async () => {
     const { tenant, session } = await setup(true);
     const r = await applyOutputGuardrails({

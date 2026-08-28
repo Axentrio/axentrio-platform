@@ -15,6 +15,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { GuardrailOutputLog } from '../database/entities/GuardrailOutputLog';
 import { logger } from '../utils/logger';
 import { validateOutput, type OutputValidationContext } from './output-validation';
+import { stripReplyAsterisks } from './strip-reply-asterisks';
 import { isGuardrailsEnforcing } from './inbound-guardrails.service';
 
 export type GenerationPath = 'coalescer' | 'legacy' | 'rag' | 'n8n';
@@ -35,7 +36,7 @@ export interface OutputGateInput {
 }
 
 export interface OutputGateDecision {
-  /** What the caller should actually send (original, or fallback when blocked). */
+  /** What the caller must send. Use this even when blocked is false. The gate may strip markdown. */
   content: string;
   /** True when an enforced violation replaced the reply with the fallback. */
   blocked: boolean;
@@ -72,12 +73,19 @@ async function writeOutputLog(args: {
 /**
  * Validate an AI-generated reply before sending. Returns the content to send and
  * whether it was blocked. FAIL-OPEN: any unexpected error returns the original
- * content unchanged — we never drop/replace a reply because validation threw.
+ * content with asterisks stripped. We never drop or replace a reply because validation threw.
+ *
+ * Callers MUST send `decision.content`. The unblocked path is not a no-op: it
+ * strips `*` wrappers the model adds around names and prices.
+ *
+ * Strip runs once, outside the try, so a validation or config error still
+ * returns cleaned text. The enforced fallback is owner-authored and stays as written.
  */
 export async function applyOutputGuardrails(input: OutputGateInput): Promise<OutputGateDecision> {
+  const cleaned = stripReplyAsterisks(input.content);
   try {
     const result = validateOutput(input.content, input.validationContext);
-    if (result.ok) return { content: input.content, blocked: false };
+    if (result.ok) return { content: cleaned, blocked: false };
 
     const families = [...new Set(result.violations.map((v) => v.family))];
     const reasons = result.violations.map((v) => `${v.family}: ${v.evidence}`);
@@ -97,7 +105,7 @@ export async function applyOutputGuardrails(input: OutputGateInput): Promise<Out
       logger.info('[guardrails] output flagged (shadow — reply still sent)', {
         sessionId: input.session.id, path: input.generationPath, families,
       });
-      return { content: input.content, blocked: false };
+      return { content: cleaned, blocked: false };
     }
 
     logger.warn('[guardrails] output blocked — replacing reply with fallback', {
@@ -105,9 +113,9 @@ export async function applyOutputGuardrails(input: OutputGateInput): Promise<Out
     });
     return { content: input.fallbackMessage, blocked: true };
   } catch (err) {
-    logger.warn('[guardrails] output validation errored — sending original', {
+    logger.warn('[guardrails] output validation errored - sending stripped reply', {
       sessionId: input.session?.id, err,
     });
-    return { content: input.content, blocked: false };
+    return { content: cleaned, blocked: false };
   }
 }

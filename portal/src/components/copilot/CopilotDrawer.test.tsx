@@ -173,3 +173,46 @@ describe('CopilotDrawer transcript', () => {
     expect(screen.getAllByText(REPLY)).toHaveLength(1);
   });
 });
+
+function TripleSendControl() {
+  const { send } = useCopilotDrawer();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void send('What plan am I on?');
+        void send('What plan am I on?');
+        void send('What plan am I on?');
+      }}
+    >
+      triple send
+    </button>
+  );
+}
+
+describe('CopilotDrawer send re-entry', () => {
+  it('starts only one turn when send is called three times in the same tick', async () => {
+    let release!: () => void;
+    sendHandler.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <CopilotDrawerProvider>
+          <TripleSendControl />
+        </CopilotDrawerProvider>
+      </MemoryRouter>,
+    );
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'triple send' }));
+    expect(sendHandler).toHaveBeenCalledTimes(1);
+    release();
+    await waitFor(() => {
+      expect(sendHandler).toHaveBeenCalledTimes(1);
+    });
+  });
+});

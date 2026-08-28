@@ -112,6 +112,7 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
   >(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const sendingRef = useRef(false);
   const sendHandler = useSendCopilotMessageHandler();
   const clearMutation = useClearCopilotConversation();
   const hasFeature = useHasFeature('platformAssistant');
@@ -149,7 +150,8 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
 
   const send = useCallback(
     async (message: string) => {
-      if (!message.trim() || isStreaming) return;
+      if (!message.trim() || sendingRef.current) return;
+      sendingRef.current = true;
       setRateLimitNotice(null);
       setIsStreaming(true);
       setInflight({
@@ -273,11 +275,12 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
           );
         }
       } finally {
+        sendingRef.current = false;
         setIsStreaming(false);
         abortRef.current = null;
       }
     },
-    [isStreaming, sendHandler],
+    [sendHandler],
   );
 
   const clear = useCallback(async () => {

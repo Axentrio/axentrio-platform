@@ -584,7 +584,7 @@ async function dispatchLegacyAgentResult(args: {
         await sendBotMessage(
           session,
           botParticipantId,
-          result.content,
+          guard.content,
           { quickReplies: result.quickReplies, affordance: result.affordance },
           result.offer,
           fence,
@@ -642,7 +642,7 @@ async function dispatchLegacyAgentResult(args: {
           handedOff = true;
         }
       } else {
-        await sendBotMessage(session, botParticipantId, result.message, undefined, undefined, fence);
+        await sendBotMessage(session, botParticipantId, guard.content, undefined, undefined, fence);
       }
       break;
     }
@@ -1450,7 +1450,7 @@ async function guardTurnReply(
     content: reply.content, fallbackMessage, generationPath: 'coalescer',
     validationContext: result.validationContext,
   });
-  if (!guard.blocked) return reply;
+  if (!guard.blocked) return { ...reply, content: guard.content };
   return {
     content: guard.content,
     handoffReason: 'bot_error',

@@ -16,6 +16,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
+import { decrypt } from '../../utils/encryption';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { MessageDelivery } from '../../database/entities/MessageDelivery';
@@ -110,6 +111,17 @@ async function countBotMessages(sessionId: string): Promise<number> {
     .where('m.sessionId = :sid', { sid: sessionId })
     .andWhere("p.type = 'bot'")
     .getCount();
+}
+
+async function botMessageContents(sessionId: string): Promise<string[]> {
+  const msgs = await messageRepo
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .where('m.sessionId = :sid', { sid: sessionId })
+    .andWhere("p.type = 'bot'")
+    .orderBy('m.createdAt', 'ASC')
+    .getMany();
+  return msgs.map((m) => (m.contentEncrypted ? decrypt(m.content) : m.content));
 }
 
 beforeEach(() => {
@@ -648,5 +660,27 @@ describe('runTurn — local autoresponders (parity with the legacy path)', () =>
 
     expect(status).toBe('answered');
     expect(runMock).toHaveBeenCalled(); // off-hours no longer short-circuits the agent
+  });
+});
+
+describe('runTurn — strips model asterisks on the way out', () => {
+  it('saves and sends WhatsApp text without the stars around names and prices', async () => {
+    const starred = 'De dienst *Prijs test vast* kost *€75 inclusief btw* en duurt 30 minuten.';
+    const clean = 'De dienst Prijs test vast kost €75 inclusief btw en duurt 30 minuten.';
+    const runMock = vi.fn().mockResolvedValue({ type: 'response', content: starred });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'whatsapp' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const pending = await createTestMessage(session.id, tenant.id, user.id, { content: 'Wat kost Prijs test vast?' });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(await runTurn(fresh, pending)).toBe('answered');
+
+    expect(await botMessageContents(session.id)).toEqual([clean]);
+    const outbound = mockRouteOutboundMessage.mock.calls[0][0] as { content?: string };
+    expect(outbound.content).toBe(clean);
+    expect(outbound.content).not.toContain('*');
   });
 });

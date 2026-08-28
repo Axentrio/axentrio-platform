@@ -19,6 +19,10 @@ import type { LLMProvider } from '../../llm/llm.types';
 
 const mockProvider: LLMProvider = { chat: vi.fn() };
 vi.mock('../../llm/provider-factory', () => ({ getProvider: () => mockProvider }));
+vi.mock('../../billing/token-budget.service', () => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../llm/block-ledger', () => ({ buildPromptTrace: () => ({}) }));
 vi.mock('../../llm/rag.service', () => ({ searchKnowledge: async () => ({ chunks: [], totalChunks: 0 }) }));
 vi.mock('../../knowledge/bot-knowledge-bases', () => ({ getBotKnowledgeBaseIds: async () => [] }));

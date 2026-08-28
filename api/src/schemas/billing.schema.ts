@@ -18,6 +18,12 @@ export const startCheckoutSchema = z.object({
   cancelUrl: z.string().url(),
 });
 
+export const startTokenTopUpSchema = z.object({
+  packId: z.enum(['tokens_5m', 'tokens_15m']),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
 export const portalSessionSchema = z.object({
   returnUrl: z.string().url(),
 });

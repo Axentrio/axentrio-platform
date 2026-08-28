@@ -73,7 +73,7 @@ function essentialResponse(overrides?: Partial<EntitlementsResponse>): Entitleme
       planId: 'essential',
       billable: true,
       activeModules: [],
-      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
+      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000, monthlyTokens: 5_000_000 },
       features: { ...ESSENTIAL_FEATURES },
       entitledFeatures: { ...ESSENTIAL_FEATURES },
       featureToggles: {},

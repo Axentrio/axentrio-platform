@@ -25,21 +25,6 @@ describe('MeteringService', () => {
     expect(mockHincrby).toHaveBeenCalledTimes(4); // prompt, completion, total, calls
   });
 
-  it('checks budget against daily total', async () => {
-    mockHgetall.mockResolvedValue({ total: '45000' });
-    const overBudget = await metering.isOverBudget('tenant-1', 50000);
-    expect(overBudget).toBe(false);
-
-    mockHgetall.mockResolvedValue({ total: '55000' });
-    const overBudget2 = await metering.isOverBudget('tenant-1', 50000);
-    expect(overBudget2).toBe(true);
-  });
-
-  it('returns false (not over budget) when no budget set', async () => {
-    const overBudget = await metering.isOverBudget('tenant-1', undefined);
-    expect(overBudget).toBe(false);
-  });
-
   it('generates correct Redis key with date', async () => {
     await metering.record('tenant-1', { promptTokens: 10, completionTokens: 5 });
     const today = new Date().toISOString().split('T')[0];

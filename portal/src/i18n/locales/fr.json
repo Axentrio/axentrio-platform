@@ -810,7 +810,17 @@
       },
       "loadError": "Impossible de charger l'état de la facturation : {{error}}",
       "unknownError": "erreur inconnue",
-      "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement."
+      "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement.",
+      "tokens": {
+        "title": "Usage IA",
+        "usedOfAllowance": "{{used}} tokens utilisés sur {{allowance}} pour cette période",
+        "periodEnds": "Cette période se termine le {{date}}",
+        "warn": "Vous avez utilisé 80 % de votre quota d'usage IA.",
+        "paused": "L'assistant est en pause. Achetez plus de tokens pour continuer.",
+        "buyPack": "Acheter {{tokens}} tokens - {{price}} €",
+        "unavailable": "Le rechargement n'est pas encore disponible.",
+        "toppedUp": "Pack de tokens reçu. L'usage se met à jour lorsque Stripe confirme le paiement."
+      }
     },
     "webhooks": {
       "title": "Envoyer les leads vers votre CRM",

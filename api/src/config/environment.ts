@@ -208,6 +208,8 @@ const envSchema = z.object({
   STRIPE_PRICE_ESSENTIAL: z.string().optional(),
   STRIPE_PRICE_PRO: z.string().optional(),
   STRIPE_PRICE_ENTERPRISE: z.string().optional(),
+  STRIPE_PRICE_TOKENS_5M: z.string().optional(),
+  STRIPE_PRICE_TOKENS_15M: z.string().optional(),
   BILLING_TRIAL_DAYS: z.string().default('14').transform(Number),
   ONBOARDING_PRO_TRIAL: z.enum(['true', 'false']).optional(),
   // Escape hatch: when 'true', boot proceeds without Stripe creds.
@@ -560,6 +562,8 @@ export const config = {
       priceEssential: env.STRIPE_PRICE_ESSENTIAL ?? '',
       pricePro: env.STRIPE_PRICE_PRO ?? '',
       priceEnterprise: env.STRIPE_PRICE_ENTERPRISE ?? '',
+      priceTokens5m: env.STRIPE_PRICE_TOKENS_5M ?? '',
+      priceTokens15m: env.STRIPE_PRICE_TOKENS_15M ?? '',
     },
     billit: {
       apiUrl: env.BILLIT_API_URL,

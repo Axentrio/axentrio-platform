@@ -34,20 +34,6 @@ export class MeteringService {
     }
   }
 
-  async isOverBudget(tenantId: string, dailyBudget: number | undefined | null): Promise<boolean> {
-    if (!dailyBudget) return false;
-
-    try {
-      const key = this.getDailyKey(tenantId);
-      const data = await this.redis.hgetall(key);
-      const totalUsed = parseInt(data?.total || '0', 10);
-      return totalUsed >= dailyBudget;
-    } catch (error) {
-      logger.warn('Failed to check token budget', { tenantId, error });
-      return false; // Fail open — don't block conversations because metering is down
-    }
-  }
-
   async getDailyUsage(tenantId: string): Promise<{ prompt: number; completion: number; total: number; calls: number }> {
     const key = this.getDailyKey(tenantId);
     const data = await this.redis.hgetall(key);

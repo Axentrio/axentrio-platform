@@ -111,6 +111,7 @@ export const queryKeys = {
   billing: {
     all: () => ['billing'] as const,
     state: () => [...queryKeys.billing.all(), 'state'] as const,
+    tokenUsage: () => [...queryKeys.billing.all(), 'tokenUsage'] as const,
   },
   entitlements: {
     all: () => ['entitlements'] as const,

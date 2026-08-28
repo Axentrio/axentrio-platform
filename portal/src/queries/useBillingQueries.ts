@@ -12,6 +12,9 @@ import { toast } from 'sonner';
 import { AxiosError } from 'axios';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
+import type { TokenPackDto, TokenUsageResponse } from '@contracts/token-usage';
+
+export type { TokenPackDto, TokenUsageResponse };
 
 export type BillingTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
@@ -84,6 +87,30 @@ export function useStartCheckout() {
     },
     onError: (err) => {
       toast.error(`Couldn't start checkout: ${describeBillingError(err)}`);
+    },
+  });
+}
+
+export function useTokenUsage() {
+  return useQuery({
+    queryKey: queryKeys.billing.tokenUsage(),
+    queryFn: () => api.get<TokenUsageResponse>('/billing/token-usage'),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useStartTokenTopUp() {
+  return useMutation({
+    mutationFn: (input: {
+      packId: TokenPackDto['id'];
+      successUrl: string;
+      cancelUrl: string;
+    }) => api.post<{ url: string }>('/billing/token-topup-session', input),
+    onSuccess: (result) => {
+      window.location.assign(result.url);
+    },
+    onError: (err) => {
+      toast.error(`Couldn't start token top-up: ${describeBillingError(err)}`);
     },
   });
 }

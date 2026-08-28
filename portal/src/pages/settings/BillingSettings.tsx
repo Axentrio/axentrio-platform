@@ -29,6 +29,7 @@ import {
   Clock,
   CreditCard,
   ExternalLink,
+  Gauge,
   Loader2,
   Mail,
   ReceiptText,
@@ -49,6 +50,8 @@ import {
   useChangePlan,
   useOpenPortal,
   useStartCheckout,
+  useStartTokenTopUp,
+  useTokenUsage,
   useUndoCancel,
   useUndoPendingChange,
   useUpdateBillingEmail,
@@ -581,6 +584,102 @@ const BillingHistory: React.FC<{ state: BillingState }> = ({ state }) => {
   );
 };
 
+const TokenUsageCard: React.FC = () => {
+  const { t } = useTranslation();
+  const { data, isLoading } = useTokenUsage();
+  const topUp = useStartTokenTopUp();
+
+  if (isLoading) {
+    return (
+      <Card variant="glass">
+        <CardContent>
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-text-secondary" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!data || data.unlimited) return null;
+
+  const paused = data.usedTokens > data.hardStopThreshold;
+  const warn = !paused && data.percentUsed >= 80;
+  const pool = data.allowanceTokens + data.topUpTokens;
+  const barWidth = Math.min(Math.max(data.percentUsed, 0), 100);
+
+  return (
+    <Card variant="glass">
+      <CardHeader>
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <Gauge className="w-5 h-5" />
+          {t('settings.billing.tokens.title')}
+        </h2>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="flex items-baseline justify-between gap-2 text-sm">
+              <span className="text-text-secondary">
+                {t('settings.billing.tokens.usedOfAllowance', {
+                  used: data.usedTokens.toLocaleString(),
+                  allowance: pool.toLocaleString(),
+                })}
+              </span>
+              <span className="font-medium text-text-primary">{data.percentUsed}%</span>
+            </div>
+            <div className="mt-2 h-2 rounded-full bg-zinc-700/50 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${paused ? 'bg-red-400' : warn ? 'bg-amber-400' : 'bg-primary-400'}`}
+                style={{ width: `${barWidth}%` }}
+              />
+            </div>
+          </div>
+          <div className="text-sm text-text-secondary">
+            {t('settings.billing.tokens.periodEnds', { date: formatDate(data.periodEnd) })}
+          </div>
+          {warn && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <span>{t('settings.billing.tokens.warn')}</span>
+            </div>
+          )}
+          {paused && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <span>{t('settings.billing.tokens.paused')}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {data.packs.map((pack) => (
+              <Button
+                key={pack.id}
+                variant="default"
+                disabled={!pack.available || topUp.isPending}
+                onClick={() =>
+                  topUp.mutate({
+                    packId: pack.id,
+                    successUrl: `${window.location.origin}/settings/billing?toppedup=1`,
+                    cancelUrl: window.location.href,
+                  })
+                }
+              >
+                {topUp.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                {t('settings.billing.tokens.buyPack', {
+                  tokens: pack.tokens.toLocaleString(),
+                  price: pack.priceEur,
+                })}
+              </Button>
+            ))}
+          </div>
+          {data.packs.every((pack) => !pack.available) && (
+            <p className="text-xs text-text-muted">{t('settings.billing.tokens.unavailable')}</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -591,6 +690,10 @@ const BillingSettings: React.FC = () => {
 
   const subscribedJustNow = useMemo(
     () => new URLSearchParams(window.location.search).get('subscribed') === '1',
+    [],
+  );
+  const toppedUpJustNow = useMemo(
+    () => new URLSearchParams(window.location.search).get('toppedup') === '1',
     [],
   );
 
@@ -623,8 +726,15 @@ const BillingSettings: React.FC = () => {
           {t('settings.billing.subscribedJustNow')}
         </div>
       )}
+      {toppedUpJustNow && (
+        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          {t('settings.billing.tokens.toppedUp')}
+        </div>
+      )}
 
       <CurrentPlanCard state={state} />
+      <TokenUsageCard />
       <ActionRow state={state} />
       <SubscribeTiles state={state} />
       <BillingEmailEditor state={state} />

@@ -17,6 +17,7 @@ import { ChatMessage, ContentPart, ToolDefinition, contentToText, type LLMProvid
 import { ChatSession } from '../database/entities/ChatSession';
 import type { Bot, BotSettings } from '../database/entities/Bot';
 import { getEntitlements } from '../billing/entitlements';
+import { isTokenBudgetExhausted, recordTokenUsage } from '../billing/token-budget.service';
 import type { FeatureKey } from '../billing/types';
 import { shouldAskForContact } from '../leads/proactive/should-ask';
 import type { ToolAdapter, Affordance, BookingAddressReplyFact, ToolResult } from './tool-adapter';
@@ -1369,7 +1370,7 @@ export class AgentService {
   /** One turn of the agent loop: budget, provider call, then tools or the reply. */
   private async runIteration(i: number, ctx: RunLoopContext, state: RunLoopState): Promise<IterationOutcome> {
     // Budget check
-    if (await this.metering.isOverBudget(ctx.tenant.id, (ctx.aiSettings as any)?.dailyTokenBudget)) {
+    if (await isTokenBudgetExhausted(ctx.tenant.id)) {
       return { kind: 'done', result: this.budgetExceededResult(ctx, state) };
     }
 
@@ -1390,6 +1391,7 @@ export class AgentService {
 
     // Record metering
     await this.metering.record(ctx.tenant.id, response.usage);
+    await recordTokenUsage(ctx.tenant.id, response.usage);
 
     // Build trace entry
     const traceEntry: AgentTrace['iterations'][0] = {

@@ -39,6 +39,7 @@ import { planIdForStripePriceId } from './plans';
 import { getStripeClient } from './providers/stripe';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { InternalPlanId, NormalizedEvent } from './types';
+import { creditTokenTopUp } from './token-budget.service';
 
 interface ResolvedRow {
   row: TenantBillingAccount;
@@ -743,6 +744,34 @@ async function handleCheckoutSessionCompleted(
     expand: ['subscription', 'customer'],
   });
 
+  if (session.mode === 'payment' && session.metadata?.kind === 'token_topup') {
+    const tenantId = resolveCheckoutTenantId(session);
+    if (!tenantId) {
+      logger.error('checkout.session.completed: token top-up cannot resolve tenant', {
+        eventId: event.providerEventId,
+        sessionId,
+      });
+      return { outcome: 'token_topup_unresolved_tenant', meta: { sessionId } };
+    }
+    const tokens = Number(session.metadata.tokens);
+    if (!Number.isFinite(tokens) || tokens <= 0) {
+      logger.error('checkout.session.completed: token top-up has unusable token count', {
+        eventId: event.providerEventId,
+        sessionId,
+        raw: session.metadata.tokens,
+      });
+      return {
+        outcome: 'token_topup_invalid_tokens',
+        meta: { sessionId, raw: session.metadata.tokens },
+      };
+    }
+    await creditTokenTopUp(tenantId, tokens, manager);
+    return {
+      outcome: 'token_topup_credited',
+      meta: { tenantId, tokens, packId: session.metadata.packId },
+    };
+  }
+
   if (session.mode !== 'subscription' || !session.subscription) {
     logger.info('checkout.session.completed ignored (non-subscription mode)', {
       eventId: event.providerEventId,
@@ -828,7 +857,7 @@ function resolveCheckoutTenantId(session: StripeNS.Checkout.Session): string | n
     return typeof md?.tenantId === 'string' ? md.tenantId : null;
   })();
   const subscriptionTenantId = (() => {
-    if (typeof session.subscription === 'string') return null;
+    if (!session.subscription || typeof session.subscription === 'string') return null;
     // Expanded subscription: same reason as the customer cast above.
     const subscription = session.subscription as { metadata?: Record<string, string> };
     const md = subscription.metadata;

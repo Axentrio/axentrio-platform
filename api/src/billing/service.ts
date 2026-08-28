@@ -35,6 +35,7 @@ import { getBillingProvider } from './provider-registry';
 import { getStripeClient } from './providers/stripe';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { BillingProviderError, CheckoutablePlanId } from './types';
+import { TOKEN_PACKS, type TokenPackId } from './token-packs';
 import { config } from '../config/environment';
 import { expireOnboardingProTrial } from './onboarding-trial';
 
@@ -215,6 +216,22 @@ export async function startCheckout(
   return stripeProvider.createCheckoutSession({
     tenantId,
     planId,
+    successUrl: returnUrls.successUrl,
+    cancelUrl: returnUrls.cancelUrl,
+  });
+}
+
+export async function startTokenTopUp(
+  tenantId: string,
+  packId: TokenPackId,
+  returnUrls: { successUrl: string; cancelUrl: string },
+): Promise<{ url: string }> {
+  if (!(packId in TOKEN_PACKS)) {
+    throw new BillingProviderError('token_pack_invalid', STRIPE, { packId });
+  }
+  return getBillingProvider(STRIPE).createTokenTopUpSession({
+    tenantId,
+    packId,
     successUrl: returnUrls.successUrl,
     cancelUrl: returnUrls.cancelUrl,
   });

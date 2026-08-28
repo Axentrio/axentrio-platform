@@ -230,6 +230,13 @@ export class Tenant {
   @Column({ type: 'int', nullable: true, name: 'daily_llm_call_limit' })
   dailyLlmCallLimit?: number | null;
 
+  /**
+   * Enterprise-only monthly LLM token allowance override. NULL means use the
+   * plan catalog. Non-enterprise tenants ignore this column.
+   */
+  @Column({ type: 'int', nullable: true, name: 'monthly_token_limit' })
+  monthlyTokenLimit?: number | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'custom_domain' })
   customDomain?: string;
 

@@ -59,6 +59,7 @@ export async function lockTenantEntitlements(
     {
       maxSessions: tenant.maxSessions ?? null,
       dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+      monthlyTokenLimit: tenant.monthlyTokenLimit ?? null,
     },
     // Count gates only read .limits (feature overrides can't touch limits),
     // but resolve with full feature context so the returned .features is

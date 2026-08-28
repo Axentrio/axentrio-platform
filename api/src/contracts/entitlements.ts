@@ -104,6 +104,8 @@ export interface PlanLimits {
   bots?: number | null;
   sessions: number | null;
   dailyLlmCalls: number | null;
+  /** Monthly LLM token allowance (prompt + completion). null = unlimited, 0 = blocked. */
+  monthlyTokens: number | null;
 }
 
 export interface EntitlementsDto {

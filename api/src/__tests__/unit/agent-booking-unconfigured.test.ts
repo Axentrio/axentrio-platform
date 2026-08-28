@@ -13,6 +13,10 @@ const mockGetProvider = vi.fn().mockReturnValue(mockProvider);
 vi.mock('../../llm/provider-factory', () => ({
   getProvider: (...args: any[]) => mockGetProvider(...args),
 }));
+vi.mock('../../billing/token-budget.service', () => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Per-entity repo stub: AvailabilityRule.findOne + ServiceType.find are what the
 // booking-config check reads. Each test sets these before calling run().

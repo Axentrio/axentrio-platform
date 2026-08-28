@@ -34,6 +34,7 @@ import { MessageDelivery } from './entities/MessageDelivery';
 import { BookingLog } from './entities/BookingLog';
 import { AgentTrace } from './entities/AgentTrace';
 import { TenantBillingAccount } from './entities/TenantBillingAccount';
+import { TenantTokenBalance } from './entities/TenantTokenBalance';
 import { LlmUsageDaily } from './entities/LlmUsageDaily';
 import { BillingEvent } from './entities/BillingEvent';
 import { StripeWebhookEvent } from './entities/StripeWebhookEvent';
@@ -124,6 +125,7 @@ export const AppDataSource = new DataSource({
     BookingLog,
     AgentTrace,
     TenantBillingAccount,
+    TenantTokenBalance,
     LlmUsageDaily,
     BillingEvent,
     StripeWebhookEvent,

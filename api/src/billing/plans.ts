@@ -23,7 +23,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     rank: 0,
     priceEurMonthly: null,
     isSelfServeCheckoutable: false,
-    limits: { agents: 0, bots: 0, sessions: 0, dailyLlmCalls: 0 },
+    limits: { agents: 0, bots: 0, sessions: 0, dailyLlmCalls: 0, monthlyTokens: 0 },
     features: {
       unifiedInbox: false,
       bookings: false,
@@ -60,7 +60,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     priceEurMonthly: 49.99,
     isSelfServeCheckoutable: true,
     // Epic: Essential includes "1 AI chatbot".
-    limits: { agents: 1, bots: 1, sessions: null, dailyLlmCalls: null },
+    limits: { agents: 1, bots: 1, sessions: null, dailyLlmCalls: null, monthlyTokens: 5_000_000 },
     features: {
       unifiedInbox: true,
       bookings: false,
@@ -102,7 +102,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     // Epic: Pro includes "1 AI chatbot". Same numeric count as Essential; Pro's
     // bot differentiation lives in feature flags (bookings, platformAssistant, etc.),
     // not in raw bot count.
-    limits: { agents: 1, bots: 1, sessions: null, dailyLlmCalls: null },
+    limits: { agents: 1, bots: 1, sessions: null, dailyLlmCalls: null, monthlyTokens: 15_000_000 },
     features: {
       unifiedInbox: true,
       bookings: true,
@@ -145,7 +145,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     isSelfServeCheckoutable: true,
     // Enterprise includes 3 AI chatbots (raised from 2 for bot-templates —
     // tenants bind up to 3 template-backed bots; .scratch/plan-bot-templates.md T2).
-    limits: { agents: 2, bots: 3, sessions: null, dailyLlmCalls: null },
+    limits: { agents: 2, bots: 3, sessions: null, dailyLlmCalls: null, monthlyTokens: 40_000_000 },
     features: {
       unifiedInbox: true,
       bookings: true,

@@ -37,6 +37,7 @@
  */
 import type { DataSource } from 'typeorm';
 import { logger } from '../../utils/logger';
+import { recordTokenUsage } from '../../billing/token-budget.service';
 import { recordLlmUsage } from '../../llm/usage-recorder';
 import { DEFAULT_MODEL } from '../../llm/defaults';
 import { CopilotMessage, CopilotMessageOutcome, CopilotToolCallSummary } from '../../database/entities/CopilotMessage';
@@ -280,6 +281,10 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
     outcome: outcome === 'pending' ? 'error' : outcome,
     retrievalMode: 'lexical',
     llmModel: model,
+  });
+  await recordTokenUsage(args.tenantId, {
+    promptTokens: tokensInTotal,
+    completionTokens: tokensOutTotal,
   });
   await recordLlmUsage({
     tenantId: args.tenantId,

@@ -52,14 +52,18 @@ describe('PLANS catalog', () => {
     expect(PLANS.free.limits.agents).toBe(0);
     expect(PLANS.free.limits.bots).toBe(0);
     expect(PLANS.free.limits.dailyLlmCalls).toBe(0);
+    expect(PLANS.free.limits.monthlyTokens).toBe(0);
     // Essential and Pro: one human support agent + one AI bot per the epic.
     expect(PLANS.essential.limits.agents).toBe(1);
     expect(PLANS.essential.limits.bots).toBe(1);
+    expect(PLANS.essential.limits.monthlyTokens).toBe(5_000_000);
     expect(PLANS.pro.limits.agents).toBe(1);
     expect(PLANS.pro.limits.bots).toBe(1);
+    expect(PLANS.pro.limits.monthlyTokens).toBe(15_000_000);
     // Enterprise: 2 agents; 3 bots (raised for bot-templates).
     expect(PLANS.enterprise.limits.agents).toBe(2);
     expect(PLANS.enterprise.limits.bots).toBe(3);
+    expect(PLANS.enterprise.limits.monthlyTokens).toBe(40_000_000);
   });
 
   it('gates features per tier', () => {
@@ -173,20 +177,24 @@ describe('entitlementsFor', () => {
     const pro = entitlementsFor('pro', {
       maxSessions: 9999,
       dailyLlmCallLimit: 99999,
+      monthlyTokenLimit: 99_000_000,
     });
     // Pro plan defaults stand regardless of override columns.
     expect(pro.limits.sessions).toBe(PLANS.pro.limits.sessions);
     expect(pro.limits.dailyLlmCalls).toBe(PLANS.pro.limits.dailyLlmCalls);
+    expect(pro.limits.monthlyTokens).toBe(PLANS.pro.limits.monthlyTokens);
   });
 
   it('merges Enterprise override columns on top of plan defaults', () => {
     const ent = entitlementsFor('enterprise', {
       maxSessions: 2500,
       dailyLlmCallLimit: 50000,
+      monthlyTokenLimit: 80_000_000,
     });
     expect(ent.planId).toBe('enterprise');
     expect(ent.limits.sessions).toBe(2500);
     expect(ent.limits.dailyLlmCalls).toBe(50000);
+    expect(ent.limits.monthlyTokens).toBe(80_000_000);
     // agents + bots have no override path; use the plan defaults.
     expect(ent.limits.agents).toBe(2);
     expect(ent.limits.bots).toBe(3);
@@ -196,9 +204,11 @@ describe('entitlementsFor', () => {
     const ent = entitlementsFor('enterprise', {
       maxSessions: null,
       dailyLlmCallLimit: null,
+      monthlyTokenLimit: null,
     });
     expect(ent.limits.sessions).toBeNull();
     expect(ent.limits.dailyLlmCalls).toBeNull();
+    expect(ent.limits.monthlyTokens).toBe(40_000_000);
   });
 
   it('throws on an unknown tier', () => {

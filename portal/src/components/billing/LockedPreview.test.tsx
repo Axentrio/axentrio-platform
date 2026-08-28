@@ -68,7 +68,7 @@ function entitlements(): EntitlementsResponse {
       planId: 'essential',
       billable: true,
       activeModules: [],
-      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
+      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000, monthlyTokens: 5_000_000 },
       features: { ...PREVIEW_FEATURES },
       entitledFeatures: { ...PREVIEW_FEATURES },
       featureToggles: {},
@@ -81,7 +81,7 @@ function entitlements(): EntitlementsResponse {
         rank: 1,
         priceEurMonthly: 29.99,
         isSelfServeCheckoutable: true,
-        limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
+        limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000, monthlyTokens: 5_000_000 },
         features: {
           unifiedInbox: true,
           bookings: false,
@@ -116,7 +116,7 @@ function entitlements(): EntitlementsResponse {
         rank: 2,
         priceEurMonthly: 99.99,
         isSelfServeCheckoutable: true,
-        limits: { agents: 10, sessions: 25, dailyLlmCalls: 10000 },
+        limits: { agents: 10, sessions: 25, dailyLlmCalls: 10000, monthlyTokens: 15_000_000 },
         features: {
           unifiedInbox: true,
           bookings: true,
@@ -151,7 +151,7 @@ function entitlements(): EntitlementsResponse {
         rank: 3,
         priceEurMonthly: null,
         isSelfServeCheckoutable: false,
-        limits: { agents: null, sessions: null, dailyLlmCalls: null },
+        limits: { agents: null, sessions: null, dailyLlmCalls: null, monthlyTokens: null },
         features: {
           unifiedInbox: true,
           bookings: true,

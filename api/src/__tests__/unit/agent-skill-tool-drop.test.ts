@@ -12,6 +12,10 @@ import type { LLMProvider } from '../../llm/llm.types';
 
 const mockProvider: LLMProvider = { chat: vi.fn() };
 vi.mock('../../llm/provider-factory', () => ({ getProvider: () => mockProvider }));
+vi.mock('../../billing/token-budget.service', () => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Unconfigured: no availability rule, no bookable services.
 vi.mock('../../database/data-source', () => ({

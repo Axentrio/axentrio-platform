@@ -5,7 +5,9 @@
  *
  * Endpoint surface:
  *   GET  /state                       → billing snapshot for the Billing page
+ *   GET  /token-usage                 → current-period LLM token usage + packs
  *   POST /checkout-session            → start Stripe Checkout
+ *   POST /token-topup-session         → start a one-off token pack Checkout
  *   POST /portal-session              → open Stripe Customer Portal
  *   POST /change-plan                 → upgrade / downgrade
  *   POST /cancel                      → cancel at period end
@@ -42,6 +44,7 @@ import {
   changePlanSchema,
   portalSessionSchema,
   startCheckoutSchema,
+  startTokenTopUpSchema,
   updateBillingEmailSchema,
   updateVatIdSchema,
 } from '../schemas/billing.schema';
@@ -52,12 +55,16 @@ import {
   getBillingState,
   openCustomerPortal,
   startCheckout,
+  startTokenTopUp,
   undoCancel,
   undoPendingChange,
   updateBillingEmail,
   updateVatId,
 } from '../billing/service';
 import { BillingProviderError } from '../billing/types';
+import { getTokenBudget } from '../billing/token-budget.service';
+import { TOKEN_PACKS, tokenPackPriceId, type TokenPackId } from '../billing/token-packs';
+import type { TokenUsageResponse } from '../contracts/token-usage';
 
 const router = Router();
 
@@ -116,6 +123,57 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const state = await getBillingState(req.tenantId!);
     sendSuccess(res, state);
+  }),
+);
+
+router.get(
+  '/token-usage',
+  asyncHandler(async (req: Request, res: Response) => {
+    const snapshot = await getTokenBudget(req.tenantId!);
+    const pool = snapshot.allowanceTokens + snapshot.topUpTokens;
+    const percentUsed =
+      snapshot.unlimited || pool <= 0
+        ? 0
+        : Math.round((snapshot.usedTokens / pool) * 100);
+    const payload: TokenUsageResponse = {
+      unlimited: snapshot.unlimited,
+      allowanceTokens: snapshot.allowanceTokens,
+      topUpTokens: snapshot.topUpTokens,
+      usedTokens: snapshot.usedTokens,
+      percentUsed,
+      warnThreshold: snapshot.warnThreshold,
+      hardStopThreshold: snapshot.hardStopThreshold,
+      periodStart: snapshot.periodStart.toISOString(),
+      periodEnd: snapshot.periodEnd.toISOString(),
+      packs: Object.values(TOKEN_PACKS).map((pack) => ({
+        id: pack.id,
+        tokens: pack.tokens,
+        priceEur: pack.priceEur,
+        available: Boolean(tokenPackPriceId(pack.id)),
+      })),
+    };
+    sendSuccess(res, payload);
+  }),
+);
+
+router.post(
+  '/token-topup-session',
+  validate(startTokenTopUpSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { packId, successUrl, cancelUrl } = req.body as {
+      packId: TokenPackId;
+      successUrl: string;
+      cancelUrl: string;
+    };
+    const result = await callBillingService(() =>
+      startTokenTopUp(req.tenantId!, packId, { successUrl, cancelUrl }),
+    );
+    logger.info('Billing: token top-up session created', {
+      tenantId: req.tenantId,
+      packId,
+      actorId: req.userId,
+    });
+    sendSuccess(res, result);
   }),
 );
 

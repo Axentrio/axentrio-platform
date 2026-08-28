@@ -3,6 +3,7 @@
  * Plan: .scratch/plan-billing.md § BillingProvider interface.
  */
 import type { PlanFeatures, TenantFeatureToggles } from '../contracts/entitlements';
+import type { TokenPackId } from './token-packs';
 
 export type { PlanFeatures };
 
@@ -94,6 +95,13 @@ export interface BillingProvider {
     cancelUrl: string;
   }): Promise<{ url: string }>;
 
+  createTokenTopUpSession(input: {
+    tenantId: string;
+    packId: TokenPackId;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ url: string }>;
+
   createPortalSession(input: {
     tenantId: string;
     returnUrl: string;
@@ -175,6 +183,8 @@ export interface Entitlements {
     bots: number | null;
     sessions: number | null;
     dailyLlmCalls: number | null;
+    /** Monthly LLM token allowance (prompt + completion). null = unlimited, 0 = blocked. */
+    monthlyTokens: number | null;
   };
   /**
    * Flat boolean feature map — the shape is the WIRE CONTRACT shared with

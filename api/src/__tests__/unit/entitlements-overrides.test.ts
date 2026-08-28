@@ -18,7 +18,7 @@ import { PLANS, overrideExceedsTier } from '../../billing/plans';
 import { OPT_IN_FEATURES } from '../../billing/feature-toggles';
 import type { FeatureOverride } from '../../database/entities/Tenant';
 
-const NO_LIMITS = { maxSessions: null, dailyLlmCallLimit: null };
+const NO_LIMITS = { maxSessions: null, dailyLlmCallLimit: null, monthlyTokenLimit: null };
 
 function override(value: boolean): FeatureOverride {
   return { value, reason: 'test', setBy: 'admin@test', setAt: '2026-06-10T00:00:00Z' };
@@ -171,11 +171,12 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
     it('enterprise numeric column overrides still apply independently', () => {
       const e = entitlementsFor(
         'enterprise',
-        { maxSessions: 999, dailyLlmCallLimit: 5000 },
+        { maxSessions: 999, dailyLlmCallLimit: 5000, monthlyTokenLimit: 80_000_000 },
         { status: 'active', featureOverrides: { crm: override(false) } },
       );
       expect(e.limits.sessions).toBe(999);
       expect(e.limits.dailyLlmCalls).toBe(5000);
+      expect(e.limits.monthlyTokens).toBe(80_000_000);
       expect(e.features.crm).toBe(false);
     });
   });

@@ -811,7 +811,17 @@
       },
       "loadError": "Facturatiestatus kon niet geladen worden: {{error}}",
       "unknownError": "onbekende fout",
-      "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt."
+      "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt.",
+      "tokens": {
+        "title": "AI-gebruik",
+        "usedOfAllowance": "{{used}} van {{allowance}} tokens gebruikt in deze periode",
+        "periodEnds": "Deze periode eindigt op {{date}}",
+        "warn": "U hebt 80% van uw AI-gebruikstoelage gebruikt.",
+        "paused": "De assistent is gepauzeerd. Koop meer tokens om verder te gaan.",
+        "buyPack": "Koop {{tokens}} tokens - €{{price}}",
+        "unavailable": "Opwaarderen is nog niet beschikbaar.",
+        "toppedUp": "Tokenpakket ontvangen. Het gebruik wordt bijgewerkt wanneer Stripe de betaling bevestigt."
+      }
     },
     "webhooks": {
       "title": "Leads naar je CRM sturen",

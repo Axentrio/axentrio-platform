@@ -33,6 +33,7 @@ import { config } from '../../config/environment';
 import { AppDataSource } from '../../database/data-source';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 import { PLANS, planIdForStripePriceId, getStripePriceIdFor } from '../plans';
+import { TOKEN_PACKS, tokenPackPriceId, type TokenPackId } from '../token-packs';
 import {
   BillingProvider,
   BillingProviderError,
@@ -366,6 +367,49 @@ export class StripeBillingProvider implements BillingProvider {
 
       return { url: session.url };
     });
+  }
+
+  async createTokenTopUpSession(input: {
+    tenantId: string;
+    packId: TokenPackId;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ url: string }> {
+    const stripe = getStripeClient();
+    const row = await AppDataSource.getRepository(TenantBillingAccount).findOne({
+      where: { tenantId: input.tenantId, provider: PROVIDER },
+    });
+    if (!row || !row.customerId) {
+      throw new BillingProviderError('no_active_account', PROVIDER, {
+        tenantId: input.tenantId,
+      });
+    }
+    const price = tokenPackPriceId(input.packId);
+    if (!price) {
+      throw new BillingProviderError('token_pack_unavailable', PROVIDER, {
+        packId: input.packId,
+      });
+    }
+    const session: StripeNS.Checkout.Session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer: row.customerId,
+      metadata: {
+        tenantId: input.tenantId,
+        kind: 'token_topup',
+        packId: input.packId,
+        tokens: String(TOKEN_PACKS[input.packId].tokens),
+      },
+      line_items: [{ price, quantity: 1 }],
+      payment_method_types: ['card', 'bancontact', 'ideal'],
+      automatic_tax: { enabled: true },
+      customer_update: { address: 'auto', name: 'auto' },
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+    });
+    if (!session.url) {
+      throw new BillingProviderError('checkout_session_no_url', PROVIDER);
+    }
+    return { url: session.url };
   }
 
   async createPortalSession(input: {

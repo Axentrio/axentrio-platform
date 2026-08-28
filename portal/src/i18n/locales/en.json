@@ -818,7 +818,17 @@
       },
       "loadError": "Couldn't load billing state: {{error}}",
       "unknownError": "unknown error",
-      "subscribedJustNow": "Subscription received — waiting for Stripe to confirm. This page will update automatically."
+      "subscribedJustNow": "Subscription received — waiting for Stripe to confirm. This page will update automatically.",
+      "tokens": {
+        "title": "AI usage",
+        "usedOfAllowance": "{{used}} of {{allowance}} tokens used this period",
+        "periodEnds": "This period ends on {{date}}",
+        "warn": "You have used 80% of your AI usage allowance.",
+        "paused": "The assistant is paused. Buy more tokens to continue.",
+        "buyPack": "Buy {{tokens}} tokens - €{{price}}",
+        "unavailable": "Top-up is not available yet.",
+        "toppedUp": "Token pack received. Usage updates when Stripe confirms the payment."
+      }
     },
     "webhooks": {
       "title": "Send leads to your CRM",

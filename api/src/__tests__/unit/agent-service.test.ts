@@ -4,6 +4,11 @@ import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
 import { createBlockLedger } from '../../llm/block-ledger';
 
+const tokenBudget = vi.hoisted(() => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../billing/token-budget.service', () => tokenBudget);
 // Create mock dependencies
 const mockProvider: LLMProvider = {
   chat: vi.fn(),
@@ -78,7 +83,7 @@ describe('AgentService', () => {
       mockTraceLogger as any,
     );
     vi.clearAllMocks();
-    mockMeteringIsOverBudget.mockResolvedValue(false);
+    tokenBudget.isTokenBudgetExhausted.mockResolvedValue(false);
     mockGetToolsForTenant.mockResolvedValue([mockKbSearch]);
   });
 
@@ -1949,7 +1954,7 @@ describe('AgentService', () => {
   });
 
   it('returns budget_exceeded when over budget', async () => {
-    mockMeteringIsOverBudget.mockResolvedValue(true);
+    tokenBudget.isTokenBudgetExhausted.mockResolvedValue(true);
 
     const result = await agent.run(
       'hi',
@@ -1958,7 +1963,7 @@ describe('AgentService', () => {
         id: 't1',
         settings: {
           ai: {
-            enabled: true, provider: 'openai', model: 'gpt-4o', dailyTokenBudget: 1000,
+            enabled: true, provider: 'openai', model: 'gpt-4o',
             guardrails: { fallbackMessage: 'Budget reached.' },
           },
         },

@@ -36,7 +36,7 @@ function entitlementsPayload() {
   return {
     current: {
       planId: 'essential',
-      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
+      limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000, monthlyTokens: 5_000_000 },
       features: {},
       support: 'email',
     },

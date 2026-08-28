@@ -53,7 +53,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
   return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
-      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides', 'featureToggles'],
+      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'monthlyTokenLimit', 'featureOverrides', 'featureToggles'],
     });
 
     if (!tenant) {
@@ -65,6 +65,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
       {
         maxSessions: tenant.maxSessions ?? null,
         dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+        monthlyTokenLimit: tenant.monthlyTokenLimit ?? null,
       },
       {
         status: tenant.status,
@@ -102,9 +103,10 @@ export async function invalidateEntitlements(tenantId: string): Promise<void> {
  */
 export function entitlementsFor(
   tier: InternalPlanId,
-  overrides: { maxSessions: number | null; dailyLlmCallLimit: number | null } = {
+  overrides: { maxSessions: number | null; dailyLlmCallLimit: number | null; monthlyTokenLimit: number | null } = {
     maxSessions: null,
     dailyLlmCallLimit: null,
+    monthlyTokenLimit: null,
   },
   featureCtx?: {
     status?: TenantStatus;
@@ -128,6 +130,7 @@ export function entitlementsFor(
   if (tier === 'enterprise') {
     if (overrides.maxSessions !== null) limits.sessions = overrides.maxSessions;
     if (overrides.dailyLlmCallLimit !== null) limits.dailyLlmCalls = overrides.dailyLlmCallLimit;
+    if (overrides.monthlyTokenLimit !== null) limits.monthlyTokens = overrides.monthlyTokenLimit;
   }
 
   // Clone before any mutation — plan.features is the shared catalog object;

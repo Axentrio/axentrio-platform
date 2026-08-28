@@ -29,6 +29,10 @@ const mockChat = vi.fn();
 vi.mock('../../llm/provider-factory', () => ({
   getProvider: () => ({ chat: mockChat }),
 }));
+vi.mock('../../billing/token-budget.service', () => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
 
 // ── Mock booking service ────────────────────────────────────────────
 const mockCheckAvailability = vi.fn();

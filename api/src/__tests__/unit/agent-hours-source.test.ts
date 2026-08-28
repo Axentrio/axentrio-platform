@@ -12,6 +12,10 @@ import type { LLMProvider } from '../../llm/llm.types';
 
 const mockProvider: LLMProvider = { chat: vi.fn() };
 vi.mock('../../llm/provider-factory', () => ({ getProvider: () => mockProvider }));
+vi.mock('../../billing/token-budget.service', () => ({
+  isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
+  recordTokenUsage: vi.fn().mockResolvedValue(undefined),
+}));
 
 // promptBuilder is stubbed, so there's no real block ledger to summarise. Without
 // this the agent loop throws before it ever reaches the egress guard.

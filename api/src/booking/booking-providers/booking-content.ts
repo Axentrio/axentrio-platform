@@ -61,6 +61,11 @@ export interface ServiceContentInput {
   intakeQuestions?: ReadonlyArray<{ id?: unknown; label?: unknown; includeInCalendar?: unknown }> | null;
   /** Owner-authored prep notes. Stored since P5 and, until now, read by nothing at all. */
   preparationInstructions?: string | null;
+  /**
+   * Already-formatted price from `formatServicePrice`. Empty or absent means
+   * no price — the line is omitted. Never pass a leftover note without a price.
+   */
+  priceDisplay?: string | null;
 }
 
 /**
@@ -110,6 +115,11 @@ function customerLine(name?: string | null, email?: string | null): string | nul
   if (!n && e) return `Customer: <${e}>`;
   if (n && !e) return `Customer: ${n}`;
   return null;
+}
+
+/** The `Price:` line, or null when the service shows no price. */
+function priceLine(priceDisplay?: string | null): string | null {
+  return present(priceDisplay) ? `Price: ${normalizeField(priceDisplay)}` : null;
 }
 
 /** Question metadata the intake block needs: id -> label, plus the ids the owner
@@ -251,6 +261,8 @@ export function buildBookingEventContent(
   if (typeof booking.durationMin === 'number' && booking.durationMin > 0) {
     head.push(`Duration: ${booking.durationMin} min`);
   }
+  const price = priceLine(service.priceDisplay);
+  if (price) head.push(price);
   if (present(booking.sourceChannel)) head.push(`Booked via: ${normalizeField(booking.sourceChannel)}`);
 
   // MIDDLE - droppable (last line first) under the body cap.
@@ -302,6 +314,7 @@ export function buildCustomerEventDescription(input: {
   preparationInstructions?: string | null;
   manageUrl?: string | null;
   businessName?: string | null;
+  priceDisplay?: string | null;
 }): string | undefined {
   const lines: string[] = [];
   if (present(input.businessName)) lines.push(`With: ${normalizeField(input.businessName)}`);
@@ -309,6 +322,8 @@ export function buildCustomerEventDescription(input: {
   if (typeof input.durationMin === 'number' && input.durationMin > 0) {
     lines.push(`Duration: ${input.durationMin} min`);
   }
+  const price = priceLine(input.priceDisplay);
+  if (price) lines.push(price);
   if (present(input.meetUrl)) lines.push(`Join the meeting: ${input.meetUrl}`);
   if (present(input.preparationInstructions)) {
     lines.push(`Before your appointment: ${normalizeField(input.preparationInstructions)}`);

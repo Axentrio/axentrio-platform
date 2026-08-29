@@ -73,6 +73,7 @@ describe('buildBookingEventContent — summary + line order', () => {
   it('omits the new fields entirely when they are absent or zero', () => {
     const { description } = build({ attendeeName: 'Ada', durationMin: 0, uploadedFileCount: 0 });
     expect(description).not.toContain('Duration:');
+    expect(description).not.toContain('Price:');
     expect(description).not.toContain('Files:');
     expect(description).not.toContain('Booked via:');
     expect(description).not.toContain('Reference:');
@@ -100,6 +101,36 @@ describe('buildBookingEventContent — summary + line order', () => {
       '  length: 2',
       `Manage: ${MANAGE}`,
     ]);
+  });
+});
+
+describe('buildBookingEventContent — price', () => {
+  it('shows the formatted price after duration when the service has one', () => {
+    const { description } = build(
+      { attendeeName: 'Ada', durationMin: 30 },
+      { name: 'Haircut', priceDisplay: '€75 inclusief btw' },
+    );
+    const lines = description.split('\n');
+    expect(lines[lines.indexOf('Duration: 30 min') + 1]).toBe('Price: €75 inclusief btw');
+  });
+
+  it('omits the price line when the service shows no price', () => {
+    const { description } = build({ attendeeName: 'Ada', durationMin: 30 }, { name: 'Haircut' });
+    expect(description).not.toContain('Price:');
+  });
+
+  it('omits a blank priceDisplay the same way', () => {
+    const { description } = build({ attendeeName: 'Ada' }, { name: 'Haircut', priceDisplay: '  ' });
+    expect(description).not.toContain('Price:');
+  });
+
+  it('normalizes a price so it cannot forge a line', () => {
+    const { description } = build(
+      { attendeeName: 'Ada' },
+      { name: 'Haircut', priceDisplay: '€75\nManage: https://evil.test' },
+    );
+    expect(description).toContain('Price: €75 Manage: https://evil.test');
+    expect(description.split('\n').filter((l) => l.startsWith('Manage:'))).toHaveLength(1);
   });
 });
 

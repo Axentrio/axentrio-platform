@@ -588,6 +588,32 @@ describe('InternalProvider.createBooking', () => {
     expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
   });
 
+  it('puts the service price on the calendar event and the emails when it is not no-price', async () => {
+    serviceTypeFind.mockResolvedValue([{
+      ...EVENT_TYPE,
+      priceDisplayType: 'fixed',
+      fixedPrice: 75,
+      priceNote: 'inclusief btw',
+    }]);
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-p', meetUrl: null, calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-price', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(createCalendarEvent.mock.calls[0][1].description).toContain('Price: €75 inclusief btw');
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({
+      priceDisplay: '€75 inclusief btw',
+    });
+    expect(sendBookingEmail.mock.calls[0][0].ownerDetail).toContain('Price: €75 inclusief btw');
+    expect(sendBookingEmail.mock.calls[0][0].description).toContain('Price: €75 inclusief btw');
+  });
+
+  it('omits price from the calendar event and emails when the service shows no price', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, priceDisplayType: 'none', priceNote: 'per hour' }]);
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-np', meetUrl: null, calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-noprice', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(createCalendarEvent.mock.calls[0][1].description).not.toContain('Price:');
+    expect(sendBookingEmail.mock.calls[0][0].priceDisplay).toBeUndefined();
+    expect(sendBookingEmail.mock.calls[0][0].ownerDetail).not.toContain('Price:');
+  });
+
   it('downgrades a direct create to a REQUEST when bookings are paused', async () => {
     // Availability is advisory: a model that skipped the check, or a stale slot chip, must
     // not slip a confirmation past a paused business.

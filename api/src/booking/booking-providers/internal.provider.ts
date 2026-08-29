@@ -38,6 +38,7 @@ import {
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
+import { formatServicePrice } from '../pricing/service-discount';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
 import {
@@ -1728,6 +1729,7 @@ export class InternalProvider implements BookingProvider {
     }
   ): Promise<void> {
     const { bookingId, service, rule, start, end, attendee, contact, extras, effectiveDuration } = input;
+    const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
     // The rich event body comes from the single P6a builder (ai_summary now flows on the auto
     // path too — no value flows in here yet, the builder simply omits that line).
     const eventContent = buildBookingEventContent(
@@ -1744,7 +1746,7 @@ export class InternalProvider implements BookingProvider {
         sourceChannel: ctx.session?.channel ?? null,
         uploadedFileCount: input.uploadedFiles?.length ?? 0,
       },
-      service,
+      { ...service, priceDisplay },
       buildManageUrl(bookingId),
     );
     const { venue } = await loadBusinessRules(ctx.bot.id);
@@ -1797,6 +1799,7 @@ export class InternalProvider implements BookingProvider {
         preparationInstructions: service.preparationInstructions,
         manageUrl: buildManageUrl(bookingId),
         businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+        priceDisplay,
       }),
       // The owner's copy says exactly what their calendar entry says.
       ownerDetail: eventContent.description,
@@ -1809,6 +1812,7 @@ export class InternalProvider implements BookingProvider {
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
+      priceDisplay,
     });
   }
 
@@ -2482,6 +2486,7 @@ export class InternalProvider implements BookingProvider {
     }
   ): Promise<void> {
     const { bookingId, confirmed, service, start, end, effectiveDuration } = input;
+    const priceDisplay = formatServicePrice(service, input.timezone) || undefined;
     // P6a rich body from the row.
     const eventContent = buildBookingEventContent(
       {
@@ -2497,7 +2502,7 @@ export class InternalProvider implements BookingProvider {
         sourceChannel: confirmed.sourceChannel,
         uploadedFileCount: Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles.length : 0,
       },
-      service,
+      { ...service, priceDisplay },
       buildManageUrl(bookingId)
     );
     const { venue } = await loadBusinessRules(ctx.bot.id);
@@ -2546,6 +2551,7 @@ export class InternalProvider implements BookingProvider {
         preparationInstructions: service.preparationInstructions,
         manageUrl: buildManageUrl(bookingId),
         businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+        priceDisplay,
       }),
       // The owner's copy says exactly what their calendar entry says.
       ownerDetail: eventContent.description,
@@ -2558,6 +2564,7 @@ export class InternalProvider implements BookingProvider {
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
+      priceDisplay,
     });
   }
 
@@ -3263,6 +3270,7 @@ export class InternalProvider implements BookingProvider {
     }
   ): Promise<void> {
     const { booking, bookingId, service, rule, start, end, sequence, effectiveDuration } = input;
+    const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
     const ref = await canonicalRef(ctx.bot.id, bookingId);
     const meetUrl = ref?.meetingUrl ?? null;
     // The venue comes off the same booking-settings row the rules do; read at the tail
@@ -3292,6 +3300,7 @@ export class InternalProvider implements BookingProvider {
         preparationInstructions: service.preparationInstructions,
         manageUrl: buildManageUrl(booking.id),
         businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+        priceDisplay,
       }),
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
@@ -3302,6 +3311,7 @@ export class InternalProvider implements BookingProvider {
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
+      priceDisplay,
     });
 
     // Replace reminders: drop the old jobs, schedule fresh ones for the new time.
@@ -3323,7 +3333,7 @@ export class InternalProvider implements BookingProvider {
         sourceChannel: booking.sourceChannel,
         uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
       },
-      service,
+      { ...service, priceDisplay },
       buildManageUrl(bookingId)
     );
     await syncCalendarReschedule(

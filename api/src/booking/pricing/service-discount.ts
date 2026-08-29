@@ -4,14 +4,15 @@
  * A discount is a separate layer ON TOP of the configured price (fixed / from / range).
  * `isDiscountActive` decides whether the layer applies right now (enabled, valid type +
  * value, and within the optional calendar-day window in the business timezone). `applyDiscount`
- * computes the reduced amount. Both the prompt (`priceHint`) and any other consumer resolve the
- * final price through here so a number is never re-derived — and never diverges — at a callsite.
+ * computes the reduced amount. `formatServicePrice` is the only renderer: the prompt, the
+ * calendar body and the booking email all quote this string so a number is never re-derived
+ * — and never diverges — at a callsite.
  *
  * Pure: no DB, no clock of its own. `now` and `tz` are passed in so the same "today" the rest
  * of the booking prompt uses (bot business timezone) decides whether a window is open.
  */
 import { DateTime } from 'luxon';
-import type { DiscountType } from '../../database/entities/ServiceType';
+import type { DiscountType, PriceDisplayType } from '../../database/entities/ServiceType';
 
 /** The discount-shaped fields of a ServiceType — kept structural so tests need no full row. */
 export interface DiscountConfig {
@@ -79,4 +80,64 @@ export function validateDiscountConfig(c: DiscountConfig): string | null {
     return 'The discount start date must be on or before the end date.';
   }
   return null;
+}
+
+/** The price-shaped fields of a ServiceType — kept structural so tests need no full row. */
+export interface PriceDisplayConfig extends DiscountConfig {
+  priceDisplayType?: PriceDisplayType | null;
+  fixedPrice?: number | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  priceNote?: string | null;
+}
+
+/** Collapse whitespace and drop `·`/`"` so a note cannot forge a catalog field. */
+function sanitizePriceNote(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
+}
+
+/**
+ * The price as it should be shown — the FINAL price (discount applied when active),
+ * including the owner's qualifier.
+ *
+ * Empty string means no price: do not display a line. `none`, a missing amount, and
+ * a zero base stay silent — "no price", not "€0". `free` is a shown price.
+ *
+ * `priceNote` ("per hour", "inclusief btw") is appended ONLY when a price is actually
+ * shown. A dangling qualifier under a service whose owner chose no price would be
+ * worse than silence.
+ */
+export function formatServicePrice(
+  s: PriceDisplayConfig,
+  tz = 'UTC',
+  now: Date = new Date(),
+): string {
+  const active = isDiscountActive(s, tz, now);
+  const finalOf = (amount: number): number =>
+    active && (s.discountType === 'percentage' || s.discountType === 'fixed') && typeof s.discountValue === 'number'
+      ? applyDiscount(amount, s.discountType, s.discountValue)
+      : amount;
+  // Truthy guard keeps a 0/undefined BASE silent; the discounted RESULT is shown even at €0.
+  const money = (baseAmount: number | null | undefined): string => (baseAmount ? `€${finalOf(baseAmount)}` : '');
+  const base = ((): string => {
+    switch (s.priceDisplayType) {
+      case 'fixed':
+        return money(s.fixedPrice);
+      case 'from': {
+        const m = money(s.fixedPrice);
+        return m ? `from ${m}` : '';
+      }
+      case 'range':
+        return s.minPrice && s.maxPrice ? `€${finalOf(s.minPrice)}–€${finalOf(s.maxPrice)}` : '';
+      case 'on_request':
+        return 'price on request';
+      case 'free':
+        return 'free';
+      default:
+        return '';
+    }
+  })();
+  if (!base) return '';
+  const note = s.priceNote?.trim() ? sanitizePriceNote(s.priceNote).slice(0, 60) : '';
+  return note ? `${base} ${note}` : base;
 }

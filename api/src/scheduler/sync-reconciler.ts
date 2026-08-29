@@ -26,6 +26,7 @@ import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './c
 import { applyExternalRemoval } from './inbound-calendar-sync';
 import { returningRows } from '../utils/raw-sql';
 import { buildBookingEventContent } from '../booking/booking-providers/booking-content';
+import { formatServicePrice } from '../booking/pricing/service-discount';
 import { buildManageUrl } from './booking-token';
 
 const LEASE_MINUTES = 2;
@@ -279,7 +280,8 @@ function reconciledDurationMin(b: BookingContentRow | undefined): number | null 
 function buildReconciledContent(
   row: ClaimedRow,
   b: BookingContentRow | undefined,
-  eventType: ServiceType
+  eventType: ServiceType,
+  timezone: string,
 ): { summary: string; description: string } {
   return buildBookingEventContent(
     {
@@ -300,6 +302,7 @@ function buildReconciledContent(
       description: eventType.description,
       intakeQuestions: eventType.intakeQuestions,
       preparationInstructions: eventType.preparationInstructions,
+      priceDisplay: formatServicePrice(eventType, timezone) || undefined,
     },
     buildManageUrl(row.id)
   );
@@ -371,7 +374,7 @@ async function loadEventMeta(
     [row.id]
   );
   const b = bookingRows[0];
-  const content = buildReconciledContent(row, b, eventType);
+  const content = buildReconciledContent(row, b, eventType, timezone);
   const location = await resolveMirrorLocation(row.bot_id, eventType, b?.customer_address);
   return {
     content,

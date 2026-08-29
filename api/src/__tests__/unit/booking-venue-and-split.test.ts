@@ -360,6 +360,27 @@ describe('booking email — owner and customer get separate messages', () => {
     expect(toCustomer()!.body).toContain('Grote Markt 1, 9300 Aalst');
     expect(toOwner()!.body).toContain('Grote Markt 1, 9300 Aalst');
   });
+
+  it('shows the price on the customer email when the service has one', async () => {
+    await sendBookingEmail({ ...BASE, durationMin: 30, priceDisplay: '€75 inclusief btw' });
+    expect(toCustomer()!.body).toContain('30 min');
+    expect(toCustomer()!.body).toContain('€75 inclusief btw');
+  });
+
+  it('omits the price from the customer email when the service shows no price', async () => {
+    await sendBookingEmail({ ...BASE, durationMin: 30 });
+    expect(toCustomer()!.body).toContain('30 min');
+    expect(toCustomer()!.body).not.toContain('€');
+    expect(toCustomer()!.body).not.toMatch(/price/i);
+  });
+
+  it('shows the price on the owner email when it is in the calendar body', async () => {
+    await sendBookingEmail({
+      ...BASE,
+      ownerDetail: 'Duration: 30 min\nPrice: €75 inclusief btw',
+    });
+    expect(toOwner()!.body).toContain('Price: €75 inclusief btw');
+  });
 });
 
 // --------------------------------------------------------------------------------------
@@ -523,6 +544,21 @@ describe('the customer’s own calendar entry', () => {
     expect(out).toContain('Duration: 60 min');
     expect(out).toContain('Before your appointment: Please clear access to the boiler.');
     expect(out).toContain('Reschedule or cancel: https://app.example/manage?token=x');
+  });
+
+  it('shows the formatted price after duration when the service has one', () => {
+    const out = buildCustomerEventDescription({
+      ...base,
+      durationMin: 30,
+      priceDisplay: '€75 inclusief btw',
+    })!;
+    const lines = out.split('\n');
+    expect(lines[lines.indexOf('Duration: 30 min') + 1]).toBe('Price: €75 inclusief btw');
+  });
+
+  it('omits the price line when the service shows no price', () => {
+    const out = buildCustomerEventDescription({ ...base, durationMin: 30 })!;
+    expect(out).not.toContain('Price:');
   });
 
   it('puts the manage link LAST — it is the only self-service route the customer has', () => {

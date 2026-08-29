@@ -423,6 +423,31 @@ describe('reconciler content parity', () => {
     expect(sent.description).toContain('Duration: 45 min');
     (STORED as { booked_duration_min: number | null }).booked_duration_min = null;
   });
+
+  it('carries the service price onto the mirror when the service shows one', async () => {
+    etFindOne.mockResolvedValue({
+      ...SERVICE,
+      priceDisplayType: 'fixed',
+      fixedPrice: 75,
+      priceNote: 'inclusief btw',
+    });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    const sent = createCalendarEvent.mock.calls[0].find(
+      (a: any) => a && typeof a === 'object' && typeof a.description === 'string'
+    );
+    expect(sent.description).toContain('Price: €75 inclusief btw');
+  });
+
+  it('omits the price line when the service shows no price', async () => {
+    etFindOne.mockResolvedValue({ ...SERVICE, priceDisplayType: 'none', priceNote: 'per hour' });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    const sent = createCalendarEvent.mock.calls[0].find(
+      (a: any) => a && typeof a === 'object' && typeof a.description === 'string'
+    );
+    expect(sent.description).not.toContain('Price:');
+  });
 });
 
 /**

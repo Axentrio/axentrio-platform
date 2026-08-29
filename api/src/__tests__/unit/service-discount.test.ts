@@ -3,6 +3,7 @@ import {
   applyDiscount,
   isDiscountActive,
   validateDiscountConfig,
+  formatServicePrice,
 } from '../../booking/pricing/service-discount';
 
 describe('applyDiscount', () => {
@@ -105,5 +106,42 @@ describe('validateDiscountConfig', () => {
         discountEndOn: '2026-06-30',
       })
     ).toBeNull();
+  });
+});
+
+describe('formatServicePrice', () => {
+  it('stays silent for no-price, including a leftover note', () => {
+    expect(formatServicePrice({ priceDisplayType: 'none', priceNote: 'per hour' })).toBe('');
+    expect(formatServicePrice({ priceDisplayType: 'fixed', fixedPrice: null, priceNote: 'per hour' })).toBe('');
+    expect(formatServicePrice({ priceDisplayType: 'fixed', fixedPrice: 0 })).toBe('');
+  });
+
+  it('shows a fixed price with the owner qualifier', () => {
+    expect(formatServicePrice({
+      priceDisplayType: 'fixed',
+      fixedPrice: 75,
+      priceNote: 'inclusief btw',
+    })).toBe('€75 inclusief btw');
+  });
+
+  it('shows free, from, range and on-request', () => {
+    expect(formatServicePrice({ priceDisplayType: 'free' })).toBe('free');
+    expect(formatServicePrice({ priceDisplayType: 'from', fixedPrice: 80 })).toBe('from €80');
+    expect(formatServicePrice({ priceDisplayType: 'range', minPrice: 50, maxPrice: 90 })).toBe('€50–€90');
+    expect(formatServicePrice({ priceDisplayType: 'on_request' })).toBe('price on request');
+  });
+
+  it('quotes the discounted final amount when the window is open', () => {
+    expect(formatServicePrice(
+      {
+        priceDisplayType: 'fixed',
+        fixedPrice: 100,
+        discountEnabled: true,
+        discountType: 'percentage',
+        discountValue: 20,
+      },
+      'Europe/Brussels',
+      new Date('2026-06-15T12:00:00Z'),
+    )).toBe('€80');
   });
 });

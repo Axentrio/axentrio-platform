@@ -106,6 +106,12 @@ export interface BookingEmailParams {
    * this email, which both the customer AND the owner receive.
    */
   preparationInstructions?: string | null;
+  /**
+   * Already-formatted price from `formatServicePrice`. Empty or absent means
+   * no price — omitted from the customer body. The owner's copy gets the same
+   * string via `ownerDetail` (the calendar body).
+   */
+  priceDisplay?: string | null;
 }
 
 function formatWhen(start: Date, timezone: string): string {
@@ -199,9 +205,13 @@ function customerEmailBody(params: BookingEmailParams, cancelled: boolean): stri
     typeof params.durationMin === 'number' && params.durationMin > 0
       ? ` &middot; ${params.durationMin} min`
       : '';
+  const price =
+    !cancelled && params.priceDisplay?.trim()
+      ? ` &middot; ${esc(params.priceDisplay.trim())}`
+      : '';
   return (
     `<p>${lead}</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}${price}</p>` +
     (params.location ? `<p>Location: ${esc(params.location)}</p>` : '') +
     (!cancelled && params.preparationInstructions?.trim()
       ? `<p><strong>Before your appointment:</strong><br/>${esc(params.preparationInstructions.trim())}</p>`

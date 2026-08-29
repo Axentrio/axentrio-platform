@@ -52,6 +52,7 @@ import {
   type OutputValidationContext,
 } from '../guardrails/output-validation';
 import { renderMemoryForPrompt } from '../memory/memory-store';
+import { pendingYesNeedsCreate } from './pending-booking-confirmation';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -441,6 +442,9 @@ async function inCustomerLanguage(
 const BOOKING_CORRECTION_NOTE =
   "(Internal note, not from the customer.) You just implied to the customer that their booking or request was made, but no booking was recorded this turn. If you HAVE a booking tool and already have the service, the customer's name, and a time, call the correct booking tool now (and only claim it's done once the tool succeeds). If a required detail is missing, ask for it. If you do NOT have a booking tool available, do NOT claim, confirm, or imply any booking — instead offer to take the customer's details so the team can follow up, in the customer's language.";
 
+const PENDING_YES_NOTE =
+  '(Internal note, not from the customer.) The customer already confirmed the pending booking summary. Call create_booking now with the same service, time, and name. Do not send another summary and do not ask for confirmation again.';
+
 /** Nudge for a reply that declared a named date shut or full without ever looking. */
 const AVAILABILITY_CORRECTION_NOTE =
   "(Internal note, not from the customer.) You just told the customer a specific date is closed, " +
@@ -668,6 +672,8 @@ interface RunLoopState {
   correctionAttempted: boolean;
   /** Separate from `correctionAttempted`: each guard gets its own single retry, or one
    *  firing would spend the other's budget and ship the fault it was there to stop. */
+  /** Own retry budget: a yes with a pending summary and no create_booking this turn. */
+  pendingYesNudgeAttempted: boolean;
   availabilityCorrectionAttempted: boolean;
   /** Same rule again: the promised-check guard owns its own single retry. */
   promisedCheckCorrectionAttempted: boolean;
@@ -698,6 +704,7 @@ function newRunLoopState(): RunLoopState {
     pendingAffordance: null,
     bookingRecorded: false,
     sideEffectsInvoked: new Set<string>(),
+    pendingYesNudgeAttempted: false,
     correctionAttempted: false,
     availabilityCorrectionAttempted: false,
     promisedCheckCorrectionAttempted: false,
@@ -1445,6 +1452,7 @@ export class AgentService {
     const booking = this.applyBookingClaimGuard(i, ctx, state, address.content);
     if (booking.kind === 'retry') return CONTINUE_ITERATION;
     if (booking.kind === 'result') return { kind: 'done', result: booking.result };
+    if (await this.applyPendingYesGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
     if (this.applyAvailabilityClaimGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
     const promised = await this.applyPromisedCheckGuard(i, ctx, state, booking.content);
     if (promised.kind === 'retry') return CONTINUE_ITERATION;
@@ -1524,6 +1532,30 @@ export class AgentService {
         ...(state.escalationRequested ? { handoffRequested: true } : {}),
       },
     };
+  }
+
+  /**
+   * The customer already said yes to a pending summary, but this turn did not call
+   * create_booking. One nudge, then ship whatever they produce.
+   */
+  private async applyPendingYesGuard(
+    i: number,
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): Promise<boolean> {
+    if (state.bookingRecorded || !ctx.bookingClaimGuardArmed) return false;
+    if (state.pendingYesNudgeAttempted || i >= MAX_ITERATIONS - 1) return false;
+    const history = [...state.messages, { role: 'user' as const, content: ctx.message }];
+    if (!(await pendingYesNeedsCreate(ctx.session.id, history))) return false;
+    state.pendingYesNudgeAttempted = true;
+    (ctx.trace.corrections ??= []).push('pending_yes_without_create');
+    logger.warn('[agent] pending summary already confirmed; nudging model to create_booking', {
+      sessionId: ctx.session.id,
+    });
+    state.messages.push({ role: 'assistant', content });
+    state.messages.push({ role: 'user', content: PENDING_YES_NOTE });
+    return true;
   }
 
   /**

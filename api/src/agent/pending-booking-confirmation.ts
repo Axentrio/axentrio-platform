@@ -59,7 +59,7 @@ export function isConfirmingChip(text: string, startTime: string): boolean {
   return namesSingleOfferedTime(trimmed, [`${clock[1]}:${clock[2]}`]);
 }
 
-export function lastCustomerUtterance(ctx: ToolContext): string {
+export function lastCustomerUtterance(ctx: Pick<ToolContext, 'conversationHistory'>): string {
   const history = ctx.conversationHistory;
   if (!Array.isArray(history)) return '';
   for (let i = history.length - 1; i >= 0; i--) {
@@ -70,6 +70,16 @@ export function lastCustomerUtterance(ctx: ToolContext): string {
     return text;
   }
   return '';
+}
+
+/** True when a pending summary exists and the last customer line is an explicit yes. */
+export async function pendingYesNeedsCreate(
+  sessionId: string,
+  history: ToolContext['conversationHistory'],
+): Promise<boolean> {
+  if (!isAffirmativeReply(lastCustomerUtterance({ conversationHistory: history }))) return false;
+  const lookup = await readPending(sessionId);
+  return lookup.store === 'up' && lookup.pending != null;
 }
 
 function parsePending(raw: string | null): PendingBookingDetails | null {

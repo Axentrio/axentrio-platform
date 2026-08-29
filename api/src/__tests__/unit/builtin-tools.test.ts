@@ -69,6 +69,7 @@ import {
 import { EscalationTool } from '../../agent/tools/escalation.tool';
 import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
 import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
+import { pendingYesNeedsCreate } from '../../agent/pending-booking-confirmation';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -575,6 +576,32 @@ describe('CreateBookingTool', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
     expect(result.error).not.toContain('€80');
+  });
+
+  it('sees a later ja as the yes the agent loop must turn into create_booking', async () => {
+    const tool = new CreateBookingTool();
+    await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-nudge',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    await expect(
+      pendingYesNeedsCreate('sess-confirm-nudge', [
+        { role: 'user', content: DUMP },
+        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'user', content: 'Ja, dat klopt' },
+      ]),
+    ).resolves.toBe(true);
+    await expect(
+      pendingYesNeedsCreate('sess-confirm-nudge', [
+        { role: 'user', content: DUMP },
+        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'user', content: 'What is the address?' },
+      ]),
+    ).resolves.toBe(false);
   });
 
   it('writes after a later explicit yes for the same pending details', async () => {

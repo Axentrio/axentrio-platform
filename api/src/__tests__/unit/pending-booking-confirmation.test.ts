@@ -84,6 +84,7 @@ describe('summaryWasAsked', () => {
         [
           { role: 'user', content: 'dump' },
           { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+          { role: 'user', content: 'Ja, dat klopt' },
         ],
         start,
       ),
@@ -103,6 +104,20 @@ describe('summaryWasAsked', () => {
     expect(
       summaryWasAsked(
         [{ role: 'assistant', content: 'Zal ik boeken om 11:00?' }],
+        start,
+      ),
+    ).toBe(false);
+  });
+
+  it('ignores a same-turn booking question after the yes', () => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'dump' },
+          { role: 'assistant', content: 'Zal ik de beschikbaarheid checken?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+          { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+        ],
         start,
       ),
     ).toBe(false);

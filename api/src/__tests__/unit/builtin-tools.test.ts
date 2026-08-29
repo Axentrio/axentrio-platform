@@ -682,6 +682,26 @@ describe('CreateBookingTool', () => {
     expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
   });
 
+  it('does not write when the model asks to book only after the yes', async () => {
+    const tool = new CreateBookingTool();
+    const yesCtx = {
+      sessionId: 'sess-confirm-sameturn',
+      runId: 'run-sameturn',
+      conversationHistory: [
+        { role: 'user' as const, content: DUMP },
+        { role: 'assistant' as const, content: 'Zal ik de beschikbaarheid checken?' },
+        { role: 'user' as const, content: 'Ja, dat klopt' },
+        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+      ],
+    };
+    await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-no' } });
+    const result = await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+  });
+
   it('treats an offered Z instant and a later zoneless time as the same booking', async () => {
     const tool = new CreateBookingTool();
     const dumpCtx = {

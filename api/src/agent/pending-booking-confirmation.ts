@@ -75,8 +75,9 @@ export function lastCustomerUtterance(ctx: Pick<ToolContext, 'conversationHistor
 const SUMMARY_ASK = /boek|book|bevestig|confirm|afspraak|appointment|samenvatting|summary|klopt/i;
 
 /**
- * A prior assistant reply named this hour and asked a question. That reply must
- * already be in history: a question still inside this turn is not evidence.
+ * A prior assistant reply named this hour and asked a question. Only replies
+ * BEFORE the last real customer line count: a same-turn "Zal ik boeken?" after
+ * the yes is the model talking to itself, not a summary the customer saw.
  */
 export function summaryWasAsked(
   history: ToolContext['conversationHistory'],
@@ -85,7 +86,18 @@ export function summaryWasAsked(
   const clock = startTime.match(/T(\d{2}):(\d{2})/);
   if (!clock || !Array.isArray(history)) return false;
   const hhmm = `${clock[1]}:${clock[2]}`;
-  for (const m of history) {
+  let lastUser = -1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== 'user') continue;
+    const text = contentToText(m.content).trim();
+    if (text.startsWith('(Internal note')) continue;
+    lastUser = i;
+    break;
+  }
+  if (lastUser < 0) return false;
+  for (let i = 0; i < lastUser; i++) {
+    const m = history[i];
     if (m.role !== 'assistant') continue;
     const text = contentToText(m.content);
     if (!text.includes('?') || !SUMMARY_ASK.test(text)) continue;

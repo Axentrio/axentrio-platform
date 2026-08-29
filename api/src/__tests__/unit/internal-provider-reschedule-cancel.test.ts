@@ -371,6 +371,30 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0].description).toContain('Duration: 120 min');
   });
 
+  it('refuses a move onto a Google busy interval at the new time', async () => {
+    providerGetBusy.mockResolvedValue([
+      { start: new Date('2026-06-10T08:00:00Z'), end: new Date('2026-06-10T08:30:00Z') },
+    ]);
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'SLOT_UNAVAILABLE',
+    });
+  });
+
+  it('allows the inbound path to ignore the mirrored event already at the new time', async () => {
+    providerGetBusy.mockResolvedValue([
+      { start: new Date('2026-06-10T08:00:00Z'), end: new Date('2026-06-10T08:30:00Z') },
+    ]);
+    await expect(
+      provider.rescheduleBooking(ctx, 'bk-1', NEW_START, {
+        excludeExternalInterval: {
+          start: new Date('2026-06-10T08:00:00Z'),
+          end: new Date('2026-06-10T08:30:00Z'),
+        },
+      })
+    ).resolves.toMatchObject({ success: true });
+  });
+
+
 
   it('moves calendar_key with the booking, so the row lands on the diary it was validated against', async () => {
     // The gap #60 recorded and left. Everything above the UPDATE resolves the itinerary key

@@ -2720,7 +2720,7 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     bookingId: string,
     newStartTime: string,
-    opts?: { durationMin?: number }
+    opts?: { durationMin?: number; excludeExternalInterval?: { start: Date; end: Date } }
   ): Promise<RescheduleResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     if (booking.status !== 'confirmed') {
@@ -2752,7 +2752,7 @@ export class InternalProvider implements BookingProvider {
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
       rule.timezone,
       bookingId,
-      { start: booking.startUtc, end: booking.endUtc }
+      opts?.excludeExternalInterval ?? { start: booking.startUtc, end: booking.endUtc }
     );
     const offered = computeSlots({
       rule,

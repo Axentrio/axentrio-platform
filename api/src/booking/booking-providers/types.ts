@@ -393,7 +393,7 @@ export interface BookingProvider {
     ctx: BookingContext,
     bookingId: string,
     newStartTime: string,
-    opts?: { durationMin?: number }
+    opts?: { durationMin?: number; excludeExternalInterval?: { start: Date; end: Date } }
   ): Promise<RescheduleResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;
 }

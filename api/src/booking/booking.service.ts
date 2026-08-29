@@ -734,7 +734,12 @@ export async function externalRescheduleBooking(
 ) {
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
-  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, { durationMin });
+  const start = new Date(newStartTime);
+  const end = new Date(start.getTime() + durationMin * 60_000);
+  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, {
+    durationMin,
+    excludeExternalInterval: { start, end },
+  });
 }
 
 export async function externalCancelBooking(tenantId: string, bookingId: string, reason: string) {

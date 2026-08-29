@@ -116,9 +116,12 @@ export async function loadAllBusy(
   // drop it (exact raw start/end match — the mirror carries no buffer) so a nearby
   // move doesn't conflict with itself. excludeId only covers the internal copy.
   if (external && excludeExternalInterval) {
-    const xs = excludeExternalInterval.start.getTime();
-    const xe = excludeExternalInterval.end.getTime();
-    external = external.filter((iv) => !(iv.start.getTime() === xs && iv.end.getTime() === xe));
+    const xs = Math.floor(excludeExternalInterval.start.getTime() / 1000);
+    const xe = Math.floor(excludeExternalInterval.end.getTime() / 1000);
+    external = external.filter(
+      (iv) =>
+        !(Math.floor(iv.start.getTime() / 1000) === xs && Math.floor(iv.end.getTime() / 1000) === xe)
+    );
   }
   return external ? [...internal, ...external] : internal;
 }

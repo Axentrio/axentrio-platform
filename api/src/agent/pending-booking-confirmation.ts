@@ -13,6 +13,7 @@ import type { ToolContext, ToolResult } from './tool-adapter';
 import { contentToText } from '../llm/llm.types';
 import { namesSingleOfferedTime } from './clock-times';
 import { getRedisClient } from '../config/redis';
+import { wallClockKey } from './offered-slots-store';
 import { logger } from '../utils/logger';
 
 export const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
@@ -147,9 +148,8 @@ export async function refuseUnlessConfirmed(
   // must not refuse forever after a yes the next turn cannot see.
   if (lookup.store === 'down') return null;
 
-  const startMatch = String(args.startTime ?? '').match(/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
   const details = {
-    startTime: startMatch ? `${startMatch[1]}T${startMatch[2]}` : String(args.startTime ?? ''),
+    startTime: await wallClockKey(ctx.sessionId, String(args.startTime ?? '')),
     attendeeName: String(args.attendeeName ?? '').trim(),
     serviceId: String(args.serviceId ?? ''),
   };

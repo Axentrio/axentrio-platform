@@ -61,6 +61,19 @@ async function getOfferedSlots(sessionId: string): Promise<OfferedSlots | null> 
   }
 }
 
+/** Business wall clock for a start time, so Z and zoneless forms of the same hour match. */
+export async function wallClockKey(sessionId: string, startTime: string): Promise<string> {
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(startTime)) {
+    const offered = await getOfferedSlots(sessionId);
+    if (offered?.timezone) {
+      const dt = DateTime.fromISO(startTime, { zone: 'utc' }).setZone(offered.timezone);
+      if (dt.isValid) return dt.toFormat("yyyy-MM-dd'T'HH:mm");
+    }
+  }
+  const m = startTime.match(/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  return m ? `${m[1]}T${m[2]}` : startTime;
+}
+
 /**
  * Resolve a booking time the model sent.
  *

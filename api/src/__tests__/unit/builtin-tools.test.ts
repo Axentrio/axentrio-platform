@@ -583,8 +583,12 @@ describe('CreateBookingTool', () => {
       sessionId: 'sess-confirm-z',
       conversationHistory: [{ role: 'user' as const, content: DUMP }],
     };
+    redisStore.set('booking:offered:sess-confirm-z', JSON.stringify({
+      starts: ['2026-10-26T09:00:00.000Z'],
+      timezone: 'Europe/Brussels',
+    }));
     await tool.execute(
-      { ...BOOK_ARGS, startTime: '2026-10-26T10:00:00.000Z' },
+      { ...BOOK_ARGS, startTime: '2026-10-26T09:00:00.000Z' },
       makeCtx({ ...dumpCtx, runId: 'run-1' }),
     );
     mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-z' } });

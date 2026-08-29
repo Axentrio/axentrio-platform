@@ -577,6 +577,34 @@ describe('CreateBookingTool', () => {
     expect(result.success).toBe(true);
   });
 
+  it('treats an offered Z instant and a later zoneless time as the same booking', async () => {
+    const tool = new CreateBookingTool();
+    const dumpCtx = {
+      sessionId: 'sess-confirm-z',
+      conversationHistory: [{ role: 'user' as const, content: DUMP }],
+    };
+    await tool.execute(
+      { ...BOOK_ARGS, startTime: '2026-10-26T10:00:00.000Z' },
+      makeCtx({ ...dumpCtx, runId: 'run-1' }),
+    );
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-z' } });
+    const { serviceId: _omit, ...withoutService } = BOOK_ARGS;
+    const result = await tool.execute(
+      { ...withoutService, startTime: '2026-10-26T10:00:00' },
+      makeCtx({
+        ...dumpCtx,
+        runId: 'run-2',
+        conversationHistory: [
+          { role: 'user', content: DUMP },
+          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+      }),
+    );
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+  });
+
   it('does not write when a later message changes the time', async () => {
     const tool = new CreateBookingTool();
     await tool.execute(

@@ -147,17 +147,19 @@ export async function refuseUnlessConfirmed(
   // must not refuse forever after a yes the next turn cannot see.
   if (lookup.store === 'down') return null;
 
+  const startMatch = String(args.startTime ?? '').match(/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
   const details = {
-    startTime: String(args.startTime ?? ''),
+    startTime: startMatch ? `${startMatch[1]}T${startMatch[2]}` : String(args.startTime ?? ''),
     attendeeName: String(args.attendeeName ?? '').trim(),
     serviceId: String(args.serviceId ?? ''),
   };
   const pending = lookup.pending;
+  const sameService = !pending?.serviceId || !details.serviceId || pending.serviceId === details.serviceId;
   const confirmed =
     !!pending &&
     pending.startTime === details.startTime &&
     pending.attendeeName.toLowerCase() === details.attendeeName.toLowerCase() &&
-    pending.serviceId === details.serviceId &&
+    sameService &&
     ctx.runId !== pending.runId &&
     (isAffirmativeReply(last) || isConfirmingChip(last, pending.startTime));
 

@@ -757,7 +757,11 @@ export class CreateBookingTool implements ToolAdapter {
       );
       const unsettledAddress = await rejectUnsettledAddress(ctx, booked);
       if (unsettledAddress) return unsettledAddress;
-      const needsConfirm = await refuseUnlessConfirmed(args, ctx);
+      // Resolve BEFORE the confirm gate. Fingerprinting the raw arg treats
+      // an offered `T10:00:00.000Z` and a later zoneless `T10:00:00` as different
+      // bookings, so the customer had to say yes twice.
+      const startTime = await resolveBookingTime(ctx.sessionId, args.startTime as string, lastCustomerText(ctx));
+      const needsConfirm = await refuseUnlessConfirmed({ ...args, startTime }, ctx);
       if (needsConfirm) return needsConfirm;
       // Customer confirmation of the summary, not an availability re-check. The old
       // precondition forced a second check_availability and Cal.com drifted.
@@ -767,7 +771,6 @@ export class CreateBookingTool implements ToolAdapter {
       // only fires when a BINDING exists, and a binding is written in exactly one place
       // (`/places/select`). Wherever address suggestions are unavailable, that guard never runs
       // and this key is all that is left.
-      const startTime = await resolveBookingTime(ctx.sessionId, args.startTime as string, lastCustomerText(ctx));
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${startTime}:${addressToken(booked)}`;
       const result = await createBooking(
         'agent',

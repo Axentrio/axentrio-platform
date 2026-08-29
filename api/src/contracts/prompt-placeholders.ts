@@ -61,7 +61,7 @@ export const PLACEHOLDER_CATALOG = [
   {
     key: 'language',
     label: 'Language',
-    description: 'The default language of the bot (en, nl, or fr). Later replies follow the visitor.',
+    description: 'The default language of the bot (en, nl, or fr). Replies stay in this language until the visitor writes clearly in another language.',
     category: 'identity',
     safeToExpose: true,
     failClosed: 'en',

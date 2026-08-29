@@ -923,7 +923,7 @@
         },
         "language": {
           "label": "Taal",
-          "helper": "Alleen voor de eerste begroeting. Daarna volgt de bot de taal van de bezoeker.",
+          "helper": "De bot gebruikt deze taal voor de begroeting en voor latere antwoorden. De bot verandert van taal alleen wanneer de bezoeker duidelijk in een andere taal schrijft.",
           "options": {
             "en": "English",
             "nl": "Nederlands",

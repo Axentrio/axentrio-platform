@@ -11,9 +11,9 @@ block records an include/exclude decision in the block ledger (visible on
 
 ## Ordering rationale (why blocks sit where they do)
 
-- **LANGUAGE goes first *and* last.** Primacy + recency — the opening greeting is
-  in the business's default language and otherwise anchors the model into
-  replying in it.
+- **LANGUAGE goes first *and* last.** Primacy + recency. The line names the configured
+  default language. Ambiguous greetings stay on that default. A clear message
+  in another language is a switch.
 - **PLATFORM RULES + FORMATTING RULES go last**, *after* all tenant/external text
   (template body, custom instructions, module sections, retrieved KB). Recency
   means nothing an operator or a poisoned KB doc writes can override safety.

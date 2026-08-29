@@ -930,7 +930,7 @@
         },
         "language": {
           "label": "Language",
-          "helper": "Used for the first greeting only. Later replies follow the visitor.",
+          "helper": "The bot uses this language for the greeting and for later replies. The bot changes language only when the visitor writes clearly in another language.",
           "options": {
             "en": "English",
             "nl": "Nederlands",

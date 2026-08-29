@@ -170,6 +170,25 @@ describe('{language} substitution in the composed prompt', () => {
     } as any);
     expect(prompt).toContain('Default language: en.');
   });
+
+  it('names the configured language and does not treat hey as a switch', () => {
+    const { prompt } = composeSystemPrompt({
+      mode: 'agent',
+      ai: { enabled: true, language: 'nl' },
+      tenantName: 'WaterFix',
+      tools: [],
+    } as any);
+    const languageLines = prompt.split('\n').filter((line) => /\bLANGUAGE\b/.test(line));
+    expect(languageLines.length).toBeGreaterThanOrEqual(2);
+    for (const line of languageLines) {
+      expect(line).toContain('Dutch');
+      expect(line).not.toMatch(/\{+language\}+/i);
+    }
+    expect(prompt).toMatch(/"hey"/);
+    expect(prompt).not.toContain(
+      "Write every reply in the SAME language as the customer's most recent message",
+    );
+  });
 });
 
 describe('{services} / {openingHours} substitution in the composed prompt', () => {

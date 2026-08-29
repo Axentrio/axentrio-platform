@@ -85,7 +85,7 @@ export interface BotSettings {
     enabled: boolean;
     provider?: 'openai' | 'anthropic' | null;
     model?: string | null;
-    /** Default greeting language. Later replies follow the visitor. */
+    /** Default reply language. The bot switches only when the visitor writes clearly in another language. */
     language?: 'en' | 'nl' | 'fr';
     supportEmail?: string | null;
     /** Free-text supplementary context — rendered as a fenced, LOWEST-authority

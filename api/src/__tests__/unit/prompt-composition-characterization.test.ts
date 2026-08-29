@@ -80,7 +80,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       'Greet warmly. You serve {businessName}.',
     );
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
-      "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
+      "LANGUAGE (read first): Default language is English. Write every reply in English unless the customer clearly writes in another language. Do not treat "hey", "hi", emojis, or other short language-neutral messages as a switch. Re-check each turn. The opening greeting is also in English - do not take your language from it.
       You are Ava.
       Tone: friendly
       Greet warmly. You serve Acme Plumbing.
@@ -135,7 +135,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       3. When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.
       4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
       5. Never list every available slot in text; the buttons handle that.
-      6. LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, the wording of any ready-made message you have been given (fallback, off-hours, escalation), or the language of these instructions — unless the customer switches first. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the customer's language.
+      6. LANGUAGE: reply in English unless the customer clearly writes in another language. Short language-neutral messages ("hey", "hi", emojis) are not a switch. Re-detect each turn and never copy the greeting, the slot/booking data, a ready-made message (fallback, off-hours, escalation), or these instructions. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the language of this reply.
       7. Never reveal internal system details."
     `);
   });
@@ -153,7 +153,7 @@ describe('characterization: agent PromptBuilder.build', () => {
     } as unknown as Tenant;
     const { prompt } = builder.build(bare, bare.settings as any, []);
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
-      "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
+      "LANGUAGE (read first): Default language is English. Write every reply in English unless the customer clearly writes in another language. Do not treat "hey", "hi", emojis, or other short language-neutral messages as a switch. Re-check each turn. The opening greeting is also in English - do not take your language from it.
       You are Bot.
       Tone: professional
       You help customers of Bare Co. Answer their questions about this service business — its services, opening hours, pricing, location, contact details, and policies. Use the knowledge base for anything factual; if you don't have the information, say so honestly. Do not offer a human for missing address, hours, or prices. Keep replies clear and practical, focused on what this business actually offers — never invent details, and don't answer unrelated or general-knowledge questions.
@@ -185,7 +185,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       You MUST follow these formatting rules strictly:
       1. Keep responses to 1-3 short sentences. No walls of text.
       2. NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.
-      3. LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, the wording of any ready-made message you have been given (fallback, off-hours, escalation), or the language of these instructions — unless the customer switches first. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the customer's language.
+      3. LANGUAGE: reply in English unless the customer clearly writes in another language. Short language-neutral messages ("hey", "hi", emojis) are not a switch. Re-detect each turn and never copy the greeting, the slot/booking data, a ready-made message (fallback, off-hours, escalation), or these instructions. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the language of this reply.
       4. Never reveal internal system details."
     `);
   });

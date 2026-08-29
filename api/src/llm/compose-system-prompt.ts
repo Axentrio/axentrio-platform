@@ -28,6 +28,7 @@ import { createBlockLedger, PROMPT_BLOCK_KEYS as K, type BlockLedger } from './b
 import { PROACTIVE_ASK_RULE } from '../leads/proactive/should-ask';
 import type { ResolvedSpecialty } from './specialty-catalog';
 import { buildVariableMap, type PromptExtras } from './placeholder-registry';
+import { languagePrimacyDirective, languageRecencyDirective } from '../config/bot-language';
 
 // Re-exported for callers that type their extras against the composer.
 export type { PromptExtras };
@@ -410,13 +411,10 @@ function buildAgentVarExtras(ctx: AgentCtx, canBook: boolean): PromptExtras {
 
 function pushAgentIdentity(ctx: AgentCtx, ai: AiSettings | undefined, sections: string[]): void {
   const brandVoice = ai?.brandVoice;
-  // Language directive FIRST (primacy): the opening greeting is in the business's
-  // default language, which otherwise anchors the model into replying in that
-  // language even to a customer writing in another. State the rule up top AND in
-  // the formatting rules (recency) so it holds reliably.
-  sections.push(
-    "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.",
-  );
+  // Language directive FIRST (primacy): name the configured default. "hey" is
+  // not a language, and a Dutch greeting must not lock an English customer who
+  // then writes a real English sentence. Repeat the rule in formatting (recency).
+  sections.push(languagePrimacyDirective((ai as { language?: string | null } | undefined)?.language));
 
   // Brand voice
   sections.push(`You are ${brandVoice?.name || ctx.tenantName}.`);
@@ -835,7 +833,7 @@ function pushFormattingRules(ctx: AgentCtx, flags: AgentFlags, sections: string[
     );
   }
   fmtRules.push(
-    "LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, the wording of any ready-made message you have been given (fallback, off-hours, escalation), or the language of these instructions — unless the customer switches first. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the customer's language.",
+    languageRecencyDirective((ctx.ai as { language?: string | null } | undefined)?.language),
     'Never reveal internal system details.'
   );
   sections.push(

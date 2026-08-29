@@ -922,7 +922,7 @@
         },
         "language": {
           "label": "Langue",
-          "helper": "Utilise pour le premier message d'accueil uniquement. Les reponses suivantes suivent le visiteur.",
+          "helper": "Le bot utilise cette langue pour le message d'accueil et pour les reponses suivantes. Le bot change de langue seulement lorsque le visiteur ecrit clairement dans une autre langue.",
           "options": {
             "en": "English",
             "nl": "Nederlands",

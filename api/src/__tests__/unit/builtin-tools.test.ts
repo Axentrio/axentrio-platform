@@ -317,6 +317,8 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBe(true);
     expect((result.data as { guidance?: string }).guidance).toMatch(/already named this time/i);
     expect((result.data as { guidance?: string }).guidance).toMatch(/do not list or offer other times/i);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/CONFIRMATION_REQUIRED/);
+    expect((result.data as { guidance?: string }).guidance).not.toContain('€80');
   });
 
   it('still sees a named time after the customer answers a required intake question', async () => {
@@ -506,6 +508,128 @@ describe('CreateBookingTool', () => {
     expect(tool.preconditions).toBeUndefined();
   });
 
+  const DUMP =
+    'Ik wil maandag 26 oktober 2026 om 10:00 de Korting booking test boeken. Tom Test, 0470 00 00 12, achraftamranim@gmail.com.';
+  const BOOK_ARGS = {
+    startTime: '2026-10-26T10:00:00',
+    attendeeName: 'Tom Test',
+    attendeeEmail: 'achraftamranim@gmail.com',
+    serviceId: 'svc-korting',
+  };
+
+  async function executeAfterConfirm(
+    tool: CreateBookingTool,
+    args: Record<string, unknown>,
+    ctx: ToolContext,
+  ) {
+    await tool.execute(args, { ...ctx, runId: `${ctx.runId}:ask` });
+    return tool.execute(args, {
+      ...ctx,
+      runId: `${ctx.runId}:yes`,
+      conversationHistory: [
+        ...ctx.conversationHistory,
+        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'user', content: 'ja' },
+      ],
+    });
+  }
+
+  it('does not write on the first turn when the customer dumped the details', async () => {
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+    expect(result.error).not.toContain('€80');
+  });
+
+  it('writes after a later explicit yes for the same pending details', async () => {
+    const tool = new CreateBookingTool();
+    await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-yes',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-1' } });
+    const result = await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-yes',
+        runId: 'run-2',
+        conversationHistory: [
+          { role: 'user', content: DUMP },
+          { role: 'assistant', content: 'Zal ik Korting booking test boeken op maandag 26 oktober 2026 om 10:00 op naam van Tom Test?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+      }),
+    );
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+  });
+
+  it('does not write when a later message changes the time', async () => {
+    const tool = new CreateBookingTool();
+    await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-change',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    const result = await tool.execute(
+      { ...BOOK_ARGS, startTime: '2026-10-26T11:00:00' },
+      makeCtx({
+        sessionId: 'sess-confirm-change',
+        runId: 'run-2',
+        conversationHistory: [
+          { role: 'user', content: DUMP },
+          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'user', content: 'Change it to 11:00' },
+        ],
+      }),
+    );
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+  });
+
+  it('does not treat a later question as confirmation of the old summary', async () => {
+    const tool = new CreateBookingTool();
+    await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-q',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    const result = await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-q',
+        runId: 'run-2',
+        conversationHistory: [
+          { role: 'user', content: DUMP },
+          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'user', content: 'What is the address?' },
+        ],
+      }),
+    );
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
   it('does not expose fileSessionIds to the model', () => {
     const create = new CreateBookingTool();
     const request = new RequestAppointmentTool();
@@ -638,7 +762,8 @@ describe('CreateBookingTool', () => {
       starts: ['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z'],
       timezone: 'Europe/Brussels',
     }));
-    await tool.execute(
+    await executeAfterConfirm(
+      tool,
       { startTime: '2026-10-05T09:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
       makeCtx({
         sessionId: 'sess-verbatim',
@@ -659,7 +784,8 @@ describe('CreateBookingTool', () => {
       starts: ['2026-10-05T13:00:00.000Z'],
       timezone: 'Europe/Brussels',
     }));
-    await tool.execute(
+    await executeAfterConfirm(
+      tool,
       { startTime: '2026-10-05T13:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
       makeCtx({
         sessionId: 'sess-contradict',
@@ -678,7 +804,8 @@ describe('CreateBookingTool', () => {
       starts: ['2026-10-05T09:00:00.000Z', '2026-10-05T09:30:00.000Z'],
       timezone: 'Europe/Brussels',
     }));
-    await tool.execute(
+    await executeAfterConfirm(
+      tool,
       { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
       makeCtx({
         sessionId: 'sess-constructed',

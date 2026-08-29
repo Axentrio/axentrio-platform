@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
+import { refuseUnlessConfirmed } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
 
 /**
@@ -153,7 +154,7 @@ function addressReplyFact(
 }
 
 const NAMED_TIME_GUIDANCE =
-  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. If they tapped a slot button or already asked you to book this time, and you have their name, call create_booking - do not ask them to pick a time again.';
+  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
 
 /**
  * The customer named a time this call has just ruled out.
@@ -676,7 +677,7 @@ async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult): Prom
 
 export class CreateBookingTool implements ToolAdapter {
   name = 'create_booking';
-  description = 'Create an appointment booking for the customer. You can call this directly if availability was already checked in a recent conversation turn. If the service has intake questions, ask them first and pass the answers in intakeAnswers.';
+  description = 'Create an appointment booking. If this returns CONFIRMATION_REQUIRED, present a short summary (service, date, time, name, and the final price from that service\'s SERVICES line when one is shown) and wait for an explicit yes, then call again with the same details. Checking availability and collecting details is not confirmation. If the service has intake questions, ask them first and pass the answers in intakeAnswers.';
   parameters = {
     type: 'object',
     properties: {
@@ -756,6 +757,10 @@ export class CreateBookingTool implements ToolAdapter {
       );
       const unsettledAddress = await rejectUnsettledAddress(ctx, booked);
       if (unsettledAddress) return unsettledAddress;
+      const needsConfirm = await refuseUnlessConfirmed(args, ctx);
+      if (needsConfirm) return needsConfirm;
+      // Customer confirmation of the summary, not an availability re-check. The old
+      // precondition forced a second check_availability and Cal.com drifted.
       // The address is in the key for the same reason it is in `request_appointment`'s: two calls
       // that differ only in where the van goes are not the same booking. The `correctionPending`
       // guard above is the first line of defence and a better one - it asks the customer - but it

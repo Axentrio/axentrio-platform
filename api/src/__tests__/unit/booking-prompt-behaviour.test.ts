@@ -63,6 +63,14 @@ describe('a customer who already named the hour', () => {
     expect(p).toMatch(/tapped slot button/i);
     expect(p).toMatch(/they have confirmed/i);
   });
+
+  it('requires CONFIRMATION_REQUIRED to become a summary, not a write', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/CONFIRMATION_REQUIRED/);
+    expect(p).toMatch(/wait for an explicit yes/i);
+    expect(p).toMatch(/Giving every detail in one first message is not confirmation/i);
+    expect(p).toMatch(/final price from that service's SERVICES line/i);
+  });
 });
 
 /**
@@ -1013,6 +1021,22 @@ describe('discounts — final price on the line, mention gated by the block', ()
     });
     expect(line(p)).toContain('€80');
     expect(line(p)).not.toContain('€100');
+  });
+
+  it('puts €80 on the catalog line so the confirm summary can quote it', () => {
+    const p = priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 100,
+      discountEnabled: true,
+      discountType: 'percentage',
+      discountValue: 20,
+      mentionDiscountInChat: false,
+    });
+    expect(line(p)).toContain('€80');
+    expect(p).toMatch(/final price from that service's SERVICES line/i);
+    const confirmLine = p.split('\n').find((l) => l.startsWith('- CONFIRM:'));
+    expect(confirmLine).toBeDefined();
+    expect(confirmLine).not.toContain('€80');
   });
 
   it('mention ON: the block carries the was/now figures and permits proactive mention', () => {

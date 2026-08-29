@@ -61,6 +61,9 @@ describe('a customer who already named the hour', () => {
     expect(p).toMatch(/already named a specific clock time/i);
     expect(p).toMatch(/do not list or offer other times/i);
     expect(p).toMatch(/tapped slot button/i);
+    expect(p).toContain('"Mon 10:00"');
+    expect(p).not.toContain('Mon 10:00 AM');
+    expect(buildServicesSection([svc()], false, false, 'America/New_York')!).toContain('Mon 10:00 AM');
     expect(p).toMatch(/they have confirmed/i);
   });
 
@@ -666,18 +669,21 @@ describe('{openingHours} carries closures', () => {
 });
 
 /**
- * Travel time changes the ORDER of the conversation, and only for the businesses using it.
- *
- * Everywhere else the address is collected before the BOOKING tool. With travel on it has to
- * come before the AVAILABILITY tool instead, because which times exist at all now depends on
- * where the job is. That is real friction moved earlier, so nobody else may be charged it.
+ * Customer-location jobs collect the full address before times, even when
+ * travel time is off. Travel time then adds the requestable-slots rule.
  */
 describe('travel time — asking for the address before the times', () => {
   const mobile = svc({ customerAddressRequired: true, locationType: 'custom' });
 
-  it('says nothing at all when travel time is not running', () => {
+  it('still collects the full address before times when travel time is not running', () => {
     const section = buildServicesSection([mobile])!;
-    expect(section).not.toMatch(/BEFORE you call check_availability/);
+    expect(section).toMatch(/BEFORE you call check_availability/);
+    expect(section).toMatch(/street/i);
+    expect(section).toMatch(/house number/i);
+    expect(section).toMatch(/postal code/i);
+    expect(section).toMatch(/city/i);
+    expect(section).toMatch(/map search results/i);
+    expect(section).not.toMatch(/requestableSlots/);
   });
 
   it('tells the bot to collect the address before checking times when it is', () => {

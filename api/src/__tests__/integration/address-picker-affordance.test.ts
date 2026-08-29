@@ -51,7 +51,7 @@ import { bindAddress } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
 
 const SESSION = '20000000-0000-4000-8000-000000000001';
-const TYPED = 'Kerkstraat 12, Antwerpen';
+const TYPED = 'Kerkstraat 12, 2060 Antwerpen';
 /** What the customer actually picked, so the model's argument is a genuine second option. */
 const BOUND = 'Turnhoutsebaan 100, 2140 Antwerpen';
 

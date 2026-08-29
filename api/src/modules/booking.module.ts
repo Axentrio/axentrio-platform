@@ -12,7 +12,7 @@
 import { DateTime } from 'luxon';
 import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
-import { isDiscountActive, applyDiscount, formatServicePrice } from '../booking/pricing/service-discount';
+import { isDiscountActive, applyDiscount, formatEuro, formatServicePrice } from '../booking/pricing/service-discount';
 import {
   AvailabilityRule,
   isRelevantOn,
@@ -34,6 +34,7 @@ import { Bot } from '../database/entities/Bot';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
 import { resolveTravelEligibility } from '../booking/travel/travel-eligibility';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
+import { usesHour12 } from '../contracts/clock-format';
 import { resolveItineraryKey } from '../scheduler/itinerary-key';
 import { logger } from '../utils/logger';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
@@ -70,8 +71,8 @@ function discountDetailLine(s: ServiceType, tz: string, now: Date): string | nul
   if (!isDiscountActive(s, tz, now)) return null;
   if (s.discountType !== 'percentage' && s.discountType !== 'fixed') return null;
   if (typeof s.discountValue !== 'number') return null;
-  const was = (n: number) => `€${n}`;
-  const nowP = (n: number) => `€${applyDiscount(n, s.discountType as 'percentage' | 'fixed', s.discountValue as number)}`;
+  const was = (n: number) => formatEuro(n);
+  const nowP = (n: number) => formatEuro(applyDiscount(n, s.discountType as 'percentage' | 'fixed', s.discountValue as number));
   let originalStr = '';
   let finalStr = '';
   switch (s.priceDisplayType) {
@@ -93,7 +94,7 @@ function discountDetailLine(s: ServiceType, tz: string, now: Date): string | nul
     default:
       return null;
   }
-  const descr = s.discountType === 'percentage' ? `${s.discountValue}% off` : `€${s.discountValue} off`;
+  const descr = s.discountType === 'percentage' ? `${s.discountValue}% off` : `${formatEuro(s.discountValue)} off`;
   const mention = s.mentionDiscountInChat ? 'may mention' : 'do not mention';
   return `  - ${s.id} · ${sanitizeForLine(s.name)}: was ${originalStr}, now ${finalStr} (${descr}) · ${mention}`;
 }
@@ -407,19 +408,21 @@ If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job 
 }
 
 /**
- * The one rule that changes the ORDER of a booking conversation.
+ * Customer-location jobs need the full appointment address before times.
  *
- * Everywhere else the address is collected before the booking tool is called. With travel time
- * on it has to come before the AVAILABILITY tool instead, because which times exist at all now
- * depends on where the job is: the owner cannot be in two places an hour apart. That is real
- * friction moved earlier in the conversation, and it is accepted only because it is confined to
- * services whose customers have to give an address anyway — and because the alternative is
- * offering a time and then taking it back, which this codebase has already ruled against.
- *
- * Emitted only when travel time is actually running for the Agent, so no other business is made
- * to ask for anything sooner than it does today.
+ * Phone-first is the same shape: a prompt rule without a server gate was ignored.
+ * The four Belgian parts are named so a city or the business location cannot
+ * stand in for the customer's door.
  */
-const TRAVEL_ADDRESS_FIRST_RULE = `- Where the job is: for a service flagged "needs address", ask for the customer's address BEFORE you call check_availability, and pass it as customerAddress. The times this business can offer depend on where the job is — it travels to customers, so a time is only bookable if the owner can get there from the jobs either side of it. If check_availability returns ADDRESS_REQUIRED, ask for the address and call it again. Some results also carry travel.requestableSlots: those times cannot be auto-confirmed, so if the customer wants one, capture it with request_appointment and say plainly that the business will confirm it.`;
+const ADDRESS_FIRST_RULE = `- Where the job is: for a service flagged "needs address", ask for the customer's full appointment address BEFORE you call check_availability, create_booking, or request_appointment, and pass it as customerAddress. For a Belgian address that means street, house number, postal code, and city. Do not check times or confirm until you have all four. Do not offer the business location, a city name, or map search results as the appointment address. Never invent an address. If a booking tool returns ADDRESS_REQUIRED, ask for the missing parts and retry with customerAddress. Keep any date and time the customer already named.`;
+
+/**
+ * Travel time adds a second fact: which times exist depends on where the job is.
+ *
+ * Address-first already collected the door. This rule only explains requestable
+ * times, and only when travel time is actually running for the Agent.
+ */
+const TRAVEL_ADDRESS_FIRST_RULE = `- Travel times: the times this business can offer depend on where the job is - it travels to customers, so a time is only bookable if the owner can get there from the jobs either side of it. Some results also carry travel.requestableSlots: those times cannot be auto-confirmed, so if the customer wants one, capture it with request_appointment and say plainly that the business will confirm it.`;
 
 /**
  * Phone-call Auto-book must stay in the booking flow when the number is missing.
@@ -484,6 +487,9 @@ export function buildServicesSection(
     const loc = resolveServiceLocationMode(s);
     return loc === 'customer_location' || loc === 'customer_choice';
   });
+  const hasCustomerLocation = services.some(
+    (s) => resolveServiceLocationMode(s) === 'customer_location',
+  );
   // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
   // emitted for them as well — keyed on per-service caps alone, a bot with only a business
   // cap got the error with no instruction and would tell the customer it was fully booked.
@@ -500,7 +506,7 @@ export function buildServicesSection(
 When the customer wants to book, identify which service they mean and pass its id as serviceId (use the SAME service whose availability you checked). Before you call create_booking or request_appointment, collect the following — and never invent any of it:
 - NAME: if it's already known from their profile (see above), confirm it rather than asking from scratch; otherwise ask for it.
 ${hasIntake ? `- INTAKE: if the chosen service lists Intake questions, ask every listed question (including optional) and wait for an answer or a decline BEFORE you call check_availability or a booking tool. Keep the date and time they already named.
-` : ''}- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture. If they already named a specific clock time and check_availability includes it, confirm THAT time only - do not list or offer other times. A tapped slot button (a short "Mon 10:00 AM" or "Book ... at ..." message) IS their choice of that time; do not offer times again.
+` : ''}- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture. If they already named a specific clock time and check_availability includes it, confirm THAT time only - do not list or offer other times. A tapped slot button (a short "${usesHour12(tz) ? 'Mon 10:00 AM' : 'Mon 10:00'}" or "Book ... at ..." message) IS their choice of that time; do not offer times again.
 - CONFIRM: call create_booking once you have the details. If it returns CONFIRMATION_REQUIRED, send a short summary (service, date, time, name, and the final price from that service's SERVICES line when one is shown) and wait for an explicit yes. Do not call create_booking again in that same reply, and do not tell them they are booked. Giving every detail in one first message is not confirmation. If they already said yes to that summary (ja, yes, ok, klopt), call create_booking immediately with the same details - do not send a second summary. If you already asked whether to book that same time and they choose it again, or they tap a slot after you asked, they have confirmed — then call create_booking again with the same details.
 - EMAIL (optional): ask once so we can send a calendar invite, but if they have none or decline, proceed without it — don't insist, re-ask, or block the booking on it.
 - SUMMARY (optional, never asked for): if the conversation told you something the business owner would want to know before this appointment — what the customer actually needs, a constraint, an urgency, something they mentioned in passing — pass it as aiSummary, one plain line written for the owner. It goes on their calendar entry and the customer never sees it. Do NOT invent one, and skip it entirely when nothing was said beyond the booking itself.
@@ -538,7 +544,7 @@ Then follow these rules IN ORDER:
   7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
   }
-${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. The price shown on a service line is the FINAL price and may already include a discount — quote it exactly, even if it is €0 for a service listed under Discounts below. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free", or when it is the discounted final price of a service listed under Discounts. A service whose price is not shown has no price to quote — do not infer that it is free. Never mention, invent, imply, or deny a discount, promotion, or special offer for a service unless it is listed under Discounts below.${

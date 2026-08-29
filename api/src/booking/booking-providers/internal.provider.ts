@@ -106,7 +106,7 @@ import {
   requestTooFar,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
-import { resolveContactFields, assertRequiredPhone } from './contact';
+import { resolveContactFields, assertRequiredPhone, assertRequiredAddress } from './contact';
 import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
 import {
   resolveDuration,
@@ -301,6 +301,7 @@ export class InternalProvider implements BookingProvider {
     // existing booking, already have a number or do not need one to see times.
     if (!ctx.isAdmin && !excludeBookingId) {
       assertRequiredPhone(service, { customerPhone }, ctx.session);
+      assertRequiredAddress(service, { customerAddress, locationChoice });
     }
     // A paused business still HELPS — it just stops auto-confirming. Same fork, same
     // capture-don't-refuse machinery as a missing calendar, because the customer's

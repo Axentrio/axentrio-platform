@@ -87,13 +87,17 @@ describe('autocompleteAddress', () => {
 
     const [, body, opts] = post.mock.calls[0] as [
       string,
-      { input: string; includedRegionCodes: string[] },
+      { input: string; includedRegionCodes: string[]; includedPrimaryTypes: string[] },
       { headers: Record<string, string> },
     ];
     // `components=country:BE` is the Geocoding-v3 spelling and is IGNORED here rather than
     // rejected, which is how a suggestion list silently spans continents.
-    expect(body.includedRegionCodes).toEqual(['be']);
-    expect(body.input).toBe('Grote Markt');
+    // Without street_address, Autocomplete (New) returns cities and stations.
+    expect(body).toEqual({
+      input: 'Grote Markt',
+      includedRegionCodes: ['be'],
+      includedPrimaryTypes: ['street_address'],
+    });
     // A wide mask is what turns a cheap autocomplete into an expensive one.
     expect(opts.headers['X-Goog-FieldMask']).toBe(
       'suggestions.placePrediction.placeId,suggestions.placePrediction.text'

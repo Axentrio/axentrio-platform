@@ -38,6 +38,14 @@ const AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const REGION_CODES = ['be'];
 
 /**
+ * Street addresses only. Autocomplete (New) `includedPrimaryTypes` takes Table A
+ * or Table B types; `street_address` is the Table B filter. Without it, a short
+ * query returns cities, stations, and other map hits, which then ship as booking
+ * location options. `(cities)` is the opposite collection and must never be sent.
+ */
+const PRIMARY_TYPES = ['street_address'];
+
+/**
  * Below this, suggestions are noise and every keystroke is billable.
  *
  * Three characters is roughly where a Belgian street name starts to discriminate. It is also the
@@ -95,7 +103,7 @@ export async function autocompleteAddress(tenantId: string, query: string): Prom
   try {
     const { data } = await axios.post<AutocompleteResponse>(
       AUTOCOMPLETE_URL,
-      { input, includedRegionCodes: REGION_CODES },
+      { input, includedRegionCodes: REGION_CODES, includedPrimaryTypes: PRIMARY_TYPES },
       {
         timeout: TIMEOUT_MS,
         headers: {

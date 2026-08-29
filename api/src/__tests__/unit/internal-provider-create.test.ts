@@ -1086,6 +1086,34 @@ describe('InternalProvider.createBooking', () => {
     ).resolves.toMatchObject({ locationMode: 'remote' });
   });
 
+  it('throws ADDRESS_REQUIRED on checkAvailability for a customer-location job with no address', async () => {
+    const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
+    serviceTypeFind.mockResolvedValue([mobile]);
+    eventTypeFindOne.mockResolvedValue(mobile);
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11'),
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
+  it('throws ADDRESS_REQUIRED on checkAvailability for a city-only address', async () => {
+    const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
+    serviceTypeFind.mockResolvedValue([mobile]);
+    eventTypeFindOne.mockResolvedValue(mobile);
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, 'Antwerp'),
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
+  it('offers slots for a customer-location job once the full address is given', async () => {
+    const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
+    serviceTypeFind.mockResolvedValue([mobile]);
+    eventTypeFindOne.mockResolvedValue(mobile);
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, 'Kerkstraat 12, 9000 Gent',
+    );
+    expect(res.slots.length).toBeGreaterThan(0);
+  });
+
 
 });
 
@@ -1360,10 +1388,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(insertParam(insert as any, 'service_area_match')).toBeNull();
   });
 
-  it('CAPTURES rather than auto-confirms when the address cannot be placed', async () => {
-    // Deliberately not fail-open here. A wrong "outside" costs the owner one glance at a
-    // request they can accept; a wrong "inside" costs a confirmed calendar event, an
-    // invite the customer is holding, and either a long drive or a cancellation.
+  it('throws ADDRESS_REQUIRED when the address is not a full appointment address', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
@@ -1372,7 +1397,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
         ctx, 'idem-area-unknown', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
         { customerAddress: 'the house behind the church' }
       )
-    ).rejects.toMatchObject({ code: 'ADDRESS_NOT_PLACEABLE' });
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
   });
 
   it('distinguishes "cannot be placed" from "outside", because the bot must act differently', async () => {
@@ -1390,16 +1415,18 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'OUT_OF_SERVICE_AREA' });
   });
 
-  it('tells the customer what would make the address placeable', async () => {
-    // The message is the only place the bot learns what to ask for next.
+  it('tells the bot the four parts a Belgian appointment address needs', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
     await expect(
       provider.createBooking(
         ctx, 'idem-area-msg', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
-        { customerAddress: 'the house behind the church' }
+        { customerAddress: 'Antwerp' }
       )
-    ).rejects.toMatchObject({ message: expect.stringMatching(/postcode or town/i) });
+    ).rejects.toMatchObject({
+      code: 'ADDRESS_REQUIRED',
+      message: expect.stringMatching(/street.*house number.*postal code.*city/i),
+    });
   });
 
   it('never gates a service that does not ask for an address', async () => {
@@ -1561,6 +1588,17 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(bookingQuery).not.toHaveBeenCalled();
   });
 
+  it('throws ADDRESS_REQUIRED for a city-only address on the write path', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    await expect(
+      provider.requestAppointment(
+        ctx, 'idem-addr-city', OFFERED_START, { name: 'Ada', email: 'ada@example.com' },
+        undefined, undefined, undefined, undefined,
+        { customerAddress: 'Antwerp' },
+      )
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
   it('throws PHONE_REQUIRED when the service requires a phone (customerLocationRequired) and only whitespace is given', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerLocationRequired: true }]);
     await expect(
@@ -1603,10 +1641,10 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, customerLocationRequired: true }]);
     await provider.requestAppointment(
       ctx, 'idem-contact', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined,
-      { customerAddress: '  221B Baker Street  ', customerPhone: '+44 20 7946 0000' }
+      { customerAddress: '  Kerkstraat 12, 9000 Gent  ', customerPhone: '+44 20 7946 0000' }
     );
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect(insertParam(insert as any, 'customer_address')).toBe('221B Baker Street');
+    expect(insertParam(insert as any, 'customer_address')).toBe('Kerkstraat 12, 9000 Gent');
     expect(insertParam(insert as any, 'customer_phone')).toBe('+44 20 7946 0000');
   });
 });
@@ -1662,6 +1700,28 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
     const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
     expect(res.serviceId).toBe('et-1');
     expect(res.timezone).toBe('Europe/Brussels');
+  });
+
+  it('asks for the address before a calendar exit on a customer-location service', async () => {
+    const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
+    eventTypeFindOne.mockResolvedValue(mobile);
+    serviceTypeFind.mockResolvedValue([mobile]);
+    hasHealthyCalendarConnection.mockResolvedValue(false);
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
+  it('still raises CALENDAR_NOT_CONNECTED once the address is complete', async () => {
+    const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
+    eventTypeFindOne.mockResolvedValue(mobile);
+    serviceTypeFind.mockResolvedValue([mobile]);
+    hasHealthyCalendarConnection.mockResolvedValue(false);
+    await expect(
+      provider.checkAvailability(
+        ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, 'Kerkstraat 12, 9000 Gent',
+      )
+    ).rejects.toMatchObject({ code: 'CALENDAR_NOT_CONNECTED' });
   });
   describe('paused bookings', () => {
     // The whole point of a pause is that the business stays HELPFUL. It must behave exactly
@@ -2103,14 +2163,25 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     provider.checkAvailability({ ...ctx, ...over } as never, '2026-06-10', '2026-06-11',
       undefined, undefined, undefined, address);
 
-  it('leaves an Agent without travel time byte-identical to yesterday', async () => {
+  it('still demands a full address when travel time is off', async () => {
     resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
-    const res = await check();
+    await expect(check()).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+    expect(placeAddressFor).not.toHaveBeenCalled();
+  });
+
+  it('offers unfiltered times when travel is off, once the address is complete', async () => {
+    resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
+    const res = await check(ADDRESS);
     expect(res.slots).toHaveLength(4);
     expect(res.travel).toBeUndefined();
-    // Nothing was placed, no diary was read, and no address was demanded.
     expect(placeAddressFor).not.toHaveBeenCalled();
     expect(loadTravelNeighbours).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES a city-only address rather than treating it as the job location', async () => {
+    await expect(check('Antwerp')).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+    await expect(check('Antwerpen, Antwerp, Belgium')).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+    expect(placeAddressFor).not.toHaveBeenCalled();
   });
 
   it('leaves a service nobody drives to alone, even on an Agent with travel on', async () => {

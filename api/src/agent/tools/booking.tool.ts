@@ -414,7 +414,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       customerAddress: {
         type: 'string',
         description:
-          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depend on where the job is, and calling without it returns ADDRESS_REQUIRED. For a 'customer chooses location' service, only required when locationChoice is 'customer'.",
+          "The customer's full appointment address as one string (street, house number, postal code, and city for a Belgian address). Required when the SERVICES entry flags 'needs address', or when it flags 'customer chooses location' AND locationChoice is 'customer'. A city name or the business location is not enough and returns ADDRESS_REQUIRED.",
       },
       customerPhone: {
         type: 'string',
@@ -727,7 +727,8 @@ export class CreateBookingTool implements ToolAdapter {
       },
       customerAddress: {
         type: 'string',
-        description: "The customer's address. Required only if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'.",
+        description:
+          "The customer's full appointment address as one string (street, house number, postal code, and city for a Belgian address). Required if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'. A city name is not enough and returns ADDRESS_REQUIRED.",
       },
       customerPhone: {
         type: 'string',
@@ -937,7 +938,8 @@ export class RequestAppointmentTool implements ToolAdapter {
       },
       customerAddress: {
         type: 'string',
-        description: "The customer's address. Required only if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'.",
+        description:
+          "The customer's full appointment address as one string (street, house number, postal code, and city for a Belgian address). Required if the SERVICES entry flags 'needs address', or if it flags 'customer chooses location' AND locationChoice is 'customer'. A city name is not enough and returns ADDRESS_REQUIRED.",
       },
       customerPhone: {
         type: 'string',

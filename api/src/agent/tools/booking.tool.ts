@@ -28,7 +28,7 @@ import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
-import { refuseUnlessConfirmed } from '../pending-booking-confirmation';
+import { refuseUnlessConfirmed, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
 
 /**
@@ -155,6 +155,8 @@ function addressReplyFact(
 
 const NAMED_TIME_GUIDANCE =
   'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
+const NAMED_TIME_AFTER_YES =
+  'The customer already confirmed this time. Call create_booking now with the same details. Do not send another summary and do not ask for confirmation again.';
 
 /**
  * The customer named a time this call has just ruled out.
@@ -220,7 +222,14 @@ function namedTimeGuidance(
   const said = lastCustomerText(ctx);
   const append = (line: string) => (guidance ? `${guidance} ${line}` : line);
   if (namesSingleOfferedTime(said, offered.confirmable)) {
-    return { requestedTimeAvailable: true, guidance: append(NAMED_TIME_GUIDANCE) };
+    const last = lastCustomerUtterance(ctx);
+    const alreadyYes =
+      isAffirmativeReply(last) ||
+      offered.confirmable.some((clock) => isConfirmingChip(last, `1970-01-01T${clock}`));
+    return {
+      requestedTimeAvailable: true,
+      guidance: append(alreadyYes ? NAMED_TIME_AFTER_YES : NAMED_TIME_GUIDANCE),
+    };
   }
   const ruledOut = unofferedSingleTimeIn(said, known);
   if (ruledOut) {

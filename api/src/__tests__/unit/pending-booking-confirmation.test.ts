@@ -59,6 +59,11 @@ describe('isConfirmingChip', () => {
     expect(isConfirmingChip('Mon 11:00 AM', start)).toBe(false);
   });
 
+  it('rejects a time question even when it is under 80 characters', () => {
+    expect(isConfirmingChip('Kan ik maandag 5 oktober 2026 om 10:00 langskomen?', start)).toBe(false);
+    expect(isConfirmingChip('Kan ik om 10:00 langskomen?', start)).toBe(false);
+  });
+
   it('rejects the details dump even though it names 10:00', () => {
     expect(
       isConfirmingChip(

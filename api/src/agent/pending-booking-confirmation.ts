@@ -50,7 +50,10 @@ export function isAffirmativeReply(text: string): boolean {
 /** A short slot-chip payload naming the pending hour, not a details dump. */
 export function isConfirmingChip(text: string, startTime: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.length > CHIP_MAX_CHARS) return false;
+  if (!trimmed || trimmed.length > CHIP_MAX_CHARS || trimmed.includes('?')) return false;
+  if (!/^(book\b|(?:mon|tue|wed|thu|fri|sat|sun|ma|di|wo|do|vr|za|zo)\b)/i.test(trimmed)) {
+    return false;
+  }
   const clock = startTime.match(/T(\d{2}):(\d{2})/);
   if (!clock) return false;
   return namesSingleOfferedTime(trimmed, [`${clock[1]}:${clock[2]}`]);

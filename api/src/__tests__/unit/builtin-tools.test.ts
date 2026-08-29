@@ -321,6 +321,33 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { guidance?: string }).guidance).not.toContain('€80');
   });
 
+  it('tells the model to call create_booking now after an explicit yes', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+    const result = await tool.execute(
+      { startDate: '2026-10-05', endDate: '2026-10-05' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik maandag 5 oktober 2026 om 10:00 langskomen?' },
+          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+      }),
+    );
+    const guidance =
+      result.data && typeof result.data === 'object' && 'guidance' in result.data
+        ? String((result.data as { guidance?: string }).guidance)
+        : '';
+    expect(guidance).toMatch(/Call create_booking now/i);
+    expect(guidance).toMatch(/Do not send another summary/i);
+    expect(guidance).not.toMatch(/CONFIRMATION_REQUIRED/);
+  });
+
   it('still sees a named time after the customer answers a required intake question', async () => {
     // Production: Lekonderzoek auto-book, required intake "Waar bevindt het probleem zich?".
     // Customer named Monday 12 October 2026 at 10:00, then answered the intake. lastCustomerText
@@ -655,6 +682,32 @@ describe('CreateBookingTool', () => {
           { role: 'user', content: DUMP },
           { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
           { role: 'user', content: 'What is the address?' },
+        ],
+      }),
+    );
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
+  it('does not treat a later time question as confirmation of the pending summary', async () => {
+    const tool = new CreateBookingTool();
+    await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-timeq',
+        runId: 'run-1',
+        conversationHistory: [{ role: 'user', content: DUMP }],
+      }),
+    );
+    const result = await tool.execute(
+      BOOK_ARGS,
+      makeCtx({
+        sessionId: 'sess-confirm-timeq',
+        runId: 'run-2',
+        conversationHistory: [
+          { role: 'user', content: DUMP },
+          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'user', content: 'Kan ik om 10:00 langskomen?' },
         ],
       }),
     );

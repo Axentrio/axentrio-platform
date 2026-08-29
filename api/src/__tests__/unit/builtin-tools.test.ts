@@ -70,6 +70,7 @@ import { EscalationTool } from '../../agent/tools/escalation.tool';
 import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
 import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
 import { pendingYesNeedsCreate } from '../../agent/pending-booking-confirmation';
+import { wallClockKey } from '../../agent/offered-slots-store';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -551,12 +552,17 @@ describe('CreateBookingTool', () => {
     ctx: ToolContext,
   ) {
     await tool.execute(args, { ...ctx, runId: `${ctx.runId}:ask` });
+    const pendingRaw = redisStore.get(`booking:confirm:${ctx.sessionId}`);
+    const pendingTime = pendingRaw ? (JSON.parse(pendingRaw) as { startTime?: string }).startTime : '';
+    const keyed = pendingTime || (await wallClockKey(ctx.sessionId, String(args.startTime ?? '')));
+    const clock = keyed.match(/T(\d{2}):(\d{2})/);
+    const hhmm = clock ? `${clock[1]}:${clock[2]}` : '10:00';
     return tool.execute(args, {
       ...ctx,
       runId: `${ctx.runId}:yes`,
       conversationHistory: [
         ...ctx.conversationHistory,
-        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'assistant', content: `Zal ik boeken om ${hhmm}?` },
         { role: 'user', content: 'ja' },
       ],
     });
@@ -591,14 +597,21 @@ describe('CreateBookingTool', () => {
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
         { role: 'user', content: 'Ja, dat klopt' },
       ]),
     ).resolves.toBe(true);
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken?' },
+        { role: 'assistant', content: 'Zal ik de beschikbaarheid checken?' },
+        { role: 'user', content: 'Ja, dat klopt' },
+      ]),
+    ).resolves.toBe(false);
+    await expect(
+      pendingYesNeedsCreate('sess-confirm-nudge', [
+        { role: 'user', content: DUMP },
+        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
         { role: 'user', content: 'What is the address?' },
       ]),
     ).resolves.toBe(false);
@@ -629,6 +642,44 @@ describe('CreateBookingTool', () => {
     );
     expect(mockCreateBooking).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
+  });
+
+  it('writes on a second create_booking in the same yes turn', async () => {
+    const tool = new CreateBookingTool();
+    const yesCtx = {
+      sessionId: 'sess-confirm-samerun',
+      runId: 'run-yes',
+      conversationHistory: [
+        { role: 'user' as const, content: DUMP },
+        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+        { role: 'user' as const, content: 'Ja, dat klopt' },
+      ],
+    };
+    await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-same' } });
+    const result = await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+  });
+
+  it('does not write a same-run ja that only answered an availability question', async () => {
+    const tool = new CreateBookingTool();
+    const yesCtx = {
+      sessionId: 'sess-confirm-avail-ja',
+      runId: 'run-avail',
+      conversationHistory: [
+        { role: 'user' as const, content: DUMP },
+        { role: 'assistant' as const, content: 'Zal ik de beschikbaarheid checken?' },
+        { role: 'user' as const, content: 'Ja, dat klopt' },
+      ],
+    };
+    await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-no' } });
+    const result = await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
   });
 
   it('treats an offered Z instant and a later zoneless time as the same booking', async () => {

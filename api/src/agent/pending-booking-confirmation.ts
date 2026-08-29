@@ -2,8 +2,8 @@
  * A confirmed booking may not be written until the Booking Customer has agreed
  * to a summary of the exact details. The first create_booking call records those
  * details; a later turn may write only after an explicit yes (or a slot chip for
- * that same hour). A later "change it to 11:00" or "what is the address?" is not
- * that yes, and different details replace the pending record instead of writing.
+ * that same hour), and only when a prior assistant reply named that hour and asked
+ * a question. A later "change it to 11:00" or "what is the address?" is not that yes.
  *
  * Lives in Redis, same as offered slots: conversation-scoped, dies with TTL, no
  * migration on chat_sessions. Without Redis the gate fails open, matching the
@@ -11,7 +11,7 @@
  */
 import type { ToolContext, ToolResult } from './tool-adapter';
 import { contentToText } from '../llm/llm.types';
-import { namesSingleOfferedTime } from './clock-times';
+import { namesSingleOfferedTime, parseClockTimes } from './clock-times';
 import { getRedisClient } from '../config/redis';
 import { wallClockKey } from './offered-slots-store';
 import { logger } from '../utils/logger';
@@ -72,6 +72,28 @@ export function lastCustomerUtterance(ctx: Pick<ToolContext, 'conversationHistor
   return '';
 }
 
+const SUMMARY_ASK = /boek|book|bevestig|confirm|afspraak|appointment|samenvatting|summary|klopt/i;
+
+/**
+ * A prior assistant reply named this hour and asked a question. That reply must
+ * already be in history: a question still inside this turn is not evidence.
+ */
+export function summaryWasAsked(
+  history: ToolContext['conversationHistory'],
+  startTime: string,
+): boolean {
+  const clock = startTime.match(/T(\d{2}):(\d{2})/);
+  if (!clock || !Array.isArray(history)) return false;
+  const hhmm = `${clock[1]}:${clock[2]}`;
+  for (const m of history) {
+    if (m.role !== 'assistant') continue;
+    const text = contentToText(m.content);
+    if (!text.includes('?') || !SUMMARY_ASK.test(text)) continue;
+    if (parseClockTimes(text).some((t) => t.key === hhmm)) return true;
+  }
+  return false;
+}
+
 /** True when a pending summary exists and the last customer line is an explicit yes. */
 export async function pendingYesNeedsCreate(
   sessionId: string,
@@ -79,7 +101,8 @@ export async function pendingYesNeedsCreate(
 ): Promise<boolean> {
   if (!isAffirmativeReply(lastCustomerUtterance({ conversationHistory: history }))) return false;
   const lookup = await readPending(sessionId);
-  return lookup.store === 'up' && lookup.pending != null;
+  if (lookup.store !== 'up' || lookup.pending == null) return false;
+  return summaryWasAsked(history, lookup.pending.startTime);
 }
 
 function parsePending(raw: string | null): PendingBookingDetails | null {
@@ -173,8 +196,8 @@ export async function refuseUnlessConfirmed(
     pending.startTime === details.startTime &&
     pending.attendeeName.toLowerCase() === details.attendeeName.toLowerCase() &&
     sameService &&
-    ctx.runId !== pending.runId &&
-    (isAffirmativeReply(last) || isConfirmingChip(last, pending.startTime));
+    (isConfirmingChip(last, pending.startTime) ||
+      (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime)));
 
   if (confirmed) {
     await clearPending(ctx.sessionId);

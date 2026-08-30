@@ -627,9 +627,9 @@ describe('Inbox super-admin reset', () => {
 
     await user.click(await screen.findByRole('button', { name: /^Reset$/ }));
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent(/this customer's chat history on this channel/i);
-    expect(dialog).toHaveTextContent(/including earlier chats/i);
-    expect(dialog).not.toHaveTextContent(/earlier chats stay/i);
+    expect(dialog).toHaveTextContent(/deletes this chat's history/i);
+    expect(dialog).toHaveTextContent(/earlier chats stay/i);
+    expect(dialog).not.toHaveTextContent(/old transcript stays/i);
     await user.click(within(dialog).getByRole('button', { name: /^Reset$/ }));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));

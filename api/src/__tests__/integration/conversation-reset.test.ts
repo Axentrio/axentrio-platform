@@ -207,32 +207,8 @@ describe('Superadmin conversation reset', () => {
       status: 'closed',
     });
     const olderParticipant = await createTestParticipant(older.id, { type: 'user' });
-    await createTestMessage(older.id, tenant.id, olderParticipant.id, {
+    const olderMessage = await createTestMessage(older.id, tenant.id, olderParticipant.id, {
       content: `Earlier booking ${SLOT_TEXT}`,
-    });
-
-    const widget = await createTestSession(tenant.id, {
-      botId: bot.id,
-      visitorId: VISITOR,
-      channel: 'widget',
-      source: 'widget',
-      status: 'closed',
-    });
-    const widgetParticipant = await createTestParticipant(widget.id, { type: 'user' });
-    const widgetMessage = await createTestMessage(widget.id, tenant.id, widgetParticipant.id, {
-      content: `Widget booking ${SLOT_TEXT}`,
-    });
-
-    const messenger = await createTestSession(tenant.id, {
-      botId: bot.id,
-      visitorId: VISITOR,
-      channel: 'messenger',
-      source: 'messenger',
-      status: 'closed',
-    });
-    const messengerParticipant = await createTestParticipant(messenger.id, { type: 'user' });
-    const messengerMessage = await createTestMessage(messenger.id, tenant.id, messengerParticipant.id, {
-      content: `Messenger booking ${SLOT_TEXT}`,
     });
 
     const subjectKey = await seedMemory(first);
@@ -352,28 +328,11 @@ describe('Superadmin conversation reset', () => {
     expect(Number(selectedLeft[0].n)).toBe(0);
 
     const olderLeft = await AppDataSource.query(
-      `SELECT count(*)::int AS n FROM messages WHERE session_id = $1`,
+      `SELECT id, content FROM messages WHERE session_id = $1`,
       [older.id],
     );
-    expect(Number(olderLeft[0].n)).toBe(0);
-
-    const widgetLeft = await AppDataSource.query(
-      `SELECT id FROM messages WHERE session_id = $1`,
-      [widget.id],
-    );
-    expect(widgetLeft).toHaveLength(1);
-    expect(widgetLeft[0].id).toBe(widgetMessage.id);
-
-    const messengerLeft = await AppDataSource.query(
-      `SELECT id FROM messages WHERE session_id = $1`,
-      [messenger.id],
-    );
-    expect(messengerLeft).toHaveLength(1);
-    expect(messengerLeft[0].id).toBe(messengerMessage.id);
-
-    expect(reset.transcriptSessionIds).toEqual(expect.arrayContaining([first.id, older.id]));
-    expect(reset.transcriptSessionIds).not.toContain(widget.id);
-    expect(reset.transcriptSessionIds).not.toContain(messenger.id);
+    expect(olderLeft).toHaveLength(1);
+    expect(olderLeft[0].id).toBe(olderMessage.id);
 
     const sessionStats = await AppDataSource.query(
       `SELECT message_count, unread_count, last_coalesced_answer_message_id

@@ -184,8 +184,6 @@ export interface ResetResult {
   conversation: ConversationSummary;
   replayed?: boolean;
   sessionIds?: string[];
-  /** Sessions whose message rows were deleted (this channel + visitor). */
-  transcriptSessionIds?: string[];
   /** True only after Redis DEL of session-keyed tool state succeeded. */
   scratchCleared?: boolean;
 }
@@ -1070,9 +1068,8 @@ export const conversationCommands = {
    * Superadmin test reset: close the session so the next inbound starts a new
    * chat, then wipe identity-keyed conversation state (memory, draft booking
    * scratch, intake, address, lead extraction, Redis tool/session scratch)
-   * and delete this customer's message transcripts on this channel (this
-   * chat and earlier chats). Other channels keep their logs. Close alone
-   * leaves remembered preferred times in the next prompt.
+   * and delete this session's message transcript. Earlier closed chats keep
+   * their logs. Close alone leaves remembered preferred times in the next prompt.
    * Confirmed calendar bookings are not cancelled.
    *
    * Redis scratch is cleared AFTER the DB commit. Missing Redis or a DEL that
@@ -1111,7 +1108,6 @@ export const conversationCommands = {
         outcome: 'reset' as const,
         conversation,
         sessionIds: cleared.sessionIds,
-        transcriptSessionIds: cleared.transcriptSessionIds,
       };
     });
     try {

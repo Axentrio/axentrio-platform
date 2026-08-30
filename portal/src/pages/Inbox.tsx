@@ -53,7 +53,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { api } from '@services/apiClient';
 import { takeoverFailureOf, takeoverToastKey } from '@utils/takeoverErrors';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../queries/queryKeys';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { useSocket } from '@websocket/SocketContext';
@@ -941,6 +941,7 @@ const Inbox: React.FC = () => {
         { idempotencyKey: newUuid() },
       );
       applyCommandConversation(queryClient, res.conversation);
+      if (command === 'reset') clearSelectedTranscriptCache(queryClient, prev.id);
       toast.success(t(toasts.success));
     } catch (error) {
       console.error('Failed to close or reset chat:', error);
@@ -950,6 +951,7 @@ const Inbox: React.FC = () => {
       if (command === 'reset' && isResetScratchIncomplete(error)) {
         const summary = conversationFromResetScratchError(error) ?? closedSummaryFromChat(prev);
         applyCommandConversation(queryClient, summary);
+        clearSelectedTranscriptCache(queryClient, prev.id);
         setSelectedChat((current) => mergeDefined(current ?? prev, commandSummaryToChatPatch(summary)));
         return;
       }
@@ -1123,6 +1125,13 @@ const Inbox: React.FC = () => {
     </div>
   );
 };
+
+function clearSelectedTranscriptCache(queryClient: QueryClient, sessionId: string): void {
+  queryClient.setQueryData(queryKeys.chats.detail(sessionId), (old: { messages?: unknown[] } | undefined) =>
+    old ? { ...old, messages: [] } : old,
+  );
+  queryClient.removeQueries({ queryKey: queryKeys.chats.thread(sessionId) });
+}
 
 function isResetScratchIncomplete(error: unknown): boolean {
   const response = (error as {

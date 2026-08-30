@@ -3,6 +3,9 @@
  * into the next inbound from the same visitor (memory, draft booking/tool
  * scratch, address, lead extraction). Confirmed calendar bookings stay.
  *
+ * Message transcript is deleted only for the Reset session. Earlier closed
+ * chats and other channels keep their logs.
+ *
  * Close alone starts a new ChatSession. Identity-keyed stores do not.
  */
 import { getRedisClient } from '../config/redis';
@@ -102,6 +105,9 @@ export async function clearIdentityScratch(sessionIds: string[]): Promise<boolea
  * appointments stay in Postgres and on the calendar. Draft booking intent
  * lives in Redis (`booking:confirm`, `booking:offered`) and customer memory,
  * which Reset clears separately.
+ *
+ * Message rows are deleted only for `session.id`. Identity siblings keep
+ * their transcripts.
  */
 export async function clearConversationResetState(
   manager: Queryable,
@@ -113,6 +119,7 @@ export async function clearConversationResetState(
   await clearAddressBindings(manager, sessionIds);
   await clearLeadConversationState(manager, sessionIds);
   await clearSessionTempMetadata(manager, sessionIds);
+  await clearSelectedSessionTranscript(manager, session.id);
 
   logger.info('[reset] conversation state cleared', {
     sessionId: session.id,
@@ -177,5 +184,28 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
             updated_at = now()
       WHERE id = ANY($1::uuid[])`,
     [sessionIds],
+  );
+}
+
+/**
+ * Hard-delete the Inbox/LLM transcript for the Reset session only.
+ * `message_deliveries` cascade. Coalescer watermarks are cleared so a retry
+ * cannot answer a deleted high-water mark. Sibling sessions are untouched.
+ */
+async function clearSelectedSessionTranscript(manager: Queryable, sessionId: string): Promise<void> {
+  await manager.query(
+    `UPDATE chat_sessions
+        SET last_coalesced_answer_at = NULL,
+            last_coalesced_answer_message_id = NULL,
+            message_count = 0,
+            unread_count = 0,
+            updated_at = now()
+      WHERE id = $1`,
+    [sessionId],
+  );
+  await manager.query(
+    `DELETE FROM messages
+      WHERE session_id = $1`,
+    [sessionId],
   );
 }

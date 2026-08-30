@@ -186,8 +186,29 @@ describe('Superadmin conversation reset', () => {
       status: 'bot',
     });
     const participant = await createTestParticipant(first.id, { type: 'user' });
-    await createTestMessage(first.id, tenant.id, participant.id, {
+    const inbound = await createTestMessage(first.id, tenant.id, participant.id, {
       content: `Ik wil boeken ${SLOT_TEXT}`,
+    });
+    await AppDataSource.query(
+      `UPDATE chat_sessions
+          SET last_coalesced_answer_message_id = $2,
+              last_coalesced_answer_at = now(),
+              message_count = 3,
+              unread_count = 1
+        WHERE id = $1`,
+      [first.id, inbound.id],
+    );
+
+    const older = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'closed',
+    });
+    const olderParticipant = await createTestParticipant(older.id, { type: 'user' });
+    const olderMessage = await createTestMessage(older.id, tenant.id, olderParticipant.id, {
+      content: `Earlier booking ${SLOT_TEXT}`,
     });
 
     const subjectKey = await seedMemory(first);
@@ -299,6 +320,28 @@ describe('Superadmin conversation reset', () => {
       [second.id],
     );
     expect(Number(newMessages[0].n)).toBe(0);
+
+    const selectedLeft = await AppDataSource.query(
+      `SELECT count(*)::int AS n FROM messages WHERE session_id = $1`,
+      [first.id],
+    );
+    expect(Number(selectedLeft[0].n)).toBe(0);
+
+    const olderLeft = await AppDataSource.query(
+      `SELECT id, content FROM messages WHERE session_id = $1`,
+      [older.id],
+    );
+    expect(olderLeft).toHaveLength(1);
+    expect(olderLeft[0].id).toBe(olderMessage.id);
+
+    const sessionStats = await AppDataSource.query(
+      `SELECT message_count, unread_count, last_coalesced_answer_message_id
+         FROM chat_sessions WHERE id = $1`,
+      [first.id],
+    );
+    expect(sessionStats[0].message_count).toBe(0);
+    expect(sessionStats[0].unread_count).toBe(0);
+    expect(sessionStats[0].last_coalesced_answer_message_id).toBeNull();
 
     expect(await peekPendingBooking(first.id)).toBeNull();
     expect(await peekPendingBooking(second.id)).toBeNull();

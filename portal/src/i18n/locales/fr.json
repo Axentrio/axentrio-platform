@@ -2238,7 +2238,7 @@
     },
     "resetDialog": {
       "title": "Réinitialiser cette conversation ?",
-      "description": "Le prochain message de ce client démarre un nouveau chat. L'ancien transcript reste. Cette réinitialisation efface aussi les faits mémorisés et l'autre état de test pour ce client. Les réservations confirmées restent. Rien ne leur est envoyé.",
+      "description": "Le prochain message de ce client démarre un nouveau chat. Cette réinitialisation supprime l'historique de ce chat, les faits mémorisés et l'autre état de test pour ce client. Les conversations précédentes restent. Les réservations confirmées restent. Rien ne leur est envoyé.",
       "confirm": "Réinitialiser"
     },
     "transferModal": {

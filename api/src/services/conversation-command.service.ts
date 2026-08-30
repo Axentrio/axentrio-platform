@@ -1067,8 +1067,9 @@ export const conversationCommands = {
   /**
    * Superadmin test reset: close the session so the next inbound starts a new
    * chat, then wipe identity-keyed conversation state (memory, draft booking
-   * scratch, intake, address, lead extraction, Redis tool/session scratch).
-   * Close alone leaves remembered preferred times in the next prompt.
+   * scratch, intake, address, lead extraction, Redis tool/session scratch)
+   * and delete this session's message transcript. Earlier closed chats keep
+   * their logs. Close alone leaves remembered preferred times in the next prompt.
    * Confirmed calendar bookings are not cancelled.
    *
    * Redis scratch is cleared AFTER the DB commit. Missing Redis or a DEL that

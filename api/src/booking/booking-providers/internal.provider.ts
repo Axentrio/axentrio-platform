@@ -2814,6 +2814,116 @@ export class InternalProvider implements BookingProvider {
     );
   }
 
+  private changeRequestOpenError(existing: Booking): BookingError {
+    return new BookingError(
+      `This appointment already has a pending ${existing.requestKind} request. Do not create another. Tell the customer the business is already reviewing that request.`,
+      'CHANGE_REQUEST_OPEN',
+      409,
+      { kind: existing.requestKind, requestId: existing.id },
+      'You already have a pending change request for this appointment. The business will get back to you.',
+    );
+  }
+
+  private requestedChangeResult(
+    bookingId: string,
+    start: Date,
+    end: Date,
+    timezone: string,
+    serviceName: string,
+  ): RescheduleResult & CancelResult {
+    return {
+      success: true,
+      requested: true,
+      cancelled: false,
+      timezone,
+      serviceName,
+      booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() },
+    };
+  }
+
+  private async reuseOpenChangeRequest(
+    ctx: BookingContext,
+    original: Booking,
+    service: ResolvedService,
+    existing: Booking,
+    kind: 'reschedule' | 'cancel',
+    start: Date,
+    end: Date,
+    timezone: string,
+  ): Promise<RescheduleResult & CancelResult> {
+    if ((existing.requestKind ?? 'new') !== kind) throw this.changeRequestOpenError(existing);
+    if (kind === 'reschedule') {
+      await AppDataSource.getRepository(Booking).query(
+        `UPDATE chatbot_bookings
+            SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($1,$2,'[)'), updated_at=now()
+          WHERE id=$3 AND tenant_id=$4 AND status='request_created'`,
+        [start.toISOString(), end.toISOString(), existing.id, ctx.tenant.id],
+      );
+    }
+    this.notifyRequestCreated(ctx, service, {
+      bookingId: existing.id,
+      start,
+      end,
+      attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
+      notes: existing.notes ?? undefined,
+    });
+    return this.requestedChangeResult(existing.id, start, end, timezone, service.name);
+  }
+
+  private async insertChangeRequest(
+    ctx: BookingContext,
+    original: Booking,
+    service: ResolvedService,
+    kind: 'reschedule' | 'cancel',
+    start: Date,
+    end: Date,
+    timezone: string,
+  ): Promise<RescheduleResult & CancelResult> {
+    const icsUid = `${uuidv4()}@axentrio`;
+    const note =
+      kind === 'reschedule' ? 'Customer requested to reschedule' : 'Customer requested cancellation';
+    const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
+      `INSERT INTO chatbot_bookings
+         (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
+          start_utc, end_utc, blocked_range, calendar_key,
+          attendee_name, attendee_email, notes, ics_uid,
+          source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
+          organizer_email, related_booking_id, request_kind)
+       VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       RETURNING id`,
+      [
+        ctx.tenant.id,
+        ctx.bot.id,
+        original.eventTypeId,
+        original.sessionId ?? ctx.session.id,
+        start.toISOString(),
+        end.toISOString(),
+        original.calendarKey ?? ctx.bot.id,
+        original.attendeeName ?? null,
+        original.attendeeEmail ?? null,
+        note,
+        icsUid,
+        original.sourceChannel ?? ctx.session?.channel ?? null,
+        original.aiSummary ?? null,
+        original.customerAddress ?? null,
+        original.customerPhone ?? null,
+        original.bookedDurationMin ?? null,
+        original.organizerEmail ?? null,
+        original.id,
+        kind,
+      ],
+    ));
+    this.notifyRequestCreated(ctx, service, {
+      bookingId: rows[0].id,
+      start,
+      end,
+      attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
+      notes: note,
+    });
+    return this.requestedChangeResult(rows[0].id, start, end, timezone, service.name);
+  }
+
   private async createChangeRequest(
     ctx: BookingContext,
     original: Booking,
@@ -2827,123 +2937,35 @@ export class InternalProvider implements BookingProvider {
       where: { relatedBookingId: original.id, status: 'request_created' },
     });
     if (existing?.status === 'request_created') {
-      if ((existing.requestKind ?? 'new') !== kind) {
-        throw new BookingError(
-          `This appointment already has a pending ${existing.requestKind} request. Do not create another. Tell the customer the business is already reviewing that request.`,
-          'CHANGE_REQUEST_OPEN',
-          409,
-          { kind: existing.requestKind, requestId: existing.id },
-          'You already have a pending change request for this appointment. The business will get back to you.',
-        );
-      }
-      if (kind === 'reschedule') {
-        await AppDataSource.getRepository(Booking).query(
-          `UPDATE chatbot_bookings
-              SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($1,$2,'[)'), updated_at=now()
-            WHERE id=$3 AND tenant_id=$4 AND status='request_created'`,
-          [start.toISOString(), end.toISOString(), existing.id, ctx.tenant.id],
-        );
-      }
-      this.notifyRequestCreated(ctx, service, {
-        bookingId: existing.id,
-        start,
-        end,
-        attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
-        notes: existing.notes ?? undefined,
-      });
-      return {
-        success: true,
-        requested: true,
-        cancelled: false,
-        timezone,
-        serviceName: service.name,
-        booking: { id: existing.id, startTime: start.toISOString(), endTime: end.toISOString() },
-      };
+      return this.reuseOpenChangeRequest(ctx, original, service, existing, kind, start, end, timezone);
     }
-
-    const icsUid = `${uuidv4()}@axentrio`;
-    const note =
-      kind === 'reschedule' ? 'Customer requested to reschedule' : 'Customer requested cancellation';
     try {
-      const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
-        `INSERT INTO chatbot_bookings
-           (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
-            start_utc, end_utc, blocked_range, calendar_key,
-            attendee_name, attendee_email, notes, ics_uid,
-            source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
-            organizer_email, related_booking_id, request_kind)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
-                 $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-         RETURNING id`,
-        [
-          ctx.tenant.id,
-          ctx.bot.id,
-          original.eventTypeId,
-          original.sessionId ?? ctx.session.id,
-          start.toISOString(),
-          end.toISOString(),
-          original.calendarKey ?? ctx.bot.id,
-          original.attendeeName ?? null,
-          original.attendeeEmail ?? null,
-          note,
-          icsUid,
-          original.sourceChannel ?? ctx.session?.channel ?? null,
-          original.aiSummary ?? null,
-          original.customerAddress ?? null,
-          original.customerPhone ?? null,
-          original.bookedDurationMin ?? null,
-          original.organizerEmail ?? null,
-          original.id,
-          kind,
-        ],
-      ));
-      const bookingId = rows[0].id;
-      this.notifyRequestCreated(ctx, service, {
-        bookingId,
-        start,
-        end,
-        attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
-        notes: note,
-      });
-      return {
-        success: true,
-        requested: true,
-        cancelled: false,
-        timezone,
-        serviceName: service.name,
-        booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() },
-      };
+      return await this.insertChangeRequest(ctx, original, service, kind, start, end, timezone);
     } catch (err) {
-      if ((err as { code?: string })?.code === '23505') {
-        const raced = await AppDataSource.getRepository(Booking).findOne({
-          where: { relatedBookingId: original.id, status: 'request_created' },
-        });
-        if (raced?.status === 'request_created') {
-          if ((raced.requestKind ?? 'new') !== kind) {
-            throw new BookingError(
-              `This appointment already has a pending ${raced.requestKind} request. Do not create another. Tell the customer the business is already reviewing that request.`,
-              'CHANGE_REQUEST_OPEN',
-              409,
-              { kind: raced.requestKind, requestId: raced.id },
-              'You already have a pending change request for this appointment. The business will get back to you.',
-            );
-          }
-          return {
-            success: true,
-            requested: true,
-            cancelled: false,
-            timezone,
-            serviceName: service.name,
-            booking: {
-              id: raced.id,
-              startTime: raced.startUtc.toISOString(),
-              endTime: raced.endUtc.toISOString(),
-            },
-          };
-        }
-      }
-      throw err;
+      if ((err as { code?: string })?.code !== '23505') throw err;
+      return this.resolveRacedChangeRequest(original, service, kind, timezone, err);
     }
+  }
+
+  /**
+   * Unique-index race: another insert already won. Return that row as-is.
+   * Do not update times or notify again — the winner already did both.
+   */
+  private async resolveRacedChangeRequest(
+    original: Booking,
+    service: ResolvedService,
+    kind: 'reschedule' | 'cancel',
+    timezone: string,
+    err: unknown,
+  ): Promise<RescheduleResult & CancelResult> {
+    const raced = await AppDataSource.getRepository(Booking).findOne({
+      where: { relatedBookingId: original.id, status: 'request_created' },
+    });
+    if (raced?.status === 'request_created') {
+      if ((raced.requestKind ?? 'new') !== kind) throw this.changeRequestOpenError(raced);
+      return this.requestedChangeResult(raced.id, raced.startUtc, raced.endUtc, timezone, service.name);
+    }
+    throw err;
   }
 
   private async acceptChangeRequest(

@@ -127,6 +127,75 @@ export function rescheduleOptionsState(
   return 'none';
 }
 
+type SlotIso = { start: string };
+
+function groupSlotsByDay(slots: SlotIso[], timezone: string): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const s of slots) {
+    const dt = DateTime.fromISO(s.start).setZone(timezone);
+    const day = dt.toFormat('cccc d LLLL');
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day)!.push(s.start);
+  }
+  return groups;
+}
+
+function rescheduleSlotsHtml(groups: Map<string, string[]>, token: string, timezone: string): string {
+  if (groups.size === 0) return '';
+  return Array.from(groups.entries())
+    .map(
+      ([day, isos]) =>
+        `<div class="day">${esc(day)}</div><div class="slots">` +
+        isos
+          .map(
+            (iso) =>
+              `<form method="post" action="/api/v1/bookings/manage/reschedule">
+                       <input type="hidden" name="token" value="${esc(token)}"/>
+                       <input type="hidden" name="newStartTime" value="${esc(iso)}"/>
+                       <button class="slot" type="submit">${esc(DateTime.fromISO(iso).setZone(timezone).toFormat(luxonTimeFormat(timezone)))}</button>
+                     </form>`
+          )
+          .join('') +
+        `</div>`
+    )
+    .join('');
+}
+
+function requestableTimesHtml(
+  state: ReturnType<typeof rescheduleOptionsState>,
+  requestable: Array<{ start: string }>,
+  timezone: string,
+): string {
+  if (state !== 'both' && state !== 'request-only') return '';
+  const lead =
+    state === 'both'
+      ? 'These times may also be possible'
+      : 'These times may still be possible';
+  return `<p>${lead}, but the business has to confirm them because of the travel involved. Get in touch and mention the one you would like:</p>
+           <p class="when">${requestable.map((s) => esc(whenLabel(s.start, timezone))).join('<br/>')}</p>`;
+}
+
+function reschedulePageHtml(input: {
+  eventName: string;
+  currentWhen: string;
+  requestMode: boolean;
+  slotsLength: number;
+  slotsHtml: string;
+  requestableHtml: string;
+  nothingOffered: string;
+  timezone: string;
+}): string {
+  const pickLine = input.slotsLength
+    ? input.requestMode
+      ? ' Pick a new time to request:'
+      : ' Pick a new time:'
+    : '';
+  return `<h1>Reschedule</h1>
+         <p>${esc(input.eventName)} — currently ${esc(input.currentWhen)}.${pickLine}</p>
+         ${input.slotsHtml}${input.requestableHtml}${input.nothingOffered}
+         <p class="muted">Times shown in ${esc(input.timezone)}.</p>`;
+}
+
 /** GET /manage?token= — booking summary + cancel/reschedule actions. */
 export async function getManagePage(req: Request, res: Response): Promise<void> {
   try {
@@ -249,35 +318,6 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
       booking.botId
     );
 
-    // Group slots by day in the owner's timezone.
-    const groups = new Map<string, string[]>();
-    for (const s of slots) {
-      const dt = DateTime.fromISO(s.start).setZone(timezone);
-      const day = dt.toFormat('cccc d LLLL');
-      if (!groups.has(day)) groups.set(day, []);
-      groups.get(day)!.push(s.start);
-    }
-
-    const slotsHtml = slots.length
-      ? Array.from(groups.entries())
-          .map(
-            ([day, isos]) =>
-              `<div class="day">${esc(day)}</div><div class="slots">` +
-              isos
-                .map(
-                  (iso) =>
-                    `<form method="post" action="/api/v1/bookings/manage/reschedule">
-                       <input type="hidden" name="token" value="${esc(token)}"/>
-                       <input type="hidden" name="newStartTime" value="${esc(iso)}"/>
-                       <button class="slot" type="submit">${esc(DateTime.fromISO(iso).setZone(timezone).toFormat(luxonTimeFormat(timezone)))}</button>
-                     </form>`
-                )
-                .join('') +
-              `</div>`
-          )
-          .join('')
-      : '';
-
     // TRAVEL TIME CAN EMPTY THIS LIST WITHOUT THE DIARY BEING EMPTY, and saying "no available
     // times" then is simply false. A customer whose address placed only to a town centre has
     // EVERY time judged undecided by design — a coarse position may refuse a drive and may
@@ -291,28 +331,26 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
     // ticket that adds write-time enforcement gives this page a real request path.
     const requestable = travel?.requestableSlots ?? [];
     const state = rescheduleOptionsState(slots.length, requestable.length);
-    const requestableHtml =
-      state === 'both' || state === 'request-only'
-        ? `<p>${
-            state === 'both' ? 'These times may also be possible' : 'These times may still be possible'
-          }, but the business has to confirm them because of the travel involved. Get in touch and mention the one you would like:</p>
-           <p class="when">${requestable.map((s) => esc(whenLabel(s.start, timezone))).join('<br/>')}</p>`
-        : '';
     const nothingOffered =
       state === 'none'
         ? `<p>No available times in the next 30 days. Please contact us directly.</p>`
         : '';
-
     res.status(200).send(
       page(
         'Reschedule appointment',
-        `<h1>Reschedule</h1>
-         <p>${esc(eventName)} — currently ${esc(whenLabel(booking.startUtc.toISOString(), timezone))}.${
-           slots.length ? (requestMode ? ' Pick a new time to request:' : ' Pick a new time:') : ''
-         }</p>
-         ${slotsHtml}${requestableHtml}${nothingOffered}
-         <p class="muted">Times shown in ${esc(timezone)}.</p>`
-      )
+        reschedulePageHtml({
+          eventName,
+          currentWhen: whenLabel(booking.startUtc.toISOString(), timezone),
+          requestMode,
+          slotsLength: slots.length,
+          slotsHtml: slots.length
+            ? rescheduleSlotsHtml(groupSlotsByDay(slots, timezone), token, timezone)
+            : '',
+          requestableHtml: requestableTimesHtml(state, requestable, timezone),
+          nothingOffered,
+          timezone,
+        }),
+      ),
     );
   } catch (err) {
     // The sibling POST handlers both do this; only the page that OPENS the flow did not, so

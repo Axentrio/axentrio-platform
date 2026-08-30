@@ -336,6 +336,77 @@ export interface AdminBookingRow {
   agentName: string | null;
 }
 
+function uploadedFileSnapshots(
+  files: Booking['uploadedFiles'],
+): Array<{ fileSessionId: string; fileName: string; mimeType?: string }> | null {
+  if (!Array.isArray(files)) return null;
+  return (files as Array<Record<string, unknown>>)
+    .filter((f) => f && typeof f.fileSessionId === 'string' && typeof f.fileName === 'string')
+    .map((f) => ({
+      fileSessionId: f.fileSessionId as string,
+      fileName: f.fileName as string,
+      ...(typeof f.mimeType === 'string' && f.mimeType ? { mimeType: f.mimeType } : {}),
+    }));
+}
+
+function adminServiceSlice(
+  eventTypeId: string | null | undefined,
+  nameByService: Map<string, string>,
+  questionsByService: Map<string, ServiceType['intakeQuestions']>,
+  storedAnswers: Booking['intakeAnswers'],
+): Pick<AdminBookingRow, 'serviceName' | 'serviceId' | 'intakeAnswers'> {
+  if (!eventTypeId) {
+    return {
+      serviceName: null,
+      serviceId: null,
+      intakeAnswers: buildIntakeAnswers(null, storedAnswers),
+    };
+  }
+  return {
+    serviceName: nameByService.get(eventTypeId) ?? null,
+    serviceId: eventTypeId,
+    intakeAnswers: buildIntakeAnswers(questionsByService.get(eventTypeId), storedAnswers),
+  };
+}
+
+function toAdminBookingRow(
+  b: Booking,
+  ctx: {
+    agentNameById: Map<string, string>;
+    meetByBooking: Map<string, string | null>;
+    mirroredBookingIds: Set<string>;
+    nameByService: Map<string, string>;
+    questionsByService: Map<string, ServiceType['intakeQuestions']>;
+    estimateByBooking: Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>;
+  },
+) {
+  return {
+    id: b.id,
+    agentId: b.botId,
+    agentName: ctx.agentNameById.get(b.botId) ?? null,
+    startTime: b.startUtc.toISOString(),
+    endTime: b.endUtc.toISOString(),
+    status: b.status,
+    attendeeName: b.attendeeName ?? null,
+    attendeeEmail: b.attendeeEmail ?? null,
+    notes: b.notes ?? null,
+    meetingUrl: ctx.meetByBooking.get(b.id) ?? null,
+    calendarSync: calendarSyncState(b, ctx.mirroredBookingIds.has(b.id)),
+    sourceChannel: b.sourceChannel ?? null,
+    aiSummary: b.aiSummary ?? null,
+    ...adminServiceSlice(b.eventTypeId, ctx.nameByService, ctx.questionsByService, b.intakeAnswers),
+    durationMin: b.bookedDurationMin ?? null,
+    bookingMode: b.bookingMode ?? null,
+    requestKind: b.requestKind ?? 'new',
+    relatedBookingId: b.relatedBookingId ?? null,
+    customerAddress: b.customerAddress ?? null,
+    serviceAreaMatch: b.serviceAreaMatch ?? null,
+    travelCheck: b.travelCheck ?? null,
+    travelEstimate: ctx.estimateByBooking.get(b.id) ?? null,
+    customerPhone: b.customerPhone ?? null,
+    uploadedFiles: uploadedFileSnapshots(b.uploadedFiles),
+  };
+}
 
 
 /** Build a provider context for admin actions from a booking's own bot/session. */
@@ -531,17 +602,6 @@ export async function adminListBookings(
   );
   const mirroredBookingIds = new Set(refs.map((r) => r.bookingId));
 
-  /**
-   * Whether this booking actually reached the owner's calendar.
-   *
-   * A confirmed row whose mirror failed is the worst state the product can be in: the
-   * customer holds a confirmation, the owner's calendar shows nothing, and until now the
-   * portal rendered it as an ordinary green "Confirmed". The owner could only find out by
-   * noticing the absence. Surfacing it is the whole point of this field.
-   */
-  const calendarSyncOf = (b: Booking): CalendarSyncState =>
-    calendarSyncState(b, mirroredBookingIds.has(b.id));
-
   // Service-name lookup for display (requests have no Meet URL but do name the service).
   const serviceIds = [...new Set(rows.map((r) => r.eventTypeId).filter((v): v is string => !!v))];
   // Scoped to the tenant AND to the Agents these rows actually belong to, so a stale or
@@ -587,69 +647,16 @@ export async function adminListBookings(
 
   return {
     total,
-    bookings: rows.map((b) => ({
-      id: b.id,
-      agentId: b.botId,
-      agentName: agentNameById.get(b.botId) ?? null,
-      startTime: b.startUtc.toISOString(),
-      endTime: b.endUtc.toISOString(),
-      status: b.status,
-      attendeeName: b.attendeeName ?? null,
-      attendeeEmail: b.attendeeEmail ?? null,
-      notes: b.notes ?? null,
-      meetingUrl: meetByBooking.get(b.id) ?? null,
-      calendarSync: calendarSyncOf(b),
-      // Populated in prod and never returned before — the owner could not tell a WhatsApp
-      // booking from a website one (required by the spec's booking-records page).
-      sourceChannel: b.sourceChannel ?? null,
-      aiSummary: b.aiSummary ?? null,
-      serviceName: b.eventTypeId ? nameByService.get(b.eventTypeId) ?? null : null,
-      serviceId: b.eventTypeId ?? null,
-      durationMin: b.bookedDurationMin ?? null,
-      bookingMode: b.bookingMode ?? null,
-      requestKind: b.requestKind ?? 'new',
-      relatedBookingId: b.relatedBookingId ?? null,
-      intakeAnswers: buildIntakeAnswers(
-        b.eventTypeId ? questionsByService.get(b.eventTypeId) : null,
-        b.intakeAnswers
-      ),
-      customerAddress: b.customerAddress ?? null,
-      /**
-       * What the service-area gate saw. Null = it did not apply. Surfaced so an owner can
-       * SEE the work their area is holding back — it was previously visible only in a
-       * server log, which meant a business could turn jobs away for months without knowing.
-       */
-      serviceAreaMatch: b.serviceAreaMatch ?? null,
-      /**
-       * What the travel gate DID, for the same reason the line above exists: it was visible
-       * only in a `logger.info` nobody reads. A Request the gate captured looked identical on
-       * screen to one captured for any other reason, and ADR-0015 names the consequence —
-       * *"an owner drowning in Requests rubber-stamps them, which buys back exactly the
-       * wrongness the strictness was meant to buy off."*
-       *
-       * The whole column ships, not just the value the portal currently renders. Filtering
-       * here would put the decision about what an owner may see inside a list mapper, where
-       * the next surface to need `degraded` would not find it.
-       */
-      travelCheck: b.travelCheck ?? null,
-      /**
-       * How far this sits from the jobs either side of it — DISTANCE, not a routed drive, and
-       * labelled as such where it is rendered. Null whenever there is nothing honest to say:
-       * travel off, no usable position, or neither neighbour placed. An owner reading "not
-       * known" can pick up the phone; one reading a fabricated number cannot.
-       */
-      travelEstimate: estimateByBooking.get(b.id) ?? null,
-      customerPhone: b.customerPhone ?? null,
-      uploadedFiles: Array.isArray(b.uploadedFiles)
-        ? (b.uploadedFiles as Array<Record<string, unknown>>)
-            .filter((f) => f && typeof f.fileSessionId === 'string' && typeof f.fileName === 'string')
-            .map((f) => ({
-              fileSessionId: f.fileSessionId as string,
-              fileName: f.fileName as string,
-              ...(typeof f.mimeType === 'string' && f.mimeType ? { mimeType: f.mimeType } : {}),
-            }))
-        : null,
-    })),
+    bookings: rows.map((b) =>
+      toAdminBookingRow(b, {
+        agentNameById,
+        meetByBooking,
+        mirroredBookingIds,
+        nameByService,
+        questionsByService,
+        estimateByBooking,
+      }),
+    ),
   };
 }
 

@@ -436,6 +436,51 @@ const TRAVEL_ADDRESS_FIRST_RULE = `- Travel times: the times this business can o
  */
 const PHONE_FIRST_RULE = `- Phone number: for a service flagged "needs phone", ask for the customer's phone number BEFORE you call check_availability, create_booking, or request_appointment, and pass it as customerPhone. A missing phone number does not make the service unavailable. Never capture a request, never say the service is unavailable in the booking system, and never hand off to the team because the number is still missing. If a booking tool returns PHONE_REQUIRED, ask for the number and retry with it. Keep any date and time the customer already named.`;
 
+function catalogServiceLine(s: ServiceType, tz: string, now: Date): string {
+  const price = formatServicePrice(s, tz, now);
+  const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
+  const contact = [
+    ...serviceCatalogLocationFlags(s),
+    s.customerLocationRequired ? 'needs phone' : '',
+    s.fileUploadAllowed ? 'accepts files' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const isRange =
+    (s.durationMode === 'range' || s.durationMode === 'ai') &&
+    typeof s.minDurationMin === 'number' &&
+    typeof s.maxDurationMin === 'number' &&
+    s.minDurationMin > 0 &&
+    s.maxDurationMin >= s.minDurationMin;
+  const durationLabel = isRange
+    ? `${s.minDurationMin}-${s.maxDurationMin} min (${s.durationMode === 'ai' ? 'AI-estimated' : 'choose length'})`
+    : `${s.durationMin} min`;
+  const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${durationLabel} · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''} · ${catalogChangeClause('reschedule', s.rescheduleMode, s.rescheduleUntilMin)} · ${catalogChangeClause('cancel', s.cancelMode, s.cancelUntilMin)}`;
+  const desc = s.description?.trim() ? `\n  ${sanitizeForLine(s.description).slice(0, 200)}` : '';
+  return `${head}${desc}${intakeLines(s)}`;
+}
+
+function catalogServiceFlags(services: ServiceType[], businessCapacity: boolean) {
+  return {
+    hasIntake: services.some((s) => intakeLines(s) !== ''),
+    hasContact: services.some(
+      (s) => serviceNeedsCustomerAddress(s) || s.customerLocationRequired || s.customerChoosesLocation,
+    ),
+    hasPhone: services.some((s) => s.customerLocationRequired),
+    hasChoice: services.some((s) => s.customerChoosesLocation),
+    hasTravelJob: services.some((s) => {
+      const loc = resolveServiceLocationMode(s);
+      return loc === 'customer_location' || loc === 'customer_choice';
+    }),
+    hasCustomerLocation: services.some((s) => resolveServiceLocationMode(s) === 'customer_location'),
+    hasCapacity:
+      businessCapacity || services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0),
+    hasDuration: services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai'),
+    hasOnRequestPrice: services.some((s) => s.priceDisplayType === 'on_request'),
+    hasFileUpload: services.some((s) => s.fileUploadAllowed),
+  };
+}
+
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
 export function buildServicesSection(
   services: ServiceType[],
@@ -447,58 +492,19 @@ export function buildServicesSection(
   now: Date = new Date()
 ): string | null {
   if (!services.length) return null;
-  const lines = services
-    .map((s) => {
-      const price = formatServicePrice(s, tz, now);
-      const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
-      const contact = [
-        ...serviceCatalogLocationFlags(s),
-        s.customerLocationRequired ? 'needs phone' : '',
-        s.fileUploadAllowed ? 'accepts files' : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      // P5c: show the duration RANGE for range/ai services (the agent passes durationMin).
-      const isRange =
-        (s.durationMode === 'range' || s.durationMode === 'ai') &&
-        typeof s.minDurationMin === 'number' &&
-        typeof s.maxDurationMin === 'number' &&
-        s.minDurationMin > 0 &&
-        s.maxDurationMin >= s.minDurationMin;
-      const durationLabel = isRange
-        ? `${s.minDurationMin}-${s.maxDurationMin} min (${s.durationMode === 'ai' ? 'AI-estimated' : 'choose length'})`
-        : `${s.durationMin} min`;
-      const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${durationLabel} · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''} · ${catalogChangeClause('reschedule', s.rescheduleMode, s.rescheduleUntilMin)} · ${catalogChangeClause('cancel', s.cancelMode, s.cancelUntilMin)}`;
-      // The owner's own description of the service — the single most useful field a
-      // client fills that the bot otherwise never sees. Sanitised + capped so a long
-      // description can't bloat the prompt or break the line-oriented catalog.
-      const desc = s.description?.trim() ? `\n  ${sanitizeForLine(s.description).slice(0, 200)}` : '';
-      return `${head}${desc}${intakeLines(s)}`;
-    })
-    .join('\n');
-  // Only inject the ask-intake rule when a service actually renders questions
-  // (a service whose questions are all malformed produces no lines → no dangling rule).
-  const hasIntake = services.some((s) => intakeLines(s) !== '');
-  const hasContact = services.some(
-    (s) => serviceNeedsCustomerAddress(s) || s.customerLocationRequired || s.customerChoosesLocation,
-  );
-  const hasPhone = services.some((s) => s.customerLocationRequired);
-  const hasChoice = services.some((s) => s.customerChoosesLocation);
-  const hasTravelJob = services.some((s) => {
-    const loc = resolveServiceLocationMode(s);
-    return loc === 'customer_location' || loc === 'customer_choice';
-  });
-  const hasCustomerLocation = services.some(
-    (s) => resolveServiceLocationMode(s) === 'customer_location',
-  );
-  // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
-  // emitted for them as well — keyed on per-service caps alone, a bot with only a business
-  // cap got the error with no instruction and would tell the customer it was fully booked.
-  const hasCapacity =
-    businessCapacity || services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
-  const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
-  const hasOnRequestPrice = services.some((s) => s.priceDisplayType === 'on_request');
-  const hasFileUpload = services.some((s) => s.fileUploadAllowed);
+  const lines = services.map((s) => catalogServiceLine(s, tz, now)).join('\n');
+  const {
+    hasIntake,
+    hasContact,
+    hasPhone,
+    hasChoice,
+    hasTravelJob,
+    hasCustomerLocation,
+    hasCapacity,
+    hasDuration,
+    hasOnRequestPrice,
+    hasFileUpload,
+  } = catalogServiceFlags(services, businessCapacity);
   const discountLines = services
     .map((s) => discountDetailLine(s, tz, now))
     .filter((l): l is string => l !== null);

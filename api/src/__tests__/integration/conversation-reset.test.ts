@@ -178,12 +178,16 @@ describe('Superadmin conversation reset', () => {
   it('wipes every store so the next Ik wil boeken turn cannot reuse the previous booking', async () => {
     const tenant = await createTestTenant();
     const bot = await createTestAnchorBot(tenant);
+    // Explicit startedAt: the transcript wipe cuts on (started_at, id), so the
+    // fixture must pin which siblings are earlier and which is newer.
+    const BASE = new Date('2026-08-30T12:00:00.000Z');
     const first = await createTestSession(tenant.id, {
       botId: bot.id,
       visitorId: VISITOR,
       channel: 'whatsapp',
       source: 'whatsapp',
       status: 'bot',
+      startedAt: BASE,
     });
     const participant = await createTestParticipant(first.id, { type: 'user' });
     const inbound = await createTestMessage(first.id, tenant.id, participant.id, {
@@ -205,10 +209,27 @@ describe('Superadmin conversation reset', () => {
       channel: 'whatsapp',
       source: 'whatsapp',
       status: 'closed',
+      startedAt: new Date(BASE.getTime() - 24 * 60 * 60 * 1000),
     });
     const olderParticipant = await createTestParticipant(older.id, { type: 'user' });
     await createTestMessage(older.id, tenant.id, olderParticipant.id, {
       content: `Earlier booking ${SLOT_TEXT}`,
+    });
+
+    // A NEWER sibling on the same number is the live conversation: a WhatsApp
+    // inbound reopens into a new row. Reset on an older row must NOT delete
+    // the message the bot still owes an answer to.
+    const newer = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+      startedAt: new Date(BASE.getTime() + 60 * 60 * 1000),
+    });
+    const newerParticipant = await createTestParticipant(newer.id, { type: 'user' });
+    const newerMessage = await createTestMessage(newer.id, tenant.id, newerParticipant.id, {
+      content: 'ben je er nog?',
     });
 
     const widget = await createTestSession(tenant.id, {
@@ -371,7 +392,15 @@ describe('Superadmin conversation reset', () => {
     expect(messengerLeft).toHaveLength(1);
     expect(messengerLeft[0].id).toBe(messengerMessage.id);
 
+    const newerLeft = await AppDataSource.query(
+      `SELECT id FROM messages WHERE session_id = $1`,
+      [newer.id],
+    );
+    expect(newerLeft).toHaveLength(1);
+    expect(newerLeft[0].id).toBe(newerMessage.id);
+
     expect(reset.transcriptSessionIds).toEqual(expect.arrayContaining([first.id, older.id]));
+    expect(reset.transcriptSessionIds).not.toContain(newer.id);
     expect(reset.transcriptSessionIds).not.toContain(widget.id);
     expect(reset.transcriptSessionIds).not.toContain(messenger.id);
 

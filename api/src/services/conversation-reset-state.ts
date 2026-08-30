@@ -3,9 +3,12 @@
  * into the next inbound from the same visitor (memory, draft booking/tool
  * scratch, address, lead extraction). Confirmed calendar bookings stay.
  *
- * Message transcripts are deleted for this Reset session and every other
- * session on the same tenant + channel + visitor (the Inbox "earlier"
- * list). Other channels and person_key siblings keep their logs.
+ * Message transcripts are deleted for this Reset session and its STRICTLY
+ * OLDER closed siblings on the same tenant + channel + visitor - the same
+ * boundary GET /chats/:id/thread renders as the Inbox "earlier" list. A
+ * NEWER (possibly still active) session keeps its transcript, so Reset on an
+ * old row can never eat a live inbound the bot has not answered yet. Other
+ * channels and person_key siblings keep their logs.
  *
  * Close alone starts a new ChatSession. Identity-keyed stores do not.
  */
@@ -108,8 +111,9 @@ export async function clearIdentityScratch(sessionIds: string[]): Promise<boolea
  * lives in Redis (`booking:confirm`, `booking:offered`) and customer memory,
  * which Reset clears separately.
  *
- * Message rows are deleted for this tenant + channel + visitor. Other
- * channels keep their transcripts. person_key siblings are not included.
+ * Message rows are deleted for the Reset session and its strictly-older
+ * closed siblings on this tenant + channel + visitor. Newer sessions, other
+ * channels, and person_key siblings keep their transcripts.
  */
 export async function clearConversationResetState(
   manager: Queryable,
@@ -193,7 +197,17 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
 }
 
 /**
- * Sessions that share this Inbox identity: same tenant + channel + visitor.
+ * The Reset session plus the "earlier" chats the Inbox shows above it: same
+ * tenant + channel + visitor, STRICTLY OLDER, and already closed.
+ *
+ * The `(started_at, id)` row-value cut is the one threadSessionsQuery uses,
+ * so what Reset deletes is exactly what the pane renders as earlier history.
+ * Two bounds matter:
+ *  - strictly older: a NEWER sibling can be the live session (a WhatsApp
+ *    inbound reopens into a new row), and wiping it would delete a message
+ *    the bot still owes an answer to.
+ *  - closed: never touch a session an operator or the bot is working right
+ *    now. The selected row is always included; Reset closes it first.
  * Widget is also bot-scoped. Does not follow person_key onto other channels.
  */
 async function channelIdentitySessionIds(
@@ -203,17 +217,31 @@ async function channelIdentitySessionIds(
   const ids = new Set<string>([session.id]);
   if (!session.visitorId || !session.channel) return [...ids];
 
+  const olderClosed = `
+       AND s.status = 'closed'
+       AND (COALESCE(s.started_at, s.created_at), s.id)
+         < (COALESCE(sel.started_at, sel.created_at), sel.id)`;
+
   const rows = (
     session.channel === 'widget'
       ? await manager.query(
-          `SELECT id FROM chat_sessions
-            WHERE tenant_id = $1 AND channel = 'widget' AND bot_id = $2 AND visitor_id = $3`,
-          [session.tenantId, session.botId, session.visitorId],
+          `SELECT s.id
+             FROM chat_sessions s
+             JOIN chat_sessions sel ON sel.id = $1
+            WHERE s.tenant_id = $2
+              AND s.channel = 'widget'
+              AND s.bot_id = $3
+              AND s.visitor_id = $4${olderClosed}`,
+          [session.id, session.tenantId, session.botId, session.visitorId],
         )
       : await manager.query(
-          `SELECT id FROM chat_sessions
-            WHERE tenant_id = $1 AND channel = $2 AND visitor_id = $3`,
-          [session.tenantId, session.channel, session.visitorId],
+          `SELECT s.id
+             FROM chat_sessions s
+             JOIN chat_sessions sel ON sel.id = $1
+            WHERE s.tenant_id = $2
+              AND s.channel = $3
+              AND s.visitor_id = $4${olderClosed}`,
+          [session.id, session.tenantId, session.channel, session.visitorId],
         )
   ) as Array<{ id: string }>;
 
@@ -224,9 +252,10 @@ async function channelIdentitySessionIds(
 }
 
 /**
- * Hard-delete Inbox/LLM transcripts for this channel identity.
- * `message_deliveries` cascade. Coalescer watermarks are cleared so a retry
- * cannot answer a deleted high-water mark. Other channels are untouched.
+ * Hard-delete Inbox/LLM transcripts for the Reset session and its older
+ * closed siblings. `message_deliveries` cascade. Coalescer watermarks are
+ * cleared so a retry cannot answer a deleted high-water mark. Newer sessions
+ * and other channels are untouched.
  */
 async function clearChannelIdentityTranscripts(
   manager: Queryable,

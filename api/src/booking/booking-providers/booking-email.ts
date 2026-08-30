@@ -6,6 +6,7 @@
  */
 import { DateTime } from 'luxon';
 import { config } from '../../config/environment';
+import { luxonEmailWhenFormat } from '../../contracts/clock-format';
 import { EmailService } from '../../automations/email.service';
 import { logger } from '../../utils/logger';
 import { buildIcs, IcsMethod } from './ics';
@@ -116,7 +117,7 @@ export interface BookingEmailParams {
 
 function formatWhen(start: Date, timezone: string): string {
   const dt = DateTime.fromJSDate(start).setZone(timezone);
-  return `${dt.toFormat('cccc d LLLL yyyy, HH:mm')} (${timezone})`;
+  return `${dt.toFormat(luxonEmailWhenFormat(timezone))} (${timezone})`;
 }
 
 /** Escape user-supplied text before interpolating it into an HTML email body. */

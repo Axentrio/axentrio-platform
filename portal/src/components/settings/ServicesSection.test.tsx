@@ -501,6 +501,13 @@ describe('ServicesSection — clearing an optional field', () => {
     expect(payload.fixedPrice).toBe(80);
   });
 
+  it('saves a price with two decimal places', async () => {
+    const dialog = await editExisting({ priceDisplayType: 'fixed', fixedPrice: 80 });
+    fireEvent.change(within(dialog).getByLabelText(/^price \(€\)$/i), { target: { value: '49.99' } });
+    const payload = await save(dialog);
+    expect(payload.fixedPrice).toBe(49.99);
+  });
+
   it('clears numeric prices when the display type is free', async () => {
     const dialog = await editExisting({ priceDisplayType: 'free', fixedPrice: 80, minPrice: 50, maxPrice: 90 });
     const payload = await save(dialog);

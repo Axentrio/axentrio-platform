@@ -566,7 +566,7 @@ export const SchedulerSettings: React.FC = () => {
                 />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
-                <DateOverridesSection overrides={overrides} setOverrides={setOverrides} />
+                <DateOverridesSection overrides={overrides} setOverrides={setOverrides} timezone={data?.availability?.timezone} />
 
                 {/* Live slot preview (reflects the last SAVED config) */}
                 <PreviewSection
@@ -816,6 +816,7 @@ const AvailabilitySection: React.FC<{
               <WindowList
                 windows={days[key].windows}
                 disabled={!days[key].enabled}
+                timezone={config?.availability?.timezone}
                 onChange={(windows) => setDay(key, { windows })}
               />
             </div>
@@ -1418,7 +1419,8 @@ const TravelSection: React.FC<{
 const DateOverridesSection: React.FC<{
   overrides: SchedulerFormState['overrides'];
   setOverrides: FormSetter<'overrides'>;
-}> = ({ overrides, setOverrides }) => (
+  timezone?: string | null;
+}> = ({ overrides, setOverrides, timezone }) => (
   <div className="space-y-3 border-t border-edge pt-4">
     <div className="flex items-center justify-between">
       <h3 className="text-sm font-medium text-text-primary">Date overrides</h3>
@@ -1476,6 +1478,7 @@ const DateOverridesSection: React.FC<{
             {!o.closed && (
               <WindowList
                 windows={o.windows}
+                timezone={timezone}
                 onChange={(windows) =>
                   setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, windows } : x)))
                 }

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useBookingAvailability } from '../../../queries/useSchedulerQueries';
+import { formatClockTime } from '@contracts/clock-format';
 
 /** Calls the availability endpoint for the next 7 days. Reflects SAVED config. */
 export const SlotPreview: React.FC<{ timezone: string }> = ({ timezone }) => {
@@ -20,12 +21,7 @@ export const SlotPreview: React.FC<{ timezone: string }> = ({ timezone }) => {
         day: 'numeric',
         month: 'short',
       }).format(new Date(s.start));
-      const time = new Intl.DateTimeFormat('en-GB', {
-        timeZone: data?.timezone ?? timezone,
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      }).format(new Date(s.start));
+      const time = formatClockTime(s.start, data?.timezone ?? timezone);
       if (!out.has(day)) out.set(day, []);
       out.get(day)!.push(time);
     }

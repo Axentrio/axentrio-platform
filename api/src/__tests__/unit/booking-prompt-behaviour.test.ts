@@ -238,6 +238,40 @@ describe('aiSummary — the ask the model needs', () => {
  * `emptyRange` carries that distinction to the branch pinned at the bottom of this file.
  * Prose is the right place for the WORDING and the wrong place for the DECISION.
  */
+
+describe('customer change policy — catalog line and rules', () => {
+  it('prints reschedule/cancel policy on every service line, including the auto default', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(line(p)).toContain('reschedule: auto');
+    expect(line(p)).toContain('cancel: auto');
+  });
+
+  it('names request, not_allowed, and a cutoff on the catalog line', () => {
+    const p = buildServicesSection([
+      svc({ rescheduleMode: 'request', rescheduleUntilMin: 24 * 60, cancelMode: 'not_allowed' }),
+    ])!;
+    expect(line(p)).toContain('reschedule: request until 1d before');
+    expect(line(p)).toContain('cancel: not_allowed');
+    expect(line(p)).not.toContain('cancel: not_allowed until');
+  });
+
+  it('tells the model Auto-book is not a change grant, and never to use request_appointment for a move or cancel', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/Customer changes:/);
+    expect(p).toMatch(/Auto-book of the original booking is not a change grant/i);
+    expect(p).toMatch(/Never use request_appointment to move or cancel an existing appointment/i);
+    expect(p).toMatch(/never claim a request was submitted/i);
+    expect(p).toMatch(/NOT yet confirmed/i);
+  });
+
+  it('does not treat requested:true as a confirmed clock', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/WITHOUT "requested": true/);
+    expect(p).toMatch(/do NOT quote displayTime as a confirmed clock/i);
+    expect(p).toMatch(/reschedule or cancel under a "request" customer-change policy/i);
+  });
+});
+
 describe('check_availability — the empty result carries its own instruction', () => {
   const load = async (slots: unknown[]) => {
     vi.resetModules();

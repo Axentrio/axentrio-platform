@@ -6,6 +6,7 @@
  * POST /chats/:sessionId/release   { idempotencyKey }
  * POST /chats/:sessionId/cancel    { idempotencyKey }   // HANDOFF_REQUESTED -> BOT_OWNED
  * POST /chats/:sessionId/close     { idempotencyKey }
+ * POST /chats/:sessionId/reset     { idempotencyKey }  // super_admin testing reset
  * POST /chats/:sessionId/messages  { clientMessageId, content }
  *
  * Every mutation goes through the conversation command service (one DB
@@ -28,7 +29,7 @@ import {
   requireClerkAuth,
   autoProvision,
 } from "../middleware/clerk.middleware";
-import { resolveTenantContext } from "../middleware/super-admin.middleware";
+import { resolveTenantContext, requireSuperAdmin } from "../middleware/super-admin.middleware";
 import {
   validateTenant,
   type TenantRequest,
@@ -51,6 +52,7 @@ import {
 } from "../channels/delivery-state";
 import { MAX_MESSAGE_CONTENT_CHARS } from "../guardrails/classify";
 import { conversationCommands } from "../services/conversation-command.service";
+import { ResetScratchClearError } from "../services/conversation-reset-state";
 
 const router = Router();
 
@@ -316,6 +318,58 @@ router.post(
     sendSuccess(res, {
       outcome: result.outcome,
       conversation: result.conversation,
+    });
+  }),
+);
+
+/**
+ * POST /chats/:sessionId/reset — super-admin testing reset. Closes the
+ * conversation (next inbound starts a new session) and clears this identity's
+ * customer-memory, draft booking/tool scratch, intake, and Redis session state.
+ * Confirmed calendar bookings are not cancelled. Missing Redis or a Redis that
+ * cannot drop booking:confirm / booking:offered / gr:loop returns 503
+ * reset_scratch_incomplete so the operator can retry. The 503 still fans out
+ * session:closed + conversation:upsert because the DB close already committed.
+ */
+async function emitResetClosedFanout(tenantId: string, sessionId: string): Promise<void> {
+  emitToSession(tenantId, sessionId, "session:closed", {
+    sessionId,
+    endedAt: new Date().toISOString(),
+    closedBy: "agent",
+  });
+  await emitConversationUpsertForSession(sessionId, tenantId);
+}
+
+router.post(
+  "/:sessionId/reset",
+  ...agentAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const idempotencyKey = optionalIdempotencyKey(req.body);
+
+    let result;
+    try {
+      result = await conversationCommands.resetConversation(
+        req.params.sessionId,
+        { kind: "agent", agentId: req.user!.id },
+        idempotencyKey,
+        { ...commandScope(req), reason: "Super-admin testing reset" },
+      );
+    } catch (err) {
+      if (err instanceof ResetScratchClearError) {
+        await emitResetClosedFanout(req.tenant!.id, req.params.sessionId);
+      }
+      throw err;
+    }
+
+    if (!result.replayed) {
+      await emitResetClosedFanout(req.tenant!.id, req.params.sessionId);
+    }
+
+    sendSuccess(res, {
+      outcome: result.outcome,
+      conversation: result.conversation,
+      scratchCleared: result.scratchCleared ?? false,
     });
   }),
 );

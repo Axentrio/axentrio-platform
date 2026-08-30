@@ -19,6 +19,8 @@ import { logger } from '../utils/logger';
 export const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
 
 const KEY_PREFIX = 'booking:confirm:';
+const RESCHEDULE_PREFIX = 'booking:confirm-reschedule:';
+const CANCEL_PREFIX = 'booking:confirm-cancel:';
 const TTL_MS = 24 * 60 * 60 * 1000;
 const CHIP_MAX_CHARS = 80;
 
@@ -27,6 +29,9 @@ export interface PendingBookingDetails {
   attendeeName: string;
   serviceId: string;
   runId: string;
+  /** Set on reschedule/cancel pending records so a create yes cannot satisfy a move. */
+  bookingId?: string;
+  kind?: 'create' | 'reschedule' | 'cancel';
 }
 
 const AFFIRM_START =
@@ -133,6 +138,9 @@ function parsePending(raw: string | null): PendingBookingDetails | null {
       attendeeName: v.attendeeName,
       serviceId: typeof v.serviceId === 'string' ? v.serviceId : '',
       runId: v.runId,
+      bookingId: typeof v.bookingId === 'string' ? v.bookingId : undefined,
+      kind:
+        v.kind === 'reschedule' || v.kind === 'cancel' || v.kind === 'create' ? v.kind : undefined,
     };
   } catch {
     return null;
@@ -141,11 +149,12 @@ function parsePending(raw: string | null): PendingBookingDetails | null {
 
 async function readPending(
   sessionId: string,
+  prefix = KEY_PREFIX,
 ): Promise<{ store: 'up'; pending: PendingBookingDetails | null } | { store: 'down' }> {
   const redis = getRedisClient();
   if (!redis) return { store: 'down' };
   try {
-    return { store: 'up', pending: parsePending(await redis.get(`${KEY_PREFIX}${sessionId}`)) };
+    return { store: 'up', pending: parsePending(await redis.get(`${prefix}${sessionId}`)) };
   } catch (err) {
     logger.warn('[booking] pending confirmation read failed; failing open', {
       sessionId,
@@ -155,11 +164,15 @@ async function readPending(
   }
 }
 
-async function writePending(sessionId: string, pending: PendingBookingDetails): Promise<boolean> {
+async function writePending(
+  sessionId: string,
+  pending: PendingBookingDetails,
+  prefix = KEY_PREFIX,
+): Promise<boolean> {
   const redis = getRedisClient();
   if (!redis) return false;
   try {
-    await redis.set(`${KEY_PREFIX}${sessionId}`, JSON.stringify(pending), 'PX', String(TTL_MS));
+    await redis.set(`${prefix}${sessionId}`, JSON.stringify(pending), 'PX', String(TTL_MS));
     return true;
   } catch (err) {
     logger.warn('[booking] pending confirmation write failed; failing open', {
@@ -170,14 +183,30 @@ async function writePending(sessionId: string, pending: PendingBookingDetails): 
   }
 }
 
-async function clearPending(sessionId: string): Promise<void> {
+async function clearPending(sessionId: string, prefix = KEY_PREFIX): Promise<void> {
   const redis = getRedisClient();
   if (!redis) return;
   try {
-    await redis.del(`${KEY_PREFIX}${sessionId}`);
+    await redis.del(`${prefix}${sessionId}`);
   } catch {
     // Non-fatal: a stale pending only re-asks.
   }
+}
+
+/** Test/reset helper: the pending create_booking summary for this session, if any. */
+export async function peekPendingBooking(
+  sessionId: string,
+): Promise<PendingBookingDetails | null> {
+  const result = await readPending(sessionId);
+  return result.store === 'up' ? result.pending : null;
+}
+
+/** Test helper: persist a pending confirmation the same way create_booking does. */
+export async function putPendingBooking(
+  sessionId: string,
+  pending: PendingBookingDetails,
+): Promise<boolean> {
+  return writePending(sessionId, pending);
 }
 
 /**
@@ -238,3 +267,88 @@ export async function refuseUnlessConfirmed(
     },
   };
 }
+
+export async function refuseUnlessRescheduleConfirmed(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<ToolResult | null> {
+  const last = lastCustomerUtterance(ctx);
+  if (!last) return null;
+
+  const lookup = await readPending(ctx.sessionId, RESCHEDULE_PREFIX);
+  if (lookup.store === 'down') return null;
+
+  const newStartTime = await wallClockKey(ctx.sessionId, String(args.newStartTime ?? ''));
+  const bookingId = String(args.bookingId ?? '');
+  const pending = lookup.pending;
+  const confirmed =
+    !!pending &&
+    pending.kind === 'reschedule' &&
+    pending.bookingId === bookingId &&
+    pending.startTime === newStartTime &&
+    (isConfirmingChip(last, pending.startTime) ||
+      (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime)));
+
+  if (confirmed) {
+    await clearPending(ctx.sessionId, RESCHEDULE_PREFIX);
+    return null;
+  }
+
+  const stored = await writePending(
+    ctx.sessionId,
+    { startTime: newStartTime, attendeeName: '', serviceId: '', runId: ctx.runId, bookingId, kind: 'reschedule' },
+    RESCHEDULE_PREFIX,
+  );
+  if (!stored) return null;
+
+  return {
+    success: false,
+    error:
+      `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Send a short summary ` +
+      `of the existing appointment and the new time, then wait for an explicit yes. Call reschedule_booking ` +
+      `again only after they confirm this same move.`,
+    errorSafeForModel: true,
+    data: { needsConfirmation: true, bookingId, newStartTime },
+  };
+}
+
+export async function refuseUnlessCancelConfirmed(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<ToolResult | null> {
+  const last = lastCustomerUtterance(ctx);
+  if (!last) return null;
+
+  const lookup = await readPending(ctx.sessionId, CANCEL_PREFIX);
+  if (lookup.store === 'down') return null;
+
+  const bookingId = String(args.bookingId ?? '');
+  const pending = lookup.pending;
+  const confirmed =
+    !!pending &&
+    pending.kind === 'cancel' &&
+    pending.bookingId === bookingId &&
+    (isAffirmativeReply(last) || isConfirmingChip(last, pending.startTime));
+
+  if (confirmed) {
+    await clearPending(ctx.sessionId, CANCEL_PREFIX);
+    return null;
+  }
+
+  const stored = await writePending(
+    ctx.sessionId,
+    { startTime: '', attendeeName: '', serviceId: '', runId: ctx.runId, bookingId, kind: 'cancel' },
+    CANCEL_PREFIX,
+  );
+  if (!stored) return null;
+
+  return {
+    success: false,
+    error:
+      `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was cancelled. Confirm which ` +
+      `appointment they mean, then wait for an explicit yes. Call cancel_booking again only after they confirm.`,
+    errorSafeForModel: true,
+    data: { needsConfirmation: true, bookingId },
+  };
+}
+

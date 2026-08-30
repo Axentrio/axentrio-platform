@@ -26,6 +26,16 @@ const extract = vi.hoisted(() => ({
   }),
 }));
 
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () => ({
+    del: async () => 0,
+    get: async () => null,
+    set: async () => 'OK',
+  }),
+  initializeRedis: async () => undefined,
+  isRedisAvailable: () => true,
+}));
+
 vi.mock('../../memory/fact-extractor.service', () => ({
   extractMemoryFacts: () => extract.impl(),
   MEMORY_EXTRACTION_VERSION: 1,
@@ -58,10 +68,14 @@ import { computePersonKey } from '../../leads/person-key';
 import {
   createTestTenant,
   createTestAnchorBot,
+  createTestUser,
+  createTestAgent,
   createTestSession,
   createTestParticipant,
   createTestMessage,
 } from '../helpers/factories';
+import { conversationCommands } from '../../services/conversation-command.service';
+import { computeSubjectKey } from '../../memory/subject-key';
 
 const ADDRESS = 'Kerkstraat 12, 2000 Antwerpen';
 const PHONE = '+32475123456';
@@ -301,4 +315,87 @@ describe('customer memory', () => {
     expect(await AppDataSource.getRepository(CustomerMemoryFact).count({ where: { memoryId: oldSubject.id } })).toBe(0);
     expect(await AppDataSource.getRepository(CustomerMemory).findOneBy({ id: youngSubject.id })).not.toBeNull();
   });
+
+  it('super-admin reset clears facts so a new session has an empty memory prompt', async () => {
+    const tenant = await createTestTenant();
+    const bot = await createTestAnchorBot(tenant);
+    const visitorId = '32475111999';
+    const first = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+    });
+    const participant = await createTestParticipant(first.id, { type: 'user' });
+    const msg = await createTestMessage(first.id, tenant.id, participant.id, {
+      content: `My address is ${ADDRESS}`,
+    });
+    extract.impl = () => addressResult(msg.id);
+    const run = await claimedRun(tenant.id, first.id);
+    await extractOne({ id: run.id, tenant_id: tenant.id, session_id: first.id, attempts: 0 });
+
+    const user = await createTestUser(tenant.id, { role: 'super_admin' });
+    const agent = await createTestAgent(tenant.id, user.id);
+    const reset = await conversationCommands.resetConversation(
+      first.id,
+      { kind: 'agent', agentId: agent.id },
+      undefined,
+      { tenantId: tenant.id },
+    );
+    expect(reset.outcome).toBe('reset');
+
+    const second = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+    });
+    const block = await renderMemoryForPrompt(second);
+    expect(block).toBe('');
+    const subjectKey = computeSubjectKey(second);
+    expect(subjectKey).toBe('whatsapp:32475111999');
+    expect(await loadLiveFacts(tenant.id, subjectKey!)).toEqual([]);
+  });
+
+  it('does not rewrite facts when extraction finishes after a reset', async () => {
+    const tenant = await createTestTenant();
+    const bot = await createTestAnchorBot(tenant);
+    const visitorId = '32475111888';
+    const session = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+    });
+    const participant = await createTestParticipant(session.id, { type: 'user' });
+    const msg = await createTestMessage(session.id, tenant.id, participant.id, {
+      content: `My address is ${ADDRESS}`,
+    });
+    const run = await claimedRun(tenant.id, session.id);
+
+    const user = await createTestUser(tenant.id, { role: 'super_admin' });
+    const agent = await createTestAgent(tenant.id, user.id);
+    await conversationCommands.resetConversation(
+      session.id,
+      { kind: 'agent', agentId: agent.id },
+      undefined,
+      { tenantId: tenant.id },
+    );
+
+    extract.impl = () => addressResult(msg.id);
+    await extractOne({ id: run.id, tenant_id: tenant.id, session_id: session.id, attempts: 0 });
+
+    const after = await AppDataSource.getRepository(CustomerMemoryRun).findOneByOrFail({ id: run.id });
+    expect(after.state).toBe('skipped_reset');
+    const live = await AppDataSource.query(
+      `SELECT count(*)::int AS n FROM chatbot_customer_facts
+        WHERE tenant_id = $1 AND superseded_at IS NULL`,
+      [tenant.id],
+    );
+    expect(Number(live[0].n)).toBe(0);
+  });
+
 });

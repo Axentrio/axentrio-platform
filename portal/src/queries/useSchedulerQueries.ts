@@ -47,6 +47,8 @@ export interface SchedulerAvailability {
 }
 
 export type BookingMode = 'auto' | 'request';
+export type CustomerChangeMode = 'auto' | 'request' | 'not_allowed';
+export type BookingRequestKind = 'new' | 'reschedule' | 'cancel';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
 export type DiscountType = 'percentage' | 'fixed';
@@ -76,6 +78,11 @@ export interface Service {
   category?: string | null;
   description?: string | null;
   bookingMode: BookingMode;
+  rescheduleMode?: CustomerChangeMode;
+  cancelMode?: CustomerChangeMode;
+  /** Minutes before start. null = no extra cutoff. 0 = until the start instant. */
+  rescheduleUntilMin?: number | null;
+  cancelUntilMin?: number | null;
   onlineBookable: boolean;
   durationMode: DurationMode;
   durationMin: number;
@@ -387,6 +394,8 @@ export interface AdminBooking {
   serviceId?: string | null;
   durationMin?: number | null;
   bookingMode?: string | null;
+  requestKind?: string | null;
+  relatedBookingId?: string | null;
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
   customerAddress?: string | null;
   /** What the service-area gate saw. Null = it did not apply to this booking. */

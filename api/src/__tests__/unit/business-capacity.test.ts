@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeSlots, type BusyInterval } from '../../booking/booking-providers/slot-engine';
-import { bookingRulesSchema, updateSchedulerSchema, serviceInputSchema } from '../../schemas/scheduler.schema';
+import { bookingRulesSchema, updateSchedulerSchema, serviceInputSchema, serviceUpdateSchema } from '../../schemas/scheduler.schema';
 import { resolveServiceTiming, type BusinessRules } from '../../booking/booking-providers/service-timing';
 import { EMPTY_VENUE } from '../../contracts/venue-address';
 
@@ -202,5 +202,22 @@ describe('serviceInputSchema — the four are inheritable', () => {
   it('still enforces the bounds when a value IS given', () => {
     expect(serviceInputSchema.safeParse({ ...base, maxHorizonDays: 0 }).success).toBe(false);
     expect(serviceInputSchema.safeParse({ ...base, bufferBeforeMin: 999 }).success).toBe(false);
+  });
+});
+
+
+describe('serviceInputSchema — money amounts keep cents', () => {
+  const base = { name: 'Cut', durationMin: 30 };
+
+  it('accepts two decimal places', () => {
+    expect(serviceInputSchema.parse({ ...base, fixedPrice: 49.99 }).fixedPrice).toBe(49.99);
+  });
+
+  it('rounds extra decimals to cents', () => {
+    expect(serviceInputSchema.parse({ ...base, fixedPrice: 12.345 }).fixedPrice).toBe(12.35);
+  });
+
+  it('rounds a partial PUT the same way', () => {
+    expect(serviceUpdateSchema.parse({ fixedPrice: 12.345 }).fixedPrice).toBe(12.35);
   });
 });

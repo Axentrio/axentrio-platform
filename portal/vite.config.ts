@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
+  build: {
+    chunkSizeWarningLimit: 500,
+  },
   plugins: [react()],
   resolve: {
     alias: {

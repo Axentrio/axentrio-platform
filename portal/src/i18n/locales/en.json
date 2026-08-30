@@ -2277,7 +2277,7 @@
     },
     "resetDialog": {
       "title": "Reset this conversation?",
-      "description": "The next message from this customer starts a new chat. The old transcript stays. Nothing is sent to them.",
+      "description": "The next message from this customer starts a new chat. The old transcript stays. This reset also clears remembered facts and other test session state for this customer. Confirmed bookings stay. Nothing is sent to them.",
       "confirm": "Reset"
     },
     "transferModal": {

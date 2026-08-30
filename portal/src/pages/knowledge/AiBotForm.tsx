@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine, MessagesSquare, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TimeSelect } from '@/components/ui/time-select';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
@@ -924,6 +925,7 @@ const BusinessHoursCard: React.FC<{
   bhDirty: boolean;
   isSaving: boolean;
   saveBusinessHours: () => void;
+  timezone?: string | null;
 }> = ({
   readOnly,
   bhEnabled,
@@ -936,6 +938,7 @@ const BusinessHoursCard: React.FC<{
   bhDirty,
   isSaving,
   saveBusinessHours,
+  timezone,
 }) => {
   const { t } = useTranslation();
   return (
@@ -978,9 +981,9 @@ const BusinessHoursCard: React.FC<{
                   <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
                 ) : (
                   <div className="flex items-center gap-1.5">
-                    <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
+                    <TimeSelect className="h-8" stepMinutes={1} allowEndOfDay={false} value={d.open} onChange={(v) => setDay(d.day, { open: v })} disabled={readOnly} timezone={timezone} />
                     <span className="text-text-muted">–</span>
-                    <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
+                    <TimeSelect className="h-8" stepMinutes={1} allowEndOfDay value={d.close} onChange={(v) => setDay(d.day, { close: v })} disabled={readOnly} timezone={timezone} />
                   </div>
                 )}
               </div>
@@ -1043,32 +1046,36 @@ const BusinessHoursCard: React.FC<{
                     </label>
                     {!o.closed && (
                       <div className="flex items-center gap-1.5">
-                        <Input
-                          type="time"
-                          className="h-8 w-28"
+                        <TimeSelect
+                          className="h-8"
+                          stepMinutes={1}
+                          allowEndOfDay={false}
                           value={o.windows[0]?.start ?? '09:00'}
                           disabled={readOnly}
-                          onChange={(e) =>
+                          timezone={timezone}
+                          onChange={(v) =>
                             setBhOverrides((prev) =>
                               prev.map((x, j) =>
                                 j === i
-                                  ? { ...x, windows: [{ start: e.target.value, end: x.windows[0]?.end ?? '17:00' }] }
+                                  ? { ...x, windows: [{ start: v, end: x.windows[0]?.end ?? '17:00' }] }
                                   : x,
                               ),
                             )
                           }
                         />
                         <span className="text-text-muted">–</span>
-                        <Input
-                          type="time"
-                          className="h-8 w-28"
+                        <TimeSelect
+                          className="h-8"
+                          stepMinutes={1}
+                          allowEndOfDay
                           value={o.windows[0]?.end ?? '17:00'}
                           disabled={readOnly}
-                          onChange={(e) =>
+                          timezone={timezone}
+                          onChange={(v) =>
                             setBhOverrides((prev) =>
                               prev.map((x, j) =>
                                 j === i
-                                  ? { ...x, windows: [{ start: x.windows[0]?.start ?? '09:00', end: e.target.value }] }
+                                  ? { ...x, windows: [{ start: x.windows[0]?.start ?? '09:00', end: v }] }
                                   : x,
                               ),
                             )
@@ -1684,6 +1691,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 bhDirty={bhDirty}
                 isSaving={updateBot.isPending}
                 saveBusinessHours={saveBusinessHours}
+                timezone={botDetail?.businessHours?.timezone}
               />
 
               <QuotedAddressCard

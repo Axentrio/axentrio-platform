@@ -7,7 +7,7 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
-import type { EntityManager } from 'typeorm';
+import type { EntityManager, QueryRunner } from 'typeorm';
 import { In, MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
@@ -23,6 +23,10 @@ import {
 } from './service-timing';
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
+import {
+  resolveCustomerChange,
+  CHANGE_REQUEST_LOCK_CLASS,
+} from '../customer-change-policy';
 import { logger } from '../../utils/logger';
 import {
   BookingError,
@@ -2320,6 +2324,11 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
     }
 
+    const requestKind = booking.requestKind ?? 'new';
+    if (requestKind === 'reschedule' || requestKind === 'cancel') {
+      return this.acceptChangeRequest(ctx, booking, requestKind);
+    }
+
     const start = booking.startUtc;
     const end = booking.endUtc;
     if (start.getTime() <= Date.now()) {
@@ -2579,6 +2588,23 @@ export class InternalProvider implements BookingProvider {
     if (booking.provider !== 'internal' || booking.status !== 'request_created') {
       throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
     }
+    const declineKind = booking.requestKind ?? 'new';
+    if ((declineKind === 'reschedule' || declineKind === 'cancel') && booking.relatedBookingId) {
+      return this.withChangeRequestLock(booking.relatedBookingId, async (runner) => {
+        const closed = await this.closeChangeRequestRow(
+          runner,
+          booking.id,
+          ctx.tenant.id,
+          'declined',
+          reason,
+        );
+        if (!closed) return { success: true, cancelled: true };
+        await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason).catch(
+          () => undefined,
+        );
+        return { success: true, cancelled: true };
+      });
+    }
     const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
           SET status='cancelled', notes=COALESCE($3, notes), updated_at=now()
@@ -2717,11 +2743,272 @@ export class InternalProvider implements BookingProvider {
     return !!owning?.visitorId && owning.visitorId === visitor;
   }
 
+  private refuseCustomerChange(serviceName: string, action: 'reschedule' | 'cancel'): never {
+    const verb = action === 'reschedule' ? 'reschedule' : 'cancel';
+    throw new BookingError(
+      `"${serviceName}" does not allow customers to ${verb} through the booking system. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
+      'CHANGE_NOT_ALLOWED',
+      403,
+      { action },
+      action === 'reschedule'
+        ? 'This appointment cannot be rescheduled online. Please contact the business directly.'
+        : 'This appointment cannot be cancelled online. Please contact the business directly.',
+    );
+  }
+
+  private async withChangeRequestLock<T>(
+    relatedBookingId: string,
+    fn: (runner: QueryRunner) => Promise<T>,
+  ): Promise<T> {
+    const runner = AppDataSource.createQueryRunner();
+    await runner.connect();
+    try {
+      await runner.query('SELECT pg_advisory_lock($1::int, hashtext($2::text))', [
+        CHANGE_REQUEST_LOCK_CLASS,
+        relatedBookingId,
+      ]);
+      try {
+        return await fn(runner);
+      } finally {
+        await runner.query('SELECT pg_advisory_unlock($1::int, hashtext($2::text))', [
+          CHANGE_REQUEST_LOCK_CLASS,
+          relatedBookingId,
+        ]);
+      }
+    } finally {
+      await runner.release();
+    }
+  }
+
+  private async closeChangeRequestRow(
+    runner: QueryRunner,
+    requestId: string,
+    tenantId: string,
+    resolution: 'accepted' | 'declined',
+    reason?: string,
+  ): Promise<boolean> {
+    const rows = returningRows<{ id: string }>(
+      await runner.query(
+        `UPDATE chatbot_bookings
+            SET status='cancelled', request_resolution=$3, notes=COALESCE($4, notes), updated_at=now()
+          WHERE id=$1 AND tenant_id=$2 AND status='request_created'
+          RETURNING id`,
+        [requestId, tenantId, resolution, reason ?? null],
+      ),
+    );
+    return rows.length > 0;
+  }
+
+  /** Close any open change Request for this original so the unique index cannot stick. */
+  private async closeOpenChangeRequests(
+    originalId: string,
+    tenantId: string,
+    resolution: 'accepted' | 'declined',
+  ): Promise<void> {
+    await AppDataSource.getRepository(Booking).query(
+      `UPDATE chatbot_bookings
+          SET status='cancelled', request_resolution=$3, updated_at=now()
+        WHERE related_booking_id=$1 AND tenant_id=$2 AND status='request_created'
+          AND request_kind IN ('reschedule', 'cancel')`,
+      [originalId, tenantId, resolution],
+    );
+  }
+
+  private async createChangeRequest(
+    ctx: BookingContext,
+    original: Booking,
+    service: ResolvedService,
+    kind: 'reschedule' | 'cancel',
+    start: Date,
+    end: Date,
+    timezone: string,
+  ): Promise<RescheduleResult & CancelResult> {
+    const existing = await AppDataSource.getRepository(Booking).findOne({
+      where: { relatedBookingId: original.id, status: 'request_created' },
+    });
+    if (existing?.status === 'request_created') {
+      if ((existing.requestKind ?? 'new') !== kind) {
+        throw new BookingError(
+          `This appointment already has a pending ${existing.requestKind} request. Do not create another. Tell the customer the business is already reviewing that request.`,
+          'CHANGE_REQUEST_OPEN',
+          409,
+          { kind: existing.requestKind, requestId: existing.id },
+          'You already have a pending change request for this appointment. The business will get back to you.',
+        );
+      }
+      if (kind === 'reschedule') {
+        await AppDataSource.getRepository(Booking).query(
+          `UPDATE chatbot_bookings
+              SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($1,$2,'[)'), updated_at=now()
+            WHERE id=$3 AND tenant_id=$4 AND status='request_created'`,
+          [start.toISOString(), end.toISOString(), existing.id, ctx.tenant.id],
+        );
+      }
+      this.notifyRequestCreated(ctx, service, {
+        bookingId: existing.id,
+        start,
+        end,
+        attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
+        notes: existing.notes ?? undefined,
+      });
+      return {
+        success: true,
+        requested: true,
+        cancelled: false,
+        timezone,
+        serviceName: service.name,
+        booking: { id: existing.id, startTime: start.toISOString(), endTime: end.toISOString() },
+      };
+    }
+
+    const icsUid = `${uuidv4()}@axentrio`;
+    const note =
+      kind === 'reschedule' ? 'Customer requested to reschedule' : 'Customer requested cancellation';
+    try {
+      const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
+        `INSERT INTO chatbot_bookings
+           (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
+            start_utc, end_utc, blocked_range, calendar_key,
+            attendee_name, attendee_email, notes, ics_uid,
+            source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
+            organizer_email, related_booking_id, request_kind)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
+                 $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         RETURNING id`,
+        [
+          ctx.tenant.id,
+          ctx.bot.id,
+          original.eventTypeId,
+          original.sessionId ?? ctx.session.id,
+          start.toISOString(),
+          end.toISOString(),
+          original.calendarKey ?? ctx.bot.id,
+          original.attendeeName ?? null,
+          original.attendeeEmail ?? null,
+          note,
+          icsUid,
+          original.sourceChannel ?? ctx.session?.channel ?? null,
+          original.aiSummary ?? null,
+          original.customerAddress ?? null,
+          original.customerPhone ?? null,
+          original.bookedDurationMin ?? null,
+          original.organizerEmail ?? null,
+          original.id,
+          kind,
+        ],
+      ));
+      const bookingId = rows[0].id;
+      this.notifyRequestCreated(ctx, service, {
+        bookingId,
+        start,
+        end,
+        attendee: { name: original.attendeeName ?? '', email: original.attendeeEmail ?? undefined },
+        notes: note,
+      });
+      return {
+        success: true,
+        requested: true,
+        cancelled: false,
+        timezone,
+        serviceName: service.name,
+        booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() },
+      };
+    } catch (err) {
+      if ((err as { code?: string })?.code === '23505') {
+        const raced = await AppDataSource.getRepository(Booking).findOne({
+          where: { relatedBookingId: original.id, status: 'request_created' },
+        });
+        if (raced?.status === 'request_created') {
+          if ((raced.requestKind ?? 'new') !== kind) {
+            throw new BookingError(
+              `This appointment already has a pending ${raced.requestKind} request. Do not create another. Tell the customer the business is already reviewing that request.`,
+              'CHANGE_REQUEST_OPEN',
+              409,
+              { kind: raced.requestKind, requestId: raced.id },
+              'You already have a pending change request for this appointment. The business will get back to you.',
+            );
+          }
+          return {
+            success: true,
+            requested: true,
+            cancelled: false,
+            timezone,
+            serviceName: service.name,
+            booking: {
+              id: raced.id,
+              startTime: raced.startUtc.toISOString(),
+              endTime: raced.endUtc.toISOString(),
+            },
+          };
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async acceptChangeRequest(
+    ctx: BookingContext,
+    request: Booking,
+    kind: 'reschedule' | 'cancel',
+  ): Promise<CreateBookingResult> {
+    if (!request.relatedBookingId) {
+      throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
+    }
+    const relatedId = request.relatedBookingId;
+    return this.withChangeRequestLock(relatedId, async (runner) => {
+      const fresh = await runner.manager.findOne(Booking, { where: { id: request.id } });
+      if (!fresh || fresh.status !== 'request_created') {
+        throw new BookingError('This request was already handled', 'REQUEST_ALREADY_HANDLED', 409);
+      }
+      const original = await this.loadOwned(ctx, relatedId);
+      const ownerCtx: BookingContext = {
+        ...ctx,
+        isAdmin: true,
+        travelPolicy: 'annotate',
+        subjectToCustomerChangePolicy: false,
+      };
+
+      if (kind === 'reschedule') {
+        if (original.status !== 'confirmed') {
+          await this.closeChangeRequestRow(runner, request.id, ctx.tenant.id, 'declined');
+          throw new BookingError(
+            'The original appointment is no longer confirmed, so this reschedule request cannot be accepted',
+            'ORIGINAL_NOT_CONFIRMED',
+            409,
+          );
+        }
+        const alreadyMoved =
+          original.startUtc.getTime() === request.startUtc.getTime() &&
+          original.endUtc.getTime() === request.endUtc.getTime();
+        if (!alreadyMoved) {
+          const durationMin = Math.round(
+            (request.endUtc.getTime() - request.startUtc.getTime()) / 60_000,
+          );
+          await this.rescheduleBooking(ownerCtx, original.id, request.startUtc.toISOString(), {
+            durationMin,
+            skipCloseChangeRequests: true,
+          });
+        }
+      } else if (original.status !== 'cancelled') {
+        await this.cancelBooking(ownerCtx, original.id, undefined, { skipCloseChangeRequests: true });
+      }
+
+      await this.closeChangeRequestRow(runner, request.id, ctx.tenant.id, 'accepted');
+      const updated = await this.loadOwned(ctx, relatedId);
+      return this.toResult(updated, false);
+    });
+  }
+
   async rescheduleBooking(
     ctx: BookingContext,
     bookingId: string,
     newStartTime: string,
-    opts?: { durationMin?: number; excludeExternalInterval?: { start: Date; end: Date } }
+    opts?: {
+      durationMin?: number;
+      excludeExternalInterval?: { start: Date; end: Date };
+      /** Accept of a change Request closes that row itself; do not auto-decline it here. */
+      skipCloseChangeRequests?: boolean;
+    }
   ): Promise<RescheduleResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     if (booking.status !== 'confirmed') {
@@ -2742,6 +3029,17 @@ export class InternalProvider implements BookingProvider {
     // against the service's current bounds). Legacy rows fall back to service.durationMin.
     const effectiveDuration = opts?.durationMin ?? booking.bookedDurationMin ?? service.durationMin;
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
+    if (ctx.subjectToCustomerChangePolicy) {
+      const decision = resolveCustomerChange(
+        service.rescheduleMode ?? 'auto',
+        booking.startUtc,
+        service.rescheduleUntilMin,
+      );
+      if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule');
+      if (decision === 'request') {
+        return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone);
+      }
+    }
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
@@ -2901,7 +3199,13 @@ export class InternalProvider implements BookingProvider {
             eligibility: exposureEligibility!,
             rule,
             day: pair.day,
-            venue: travelSnapshot?.venue ?? null,
+            // An at-premises move never produces a travelSnapshot — the job is the
+            // workshop, not a customer door. The pre-lock pass still placed the
+            // venue (captureVenue). Dropping that here made the in-lock base
+            // `unresolved`, so moving the day's only workshop job later refused
+            // a 0 km premises leg. Prefer the moved-job snapshot when it exists;
+            // otherwise the one exposure already paid for.
+            venue: travelSnapshot?.venue ?? exposureSnapshot.venue ?? null,
             lookup: replayLookup(exposureSnapshot.drives),
             load: async (from, to) => ({
               neighbours: await loadStoredNeighbours(manager, {
@@ -2984,6 +3288,10 @@ export class InternalProvider implements BookingProvider {
       sequence,
       effectiveDuration,
     });
+
+    if (!opts?.skipCloseChangeRequests) {
+      await this.closeOpenChangeRequests(bookingId, ctx.tenant.id, 'declined');
+    }
 
     return {
       success: true,
@@ -3358,7 +3666,12 @@ export class InternalProvider implements BookingProvider {
     ).catch(() => undefined);
   }
 
-  async cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult> {
+  async cancelBooking(
+    ctx: BookingContext,
+    bookingId: string,
+    reason?: string,
+    opts?: { skipCloseChangeRequests?: boolean },
+  ): Promise<CancelResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     // Idempotent: already cancelled → success, no email/log.
     if (booking.status === 'cancelled') {
@@ -3369,6 +3682,25 @@ export class InternalProvider implements BookingProvider {
     }
     const rule = await this.loadRule(ctx.bot);
     const service = await this.serviceForBooking(booking);
+    if (ctx.subjectToCustomerChangePolicy) {
+      const decision = resolveCustomerChange(
+        service.cancelMode ?? 'auto',
+        booking.startUtc,
+        service.cancelUntilMin,
+      );
+      if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'cancel');
+      if (decision === 'request') {
+        return this.createChangeRequest(
+          ctx,
+          booking,
+          service,
+          'cancel',
+          booking.startUtc,
+          booking.endUtc,
+          rule.timezone,
+        );
+      }
+    }
 
     const rows = returningRows<{ sequence: number }>(await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
@@ -3382,6 +3714,9 @@ export class InternalProvider implements BookingProvider {
       return { success: true, cancelled: true };
     }
 
+    if (!opts?.skipCloseChangeRequests) {
+      await this.closeOpenChangeRequests(bookingId, ctx.tenant.id, 'declined');
+    }
     await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason);
 
     await sendBookingEmail({

@@ -87,6 +87,15 @@ export interface BookingContext {
    * — annotating without warning is strictly worse than filtering.
    */
   travelPolicy?: 'enforce' | 'annotate';
+  /**
+   * Whether this caller is bound by the Service's customer reschedule/cancel policy.
+   *
+   * NOT derived from `isAdmin`: the signed manage link sets that flag (it may manage
+   * any booking the token names) and is still a Booking Customer. Set from
+   * `BookingCaller` at every dispatcher: agent, internal-n8n, and public-manage
+   * are true; scheduler-admin and inbound calendar sync are false.
+   */
+  subjectToCustomerChangePolicy?: boolean;
 }
 
 export interface BookingSlot {
@@ -285,6 +294,11 @@ export interface RescheduleResult {
   success: boolean;
   timezone?: string;
   serviceName?: string;
+  /**
+   * Captured as a change Request — the original appointment is unchanged.
+   * Absent/false means the move actually happened.
+   */
+  requested?: boolean;
   booking: {
     id: string;
     startTime: string;
@@ -306,6 +320,11 @@ export interface RescheduleResult {
 export interface CancelResult {
   success: boolean;
   cancelled: boolean;
+  /**
+   * Captured as a change Request — the original appointment is still confirmed.
+   * Absent/false means the cancellation actually happened.
+   */
+  requested?: boolean;
   /**
    * The cancelled job was that day's first, and what it exposed cannot be reached from the
    * premises. ADVICE, never a refusal — declining a cancellation because of a drive is absurd,

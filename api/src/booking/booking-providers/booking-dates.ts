@@ -4,6 +4,7 @@
  */
 import { DateTime } from 'luxon';
 import { BookingError } from './types';
+import { luxonBookingDisplayFormat } from '../../contracts/clock-format';
 
 /**
  * Coerce a possibly-loose date range into a UTC [start, end) window. The LLM
@@ -57,10 +58,10 @@ export function parseBookingStart(input: string, timezone: string): Date | null 
 /**
  * #6: server-format the booking time in the BUSINESS timezone, so the AI can quote
  * it verbatim instead of re-deriving a local time from the UTC instant (which drifts).
- * e.g. "Monday, 23 June 2026 at 12:00 PM".
+ * e.g. "Monday, 23 June 2026 at 14:00" in Europe, "… at 12:00 PM" in the US.
  */
 export function formatBookingDisplayTime(startUtc: Date, timezone: string): string {
-  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a");
+  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat(luxonBookingDisplayFormat(timezone));
 }
 
 /** Calendar day only - the format `check_availability` takes for startDate/endDate. */

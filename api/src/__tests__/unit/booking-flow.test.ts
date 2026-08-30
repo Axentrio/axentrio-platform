@@ -258,7 +258,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       }]))
       // Second LLM call: presents slots to user
       .mockResolvedValueOnce(llmTextResponse(
-        "I found some available slots for Tuesday April 7:\n- 9:00 AM\n- 10:00 AM\n- 2:00 PM\n\nWhich time works best for you?"
+        "I found some available slots for Tuesday April 7:\n- 09:00\n- 10:00\n- 14:00\n\nWhich time works best for you?"
       ));
 
     const turn2 = await agent.run(
@@ -272,15 +272,15 @@ describe('Booking Flow — Full Agent Loop', () => {
     );
 
     expect(turn2.type).toBe('response');
-    expect((turn2 as any).content).toContain('9:00 AM');
+    expect((turn2 as any).content).toContain('09:00');
     // The chips and the prose must name the SAME times. They disagreed here for as long as this
     // test existed - the fixture's slots carried no UTC offset, so they rendered in whatever zone
     // the machine ran in while the prose claimed 9:00 regardless - and nothing compared them.
     // A customer reads the words; they can only tap the chips.
     expect((turn2 as any).quickReplies?.map((q: { title: string }) => q.title)).toEqual([
-      'Tue 9:00 AM',
-      'Tue 10:00 AM',
-      'Tue 2:00 PM',
+      'Tue 09:00',
+      'Tue 10:00',
+      'Tue 14:00',
     ]);
     // Trailing undefineds: customerAddress, then #149 locationChoice, then phone.
     expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined, undefined, undefined);
@@ -325,7 +325,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       ]))
       // Third LLM call: confirms booking to user
       .mockResolvedValueOnce(llmTextResponse(
-        "Your appointment has been booked for Tuesday, April 7 at 10:00 AM. See you then, Sarah!"
+        "Your appointment has been booked for Tuesday, April 7 at 10:00. See you then, Sarah!"
       ));
 
     const turn3 = await agent.run(
@@ -336,7 +336,7 @@ describe('Booking Flow — Full Agent Loop', () => {
         { role: 'user', content: 'I want to book an appointment' },
         { role: 'assistant', content: "I'd be happy to help you book an appointment! When would you like to come in?" },
         { role: 'user', content: 'Next Tuesday please' },
-        { role: 'assistant', content: "I found some available slots for Tuesday April 7:\n- 9:00 AM\n- 10:00 AM\n- 2:00 PM\n\nWhich time works best for you?" },
+        { role: 'assistant', content: "I found some available slots for Tuesday April 7:\n- 09:00\n- 10:00\n- 14:00\n\nWhich time works best for you?" },
       ],
     );
 
@@ -394,8 +394,8 @@ describe('Booking Flow — Full Agent Loop', () => {
     expect((turn as any).content).toBe('Here are the times I have available — let me know which one suits you.');
     // ...and the real times still reach the customer, because the chips were never the problem.
     expect((turn as any).quickReplies?.map((q: { title: string }) => q.title)).toEqual([
-      'Tue 9:00 AM',
-      'Tue 10:00 AM',
+      'Tue 09:00',
+      'Tue 10:00',
     ]);
   });
 

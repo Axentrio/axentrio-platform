@@ -231,6 +231,9 @@ describe('formatBusinessHoursForPlaceholder — closed weekdays and one-off hour
     });
     expect(formatBusinessHoursForPlaceholder(hours)).toContain('Wed closed');
     expect(formatBusinessHoursForPlaceholder(hours)).toContain('Mon 09:00–17:00');
+    expect(formatBusinessHoursForPlaceholder(hours, WED_10_00Z, 'America/New_York')).toContain(
+      'Mon 9:00 AM–5:00 PM',
+    );
   });
 
   it('states one-off hours that open a normally-closed Sunday', () => {

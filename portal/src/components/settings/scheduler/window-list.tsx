@@ -16,21 +16,29 @@ import { DEFAULT_WINDOW } from './scheduler-types';
 export const WindowList: React.FC<{
   windows: TimeWindow[];
   disabled?: boolean;
+  timezone?: string | null;
   onChange: (next: TimeWindow[]) => void;
-}> = ({ windows, disabled, onChange }) => (
+}> = ({ windows, disabled, timezone, onChange }) => (
   <div className="flex flex-col gap-1.5">
     {windows.map((w, i) => (
       // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
       <div key={i} className="flex items-center gap-2">
+        {/* Booking windows stay on a 15-minute grid; opening hours use stepMinutes={1}. */}
         <TimeSelect
           value={w.start}
           disabled={disabled}
+          timezone={timezone}
+          stepMinutes={15}
+          allowEndOfDay={false}
           onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, start: v } : x)))}
         />
         <span className="text-text-muted">–</span>
         <TimeSelect
           value={w.end}
           disabled={disabled}
+          timezone={timezone}
+          stepMinutes={15}
+          allowEndOfDay
           onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, end: v } : x)))}
         />
         {windows.length > 1 && (

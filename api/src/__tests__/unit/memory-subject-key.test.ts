@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeSubjectKey } from '../../memory/subject-key';
+import { computeSubjectKey, parseSubjectKey } from '../../memory/subject-key';
 import { ERASED_PREFIX } from '../../leads/lead-tombstone';
 
 describe('computeSubjectKey', () => {
@@ -30,5 +30,28 @@ describe('computeSubjectKey', () => {
     expect(
       computeSubjectKey({ channel: 'whatsapp', visitorId: `${ERASED_PREFIX}lead-1`, botId: 'b1' }),
     ).toBeNull();
+  });
+});
+
+describe('parseSubjectKey', () => {
+  it('inverts a WhatsApp subject key', () => {
+    expect(parseSubjectKey('whatsapp:32475123456')).toEqual({
+      channel: 'whatsapp',
+      visitorId: '32475123456',
+    });
+  });
+
+  it('inverts a widget subject key', () => {
+    expect(parseSubjectKey('widget:b1:widget-abc')).toEqual({
+      channel: 'widget',
+      botId: 'b1',
+      visitorId: 'widget-abc',
+    });
+  });
+
+  it('returns null for a malformed key', () => {
+    expect(parseSubjectKey('whatsapp')).toBeNull();
+    expect(parseSubjectKey('widget:b1')).toBeNull();
+    expect(parseSubjectKey(':nobody')).toBeNull();
   });
 });

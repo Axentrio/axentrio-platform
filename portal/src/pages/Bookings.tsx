@@ -20,6 +20,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { api, extractApiErrorMessage } from '../services/apiClient';
+import { formatClockTime } from '@contracts/clock-format';
 import { toast } from 'sonner';
 import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
@@ -80,8 +81,7 @@ function fmt(iso: string, tz: string, opts: Intl.DateTimeFormatOptions): string 
 
 const dayLabel = (iso: string, tz: string) =>
   fmt(iso, tz, { weekday: 'long', day: 'numeric', month: 'long' });
-const timeLabel = (iso: string, tz: string) =>
-  fmt(iso, tz, { hour: 'numeric', minute: '2-digit', hour12: true });
+const timeLabel = (iso: string, tz: string) => formatClockTime(iso, tz);
 
 /** P5e — fetch a fresh signed URL for an attached file and open it (404 if removed). */
 async function downloadFile(fileSessionId: string): Promise<void> {
@@ -428,7 +428,11 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
                 <>
                   {declineTarget.attendeeName || declineTarget.attendeeEmail} —{' '}
                   {dayLabel(declineTarget.startTime, timezone)} at {timeLabel(declineTarget.startTime, timezone)}.
-                  This closes the request. No appointment is created and the customer is not emailed.
+                  {declineTarget.requestKind === 'reschedule'
+                    ? 'This closes the move request. The original appointment stays as it is.'
+                    : declineTarget.requestKind === 'cancel'
+                      ? 'This closes the cancellation request. The original appointment stays confirmed.'
+                      : 'This closes the request. No appointment is created and the customer is not emailed.'}
                 </>
               )}
             </AlertDialogDescription>
@@ -489,6 +493,16 @@ function BookingRowHeader({ booking, timezone }: { booking: AdminBooking; timezo
       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${pill.cls}`}>
         {pill.label}
       </span>
+      {booking.status === 'request_created' && booking.requestKind === 'reschedule' && (
+        <span className="inline-flex rounded-full bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-400">
+          Move
+        </span>
+      )}
+      {booking.status === 'request_created' && booking.requestKind === 'cancel' && (
+        <span className="inline-flex rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-400">
+          Cancel
+        </span>
+      )}
       {/* A confirmed booking whose calendar mirror failed used to look identical to a
           healthy one: green pill, nothing on the calendar, and for a channel booking no
           email either — so the owner only found out by noticing the absence. */}
@@ -697,6 +711,7 @@ function BookingRowDetails({ booking }: { booking: AdminBooking }) {
 function BookingRowActions({
   canManage,
   isRequest,
+  requestKind,
   acting,
   onCancel,
   onReschedule,
@@ -705,6 +720,7 @@ function BookingRowActions({
 }: {
   canManage: boolean;
   isRequest: boolean;
+  requestKind?: string | null;
   acting: boolean;
   onCancel: () => void;
   onReschedule: () => void;
@@ -734,7 +750,11 @@ function BookingRowActions({
         <div className="flex shrink-0 items-center gap-2">
           <Button size="sm" disabled={acting} onClick={onAccept}>
             <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-            Accept
+            {requestKind === 'reschedule'
+              ? 'Accept move'
+              : requestKind === 'cancel'
+                ? 'Accept cancellation'
+                : 'Accept'}
           </Button>
           <Button
             variant="ghost"
@@ -792,6 +812,7 @@ function BookingRow({
       <BookingRowActions
         canManage={canManage}
         isRequest={isRequest}
+        requestKind={booking.requestKind}
         acting={acting}
         onCancel={onCancel}
         onReschedule={onReschedule}

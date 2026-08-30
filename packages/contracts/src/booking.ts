@@ -7,6 +7,11 @@ export type BookingStatus =
 
 export type BookingMode = 'auto' | 'request';
 
+/** How a Booking Customer may move or cancel an existing appointment for this Service. */
+export type CustomerChangeMode = 'auto' | 'request' | 'not_allowed';
+
+export type BookingRequestKind = 'new' | 'reschedule' | 'cancel';
+
 /** Item in GET /api/v1/scheduler/bookings */
 export interface Booking {
   id: string;

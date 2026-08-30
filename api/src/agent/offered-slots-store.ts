@@ -61,6 +61,12 @@ async function getOfferedSlots(sessionId: string): Promise<OfferedSlots | null> 
   }
 }
 
+/** Test/reset helper: slot starts check_availability last offered this session. */
+export async function peekOfferedSlots(sessionId: string): Promise<string[] | null> {
+  const offered = await getOfferedSlots(sessionId);
+  return offered?.starts ?? null;
+}
+
 /** Business wall clock for a start time, so Z and zoneless forms of the same hour match. */
 export async function wallClockKey(sessionId: string, startTime: string): Promise<string> {
   if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(startTime)) {

@@ -43,6 +43,8 @@ export type LocationType =
   | 'custom'
   | 'unset';
 export type BookingMode = 'auto' | 'request';
+/** Distinct from BookingMode: how a Booking Customer may move or cancel an existing appointment. */
+export type CustomerChangeMode = 'auto' | 'request' | 'not_allowed';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request' | 'free';
 
@@ -114,6 +116,26 @@ export class ServiceType {
   /** auto = AI can confirm directly; request = collect info + create a lead/request. */
   @Column({ type: 'varchar', length: 16, name: 'booking_mode', default: 'auto' })
   bookingMode!: BookingMode;
+
+  /**
+   * Whether a Booking Customer may reschedule an existing appointment for this Service.
+   * Default `auto` preserves today's behaviour. Not implied by `bookingMode`.
+   */
+  @Column({ type: 'varchar', length: 16, name: 'reschedule_mode', default: 'auto' })
+  rescheduleMode!: CustomerChangeMode;
+
+  @Column({ type: 'varchar', length: 16, name: 'cancel_mode', default: 'auto' })
+  cancelMode!: CustomerChangeMode;
+
+  /**
+   * Minutes before start after which a customer reschedule is not allowed.
+   * Null = no extra cutoff. `0` = until the start instant.
+   */
+  @Column({ type: 'int', name: 'reschedule_until_min', nullable: true })
+  rescheduleUntilMin?: number | null;
+
+  @Column({ type: 'int', name: 'cancel_until_min', nullable: true })
+  cancelUntilMin?: number | null;
 
   @Column({ type: 'boolean', name: 'online_bookable', default: true })
   onlineBookable!: boolean;

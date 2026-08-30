@@ -27,7 +27,8 @@ export type CustomerMemoryRunState =
   | 'abstained'
   | 'failed'
   | 'skipped_disabled'
-  | 'skipped_no_subject';
+  | 'skipped_no_subject'
+  | 'skipped_reset';
 
 @Entity('chatbot_customer_memory_runs')
 @Index('uq_chatbot_customer_memory_runs_session', ['sessionId'], {

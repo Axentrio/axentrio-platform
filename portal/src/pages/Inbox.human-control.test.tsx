@@ -605,11 +605,11 @@ describe('Inbox super-admin reset', () => {
     expect(screen.getByRole('button', { name: /^Close$/ })).toBeInTheDocument();
   });
 
-  it('hides Reset on a closed chat', async () => {
+  it('still shows Reset on a closed WhatsApp chat so a Redis retry can finish', async () => {
     authRef.role = 'super_admin';
-    renderInbox(makeChat({ ownership: 'bot_owned', status: 'closed' }));
+    renderInbox(makeChat({ ownership: 'closed', status: 'closed', channel: 'whatsapp' }));
     await screen.findByTestId('chat-window');
-    expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Reset$/ })).toBeInTheDocument();
   });
 
   it('hides Reset on a widget chat (the widget has its own control)', async () => {
@@ -619,7 +619,7 @@ describe('Inbox super-admin reset', () => {
     expect(screen.queryByRole('button', { name: /^Reset$/ })).not.toBeInTheDocument();
   });
 
-  it('POSTs /chats/:id/close after confirm', async () => {
+  it('POSTs /chats/:id/reset after confirm', async () => {
     authRef.role = 'super_admin';
     apiPost.mockResolvedValue({ outcome: 'closed', conversation: { sessionId: 'c1', status: 'closed' } });
     const user = userEvent.setup();
@@ -630,9 +630,38 @@ describe('Inbox super-admin reset', () => {
     await user.click(within(dialog).getByRole('button', { name: /^Reset$/ }));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
-    expect(apiPost).toHaveBeenCalledWith('/chats/c1/close', {
+    expect(apiPost).toHaveBeenCalledWith('/chats/c1/reset', {
       idempotencyKey: expect.any(String),
     });
+  });
+
+  it('keeps the chat closed when the first Reset returns 503 reset_scratch_incomplete', async () => {
+    authRef.role = 'super_admin';
+    apiPost.mockRejectedValue(
+      takeoverError(503, 'reset_scratch_incomplete', {
+        sessionIds: ['c1'],
+        conversation: {
+          sessionId: 'c1',
+          tenantId: 't1',
+          status: 'closed',
+          ownership: 'closed',
+          ownershipVersion: 2,
+          assignedAgentId: null,
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot', channel: 'whatsapp' }));
+
+    await user.click(await screen.findByRole('button', { name: /^Reset$/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^Reset$/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(await screen.findByText('Closed')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-window')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Take Over/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Reset$/ })).toBeInTheDocument();
   });
 });
 

@@ -88,3 +88,31 @@ describe('what the reschedule page offers', () => {
     expect(rescheduleOptionsState(0, 0)).toBe('none');
   });
 });
+
+describe('customer change policy copy on the manage pages', () => {
+  it('uses throw-site copy for CHANGE_NOT_ALLOWED, never the model directive', () => {
+    const err = new BookingError(
+      '"Intro call" does not allow customers to reschedule through the booking system. Do not call request_appointment.',
+      'CHANGE_NOT_ALLOWED',
+      403,
+      { action: 'reschedule' },
+      'This appointment cannot be rescheduled online. Please contact the business directly.',
+    );
+    const shown = customerMessage(err);
+    expect(shown).toBe('This appointment cannot be rescheduled online. Please contact the business directly.');
+    expect(shown).not.toMatch(BOT_DIRECTIVE);
+  });
+
+  it('uses throw-site copy for CHANGE_REQUEST_OPEN', () => {
+    const err = new BookingError(
+      'This appointment already has a pending reschedule request. Do not create another.',
+      'CHANGE_REQUEST_OPEN',
+      409,
+      { kind: 'reschedule' },
+      'You already have a pending change request for this appointment. The business will get back to you.',
+    );
+    expect(customerMessage(err)).toBe(
+      'You already have a pending change request for this appointment. The business will get back to you.',
+    );
+  });
+});

@@ -14,7 +14,7 @@ import { logger } from '../utils/logger';
 import { Sentry } from '../config/sentry';
 import { MEMORY_FACT_KEYS, isMemoryFactKey, type MemoryFactKey } from './fact-keys';
 import { isMemoryEnabledForSession } from './memory-config';
-import { computeSubjectKey } from './subject-key';
+import { computeSubjectKey, parseSubjectKey } from './subject-key';
 
 const PROMPT_CAP = 2000;
 
@@ -264,4 +264,151 @@ export async function writeMemoryFact(
       input.extractionVersion,
     ],
   );
+}
+
+type Queryable = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
+
+export type MemorySessionIdentity = {
+  id: string;
+  tenantId: string;
+  botId: string;
+  channel: string | null;
+  visitorId: string | null;
+};
+
+/**
+ * Sessions that share this visitor (and person_key siblings). A Superadmin reset
+ * must wipe all of them: the next inbound reuses the identity, not the session id.
+ */
+export async function collectIdentitySessionIds(
+  manager: Queryable,
+  session: MemorySessionIdentity,
+): Promise<{ sessionIds: string[]; memoryIds: string[] }> {
+  const sessionIds = new Set<string>([session.id]);
+  const subjectKey = computeSubjectKey(session);
+  const memoryIds: string[] = [];
+
+  if (session.visitorId) {
+    const identityRows = returningRows<{ id: string }>(
+      await manager.query(
+        session.channel === 'widget'
+          ? `SELECT id FROM chat_sessions
+              WHERE tenant_id = $1 AND channel = 'widget' AND bot_id = $2 AND visitor_id = $3`
+          : `SELECT id FROM chat_sessions
+              WHERE tenant_id = $1 AND channel = $2 AND visitor_id = $3`,
+        session.channel === 'widget'
+          ? [session.tenantId, session.botId, session.visitorId]
+          : [session.tenantId, session.channel, session.visitorId],
+      ),
+    );
+    for (const row of identityRows) sessionIds.add(row.id);
+  }
+
+  if (subjectKey) {
+    const memories = returningRows<{ id: string; subject_key: string }>(
+      await manager.query(
+        `SELECT m.id, m.subject_key
+           FROM chatbot_customer_memory m
+          WHERE m.tenant_id = $1
+            AND (
+              m.subject_key = $2
+              OR (
+                m.person_key IS NOT NULL
+                AND m.person_key = (
+                  SELECT person_key FROM chatbot_customer_memory
+                   WHERE tenant_id = $1 AND subject_key = $2
+                )
+              )
+            )`,
+        [session.tenantId, subjectKey],
+      ),
+    );
+    for (const memory of memories) {
+      memoryIds.push(memory.id);
+      const parsed = parseSubjectKey(memory.subject_key);
+      if (!parsed) continue;
+      const siblingSessions = returningRows<{ id: string }>(
+        await manager.query(
+          parsed.channel === 'widget' && parsed.botId
+            ? `SELECT id FROM chat_sessions
+                WHERE tenant_id = $1 AND channel = 'widget' AND bot_id = $2 AND visitor_id = $3`
+            : `SELECT id FROM chat_sessions
+                WHERE tenant_id = $1 AND channel = $2 AND visitor_id = $3`,
+          parsed.channel === 'widget' && parsed.botId
+            ? [session.tenantId, parsed.botId, parsed.visitorId]
+            : [session.tenantId, parsed.channel, parsed.visitorId],
+        ),
+      );
+      for (const row of siblingSessions) sessionIds.add(row.id);
+    }
+  }
+
+  return { sessionIds: [...sessionIds], memoryIds };
+}
+
+/**
+ * Forget this identity's live facts and stop pending extraction so a Superadmin
+ * test reset cannot leak booking times / intake into the next session.
+ *
+ * Also covers person_key siblings (loadLiveFacts would inject those) and stamps
+ * `skipped_reset` on identity sessions so the quiet-window sweep cannot rewrite
+ * the facts from the closed transcript.
+ */
+export async function clearConversationMemory(
+  manager: Queryable,
+  session: MemorySessionIdentity,
+): Promise<{ factsSuperseded: number; runsSkipped: number; sessionIds: string[] }> {
+  const { sessionIds, memoryIds } = await collectIdentitySessionIds(manager, session);
+
+  const ids = [...sessionIds];
+  await manager.query(
+    `INSERT INTO chatbot_customer_memory_runs (tenant_id, session_id, state)
+     SELECT s.tenant_id, s.id, 'skipped_reset'
+       FROM chat_sessions s
+      WHERE s.id = ANY($1::uuid[])
+     ON CONFLICT (session_id) DO NOTHING`,
+    [ids],
+  );
+  const skipped = returningRows<{ id: string }>(
+    await manager.query(
+      `UPDATE chatbot_customer_memory_runs
+          SET state = 'skipped_reset',
+              claimed_until = NULL,
+              next_attempt_at = NULL,
+              last_error = NULL,
+              updated_at = now()
+        WHERE session_id = ANY($1::uuid[])
+          AND state IN ('pending', 'claimed', 'failed')
+        RETURNING id`,
+      [ids],
+    ),
+  );
+
+  let factsSuperseded = 0;
+  if (memoryIds.length > 0) {
+    const superseded = returningRows<{ id: string }>(
+      await manager.query(
+        `UPDATE chatbot_customer_facts
+            SET superseded_at = now(), updated_at = now()
+          WHERE memory_id = ANY($1::uuid[])
+            AND superseded_at IS NULL
+          RETURNING id`,
+        [memoryIds],
+      ),
+    );
+    factsSuperseded = superseded.length;
+    await manager.query(
+      `UPDATE chatbot_customer_memory
+          SET live_fact_count = 0, updated_at = now()
+        WHERE id = ANY($1::uuid[])`,
+      [memoryIds],
+    );
+  }
+
+  logger.info('[customer-memory] cleared for reset', {
+    sessionId: session.id,
+    factsSuperseded,
+    runsSkipped: skipped.length,
+  });
+  return { factsSuperseded, runsSkipped: skipped.length, sessionIds: ids };
 }

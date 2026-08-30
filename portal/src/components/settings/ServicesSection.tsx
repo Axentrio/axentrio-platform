@@ -51,6 +51,7 @@ import {
   type IntakeQuestion,
   type PriceDisplayType,
   type DiscountType,
+  type CustomerChangeMode,
 } from '../../queries/useSchedulerQueries';
 
 interface FormState {
@@ -59,6 +60,12 @@ interface FormState {
   description: string;
   preparationInstructions: string;
   bookingMode: 'auto' | 'request';
+  rescheduleMode: CustomerChangeMode;
+  cancelMode: CustomerChangeMode;
+  rescheduleUntilValue: string;
+  rescheduleUntilUnit: 'hours' | 'days';
+  cancelUntilValue: string;
+  cancelUntilUnit: 'hours' | 'days';
   durationMode: 'fixed' | 'range' | 'ai';
   durationMin: number;
   minDurationMin: string;
@@ -99,6 +106,12 @@ const BLANK: FormState = {
   description: '',
   preparationInstructions: '',
   bookingMode: 'auto',
+  rescheduleMode: 'auto',
+  cancelMode: 'auto',
+  rescheduleUntilValue: '',
+  rescheduleUntilUnit: 'hours',
+  cancelUntilValue: '',
+  cancelUntilUnit: 'hours',
   durationMode: 'fixed',
   durationMin: 30,
   minDurationMin: '',
@@ -136,6 +149,36 @@ function numStr(v: number | string | null | undefined): string {
   return v != null ? String(v) : '';
 }
 
+function untilToForm(min: number | null | undefined): { value: string; unit: 'hours' | 'days' } {
+  if (min == null) return { value: '', unit: 'hours' };
+  if (min % 1440 === 0 && min >= 1440) return { value: String(min / 1440), unit: 'days' };
+  return { value: String(min / 60), unit: 'hours' };
+}
+
+function untilFromForm(value: string, unit: 'hours' | 'days'): number | null {
+  if (value.trim() === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(unit === 'days' ? n * 1440 : n * 60);
+}
+
+const CHANGE_MODE_LABEL: Record<CustomerChangeMode, string> = {
+  auto: 'Allowed automatically',
+  request: 'Request approval',
+  not_allowed: 'Not allowed',
+};
+
+/** Same formula as api/src/booking/pricing/service-discount.ts `round2`. */
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/** Whole euros stay unpadded; cents always show 2 digits (`€80`, `€12.50`). Discounted €0 stays `€0`. */
+function formatEuro(n: number): string {
+  const rounded = round2(n);
+  return Number.isInteger(rounded) ? `€${rounded}` : `€${rounded.toFixed(2)}`;
+}
+
 function formFromService(s: Service): FormState {
   return {
     name: s.name,
@@ -143,6 +186,18 @@ function formFromService(s: Service): FormState {
     description: s.description ?? '',
     preparationInstructions: s.preparationInstructions ?? '',
     bookingMode: s.bookingMode,
+    rescheduleMode: s.rescheduleMode ?? 'auto',
+    cancelMode: s.cancelMode ?? 'auto',
+    ...(() => {
+      const r = untilToForm(s.rescheduleUntilMin);
+      const c = untilToForm(s.cancelUntilMin);
+      return {
+        rescheduleUntilValue: r.value,
+        rescheduleUntilUnit: r.unit,
+        cancelUntilValue: c.value,
+        cancelUntilUnit: c.unit,
+      };
+    })(),
     durationMode: s.durationMode ?? 'fixed',
     durationMin: s.durationMin,
     // Defensive: a range/ai row with null bounds pre-fills from durationMin so the
@@ -189,6 +244,10 @@ function toInput(f: FormState): ServiceInput {
    * the customer. No error is raised anywhere; the field simply refuses to empty.
    */
   const num = (v: string): number | null => (v.trim() === '' ? null : Number(v));
+  const money = (v: string): number | null => {
+    const n = num(v);
+    return n == null || !Number.isFinite(n) ? null : round2(n);
+  };
   const text = (v: string): string | null => (v.trim() === '' ? null : v.trim());
   // Same contract, kept under its original name for the timing fields it was written for.
   const inherit = num;
@@ -198,6 +257,10 @@ function toInput(f: FormState): ServiceInput {
     description: text(f.description),
     preparationInstructions: text(f.preparationInstructions),
     bookingMode: f.bookingMode,
+    rescheduleMode: f.rescheduleMode,
+    cancelMode: f.cancelMode,
+    rescheduleUntilMin: untilFromForm(f.rescheduleUntilValue, f.rescheduleUntilUnit),
+    cancelUntilMin: untilFromForm(f.cancelUntilValue, f.cancelUntilUnit),
     durationMode: f.durationMode,
     durationMin: f.durationMin,
     minDurationMin: f.durationMode === 'fixed' ? null : num(f.minDurationMin),
@@ -207,15 +270,15 @@ function toInput(f: FormState): ServiceInput {
     minNoticeMin: inherit(f.minNoticeMin),
     maxHorizonDays: inherit(f.maxHorizonDays),
     priceDisplayType: f.priceDisplayType,
-    fixedPrice: f.priceDisplayType === 'fixed' || f.priceDisplayType === 'from' ? num(f.fixedPrice) : null,
-    minPrice: f.priceDisplayType === 'range' ? num(f.minPrice) : null,
-    maxPrice: f.priceDisplayType === 'range' ? num(f.maxPrice) : null,
+    fixedPrice: f.priceDisplayType === 'fixed' || f.priceDisplayType === 'from' ? money(f.fixedPrice) : null,
+    minPrice: f.priceDisplayType === 'range' ? money(f.minPrice) : null,
+    maxPrice: f.priceDisplayType === 'range' ? money(f.maxPrice) : null,
     priceNote: text(f.priceNote),
     // Disabled ⇒ clear the whole group (send null, never undefined) so a stored discount
     // cannot silently resurrect. mention flag rides along regardless.
     discountEnabled: f.discountEnabled,
     discountType: f.discountEnabled ? f.discountType : null,
-    discountValue: f.discountEnabled ? num(f.discountValue) : null,
+    discountValue: f.discountEnabled ? money(f.discountValue) : null,
     discountStartOn: f.discountEnabled ? text(f.discountStartOn) : null,
     discountEndOn: f.discountEnabled ? text(f.discountEndOn) : null,
     mentionDiscountInChat: f.mentionDiscountInChat,
@@ -273,7 +336,6 @@ function discountPreview(f: FormState): { original: string; final: string } | nu
   if (!f.discountEnabled) return null;
   const value = Number(f.discountValue);
   if (!Number.isFinite(value) || value <= 0) return null;
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
   const apply = (amount: number): number =>
     f.discountType === 'percentage'
       ? round2(amount * (1 - Math.min(Math.max(value, 0), 100) / 100))
@@ -284,13 +346,13 @@ function discountPreview(f: FormState): { original: string; final: string } | nu
   switch (f.priceDisplayType) {
     case 'fixed':
       if (!(fixed > 0)) return null;
-      return { original: `€${fixed}`, final: `€${apply(fixed)}` };
+      return { original: formatEuro(fixed), final: formatEuro(apply(fixed)) };
     case 'from':
       if (!(fixed > 0)) return null;
-      return { original: `from €${fixed}`, final: `from €${apply(fixed)}` };
+      return { original: `from ${formatEuro(fixed)}`, final: `from ${formatEuro(apply(fixed))}` };
     case 'range':
       if (!(min > 0) || !(max > 0)) return null;
-      return { original: `€${min}–€${max}`, final: `€${apply(min)}–€${apply(max)}` };
+      return { original: `${formatEuro(min)}–${formatEuro(max)}`, final: `${formatEuro(apply(min))}–${formatEuro(apply(max))}` };
     default:
       return null;
   }
@@ -299,11 +361,11 @@ function discountPreview(f: FormState): { original: string; final: string } | nu
 function priceLabel(s: Service): string {
   switch (s.priceDisplayType) {
     case 'fixed':
-      return s.fixedPrice != null ? `€${s.fixedPrice}` : '';
+      return s.fixedPrice != null ? formatEuro(s.fixedPrice) : '';
     case 'from':
-      return s.fixedPrice != null ? `from €${s.fixedPrice}` : '';
+      return s.fixedPrice != null ? `from ${formatEuro(s.fixedPrice)}` : '';
     case 'range':
-      return s.minPrice != null && s.maxPrice != null ? `€${s.minPrice}–€${s.maxPrice}` : '';
+      return s.minPrice != null && s.maxPrice != null ? `${formatEuro(s.minPrice)}–${formatEuro(s.maxPrice)}` : '';
     case 'on_request':
       return 'on request';
     case 'free':
@@ -472,6 +534,16 @@ export const ServicesSection: React.FC<{
                       }`}
                     >
                       {s.bookingMode === 'request' ? 'request-only' : 'auto-book'}
+                    </span>
+                  )}
+                  {(s.rescheduleMode ?? 'auto') !== 'auto' && (
+                    <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-sky-500/10 text-sky-400">
+                      reschedule: {s.rescheduleMode}
+                    </span>
+                  )}
+                  {(s.cancelMode ?? 'auto') !== 'auto' && (
+                    <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-orange-500/10 text-orange-400">
+                      cancel: {s.cancelMode}
                     </span>
                   )}
                   {!s.isActive && <span className="text-[11px] text-text-muted">(inactive)</span>}
@@ -650,6 +722,8 @@ const ServiceEditorDialog: React.FC<{
               </div>
             </div>
 
+            <ChangePolicyFields form={form} set={set} />
+
             <div>
               <Label className="text-text-secondary mb-1 block">Description</Label>
               <Input
@@ -770,13 +844,13 @@ const PriceFields: React.FC<{ form: FormState; set: FieldSetter }> = ({ form, se
           </Select>
         </div>
         {(form.priceDisplayType === 'fixed' || form.priceDisplayType === 'from') && (
-          <NumberField label="Price (€)" value={Number(form.fixedPrice) || 0} onChange={(v) => set('fixedPrice', String(v))} min={0} />
+          <MoneyField id="svc-fixed-price" label="Price (€)" value={form.fixedPrice} onChange={(v) => set('fixedPrice', v)} />
         )}
       </div>
       {form.priceDisplayType === 'range' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <NumberField label="Min (€)" value={Number(form.minPrice) || 0} onChange={(v) => set('minPrice', String(v))} min={0} />
-          <NumberField label="Max (€)" value={Number(form.maxPrice) || 0} onChange={(v) => set('maxPrice', String(v))} min={0} />
+          <MoneyField id="svc-min-price" label="Min (€)" value={form.minPrice} onChange={(v) => set('minPrice', v)} />
+          <MoneyField id="svc-max-price" label="Max (€)" value={form.maxPrice} onChange={(v) => set('maxPrice', v)} />
         </div>
       )}
     </div>
@@ -839,7 +913,9 @@ const DiscountFields: React.FC<{ form: FormState; set: FieldSetter }> = ({ form,
               <Input
                 id="svc-discount-value"
                 type="number"
+                inputMode="decimal"
                 min={0}
+                step={form.discountType === 'fixed' ? '0.01' : undefined}
                 max={form.discountType === 'percentage' ? 100 : undefined}
                 value={form.discountValue}
                 onChange={(e) => set('discountValue', e.target.value)}
@@ -1103,6 +1179,102 @@ const PresetDialog: React.FC<{
   );
 };
 
+const ChangePolicyFields: React.FC<{ form: FormState; set: FieldSetter }> = ({ form, set }) => (
+  <div className="space-y-3 rounded-xl border border-edge p-3">
+    <p className="text-sm font-medium text-text-primary">Customer reschedule and cancellation</p>
+    <p className="text-xs text-text-muted">
+      Controls what Booking Customers can do to an existing appointment. Auto-book of a new
+      booking does not grant this. After the cutoff, the action is not allowed.
+    </p>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <Label className="text-text-secondary mb-1 block">Rescheduling</Label>
+        <Select
+          value={form.rescheduleMode}
+          onValueChange={(v) => set('rescheduleMode', v as CustomerChangeMode)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(CHANGE_MODE_LABEL) as CustomerChangeMode[]).map((m) => (
+              <SelectItem key={m} value={m}>
+                {CHANGE_MODE_LABEL[m]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-text-secondary mb-1 block">Cancellation</Label>
+        <Select
+          value={form.cancelMode}
+          onValueChange={(v) => set('cancelMode', v as CustomerChangeMode)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(CHANGE_MODE_LABEL) as CustomerChangeMode[]).map((m) => (
+              <SelectItem key={m} value={m}>
+                {CHANGE_MODE_LABEL[m]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+    {form.rescheduleMode !== 'not_allowed' && (
+      <CutoffField
+        label="Reschedule until"
+        value={form.rescheduleUntilValue}
+        unit={form.rescheduleUntilUnit}
+        onValue={(v) => set('rescheduleUntilValue', v)}
+        onUnit={(u) => set('rescheduleUntilUnit', u)}
+      />
+    )}
+    {form.cancelMode !== 'not_allowed' && (
+      <CutoffField
+        label="Cancel until"
+        value={form.cancelUntilValue}
+        unit={form.cancelUntilUnit}
+        onValue={(v) => set('cancelUntilValue', v)}
+        onUnit={(u) => set('cancelUntilUnit', u)}
+      />
+    )}
+  </div>
+);
+
+const CutoffField: React.FC<{
+  label: string;
+  value: string;
+  unit: 'hours' | 'days';
+  onValue: (v: string) => void;
+  onUnit: (u: 'hours' | 'days') => void;
+}> = ({ label, value, unit, onValue, onUnit }) => (
+  <div>
+    <Label className="text-text-secondary mb-1 block">{label}</Label>
+    <div className="flex gap-2">
+      <Input
+        type="number"
+        min={0}
+        value={value}
+        placeholder="No extra cutoff"
+        onChange={(e) => onValue(e.target.value)}
+      />
+      <select
+        value={unit}
+        onChange={(e) => onUnit(e.target.value as 'hours' | 'days')}
+        className="px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
+      >
+        <option value="hours">hours before</option>
+        <option value="days">days before</option>
+      </select>
+    </div>
+    <p className="mt-1 text-xs text-text-muted">Leave blank for no extra cutoff. 0 means until the start.</p>
+  </div>
+);
+
 /** '' → inherit. Empty is a real, savable state here, so no NaN and no snap-back to 0. */
 const InheritableNumberField: React.FC<{
   label: string;
@@ -1129,6 +1301,27 @@ const NumberField: React.FC<{ label: string; value: number; onChange: (v: number
       value={Number.isFinite(value) ? value : ''}
       min={min}
       onChange={(e) => onChange(parseInt(e.target.value, 10))}
+    />
+  </div>
+);
+
+/** Cents-capable price box. Duration still uses NumberField (whole minutes). */
+const MoneyField: React.FC<{
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}> = ({ id, label, value, onChange }) => (
+  <div>
+    <Label htmlFor={id} className="text-text-secondary mb-1 block">{label}</Label>
+    <Input
+      id={id}
+      type="number"
+      inputMode="decimal"
+      min={0}
+      step="0.01"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
     />
   </div>
 );

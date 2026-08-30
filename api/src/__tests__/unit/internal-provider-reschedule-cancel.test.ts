@@ -34,6 +34,14 @@ vi.mock('../../database/data-source', () => ({
     getRepository: vi.fn((entity: any) => repoFor(entity)),
     manager: { getRepository: (entity: any) => repoFor(entity) },
     transaction: (cb: any) => transaction(cb),
+    createQueryRunner: () => ({
+      connect: async () => undefined,
+      query: (...a: any[]) => managerQuery(...a),
+      manager: {
+        findOne: (entityOrOpts: any, maybeOpts?: any) => bookingFindOne(maybeOpts ?? entityOrOpts),
+      },
+      release: async () => undefined,
+    }),
   },
 }));
 
@@ -49,8 +57,24 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const sendBookingEmail = vi.fn();
+const sendRequestNotificationEmail = vi.fn();
 vi.mock('../../booking/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
+  sendRequestNotificationEmail: (...args: any[]) => sendRequestNotificationEmail(...args),
+}));
+vi.mock('../../webhooks/webhook.emitter', () => ({
+  emitWebhookEvent: vi.fn(),
+  buildEventBase: (type: string, tenantId: string, session: any) => ({
+    id: 'evt-1',
+    type,
+    tenantId,
+    sessionId: session.id,
+    timestamp: '2026-06-05T00:00:00.000Z',
+    session,
+  }),
+}));
+vi.mock('../../services/notification.service', () => ({
+  notificationService: { createForTenant: vi.fn(async () => undefined) },
 }));
 
 vi.mock('../../integrations/google/google-calendar.service', () => ({
@@ -871,6 +895,64 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
     });
   });
 
+  it('moves a 35-min WaterFix booking 10:00 to 11:00 with catalog 60 and 15/30 buffers', async () => {
+    // Production WaterFix: frozen 35-min job at 10:00 Brussels, catalog now 60 with
+    // 15/30 buffers, at-premises, start-from-base on, empty morning besides this row.
+    // The 10:00–10:35 Google mirror does not occupy 11:00 (buffer-before is 10:45).
+    // Without handing the pre-lock venue into the in-lock first-job assert, the
+    // premises base is `unresolved` and the move throws TRAVEL_TIME_CONFLICT —
+    // the original row unchanged — even though Google looks free at 11:00.
+    const antwerp = { lat: 51.2172, lng: 4.4214 };
+    const venue = { kind: 'known' as const, point: antwerp };
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      name: 'booking waterFix',
+      durationMin: 60,
+      bufferBeforeMin: 15,
+      bufferAfterMin: 30,
+      locationType: 'business_location',
+      customerAddressRequired: false,
+    });
+    ruleFindOne.mockResolvedValue({
+      timezone: 'Europe/Brussels',
+      weeklyHours: { mon: [{ start: '09:00', end: '17:00' }] },
+      dateOverrides: [],
+      slotGranularityMin: 30,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      startUtc: new Date('2026-10-26T09:00:00.000Z'),
+      endUtc: new Date('2026-10-26T09:35:00.000Z'),
+      bookedDurationMin: 35,
+      customerAddress: null,
+      customerPlaceId: null,
+    });
+    vi.setSystemTime(new Date('2026-08-29T12:00:00Z'));
+    providerGetBusy.mockResolvedValue([
+      { start: new Date('2026-10-26T09:00:00.000Z'), end: new Date('2026-10-26T09:35:00.000Z') },
+    ]);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('lower(blocked_range)') ? [] : [],
+    );
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('UPDATE chatbot_bookings')) return [{ sequence: 1 }];
+      return [];
+    });
+    loadTravelNeighbours.mockResolvedValue({
+      neighbours: [held('bk-1', '2026-10-26T08:45:00.000Z', '2026-10-26T10:05:00.000Z', antwerp)],
+      venue,
+    });
+    loadStoredNeighbours.mockResolvedValue([
+      held('bk-1', '2026-10-26T09:45:00.000Z', '2026-10-26T11:05:00.000Z', antwerp),
+    ]);
+
+    const res = await provider.rescheduleBooking(ctx, 'bk-1', '2026-10-26T11:00:00');
+    expect(res.success).toBe(true);
+    expect(res.booking.startTime).toBe('2026-10-26T10:00:00.000Z');
+    expect(res.booking.endTime).toBe('2026-10-26T10:35:00.000Z');
+  });
+
   it('restamps the EXPOSED booking and warns, when the owner proceeds anyway', async () => {
     // The exposed row was not written to, but its journey changed. Left saying `ok` it would
     // claim a verification that no longer covers the leg it now has.
@@ -905,5 +987,168 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
       .map((c: any) => c[1][0]);
     expect(locks.length).toBeGreaterThan(1);
     expect(locks).toEqual([...locks].sort());
+  });
+});
+
+
+describe('InternalProvider customer change policy', () => {
+  let provider: InternalProvider;
+  const customerCtx = { ...ctx, subjectToCustomerChangePolicy: true };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null as any);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue(confirmedBooking());
+    bookingRefFind.mockResolvedValue([]);
+    chatSessionFindOne.mockResolvedValue(null);
+    providerGetBusy.mockResolvedValue(null);
+    providerUpdateEvent.mockResolvedValue('no_connection');
+    bookingQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'req-change' }];
+      if (sql.includes('lower(blocked_range)')) return [];
+      if (sql.includes("status='cancelled'")) return [{ sequence: 1 }];
+      return [];
+    });
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory')) return [];
+      if (sql.includes('UPDATE chatbot_bookings')) return [{ sequence: 1, id: 'req-change' }];
+      return [];
+    });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('auto (the default) still executes a customer reschedule', async () => {
+    const res = await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START);
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeUndefined();
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(true);
+  });
+
+  it('not_allowed writes nothing and creates no request', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'not_allowed' });
+    await expect(provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'CHANGE_NOT_ALLOWED',
+    });
+    expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('UPDATE chatbot_bookings'))).toBe(false);
+  });
+
+  it('request leaves the original confirmed and returns requested: true', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'request' });
+    const res = await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START);
+    expect(res.requested).toBe(true);
+    expect(res.booking.startTime).toBe('2026-06-10T08:00:00.000Z');
+    expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(true);
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('cutoff demotes auto to not_allowed', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, cancelMode: 'auto', cancelUntilMin: 10 * 24 * 60 });
+    await expect(provider.cancelBooking(customerCtx, 'bk-1')).rejects.toMatchObject({
+      code: 'CHANGE_NOT_ALLOWED',
+    });
+  });
+
+  it('the owner caller skips the gate even when the Service says not_allowed', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'not_allowed' });
+    const res = await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeUndefined();
+  });
+
+  it('does not insert a change Request against a non-confirmed original', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'request' });
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), status: 'cancelled' });
+    await expect(provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'BOOKING_NOT_RESCHEDULABLE',
+    });
+    expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
+  });
+
+  it('a second same-kind request returns the existing row', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'request' });
+    const open = {
+      ...confirmedBooking(),
+      id: 'req-existing',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      if (opts?.where?.relatedBookingId === 'bk-1' && opts?.where?.status === 'request_created') return open;
+      return confirmedBooking();
+    });
+    const res = await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START);
+    expect(res.requested).toBe(true);
+    expect(res.booking.id).toBe('req-existing');
+    expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
+  });
+
+  it('a different-kind open request is 409, not a silent swap', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, cancelMode: 'request' });
+    const open = {
+      ...confirmedBooking(),
+      id: 'req-existing',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      if (opts?.where?.relatedBookingId === 'bk-1' && opts?.where?.status === 'request_created') return open;
+      return confirmedBooking();
+    });
+    await expect(provider.cancelBooking(customerCtx, 'bk-1')).rejects.toMatchObject({
+      code: 'CHANGE_REQUEST_OPEN',
+      details: { kind: 'reschedule' },
+    });
+  });
+
+  it('acceptRequest on a reschedule request moves the original and does not confirm the request row', async () => {
+    const requestRow = {
+      ...confirmedBooking(),
+      id: 'req-1',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+      startUtc: new Date(NEW_START),
+      endUtc: new Date('2026-06-10T08:30:00Z'),
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      const id = opts?.where?.id;
+      if (id === 'req-1') return requestRow;
+      if (opts?.where?.status === 'confirmed' && opts?.where?.endUtc) return null;
+      return confirmedBooking();
+    });
+    const res = await provider.acceptRequest({ ...ctx, isAdmin: true }, 'req-1');
+    expect(res.success).toBe(true);
+    // The original was moved under the itinerary lock — not the request row flipped to confirmed.
+    const updates = managerQuery.mock.calls.filter((c) => String(c[0]).includes('UPDATE chatbot_bookings'));
+    expect(updates.some((c) => String(c[0]).includes("SET status='confirmed'"))).toBe(false);
+    expect(updates.some((c) => String(c[0]).includes('start_utc'))).toBe(true);
+  });
+
+  it('acceptRequest skips the mutator when the original is already at the requested time', async () => {
+    const requestRow = {
+      ...confirmedBooking(),
+      id: 'req-1',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      endUtc: new Date('2026-06-10T07:30:00Z'),
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      if (opts?.where?.id === 'req-1') return requestRow;
+      if (opts?.where?.status === 'confirmed' && opts?.where?.endUtc) return null;
+      return confirmedBooking();
+    });
+    await provider.acceptRequest({ ...ctx, isAdmin: true }, 'req-1');
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('start_utc'))).toBe(false);
   });
 });

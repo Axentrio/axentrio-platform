@@ -26,6 +26,8 @@ import {
 } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
+import { subjectToCustomerChangePolicy } from './customer-change-policy';
+import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
 import { buildIntakeAnswers } from './intake-answers';
@@ -268,12 +270,14 @@ function captureLeadFromBooking(
 
 export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {
   const ctx = await resolveContext(sessionId);
+  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
 export async function cancelBooking(caller: BookingCaller, sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
+  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
@@ -304,6 +308,9 @@ export interface AdminBookingRow {
   serviceId?: string | null;
   durationMin?: number | null;
   bookingMode?: string | null;
+  /** `new` (or absent) is a new-job Request. Change Requests name the original. */
+  requestKind?: string | null;
+  relatedBookingId?: string | null;
   /** P3: ordered, pre-labeled intake answers for display (null if none). */
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
   /** P5a: captured contact details (null when not collected). */
@@ -600,6 +607,8 @@ export async function adminListBookings(
       serviceId: b.eventTypeId ?? null,
       durationMin: b.bookedDurationMin ?? null,
       bookingMode: b.bookingMode ?? null,
+      requestKind: b.requestKind ?? 'new',
+      relatedBookingId: b.relatedBookingId ?? null,
       intakeAnswers: buildIntakeAnswers(
         b.eventTypeId ? questionsByService.get(b.eventTypeId) : null,
         b.intakeAnswers
@@ -713,6 +722,7 @@ export async function adminCancelBooking(caller: BookingCaller, tenantId: string
   await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
 
@@ -720,6 +730,7 @@ export async function adminRescheduleBooking(caller: BookingCaller, tenantId: st
   await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
@@ -780,16 +791,36 @@ export async function adminDeclineRequest(caller: BookingCaller, tenantId: strin
  */
 export async function getManageBooking(
   bookingId: string
-): Promise<{ booking: Booking; timezone: string; eventName: string } | null> {
+): Promise<{
+  booking: Booking;
+  timezone: string;
+  eventName: string;
+  rescheduleMode: CustomerChangeMode;
+  cancelMode: CustomerChangeMode;
+  rescheduleUntilMin: number | null;
+  cancelUntilMin: number | null;
+} | null> {
   const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
   if (!booking || booking.provider !== 'internal') return null;
   // Canonical, server-owned business timezone — the bot is authoritative on
   // read; the AvailabilityRule copy is a denormalization.
+  // Load THIS booking's Service, not any active one: two Services can disagree
+  // on reschedule/cancel policy, and the manage page must follow the one booked.
   const [timezone, eventType] = await Promise.all([
     getBotBusinessTimezone(booking.botId),
-    AppDataSource.getRepository(ServiceType).findOne({ where: { botId: booking.botId, isActive: true } }),
+    booking.eventTypeId
+      ? AppDataSource.getRepository(ServiceType).findOne({ where: { id: booking.eventTypeId } })
+      : AppDataSource.getRepository(ServiceType).findOne({ where: { botId: booking.botId, isActive: true } }),
   ]);
-  return { booking, timezone, eventName: eventType?.name ?? 'Appointment' };
+  return {
+    booking,
+    timezone,
+    eventName: eventType?.name ?? 'Appointment',
+    rescheduleMode: eventType?.rescheduleMode ?? 'auto',
+    cancelMode: eventType?.cancelMode ?? 'auto',
+    rescheduleUntilMin: eventType?.rescheduleUntilMin ?? null,
+    cancelUntilMin: eventType?.cancelUntilMin ?? null,
+  };
 }
 
 // Lifted to its own dependency-free module; re-exported so existing importers are unaffected.

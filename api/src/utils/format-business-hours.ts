@@ -4,6 +4,7 @@ import {
   pickOverrideForDate,
   type DateOverride,
 } from '../database/entities/AvailabilityRule';
+import { formatClockRange } from '../contracts/clock-format';
 
 /**
  * Renders `Bot.settings.businessHours` for the `{openingHours}` placeholder.
@@ -70,19 +71,19 @@ function localDateInZone(now: Date, timezone: string): string {
 
 const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
 
-function windowsNote(o: DateOverride): string {
+function windowsNote(o: DateOverride, timezone: string): string {
   return (Array.isArray(o.windows) ? o.windows : [])
     .filter((w) => w && typeof w.start === 'string' && typeof w.end === 'string' && w.start && w.end)
-    .map((w) => `${w.start}–${w.end}`)
+    .map((w) => formatClockRange(w.start, w.end, timezone))
     .join(', ');
 }
 
 /** Compact override notes for `{openingHours}`: closures AND one-off hours, cap 3. */
-function overrideNotes(overrides: DateOverride[] | undefined, today: string): string {
+function overrideNotes(overrides: DateOverride[] | undefined, today: string, timezone: string): string {
   return (Array.isArray(overrides) ? overrides : [])
     .filter((o) => {
       if (!o || typeof o.date !== 'string' || !today || !isRelevantOn(o, today)) return false;
-      return !!o.closed || !!windowsNote(o);
+      return !!o.closed || !!windowsNote(o, timezone);
     })
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
@@ -90,7 +91,7 @@ function overrideNotes(overrides: DateOverride[] | undefined, today: string): st
       const end = overrideSpanEnd(o);
       const span = end ? `${o.date} to ${end}` : o.date;
       if (o.closed) return `closed ${span}`;
-      return `${span} open ${windowsNote(o)}`;
+      return `${span} open ${windowsNote(o, timezone)}`;
     })
     .join(' · ');
 }
@@ -109,7 +110,7 @@ export function formatBusinessHoursForPlaceholder(
     if (!d || d.closed || typeof d.open !== 'string' || typeof d.close !== 'string' || !d.open || !d.close) {
       return `${label} closed`;
     }
-    return `${label} ${d.open}–${d.close}`;
+    return `${label} ${formatClockRange(d.open, d.close, timezone)}`;
   }).join(', ');
 
   // Overrides are part of the answer: otherwise `{openingHours}` quotes the weekly
@@ -117,7 +118,7 @@ export function formatBusinessHoursForPlaceholder(
   // the local calendar date in the business timezone — UTC dropped a still-current
   // holiday after midnight Z.
   const today = localDateInZone(now, timezone);
-  const notes = overrideNotes(bh.dateOverrides, today);
+  const notes = overrideNotes(bh.dateOverrides, today, timezone);
   if (!notes) return weekly;
   return weekly ? `${weekly} · ${notes}` : notes;
 }

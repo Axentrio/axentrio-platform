@@ -98,7 +98,7 @@ async function requeue(row: ClaimedRun, reason: string): Promise<void> {
             next_attempt_at = now() + ($2 || ' minutes')::interval,
             last_error = $3,
             updated_at = now()
-      WHERE id = $1`,
+      WHERE id = $1 AND state = 'claimed'`,
     [row.id, String(delayMin), reason.slice(0, 500)],
   );
 }
@@ -107,7 +107,7 @@ async function markSkipped(runId: string, state: 'skipped_disabled' | 'skipped_n
   await AppDataSource.query(
     `UPDATE chatbot_customer_memory_runs
         SET state = $2, claimed_until = NULL, updated_at = now()
-      WHERE id = $1`,
+      WHERE id = $1 AND state = 'claimed'`,
     [runId, state],
   );
   logger.info('[customer-memory] skipped', {
@@ -140,7 +140,7 @@ async function persistExtraction(input: {
   revisionBefore: number;
   memoryId: string;
   result: Awaited<ReturnType<typeof extractMemoryFacts>>;
-}): Promise<'committed' | 'moved'> {
+}): Promise<'committed' | 'moved' | 'skipped'> {
   const { row, session, subjectKey, revisionBefore, memoryId, result } = input;
   const nextState = result.facts.length === 0 ? 'abstained' : 'extracted';
   try {
@@ -152,6 +152,7 @@ async function persistExtraction(input: {
                   model = $6, prompt_version = $7, extraction_version = $8,
                   claimed_until = NULL, next_attempt_at = NULL, last_error = NULL, updated_at = now()
             WHERE r.id = $1
+              AND r.state = 'claimed'
               AND (SELECT s.transcript_revision FROM chat_sessions s WHERE s.id = r.session_id) = $2
             RETURNING r.id`,
           [
@@ -197,6 +198,21 @@ async function persistExtraction(input: {
     });
   } catch (error) {
     if (error instanceof TranscriptMovedError) {
+      const current = returningRows<{ state: string }>(
+        await AppDataSource.query(
+          `SELECT state FROM chatbot_customer_memory_runs WHERE id = $1`,
+          [row.id],
+        ),
+      );
+      // A Superadmin reset (or another skip) already left the run. Do not
+      // requeue — that would revive facts the reset just cleared.
+      if (current[0]?.state !== 'claimed') {
+        logger.info('[customer-memory] extraction dropped; run is no longer claimed', {
+          runId: row.id,
+          state: current[0]?.state ?? 'missing',
+        });
+        return 'skipped';
+      }
       logger.info('[customer-memory] transcript moved during extraction — requeued', {
         runId: row.id,
         revisionBefore,
@@ -224,6 +240,16 @@ export async function extractOne(row: ClaimedRun): Promise<{ calledModel: boolea
       span?.setAttribute('abstained', abstained);
       return { calledModel };
     };
+
+    const current = returningRows<{ state: string }>(
+      await AppDataSource.query(
+        `SELECT state FROM chatbot_customer_memory_runs WHERE id = $1`,
+        [row.id],
+      ),
+    );
+    if (current[0]?.state !== 'claimed') {
+      return finish(false, 0, true);
+    }
 
     const session = await loadSessionRow(row.session_id);
     if (!session) {
@@ -258,7 +284,7 @@ export async function extractOne(row: ClaimedRun): Promise<{ calledModel: boolea
       await AppDataSource.query(
         `UPDATE chatbot_customer_memory_runs
             SET state = 'abstained', claimed_until = NULL, updated_at = now()
-          WHERE id = $1`,
+          WHERE id = $1 AND state = 'claimed'`,
         [row.id],
       );
       return finish(false, 0, true);
@@ -285,7 +311,7 @@ export async function extractOne(row: ClaimedRun): Promise<{ calledModel: boolea
       memoryId,
       result,
     });
-    if (outcome === 'moved') return finish(true, 0, true);
+    if (outcome !== 'committed') return finish(true, 0, true);
     return finish(calledModel, result.facts.length, result.abstained);
   });
 }
@@ -305,7 +331,7 @@ export async function runCustomerMemorySweep(): Promise<{ discovered: number; pr
         await AppDataSource.query(
           `UPDATE chatbot_customer_memory_runs
               SET state = 'pending', claimed_until = NULL, updated_at = now()
-            WHERE id = $1`,
+            WHERE id = $1 AND state = 'claimed'`,
           [row.id],
         );
         continue;
@@ -329,4 +355,3 @@ export async function runCustomerMemorySweep(): Promise<{ discovered: number; pr
     running = false;
   }
 }
-

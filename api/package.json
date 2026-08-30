@@ -19,7 +19,7 @@
     "check:envelope": "bash scripts/check-envelope-conventions.sh",
     "eval:leads": "ts-node --transpile-only src/leads/enrichment/eval/run-eval.ts",
     "eval:proactive": "ts-node --transpile-only src/leads/proactive/eval/run-eval.ts",
-    "lint": "oxlint src"
+    "lint": "oxlint src && node ../scripts/lint-budgets.mjs"
   },
   "keywords": [
     "chatbot",

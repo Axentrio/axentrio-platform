@@ -49,6 +49,11 @@ import {
 import { ApiError, NotFoundError, BadRequestError } from '../middleware/error-handler';
 import { encrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
+import {
+  clearConversationResetState,
+  clearIdentityScratch,
+  ResetScratchClearError,
+} from './conversation-reset-state';
 
 // ── Typed errors ─────────────────────────────────────────────────────────────
 // All extend ApiError so the REST layer's asyncHandler/errorHandler produce the
@@ -174,6 +179,15 @@ export interface CloseResult {
   replayed?: boolean;
 }
 
+export interface ResetResult {
+  outcome: 'reset';
+  conversation: ConversationSummary;
+  replayed?: boolean;
+  sessionIds?: string[];
+  /** True only after Redis DEL of session-keyed tool state succeeded. */
+  scratchCleared?: boolean;
+}
+
 export interface TransferResult {
   outcome: 'transferred';
   conversation: ConversationSummary;
@@ -187,6 +201,7 @@ type CommandName =
   | 'release'
   | 'cancel_handoff'
   | 'close'
+  | 'reset'
   | 'transfer';
 
 interface CommandOpts {
@@ -1047,6 +1062,66 @@ export const conversationCommands = {
       logger.info(`Conversation ${session.id} closed`, { actor: actor.kind });
       return { outcome: 'closed' as const, conversation: summarize(session, null) };
     });
+  },
+
+  /**
+   * Superadmin test reset: close the session so the next inbound starts a new
+   * chat, then wipe identity-keyed conversation state (memory, draft booking
+   * scratch, intake, address, lead extraction, Redis tool/session scratch).
+   * Close alone leaves remembered preferred times in the next prompt.
+   * Confirmed calendar bookings are not cancelled.
+   *
+   * Redis scratch is cleared AFTER the DB commit. Missing Redis or a DEL that
+   * still fails after retries throws 503 `reset_scratch_incomplete` so Reset is
+   * retryable and does not report success while booking:confirm / offered /
+   * gr:loop remain.
+   */
+  async resetConversation(
+    sessionId: string,
+    actor: ConversationActor,
+    idempotencyKey?: string,
+    opts: CommandOpts & { reason?: string } = {},
+  ): Promise<ResetResult> {
+    const result = await withConversation(sessionId, 'reset', idempotencyKey, opts, async (manager, session) => {
+      if (actor.kind === 'agent') await requireTenantAgent(manager, session.tenantId, actor.agentId, opts);
+
+      // closeConversation loads its own locked entity; do not summarize the
+      // outer session object, which can still look bot-owned after the close.
+      let conversation = summarize(session, null);
+      if (session.ownership !== 'closed') {
+        const closed = await conversationCommands.closeConversation(sessionId, actor, undefined, {
+          ...opts,
+          manager,
+          reason: opts.reason || 'Super-admin testing reset',
+        });
+        conversation = closed.conversation;
+      }
+
+      const cleared = await clearConversationResetState(manager, session);
+      logger.info(`Conversation ${session.id} reset`, {
+        actor: actor.kind,
+        factsSuperseded: cleared.factsSuperseded,
+        runsSkipped: cleared.runsSkipped,
+      });
+      return {
+        outcome: 'reset' as const,
+        conversation,
+        sessionIds: cleared.sessionIds,
+      };
+    });
+    try {
+      const scratchCleared = await clearIdentityScratch(result.sessionIds ?? [sessionId]);
+      return { ...result, scratchCleared };
+    } catch (error) {
+      if (error instanceof ResetScratchClearError) {
+        throw new ResetScratchClearError(
+          result.sessionIds ?? [sessionId],
+          error.details?.cause,
+          result.conversation,
+        );
+      }
+      throw error;
+    }
   },
 
   /**

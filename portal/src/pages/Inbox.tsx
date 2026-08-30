@@ -408,14 +408,14 @@ const SelectedChatActions: React.FC<
   isHumanOwned,
 }) => {
   const { t } = useTranslation();
-  // Super-admin testing reset: close a conversation so the next inbound
-  // message starts a NEW session. Scoped to the EXTERNAL channels (WhatsApp,
-  // Messenger, …) per the approved plan: the widget already has its own
-  // New-conversation button, and widget.js has no closed-session recovery, so
-  // a server-side close there would strand an open visitor until reload.
+  // Super-admin testing reset: close this conversation and wipe remembered
+  // facts, draft booking state, and other test session state. Confirmed
+  // calendar bookings stay.
+  // Scoped to EXTERNAL channels (WhatsApp, Messenger, …): the widget already
+  // has its own New-conversation button, and widget.js has no closed-session
+  // recovery, so a server-side close there would strand an open visitor.
   const canReset =
     isSuperAdmin &&
-    chat.status !== 'closed' &&
     !isHumanOwned &&
     !!chat.channel &&
     chat.channel !== 'widget';
@@ -924,7 +924,10 @@ const Inbox: React.FC = () => {
     }
   };
 
-  const closeSelectedChat = async (toasts: { success: string; failed: string }) => {
+  const closeSelectedChat = async (
+    toasts: { success: string; failed: string },
+    command: 'close' | 'reset' = 'close',
+  ) => {
     if (!selectedChat) return;
     const prev = selectedChat;
     // Optimistic: deselect immediately
@@ -934,14 +937,22 @@ const Inbox: React.FC = () => {
     setConfirmReset(false);
     try {
       const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
-        `/chats/${prev.id}/close`,
+        `/chats/${prev.id}/${command}`,
         { idempotencyKey: newUuid() },
       );
       applyCommandConversation(queryClient, res.conversation);
       toast.success(t(toasts.success));
     } catch (error) {
-      console.error('Failed to close chat:', error);
+      console.error('Failed to close or reset chat:', error);
       toast.error(t(toasts.failed));
+      // Redis 503: the session is already closed. Reconcile cache + pane so we
+      // do not restore an alive chat. Reset stays available on closed chats.
+      if (command === 'reset' && isResetScratchIncomplete(error)) {
+        const summary = conversationFromResetScratchError(error) ?? closedSummaryFromChat(prev);
+        applyCommandConversation(queryClient, summary);
+        setSelectedChat((current) => mergeDefined(current ?? prev, commandSummaryToChatPatch(summary)));
+        return;
+      }
       setSelectedChat((current) => current === null ? prev : current);
     } finally {
       setIsClosing(false);
@@ -952,7 +963,10 @@ const Inbox: React.FC = () => {
     closeSelectedChat({ success: 'inbox.toasts.closeSuccess', failed: 'inbox.toasts.closeFailed' });
 
   const handleResetChat = () =>
-    closeSelectedChat({ success: 'inbox.toasts.resetSuccess', failed: 'inbox.toasts.resetFailed' });
+    closeSelectedChat(
+      { success: 'inbox.toasts.resetSuccess', failed: 'inbox.toasts.resetFailed' },
+      'reset',
+    );
 
   const handleReturnToBot = async () => {
     if (!selectedChat) return;
@@ -1109,5 +1123,34 @@ const Inbox: React.FC = () => {
     </div>
   );
 };
+
+function isResetScratchIncomplete(error: unknown): boolean {
+  const response = (error as {
+    response?: { status?: number; data?: { error?: { code?: string } } };
+  })?.response;
+  return response?.status === 503 && response.data?.error?.code === 'reset_scratch_incomplete';
+}
+
+function conversationFromResetScratchError(error: unknown): CommandConversationSummary | undefined {
+  const conversation = (error as {
+    response?: { data?: { error?: { details?: { conversation?: CommandConversationSummary } } } };
+  })?.response?.data?.error?.details?.conversation;
+  return conversation?.sessionId ? conversation : undefined;
+}
+
+function closedSummaryFromChat(chat: Chat): CommandConversationSummary {
+  return {
+    sessionId: chat.id,
+    tenantId: chat.tenantId,
+    status: 'closed',
+    ownership: 'closed',
+    ownershipVersion: (chat.ownershipVersion ?? 0) + 1,
+    assignedAgentId: null,
+    humanControlMode: null,
+    humanControlDurationHours: null,
+    humanControlUntil: null,
+    openHandoffId: null,
+  };
+}
 
 export default Inbox;

@@ -8,9 +8,15 @@
     "**/__tests__/**"
   ],
   "categories": {
-    "correctness": "off"
+    "correctness": "warn"
   },
   "rules": {
-    "complexity": ["warn", { "max": 20 }]
+    "complexity": ["error", { "max": 20 }],
+    "max-lines": ["warn", { "max": 800, "skipBlankLines": true, "skipComments": true }],
+    "max-lines-per-function": ["warn", { "max": 80, "skipBlankLines": true, "skipComments": true }],
+    "max-depth": ["warn", { "max": 4 }],
+    "max-params": ["warn", { "max": 5 }],
+    "max-nested-callbacks": ["warn", { "max": 4 }],
+    "max-statements": ["warn", { "max": 25 }]
   }
 }

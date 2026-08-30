@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { TimeSelect } from '@/components/ui/time-select';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -217,20 +218,20 @@ export function ChatbotStep({ status, submit }: StepProps & { status: SetupStatu
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Input
+          <TimeSelect
             aria-label={t('setup.steps.chatbot.opensAt')}
-            type="time"
             value={opensAt}
-            onChange={(e) => setOpensAt(e.target.value)}
-            className="w-32"
+            stepMinutes={1}
+            allowEndOfDay={false}
+            onChange={setOpensAt}
           />
           <span className="text-sm text-text-muted">{t('setup.steps.chatbot.to')}</span>
-          <Input
+          <TimeSelect
             aria-label={t('setup.steps.chatbot.closesAt')}
-            type="time"
             value={closesAt}
-            onChange={(e) => setClosesAt(e.target.value)}
-            className="w-32"
+            stepMinutes={1}
+            allowEndOfDay
+            onChange={setClosesAt}
           />
         </div>
         <p className="text-xs text-text-muted">{t('setup.steps.chatbot.hoursHint')}</p>

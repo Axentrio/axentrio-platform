@@ -26,6 +26,12 @@ export interface DiscountConfig {
 /** Round to 2 decimals, avoiding binary-float drift (e.g. 79.995 → 80.00, not 79.99). */
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
+/** Whole euros stay unpadded; cents always show 2 digits (`€80`, `€12.50`). Discounted €0 stays `€0`. */
+export function formatEuro(n: number): string {
+  const rounded = round2(n);
+  return Number.isInteger(rounded) ? `€${rounded}` : `€${rounded.toFixed(2)}`;
+}
+
 /** Whether a value is a usable discount amount (a positive, finite number). */
 function hasUsableValue(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -118,7 +124,7 @@ export function formatServicePrice(
       ? applyDiscount(amount, s.discountType, s.discountValue)
       : amount;
   // Truthy guard keeps a 0/undefined BASE silent; the discounted RESULT is shown even at €0.
-  const money = (baseAmount: number | null | undefined): string => (baseAmount ? `€${finalOf(baseAmount)}` : '');
+  const money = (baseAmount: number | null | undefined): string => (baseAmount ? formatEuro(finalOf(baseAmount)) : '');
   const base = ((): string => {
     switch (s.priceDisplayType) {
       case 'fixed':
@@ -128,7 +134,7 @@ export function formatServicePrice(
         return m ? `from ${m}` : '';
       }
       case 'range':
-        return s.minPrice && s.maxPrice ? `€${finalOf(s.minPrice)}–€${finalOf(s.maxPrice)}` : '';
+        return s.minPrice && s.maxPrice ? `${formatEuro(finalOf(s.minPrice))}–${formatEuro(finalOf(s.maxPrice))}` : '';
       case 'on_request':
         return 'price on request';
       case 'free':

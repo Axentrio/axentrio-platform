@@ -25,6 +25,33 @@ import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
 const { auth } = createAuthMocks();
 
+const redisClient = vi.hoisted(() => ({
+  live: true,
+}));
+
+vi.mock('../../config/redis', () => {
+  const client = {
+    del: async () => 0,
+    get: async () => null,
+    set: async () => 'OK',
+    ping: async () => 'PONG',
+    on: () => undefined,
+    quit: async () => undefined,
+  };
+  return {
+    getRedisClient: () => (redisClient.live ? client : null),
+    getPubClient: () => (redisClient.live ? client : null),
+    getSubClient: () => (redisClient.live ? client : null),
+    initializeRedis: async () => undefined,
+    isRedisAvailable: () => redisClient.live,
+    getRedisAdapterOptions: () => ({
+      pubClient: redisClient.live ? client : null,
+      subClient: redisClient.live ? client : null,
+    }),
+    closeRedis: async () => undefined,
+  };
+});
+
 vi.mock('@clerk/express', () => ({
   clerkMiddleware: () => (_req: any, _res: any, next: any) => next(),
 }));
@@ -83,6 +110,7 @@ import type { AgentService } from '../../agent/agent.service';
 import { ingestWidgetCustomerMessage } from '../../services/widget-ingest';
 import { releaseAgentSessions } from '../../utils/releaseAgentSessions';
 import { CreateConversationCommands1791400000000 } from '../../database/migrations/1791400000000-CreateConversationCommands';
+import { emitToSession } from '../../websocket/socket.handler';
 
 const sessionRepo = AppDataSource.getRepository(ChatSession);
 const messageRepo = AppDataSource.getRepository(Message);
@@ -149,6 +177,7 @@ async function countBotTextMessages(sessionId: string): Promise<number> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  redisClient.live = true;
   mockRouteOutboundMessage.mockReset().mockResolvedValue({ success: true });
 });
 
@@ -610,6 +639,70 @@ describe('REST command routes', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+
+describe('REST super-admin reset', () => {
+  it('POST /reset is forbidden for a tenant admin', async () => {
+    const tenant = await makeTenantWithAi();
+    const { agent } = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'whatsapp', source: 'whatsapp' });
+    configureMockAuth(auth, { userId: agent.id, tenantId: tenant.id, role: 'admin' });
+
+    const denied = await request(app).post(`/api/v1/chats/${session.id}/reset`).send({});
+    expect(denied.status).toBe(403);
+    expect(await stateOf(session.id)).toMatchObject({ ownership: 'bot_owned', status: 'bot' });
+  });
+
+  it('POST /reset closes the session for a super admin', async () => {
+    const tenant = await makeTenantWithAi();
+    const user = await createTestUser(tenant.id, { role: 'super_admin' });
+    const agent = await createTestAgent(tenant.id, user.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'whatsapp', source: 'whatsapp' });
+    configureMockAuth(auth, { userId: agent.id, tenantId: tenant.id, role: 'super_admin' });
+
+    const res = await request(app)
+      .post(`/api/v1/chats/${session.id}/reset`)
+      .send({ idempotencyKey: 'reset-1' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.outcome).toBe('reset');
+    expect(res.body.data.scratchCleared).toBe(true);
+    expect(await stateOf(session.id)).toMatchObject({ ownership: 'closed', status: 'closed' });
+  });
+
+  it('POST /reset returns 503 reset_scratch_incomplete when Redis client is missing', async () => {
+    const tenant = await makeTenantWithAi();
+    const user = await createTestUser(tenant.id, { role: 'super_admin' });
+    const agent = await createTestAgent(tenant.id, user.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'whatsapp', source: 'whatsapp' });
+    configureMockAuth(auth, { userId: agent.id, tenantId: tenant.id, role: 'super_admin' });
+
+    redisClient.live = false;
+    const res = await request(app)
+      .post(`/api/v1/chats/${session.id}/reset`)
+      .send({ idempotencyKey: 'reset-null-redis' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('reset_scratch_incomplete');
+    expect(res.body.error.details.conversation).toMatchObject({
+      sessionId: session.id,
+      ownership: 'closed',
+      status: 'closed',
+    });
+    expect(await stateOf(session.id)).toMatchObject({ ownership: 'closed', status: 'closed' });
+    expect(emitToSession).toHaveBeenCalledWith(
+      tenant.id,
+      session.id,
+      'session:closed',
+      expect.objectContaining({ sessionId: session.id, closedBy: 'agent' }),
+    );
+    expect(emitToSession).toHaveBeenCalledWith(
+      tenant.id,
+      session.id,
+      'conversation:upsert',
+      expect.objectContaining({
+        conversation: expect.objectContaining({ id: session.id, status: 'closed' }),
+      }),
+    );
+  });
+});
 
 describe('AI finalization fence — ownership_version', () => {
   it('coalescer: a claim→release ABA mid-run (status back on bot) still voids the in-flight reply', async () => {

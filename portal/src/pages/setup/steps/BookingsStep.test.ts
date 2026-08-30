@@ -12,7 +12,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 const tenantQuery = vi.hoisted(() => ({
   data: undefined as unknown,
@@ -133,10 +133,11 @@ describe('BookingsStep — first-pass hours', () => {
     tenantQuery.isFetching = true;
     const submit = { mutate: vi.fn(), isPending: false } as unknown as StepProps['submit'];
     const view = render(React.createElement(BookingsStep, { submit }));
-    const timeInputs = view.container.querySelectorAll<HTMLInputElement>('input[type="time"]');
 
-    expect(timeInputs[0]).toHaveValue('09:00');
-    expect(timeInputs[1]).toHaveValue('17:00');
+    expect(screen.getByRole('combobox', { name: 'Opens at hours' })).toHaveTextContent('09');
+    expect(screen.getByRole('combobox', { name: 'Opens at minutes' })).toHaveTextContent('00');
+    expect(screen.getByRole('combobox', { name: 'Closes at hours' })).toHaveTextContent('17');
+    expect(screen.getByRole('combobox', { name: 'Closes at minutes' })).toHaveTextContent('00');
 
     tenantQuery.data = {
       settings: {
@@ -150,8 +151,10 @@ describe('BookingsStep — first-pass hours', () => {
     view.rerender(React.createElement(BookingsStep, { submit }));
 
     await waitFor(() => {
-      expect(timeInputs[0]).toHaveValue('08:30');
-      expect(timeInputs[1]).toHaveValue('18:00');
+      expect(screen.getByRole('combobox', { name: 'Opens at hours' })).toHaveTextContent('08');
+      expect(screen.getByRole('combobox', { name: 'Opens at minutes' })).toHaveTextContent('30');
+      expect(screen.getByRole('combobox', { name: 'Closes at hours' })).toHaveTextContent('18');
+      expect(screen.getByRole('combobox', { name: 'Closes at minutes' })).toHaveTextContent('00');
     });
   });
 });

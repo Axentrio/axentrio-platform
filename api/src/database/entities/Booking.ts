@@ -41,11 +41,23 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'request_cre
 /** How the booking was handled: auto-confirmed vs captured as a request/lead. */
 export type BookingMode = 'auto' | 'request';
 
+/** Why this row is a Request: a new job, or a customer asking to move/cancel another. */
+export type BookingRequestKind = 'new' | 'reschedule' | 'cancel';
+
+/** Terminal audit on a closed change Request. Not a claim flag. */
+export type BookingRequestResolution = 'accepted' | 'declined';
+
 @Index(['tenantId', 'botId', 'status'])
 // Declared here AND in migration 1787800000000 so the synchronize-built test schema and
 // the migration-built prod schema agree — an index that exists only in prod means its
 // query plan is never exercised by any test.
 @Index('ix_bookings_lead', ['leadId'], { where: '"lead_id" IS NOT NULL' })
+// Declared here AND in migration 1793900000000 so synchronize() tests see the same
+// uniqueness a change-request insert races on in production.
+@Index('uq_open_change_request', ['relatedBookingId'], {
+  unique: true,
+  where: `"status" = 'request_created' AND "request_kind" IN ('reschedule', 'cancel') AND "related_booking_id" IS NOT NULL`,
+})
 // Declared here AND in migration 1791000000000, for the same reason as the index above: a
 // constraint that exists only in prod is one no test can ever violate, and this file's whole
 // job is to keep the two schemas honest with each other.
@@ -57,6 +69,10 @@ export type BookingMode = 'auto' | 'request';
 // retention sweep re-resolves through, which puts a falsy-but-truthy value straight onto the
 // path that keeps a far-future appointment locatable.
 @Check('chk_chatbot_bookings_place_id_not_blank', `"customer_place_id" IS NULL OR btrim("customer_place_id") <> ''`)
+@Check(
+  'chk_chatbot_bookings_change_request',
+  `("request_kind" = 'new' AND "related_booking_id" IS NULL) OR ("request_kind" IN ('reschedule', 'cancel') AND "related_booking_id" IS NOT NULL)`
+)
 @Entity('chatbot_bookings')
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
@@ -79,6 +95,21 @@ export class Booking {
   /** auto = confirmed appointment; request = captured as a request/lead. */
   @Column({ type: 'varchar', length: 16, name: 'booking_mode', nullable: true })
   bookingMode?: BookingMode | null;
+
+  /**
+   * The original Booking this change Request is about. Null on a new-job Request.
+   * ON DELETE CASCADE is defined in the migration; cancels are soft so this stays.
+   */
+  @Column({ type: 'uuid', name: 'related_booking_id', nullable: true })
+  relatedBookingId?: string | null;
+
+  /** Default `new` is every pre-existing row and every new-job Request. */
+  @Column({ type: 'varchar', length: 16, name: 'request_kind', default: 'new' })
+  requestKind!: BookingRequestKind;
+
+  /** Set only when a change Request is closed. Null while it is open. */
+  @Column({ type: 'varchar', length: 16, name: 'request_resolution', nullable: true })
+  requestResolution?: BookingRequestResolution | null;
 
   /**
    * The Lead this booking belongs to. Set by the booking hook so the Leads page can

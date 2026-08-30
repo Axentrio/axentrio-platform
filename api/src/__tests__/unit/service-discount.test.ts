@@ -131,6 +131,12 @@ describe('formatServicePrice', () => {
     expect(formatServicePrice({ priceDisplayType: 'on_request' })).toBe('price on request');
   });
 
+  it('shows two decimal places when the amount is not a whole euro', () => {
+    expect(formatServicePrice({ priceDisplayType: 'fixed', fixedPrice: 49.99 })).toBe('€49.99');
+    expect(formatServicePrice({ priceDisplayType: 'from', fixedPrice: 12.5 })).toBe('from €12.50');
+    expect(formatServicePrice({ priceDisplayType: 'range', minPrice: 10.5, maxPrice: 20.25 })).toBe('€10.50–€20.25');
+  });
+
   it('quotes the discounted final amount when the window is open', () => {
     expect(formatServicePrice(
       {

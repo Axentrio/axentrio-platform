@@ -29,6 +29,7 @@ import { PROACTIVE_ASK_RULE } from '../leads/proactive/should-ask';
 import type { ResolvedSpecialty } from './specialty-catalog';
 import { buildVariableMap, type PromptExtras } from './placeholder-registry';
 import { languagePrimacyDirective, languageRecencyDirective } from '../config/bot-language';
+import { usesHour12 } from '../contracts/clock-format';
 
 // Re-exported for callers that type their extras against the composer.
 export type { PromptExtras };
@@ -826,9 +827,16 @@ function pushFormattingRules(ctx: AgentCtx, flags: AgentFlags, sections: string[
     'NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.',
   ];
   if (flags.canBook) {
+    const hour12 = usesHour12(zone);
+    const confirmExample = hour12
+      ? 'Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?'
+      : 'Just to confirm: Thursday April 9 at 10:00 for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?';
+    const clockRule = hour12
+      ? 'Name times with AM or PM (2:30 PM), matching the slot buttons.'
+      : 'Name times in 24-hour clock (14:30), never AM or PM, matching the slot buttons.';
     fmtRules.push(
       'When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.',
-      'When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"',
+      `When confirming a booking, use a short paragraph. Example: "${confirmExample}" ${clockRule}`,
       'Never list every available slot in text; the buttons handle that.'
     );
   }

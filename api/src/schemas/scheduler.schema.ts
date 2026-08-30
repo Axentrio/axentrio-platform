@@ -174,6 +174,22 @@ export const reorderServicesSchema = z.object({
 /** P3: optional per-service intake questions (max 8). `[]` clears; omitted leaves unchanged. */
 export const intakeQuestionsSchema = z.array(intakeQuestionSchema).max(8);
 
+/** Same formula as `round2` in booking/pricing/service-discount.ts — copied so this schema does not import pricing. */
+const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+
+/**
+ * Service prices store as `numeric(10,2)`. Extra decimals round to cents rather than 400,
+ * so 12.345 becomes 12.35 and a float like 49.9900000002 still saves as 49.99.
+ *
+ * Field-level transform so `serviceInputSchema.partial()` / `.omit()` stay object schemas
+ * (a transform on the whole object would become ZodEffects and drop those methods).
+ */
+const moneyAmount = z
+  .number()
+  .nonnegative()
+  .max(1_000_000)
+  .transform(round2);
+
 /** Full service (ServiceType) input for the multi-service CRUD (K3). */
 export const serviceInputSchema = z.object({
   name: z.string().min(1).max(255),
@@ -188,6 +204,11 @@ export const serviceInputSchema = z.object({
   category: z.string().max(255).nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   bookingMode: z.enum(['auto', 'request']).default('auto'),
+  rescheduleMode: z.enum(['auto', 'request', 'not_allowed']).default('auto'),
+  cancelMode: z.enum(['auto', 'request', 'not_allowed']).default('auto'),
+  // Null = no extra cutoff. 0 = until the start instant (a real cutoff, not absent).
+  rescheduleUntilMin: z.number().int().min(0).max(43200).nullable().optional(),
+  cancelUntilMin: z.number().int().min(0).max(43200).nullable().optional(),
   onlineBookable: z.boolean().default(true),
   durationMode: z.enum(['fixed', 'range', 'ai']).default('fixed'),
   durationMin: z.number().int().min(5).max(1440),
@@ -204,13 +225,13 @@ export const serviceInputSchema = z.object({
   maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
   maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
   priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request', 'free']).default('none'),
-  fixedPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
-  minPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
-  maxPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  fixedPrice: moneyAmount.nullable().optional(),
+  minPrice: moneyAmount.nullable().optional(),
+  maxPrice: moneyAmount.nullable().optional(),
   priceNote: z.string().max(255).nullable().optional(),
   discountEnabled: z.boolean().default(false),
   discountType: z.enum(['percentage', 'fixed']).nullable().optional(),
-  discountValue: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  discountValue: moneyAmount.nullable().optional(),
   discountStartOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected yyyy-MM-dd').nullable().optional(),
   discountEndOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected yyyy-MM-dd').nullable().optional(),
   mentionDiscountInChat: z.boolean().default(false),

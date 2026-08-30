@@ -17,6 +17,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { TimeSelect } from '@/components/ui/time-select';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -182,6 +183,7 @@ function OpeningHoursField({
   openDays,
   opensAt,
   closesAt,
+  timezone,
   onToggleDay,
   onOpensAt,
   onClosesAt,
@@ -189,6 +191,7 @@ function OpeningHoursField({
   openDays: Weekday[];
   opensAt: string;
   closesAt: string;
+  timezone?: string | null;
   onToggleDay: (day: Weekday) => void;
   onOpensAt: (value: string) => void;
   onClosesAt: (value: string) => void;
@@ -216,20 +219,22 @@ function OpeningHoursField({
         ))}
       </div>
       <div className="flex items-center gap-2">
-        <Input
+        <TimeSelect
           aria-label={t('setup.steps.chatbot.opensAt')}
-          type="time"
           value={opensAt}
-          onChange={(e) => onOpensAt(e.target.value)}
-          className="w-32"
+          timezone={timezone}
+          stepMinutes={1}
+          allowEndOfDay={false}
+          onChange={onOpensAt}
         />
         <span className="text-sm text-text-muted">{t('setup.steps.chatbot.to')}</span>
-        <Input
+        <TimeSelect
           aria-label={t('setup.steps.chatbot.closesAt')}
-          type="time"
           value={closesAt}
-          onChange={(e) => onClosesAt(e.target.value)}
-          className="w-32"
+          timezone={timezone}
+          stepMinutes={1}
+          allowEndOfDay
+          onChange={onClosesAt}
         />
       </div>
     </div>
@@ -578,6 +583,7 @@ export function BookingsStep({ submit }: StepProps) {
         openDays={openDays}
         opensAt={opensAt}
         closesAt={closesAt}
+        timezone={scheduler?.availability?.timezone}
         onToggleDay={toggleDay}
         onOpensAt={setOpensAt}
         onClosesAt={setClosesAt}

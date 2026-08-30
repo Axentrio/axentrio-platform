@@ -9,6 +9,9 @@ import { verifyBookingToken, signBookingToken } from './booking-token';
 import { getManageBooking, adminCancelBooking, adminRescheduleBooking, adminAvailability } from '../booking/booking.service';
 import { BookingError } from '../booking/booking-providers/types';
 import { logger } from '../utils/logger';
+import { luxonEmailWhenFormat, luxonTimeFormat } from '../contracts/clock-format';
+import { resolveCustomerChange } from '../booking/customer-change-policy';
+import type { CustomerChangeMode } from '../database/entities/ServiceType';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -66,6 +69,8 @@ export const CUSTOMER_MESSAGE: Record<string, string> = {
   SERVICE_REQUIRED: 'We couldn’t load the available times for this appointment. Please contact the business directly.',
   SLOT_UNAVAILABLE: 'That time has just been taken. Please pick another.',
   BOOKING_NOT_FOUND: 'This appointment could no longer be found.',
+  CHANGE_NOT_ALLOWED: 'This appointment cannot be changed online. Please contact the business directly.',
+  CHANGE_REQUEST_OPEN: 'You already have a pending change request for this appointment. The business will get back to you.',
 };
 
 /**
@@ -83,7 +88,15 @@ export function customerMessage(err: BookingError): string {
 }
 
 function whenLabel(startIso: string, tz: string): string {
-  return `${DateTime.fromISO(startIso).setZone(tz).toFormat('cccc d LLLL yyyy, HH:mm')} (${tz})`;
+  return `${DateTime.fromISO(startIso).setZone(tz).toFormat(luxonEmailWhenFormat(tz))} (${tz})`;
+}
+
+function effectiveChange(
+  mode: CustomerChangeMode,
+  startUtc: Date,
+  untilMin: number | null,
+): CustomerChangeMode {
+  return resolveCustomerChange(mode, startUtc, untilMin);
 }
 
 /**
@@ -129,19 +142,36 @@ export async function getManagePage(req: Request, res: Response): Promise<void> 
       );
     }
 
+    const reschedule = effectiveChange(view.rescheduleMode, booking.startUtc, view.rescheduleUntilMin);
+    const cancel = effectiveChange(view.cancelMode, booking.startUtc, view.cancelUntilMin);
+    const rescheduleBtn =
+      reschedule === 'not_allowed'
+        ? ''
+        : `<a class="btn btn-primary" href="/api/v1/bookings/manage/reschedule?token=${encodeURIComponent(token)}">${
+            reschedule === 'request' ? 'Request reschedule' : 'Reschedule'
+          }</a>`;
+    const cancelBtn =
+      cancel === 'not_allowed'
+        ? ''
+        : `<form method="post" action="/api/v1/bookings/manage/cancel">
+             <input type="hidden" name="token" value="${esc(token)}"/>
+             <button class="btn btn-danger" type="submit">${
+               cancel === 'request' ? 'Request cancellation' : 'Cancel appointment'
+             }</button>
+           </form>`;
+    const noActions =
+      !rescheduleBtn && !cancelBtn
+        ? '<p>This appointment cannot be changed online. Please contact the business directly.</p>'
+        : '';
+
     res.status(200).send(
       page(
         'Manage appointment',
         `<h1>${esc(eventName)}</h1>
          <p>Manage your upcoming appointment.</p>
          <div class="when">${esc(whenLabel(booking.startUtc.toISOString(), timezone))}</div>
-         <div class="row">
-           <a class="btn btn-primary" href="/api/v1/bookings/manage/reschedule?token=${encodeURIComponent(token)}">Reschedule</a>
-           <form method="post" action="/api/v1/bookings/manage/cancel">
-             <input type="hidden" name="token" value="${esc(token)}"/>
-             <button class="btn btn-danger" type="submit">Cancel appointment</button>
-           </form>
-         </div>`
+         <div class="row">${rescheduleBtn}${cancelBtn}</div>
+         ${noActions}`
       )
     );
   } catch (err) {
@@ -163,7 +193,15 @@ export async function postCancel(req: Request, res: Response): Promise<void> {
     if (!view) return errorPage(res, 'We couldn’t find this appointment.');
     // D8: token-verified self-service management of an existing appointment —
     // exempt from the bookings feature gate (the verified id IS the proof).
-    await adminCancelBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId);
+    const result = await adminCancelBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId);
+    if (result.requested) {
+      return void res.status(200).send(
+        page(
+          'Cancellation requested',
+          `<h1>${esc(view.eventName)}</h1><p>We've sent a cancellation request to the business. Your appointment is <strong>not cancelled yet</strong> — they will confirm.</p>`
+        )
+      );
+    }
     res.status(200).send(
       page(
         'Appointment cancelled',
@@ -185,7 +223,11 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
     if (!view) return errorPage(res, 'We couldn’t find this appointment.');
     const { booking, timezone, eventName } = view;
     if (booking.status !== 'confirmed') return errorPage(res, 'This appointment can no longer be rescheduled.');
+    if (effectiveChange(view.rescheduleMode, booking.startUtc, view.rescheduleUntilMin) === 'not_allowed') {
+      return errorPage(res, 'This appointment cannot be rescheduled online. Please contact the business directly.');
+    }
     const token = signBookingToken(bookingId);
+    const requestMode = effectiveChange(view.rescheduleMode, booking.startUtc, view.rescheduleUntilMin) === 'request';
 
     const start = new Date();
     const end = new Date(start.getTime() + 30 * 24 * 3600_000);
@@ -195,8 +237,8 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
       booking.tenantId,
       start.toISOString(),
       end.toISOString(),
-      undefined,
-      undefined,
+      booking.eventTypeId ?? undefined,
+      booking.bookedDurationMin ?? undefined,
       // Don't count this booking against its own reschedule.
       bookingId,
       // THE AGENT THAT OWNS THIS BOOKING, not the tenant's default one. The mutations already
@@ -227,7 +269,7 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
                     `<form method="post" action="/api/v1/bookings/manage/reschedule">
                        <input type="hidden" name="token" value="${esc(token)}"/>
                        <input type="hidden" name="newStartTime" value="${esc(iso)}"/>
-                       <button class="slot" type="submit">${esc(DateTime.fromISO(iso).setZone(timezone).toFormat('HH:mm'))}</button>
+                       <button class="slot" type="submit">${esc(DateTime.fromISO(iso).setZone(timezone).toFormat(luxonTimeFormat(timezone)))}</button>
                      </form>`
                 )
                 .join('') +
@@ -266,7 +308,7 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
         'Reschedule appointment',
         `<h1>Reschedule</h1>
          <p>${esc(eventName)} — currently ${esc(whenLabel(booking.startUtc.toISOString(), timezone))}.${
-           slots.length ? ' Pick a new time:' : ''
+           slots.length ? (requestMode ? ' Pick a new time to request:' : ' Pick a new time:') : ''
          }</p>
          ${slotsHtml}${requestableHtml}${nothingOffered}
          <p class="muted">Times shown in ${esc(timezone)}.</p>`
@@ -291,7 +333,18 @@ export async function postReschedule(req: Request, res: Response): Promise<void>
     const view = await getManageBooking(bookingId);
     if (!view) return errorPage(res, 'We couldn’t find this appointment.');
     // D8: token-verified self-service management of an existing appointment.
-    await adminRescheduleBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId, newStartTime);
+    const result = await adminRescheduleBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId, newStartTime);
+    if (result.requested) {
+      const when = whenLabel(result.booking.startTime, view.timezone);
+      return void res.status(200).send(
+        page(
+          'Reschedule requested',
+          `<h1>${esc(view.eventName)}</h1><p>We've asked the business to move your appointment to:</p>
+           <div class="when">${esc(when)}</div>
+           <p>This is <strong>not confirmed yet</strong>. Your original appointment still stands until they accept.</p>`
+        )
+      );
+    }
     const updated = await getManageBooking(bookingId);
     const when = updated ? whenLabel(updated.booking.startUtc.toISOString(), updated.timezone) : '';
     res.status(200).send(

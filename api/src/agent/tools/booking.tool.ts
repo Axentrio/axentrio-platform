@@ -28,7 +28,7 @@ import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
-import { refuseUnlessConfirmed, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
+import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
 
 /**
@@ -1063,6 +1063,8 @@ export class RescheduleBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      const needsConfirm = await refuseUnlessRescheduleConfirmed(args, ctx);
+      if (needsConfirm) return needsConfirm;
       const result = await rescheduleBooking(
         'agent',
         ctx.sessionId,
@@ -1097,6 +1099,8 @@ export class CancelBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      const needsConfirm = await refuseUnlessCancelConfirmed(args, ctx);
+      if (needsConfirm) return needsConfirm;
       const result = await cancelBooking(
         'agent',
         ctx.sessionId,

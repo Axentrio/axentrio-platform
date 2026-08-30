@@ -1,29 +1,24 @@
 /**
- * The per-bot upload switch, enforced server-side.
- *
- * `features.fileUploadEnabled` was read in exactly ONE place: the init response that tells
- * the browser whether to draw the attach button. The upload endpoints checked only the plan
- * entitlement — so an owner who turned uploads off hid a button and nothing else, and any
- * holder of a valid widget token on a paid tenant could still presign and upload. A status
- * doc described the feature as "shipped OFF" on the strength of that button.
- *
- * These tests exist because the difference between "hidden" and "denied" is the entire
- * security posture, and nothing asserted it.
+ * Widget upload gate: session exists on this tenant, then the plan
+ * includes file upload. The dead bot flag `fileUploadEnabled` is not read.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const sessionFindOne = vi.fn();
-const botFindOne = vi.fn();
+const requireFeature = vi.fn();
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: any) => {
       const name = entity?.name ?? entity;
       if (name === 'ChatSession') return { findOne: sessionFindOne };
-      if (name === 'Bot') return { findOne: botFindOne };
       return {};
     },
   },
+}));
+
+vi.mock('../../billing/enforce', () => ({
+  requireFeature: (...args: unknown[]) => requireFeature(...args),
 }));
 
 import { assertUploadEnabledForSession } from '../../file-handling/widget-upload-gate';
@@ -41,28 +36,17 @@ describe('widget upload gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionFindOne.mockResolvedValue({ id: 'cs-1', tenantId: 'ten-1', botId: 'bot-1' });
+    requireFeature.mockResolvedValue(undefined);
   });
 
-  it('allows an upload when the owner has switched it on', async () => {
-    botFindOne.mockResolvedValue({ id: 'bot-1', settings: { features: { fileUploadEnabled: true } } });
+  it('allows an upload when the plan includes file upload', async () => {
     expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('allowed');
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'fileUpload', 'plan_limit_file_upload');
   });
 
-  it('DENIES when the flag is off — not merely hides the button', async () => {
-    botFindOne.mockResolvedValue({ id: 'bot-1', settings: { features: { fileUploadEnabled: false } } });
-    expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('403:FILE_UPLOAD_DISABLED');
-  });
-
-  it('defaults to DENY when the bot has no features block at all', async () => {
-    // Absent is not consent. An upload endpoint is the wrong place to be generous.
-    botFindOne.mockResolvedValue({ id: 'bot-1', settings: {} });
-    expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('403:FILE_UPLOAD_DISABLED');
-  });
-
-  it('defaults to DENY for a legacy session with no bot bound', async () => {
-    sessionFindOne.mockResolvedValue({ id: 'cs-1', tenantId: 'ten-1', botId: null });
-    expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('403:FILE_UPLOAD_DISABLED');
-    expect(botFindOne).not.toHaveBeenCalled();
+  it('DENIES with the plan error when the tenant is not entitled', async () => {
+    requireFeature.mockRejectedValue(Object.assign(new Error('plan'), { statusCode: 402, code: 'plan_limit_file_upload' }));
+    expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('402:plan_limit_file_upload');
   });
 
   it('scopes the session lookup to the caller’s tenant', async () => {
@@ -70,32 +54,15 @@ describe('widget upload gate', () => {
     expect(sessionFindOne).toHaveBeenCalledWith({ where: { id: 'cs-1', tenantId: 'ten-1' } });
   });
 
-  it('scopes the bot lookup to the tenant too', async () => {
-    botFindOne.mockResolvedValue({ id: 'bot-1', settings: { features: { fileUploadEnabled: true } } });
-    await assertUploadEnabledForSession('ten-1', 'cs-1');
-    expect(botFindOne).toHaveBeenCalledWith({ where: { id: 'bot-1', tenantId: 'ten-1' } });
-  });
-
   it('gives a foreign session the same 404 as a missing one', async () => {
-    // Not 403: distinguishing them would turn this endpoint into a cross-tenant existence
-    // oracle for chat-session ids.
     sessionFindOne.mockResolvedValue(null);
     expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-other'))).toBe('404:NOT_FOUND');
-  });
-
-  it('requires a real boolean true, not merely something truthy', async () => {
-    // The string 'false' is truthy in JS. A hand-edited or legacy settings blob must not be
-    // able to switch uploads on by accident, so the check is `=== true`.
-    botFindOne.mockResolvedValue({ id: 'bot-1', settings: { features: { fileUploadEnabled: 'false' as never } } });
-    expect(await reason(() => assertUploadEnabledForSession('ten-1', 'cs-1'))).toBe('403:FILE_UPLOAD_DISABLED');
+    expect(requireFeature).not.toHaveBeenCalled();
   });
 });
 
 describe('widget upload gate — wiring', () => {
   it('is applied to BOTH the presign and the completion route', async () => {
-    // Completing an upload begun before the owner switched uploads off must not slip a file
-    // through the back half of the flow. Read from the route source: importing the router
-    // pulls in the whole express app, and what matters here is only that both call it.
     const fs = await import('node:fs');
     const path = await import('node:path');
     const src = fs.readFileSync(path.join(process.cwd(), 'src/routes/widget.ts'), 'utf8');

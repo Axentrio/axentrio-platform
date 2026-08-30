@@ -23,6 +23,9 @@ vi.mock('../../services/apiClient', () => ({
 vi.mock('sonner', () => ({
   toast: { success: toastSuccess, error: vi.fn(), info: vi.fn(), warning: toastWarning },
 }));
+vi.mock('../../queries/useEntitlementsQueries', () => ({
+  useIsEntitled: () => true,
+}));
 
 import { ServicesSection } from './ServicesSection';
 

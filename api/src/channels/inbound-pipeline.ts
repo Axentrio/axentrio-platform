@@ -24,7 +24,6 @@ import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { logger } from '../utils/logger';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
-import { ServiceType } from '../database/entities/ServiceType';
 import { getUploadService } from '../file-handling/upload.service';
 import { upsertLead } from '../leads/lead-capture.service';
 import { Not, IsNull } from 'typeorm';
@@ -784,28 +783,14 @@ export async function findOrCreateConversation(
 }
 
 /**
- * True when the tenant's bot has at least one active, file-upload-accepting
- * service — i.e. an inbound image could actually attach to a booking. Cheap
- * COUNT, no rows loaded.
- */
-export async function botHasActiveFileService(tenantId: string, botId: string): Promise<boolean> {
-  const repo = getRepository(ServiceType);
-  const count = await repo.count({
-    where: { tenantId, botId, isActive: true, fileUploadAllowed: true },
-  });
-  return count > 0;
-}
-
-/**
  * Gate + ingest an inbound channel image into a `ready` upload_session.
  *
  * Ingest only when ALL hold: normalized `type === 'image'` and it is NOT a
  * sticker; the channel is messenger, instagram, or whatsapp; the tenant is
- * entitled to file upload; and the bot has an active file-accepting service.
- * Messenger/Instagram need a CDN `mediaUrl`. WhatsApp needs a `mediaId` that
- * this gate resolves to a token-gated URL. On a successful new/interrupted
- * ingest, runs the scan so the row converges to `ready`. Launched
- * fire-and-forget by the caller.
+ * entitled to file upload. Messenger/Instagram need a CDN `mediaUrl`.
+ * WhatsApp needs a `mediaId` that this gate resolves to a token-gated URL.
+ * On a successful new/interrupted ingest, runs the scan so the row
+ * converges to `ready`. Launched fire-and-forget by the caller.
  */
 export async function maybeIngestInboundMedia(
   event: NormalizedEvent,
@@ -830,9 +815,6 @@ export async function maybeIngestInboundMedia(
     return;
   }
 
-  if (!(await botHasActiveFileService(connection.tenantId, session.botId))) {
-    return;
-  }
 
   let url: string | undefined;
   let headers: Record<string, string> | undefined;

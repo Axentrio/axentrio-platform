@@ -49,7 +49,7 @@ const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   DURATION_OUT_OF_RANGE: 'agent-side service configuration while creating',
   DURATION_REQUIRED: 'the agent re-asks for a length while CREATING a booking',
   FILE_NOT_READY: 'attachment upload during creation',
-  FILE_UPLOAD_NOT_ALLOWED: 'attachment upload during creation',
+  FILE_REQUIRED: 'raised while the agent collects a file for a NEW booking',
   TOO_MANY_FILES: 'attachment upload during creation',
   INVALID_RANGE: 'a malformed availability query the public page never constructs',
   INVALID_START_TIME: 'a malformed time the public page never constructs - its times come from the offered list',

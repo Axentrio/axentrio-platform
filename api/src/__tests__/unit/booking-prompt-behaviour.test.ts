@@ -175,14 +175,23 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
   });
 
 
-  it('invites a file on an accepts-files service and never asks the model for ids', () => {
-    const p = buildServicesSection([svc({ fileUploadAllowed: true })])!;
-    expect(p).toMatch(/accepts files/);
+  it('invites a file on a needs-file service and never asks the model for ids', async () => {
+    const p = buildServicesSection([svc({ fileUploadRequired: true })])!;
+    expect(p).toMatch(/needs file/);
     expect(p).toMatch(/invite the customer to attach/i);
+    expect(p).toMatch(/FILE_REQUIRED/);
     expect(p).toMatch(/already sent in this chat attach on their own/i);
     expect(p).not.toMatch(/fileSessionIds/);
     expect(p).not.toMatch(/FILE_NOT_READY|FILE_UPLOAD_NOT_ALLOWED|TOO_MANY_FILES/);
   });
+
+  it('still says files in the chat attach when no service requires one', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/already sent in this chat attach on their own/i);
+    expect(p).not.toMatch(/needs file/);
+    expect(p).not.toMatch(/FILE_REQUIRED/);
+  });
+
 
   it('says nothing about length for a fixed service', () => {
     const p = buildServicesSection([svc()])!;

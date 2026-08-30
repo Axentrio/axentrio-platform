@@ -53,6 +53,7 @@ import {
   type DiscountType,
   type CustomerChangeMode,
 } from '../../queries/useSchedulerQueries';
+import { useIsEntitled } from '../../queries/useEntitlementsQueries';
 
 interface FormState {
   name: string;
@@ -92,7 +93,7 @@ interface FormState {
   customerAddressRequired: boolean;
   customerChoosesLocation: boolean;
   customerLocationRequired: boolean;
-  fileUploadAllowed: boolean;
+  fileUploadRequired: boolean;
   maxBookingsPerDay: string;
   intakeQuestions: IntakeQuestion[];
 }
@@ -139,7 +140,7 @@ const BLANK: FormState = {
   customerAddressRequired: false,
   customerChoosesLocation: false,
   customerLocationRequired: false,
-  fileUploadAllowed: false,
+  fileUploadRequired: false,
   maxBookingsPerDay: '',
   intakeQuestions: [],
 };
@@ -226,7 +227,7 @@ function formFromService(s: Service): FormState {
     customerChoosesLocation: !!s.customerChoosesLocation,
     customerLocationRequired: !!s.customerLocationRequired,
     ...locationTypeSideEffects(s.locationType),
-    fileUploadAllowed: !!s.fileUploadAllowed,
+    fileUploadRequired: !!s.fileUploadRequired,
     maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)
@@ -290,7 +291,7 @@ function toInput(f: FormState): ServiceInput {
     customerChoosesLocation: f.customerChoosesLocation,
     customerLocationRequired: f.customerLocationRequired,
     ...locationTypeSideEffects(f.locationType),
-    fileUploadAllowed: f.fileUploadAllowed,
+    fileUploadRequired: f.fileUploadRequired,
     maxBookingsPerDay: num(f.maxBookingsPerDay),
     // Always send the array (even []) so the server replaces/clears; echo each id.
     intakeQuestions: f.intakeQuestions.map((q) => ({
@@ -1013,6 +1014,7 @@ const LocationFields: React.FC<{
   set: FieldSetter;
   workLocation: WorkLocation;
 }> = ({ form, set, workLocation }) => {
+  const canRequireFile = useIsEntitled('fileUpload');
   // business_location, customer_location and phone all pin the address flag.
   // Phone also pins the phone flag on.
   const addressPinned =
@@ -1121,14 +1123,16 @@ const LocationFields: React.FC<{
           </span>
         </span>
       </label>
-      <label htmlFor="svc-file-allowed" className="flex items-center gap-2 cursor-pointer">
+      {canRequireFile && (
+      <label htmlFor="svc-file-required" className="flex items-center gap-2 cursor-pointer">
         <Checkbox
-          id="svc-file-allowed"
-          checked={form.fileUploadAllowed}
-          onCheckedChange={(c) => set('fileUploadAllowed', c === true)}
+          id="svc-file-required"
+          checked={form.fileUploadRequired}
+          onCheckedChange={(c) => set('fileUploadRequired', c === true)}
         />
-        <span className="text-sm text-text-secondary">Allow file upload (e.g. a photo of the job)</span>
+        <span className="text-sm text-text-secondary">Required file upload (e.g. a photo of the job)</span>
       </label>
+      )}
       <div>
         <Label htmlFor="svc-max-per-day" className="text-text-secondary mb-1 block">Max bookings per day</Label>
         <Input

@@ -111,7 +111,7 @@ export interface Service {
   customerAddressRequired?: boolean;
   customerChoosesLocation?: boolean;
   customerLocationRequired?: boolean;
-  fileUploadAllowed?: boolean;
+  fileUploadRequired?: boolean;
   intakeQuestions?: IntakeQuestion[] | null;
   sortOrder: number;
   isActive: boolean;

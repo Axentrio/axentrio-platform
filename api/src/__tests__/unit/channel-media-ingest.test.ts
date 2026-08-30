@@ -110,7 +110,7 @@ vi.mock('../../file-handling/virus-scan-trigger', () => ({
 }));
 
 import { UploadService, resetUploadService } from '../../file-handling/upload.service';
-import { maybeIngestInboundMedia, botHasActiveFileService } from '../../channels/inbound-pipeline';
+import { maybeIngestInboundMedia } from '../../channels/inbound-pipeline';
 import { getUploadService } from '../../file-handling/upload.service';
 
 // Standalone ArrayBuffer (not a slice of Node's shared Buffer pool) so
@@ -437,28 +437,15 @@ describe('maybeIngestInboundMedia gate', () => {
     expect(ingestSpy).not.toHaveBeenCalled();
   });
 
-  it('skips when bot has no active file service', async () => {
+  it('ingests when the bot has no required-file service', async () => {
     serviceTypeCount.mockResolvedValue(0);
     await maybeIngestInboundMedia(makeEvent(), conn('messenger'), sess());
-    expect(ingestSpy).not.toHaveBeenCalled();
+    expect(ingestSpy).toHaveBeenCalledTimes(1);
   });
 
   it('a thrown ingest rejects (caller is responsible for catch)', async () => {
     ingestSpy.mockRejectedValue(new Error('boom'));
     await expect(maybeIngestInboundMedia(makeEvent(), conn('messenger'), sess())).rejects.toThrow('boom');
   });
-});
 
-describe('botHasActiveFileService', () => {
-  it('true when count > 0', async () => {
-    serviceTypeCount.mockResolvedValue(2);
-    expect(await botHasActiveFileService('ten-1', 'bot-1')).toBe(true);
-    expect(serviceTypeCount).toHaveBeenCalledWith({
-      where: { tenantId: 'ten-1', botId: 'bot-1', isActive: true, fileUploadAllowed: true },
-    });
-  });
-  it('false when count is 0', async () => {
-    serviceTypeCount.mockResolvedValue(0);
-    expect(await botHasActiveFileService('ten-1', 'bot-1')).toBe(false);
-  });
 });

@@ -236,8 +236,8 @@ export class ServiceType {
   @Column({ type: 'boolean', name: 'customer_chooses_location', default: false })
   customerChoosesLocation!: boolean;
 
-  @Column({ type: 'boolean', name: 'file_upload_allowed', default: false })
-  fileUploadAllowed!: boolean;
+  @Column({ type: 'boolean', name: 'file_upload_required', default: false })
+  fileUploadRequired!: boolean;
 
   @Column({ type: 'text', name: 'preparation_instructions', nullable: true })
   preparationInstructions?: string | null;

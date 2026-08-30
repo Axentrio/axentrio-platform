@@ -437,13 +437,17 @@ const TRAVEL_ADDRESS_FIRST_RULE = `- Travel times: the times this business can o
  */
 const PHONE_FIRST_RULE = `- Phone number: for a service flagged "needs phone", ask for the customer's phone number BEFORE you call check_availability, create_booking, or request_appointment, and pass it as customerPhone. A missing phone number does not make the service unavailable. Never capture a request, never say the service is unavailable in the booking system, and never hand off to the team because the number is still missing. If a booking tool returns PHONE_REQUIRED, ask for the number and retry with it. Keep any date and time the customer already named.`;
 
+const FILE_REQUIRED_RULE = `- Required file: for a service flagged "needs file", invite the customer to attach a relevant file (e.g. a photo of the job) BEFORE you call create_booking or request_appointment. Files they already sent in this chat attach on their own. A missing file does not make the service unavailable. Never capture a request, never say the service is unavailable, and never hand off to the team because the file is still missing. If a booking tool returns FILE_REQUIRED, invite the file and retry. Keep any date and time the customer already named.`;
+
+const FILES_ALWAYS_RULE = `- Files: the customer may attach a file at any time (for example a photo of the job). Files they already sent in this chat attach on their own. Never invent file ids, and never mention ids to the customer.`;
+
 function catalogServiceLine(s: ServiceType, tz: string, now: Date): string {
   const price = formatServicePrice(s, tz, now);
   const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
   const contact = [
     ...serviceCatalogLocationFlags(s),
     serviceNeedsCustomerPhone(s) ? 'needs phone' : '',
-    s.fileUploadAllowed ? 'accepts files' : '',
+    s.fileUploadRequired ? 'needs file' : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -478,7 +482,7 @@ function catalogServiceFlags(services: ServiceType[], businessCapacity: boolean)
       businessCapacity || services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0),
     hasDuration: services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai'),
     hasOnRequestPrice: services.some((s) => s.priceDisplayType === 'on_request'),
-    hasFileUpload: services.some((s) => s.fileUploadAllowed),
+    hasRequiredFile: services.some((s) => s.fileUploadRequired),
   };
 }
 
@@ -504,7 +508,7 @@ export function buildServicesSection(
     hasCapacity,
     hasDuration,
     hasOnRequestPrice,
-    hasFileUpload,
+    hasRequiredFile,
   } = catalogServiceFlags(services, businessCapacity);
   const discountLines = services
     .map((s) => discountDetailLine(s, tz, now))
@@ -553,20 +557,15 @@ Then follow these rules IN ORDER:
   7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
   }
-${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasRequiredFile ? `${FILE_REQUIRED_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. The price shown on a service line is the FINAL price and may already include a discount — quote it exactly, even if it is €0 for a service listed under Discounts below. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free", or when it is the discounted final price of a service listed under Discounts. A service whose price is not shown has no price to quote — do not infer that it is free. Never mention, invent, imply, or deny a discount, promotion, or special offer for a service unless it is listed under Discounts below.${
     hasOnRequestPrice
       ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
       : ''
-  }${
-    hasFileUpload
-      ? `
-- Files: once you have identified a service flagged "accepts files", you may invite the customer to attach a relevant file (e.g. a photo of the room). Do not invite a file before the service is resolved, or for a service that doesn't accept files. Files they already sent in this chat attach on their own. Never invent file ids, and never mention ids to the customer.`
-
-      : ''
-  }${
+  }
+${FILES_ALWAYS_RULE}${
     hasDiscount
       ? `
 - Discounts: the price shown on each service line above is ALREADY the final price for that service — quote that number. These services currently have a discount:

@@ -110,7 +110,7 @@ vi.mock('../../scheduler/calendar-provider', () => {
 });
 
 const getUploadSession = vi.fn();
-const getReadyFileIds = vi.fn();
+const getReadyFileIds = vi.fn(async (): Promise<string[]> => []);
 vi.mock('../../file-handling/upload.service', () => ({
   getUploadService: () => ({ getSession: getUploadSession, getReadySessionFileIds: getReadyFileIds }),
 }));
@@ -194,6 +194,7 @@ import {
   SLOT_TAKEN_ON_RESCHEDULE,
 } from '../../booking/booking-providers/slot-messages';
 import { BookingError } from '../../booking/booking-providers/types';
+import { getEntitlements, entitlementsFor } from '../../billing/entitlements';
 
 const ctx: any = {
   session: { id: 'sess-1' },
@@ -289,6 +290,7 @@ describe('InternalProvider.createBooking', () => {
     // clearAllMocks keeps implementations, so re-pin "no service area" or a
     // mockResolvedValue from one test would silently gate the next one.
     bookingSettingsFindOne.mockResolvedValue(null as any);
+    getReadyFileIds.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -966,7 +968,6 @@ describe('InternalProvider.createBooking', () => {
   });
 
   it('snapshots a ready, tenant+session-matched auto-collected file into uploaded_files', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
     getReadyFileIds.mockResolvedValue(['f-1', 'f-1']);
     getUploadSession.mockResolvedValue(readySession());
     await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
@@ -976,7 +977,6 @@ describe('InternalProvider.createBooking', () => {
   });
 
   it('skips an unscanned / foreign-tenant / wrong-session auto-collected file and still books', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
     getReadyFileIds.mockResolvedValue(['f-1']);
     for (const bad of [{ status: 'scanning' }, { tenantId: 'other' }, { chatSessionId: 'other-sess' }]) {
       getUploadSession.mockResolvedValueOnce(readySession(bad));
@@ -987,33 +987,51 @@ describe('InternalProvider.createBooking', () => {
     }
   });
 
-
   it('throws TOO_MANY_FILES for more than 5 distinct auto-collected files', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
     getReadyFileIds.mockResolvedValue(['a','b','c','d','e','f']);
     await expect(
       provider.createBooking(ctx, 'idem-many', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'TOO_MANY_FILES' });
   });
 
-
-  it('auto-collects the chat session ready uploads for a file-accepting service when the tool passes none', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
-    getReadyFileIds.mockResolvedValue(['auto-1']); // the agent never surfaces upload ids to the LLM
+  it('auto-collects the chat session ready uploads when the tool passes none', async () => {
+    getReadyFileIds.mockResolvedValue(['auto-1']);
     getUploadSession.mockResolvedValue(readySession());
-    await provider.createBooking(ctx, 'idem-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }); // no extras
+    await provider.createBooking(ctx, 'idem-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     expect(getReadyFileIds).toHaveBeenCalledWith('sess-1', 'ten-1');
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const files = JSON.parse(insertParam(insert as any, 'uploaded_files') as string);
+    const files = JSON.parse(insertParam(insert as [string, unknown[]], 'uploaded_files') as string);
     expect(files).toEqual([{ fileSessionId: 'auto-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
 
-  it('does NOT auto-collect (so a stray upload never blocks) for a no-file service', async () => {
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: false }]);
-    const res = await provider.createBooking(ctx, 'idem-nofile', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
-    expect(res.success).toBe(true);
-    expect(getReadyFileIds).not.toHaveBeenCalled();
+  it('auto-collects a stray upload even when the service does not require a file', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: false }]);
+    getReadyFileIds.mockResolvedValue(['auto-1']);
+    getUploadSession.mockResolvedValue(readySession());
+    await provider.createBooking(ctx, 'idem-optional', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(getReadyFileIds).toHaveBeenCalledWith('sess-1', 'ten-1');
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const files = JSON.parse(insertParam(insert as [string, unknown[]], 'uploaded_files') as string);
+    expect(files).toEqual([{ fileSessionId: 'auto-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
+
+  it('throws FILE_REQUIRED when the service requires a file and none are ready', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: true }]);
+    getReadyFileIds.mockResolvedValue([]);
+    await expect(
+      provider.createBooking(ctx, 'idem-needfile', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }),
+    ).rejects.toMatchObject({ code: 'FILE_REQUIRED' });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('still books a required-file service when the tenant is not entitled to upload', async () => {
+    vi.mocked(getEntitlements).mockResolvedValueOnce(entitlementsFor('free'));
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: true }]);
+    getReadyFileIds.mockResolvedValue([]);
+    const res = await provider.createBooking(ctx, 'idem-free-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+  });
+
 
   it('throws PHONE_REQUIRED on createBooking for a phone-call Auto-book when the number is missing', async () => {
     const phone = { ...EVENT_TYPE, locationType: 'phone', bookingMode: 'auto', customerLocationRequired: true };
@@ -1158,6 +1176,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     // clearAllMocks keeps implementations, so re-pin "no service area" or a
     // mockResolvedValue from one test would silently gate the next one.
     bookingSettingsFindOne.mockResolvedValue(null as any);
+    getReadyFileIds.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -1639,6 +1658,15 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
   });
 
+  it('throws FILE_REQUIRED when the service requires a file and none are ready', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: true }]);
+    getReadyFileIds.mockResolvedValue([]);
+    await expect(
+      provider.requestAppointment(ctx, 'idem-needfile', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }),
+    ).rejects.toMatchObject({ code: 'FILE_REQUIRED' });
+  });
+
+
   it('#149: customer_choice + locationChoice=customer without an address is ADDRESS_REQUIRED', async () => {
     serviceTypeFind.mockResolvedValue([{
       ...EVENT_TYPE,
@@ -1848,6 +1876,7 @@ describe('InternalProvider.createBooking - travel placement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     bookingSettingsFindOne.mockResolvedValue(null as any);
+    getReadyFileIds.mockResolvedValue([]);
     placeBookingAddress.mockResolvedValue({ applies: false });
     placeAddressFor.mockResolvedValue({ applies: false });
     resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
@@ -2533,6 +2562,7 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     bookingSettingsFindOne.mockResolvedValue(null);
+    getReadyFileIds.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();

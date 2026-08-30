@@ -127,9 +127,9 @@ function buildWidgetAppearance(botSettings: WidgetBotSettings) {
   };
 }
 
-function buildWidgetFeatureFlags(botSettings: WidgetBotSettings) {
+function buildWidgetFeatureFlags(botSettings: WidgetBotSettings, fileUploadEnabled: boolean) {
   return {
-    fileUploadEnabled: botSettings.features?.fileUploadEnabled ?? false,
+    fileUploadEnabled,
     handoffEnabled: botSettings.features?.handoffEnabled ?? true,
     aiEnabled: botSettings.ai?.enabled ?? false,
   };
@@ -198,10 +198,14 @@ router.get(
     // renders the footer when false. Fail closed on unknown tier so a
     // malformed DB row defaults to showing the attribution.
     let hideAttribution = false;
+    let fileUploadEnabled = false;
     try {
-      hideAttribution = (await getEntitlements(tenant.id)).features.hideWidgetAttribution;
+      const entitlements = await getEntitlements(tenant.id);
+      hideAttribution = entitlements.features.hideWidgetAttribution;
+      fileUploadEnabled = entitlements.features.fileUpload === true;
     } catch {
       hideAttribution = false;
+      fileUploadEnabled = false;
     }
 
     sendSuccess(res, {
@@ -217,7 +221,7 @@ router.get(
         backgroundColor: '#ffffff',
         textColor: '#333333',
       },
-      features: buildWidgetFeatureFlags(botSettings),
+      features: buildWidgetFeatureFlags(botSettings, fileUploadEnabled),
       businessHours: buildWidgetBusinessHours(botSettings, bot.businessTimezone),
       appearance,
       attribution: { hide: hideAttribution },
@@ -855,7 +859,6 @@ router.post(
     const w = req.widget!;
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     await requireFeature(w.tenantId, 'fileUpload', 'plan_limit_file_upload');
-    // Entitlement is the ceiling; the owner's own switch is what actually decides.
     await assertUploadEnabledForSession(w.tenantId, w.sessionId);
     if (!isS3Configured()) {
       throw new ApiError('File uploads are not available right now', 503, 'STORAGE_UNAVAILABLE');

@@ -135,6 +135,7 @@ import {
   createdWithinDedupWindow,
 } from './dedup';
 import type { UploadSession } from '../../file-handling/upload.service';
+import { getEntitlements } from '../../billing/entitlements';
 
 /**
  * The ICS organizer stamped on every NEW booking: a per-TENANT address on the platform's
@@ -1265,9 +1266,10 @@ export class InternalProvider implements BookingProvider {
     // is a no-op when the service needs no address or no enforceable place is configured, and
     // recording 'inside' for those would claim a check that never ran.
     const { match: areaMatch } = await evaluateServiceArea(ctx, service, contact.address);
-    // P5e: snapshot ready uploads from this chat (the model never sees file ids).
-    const fileSessionIds = await this.resolveFileSessionIds(ctx, service);
-    const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
+    // Snapshot ready uploads from this chat (the model never sees file ids).
+    const fileSessionIds = await this.resolveFileSessionIds(ctx);
+    const uploadedFiles = await this.validateUploadedFiles(ctx, fileSessionIds);
+    await this.assertRequiredFile(ctx, service, uploadedFiles);
 
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
@@ -1883,9 +1885,10 @@ export class InternalProvider implements BookingProvider {
         outcome: placement.applies ? placement.outcome : 'n/a',
       });
     }
-    // P5e: snapshot ready uploads from this chat (the model never sees file ids).
-    const fileSessionIds = await this.resolveFileSessionIds(ctx, service);
-    const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
+    // Snapshot ready uploads from this chat (the model never sees file ids).
+    const fileSessionIds = await this.resolveFileSessionIds(ctx);
+    const uploadedFiles = await this.validateUploadedFiles(ctx, fileSessionIds);
+    await this.assertRequiredFile(ctx, service, uploadedFiles);
 
     let bookingId: string;
     const requestAreaMatch = (await evaluateServiceArea(ctx, service, contact.address ?? null)).match;
@@ -2213,20 +2216,15 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
-   * Auto-collect the chat session's ready uploads for a file-accepting service.
-   * The model never sees upload ids; this is how a customer's file reaches the
-   * booking. A no-file service auto-collects nothing, so a stray upload
-   * elsewhere in the chat cannot block a booking.
+   * Auto-collect the chat session's ready uploads. The model never sees upload
+   * ids; this is how a customer's file reaches the booking.
    */
-
   private async resolveFileSessionIds(
     ctx: BookingContext,
-    service: ServiceType,
   ): Promise<string[] | undefined> {
-    if (!service.fileUploadAllowed) return undefined;
     const { getUploadService } = await import('../../file-handling/upload.service');
     const ids = await getUploadService().getReadySessionFileIds(ctx.session.id, ctx.tenant.id);
-    return ids.length ? ids : undefined;
+    return Array.isArray(ids) && ids.length ? ids : undefined;
   }
 
   /**
@@ -2235,17 +2233,12 @@ export class InternalProvider implements BookingProvider {
    * thrown: FILE_NOT_READY would poison every later booking in this chat.
    * Returns the JSON array or null when nothing well-formed was attached.
    */
-
   private async validateUploadedFiles(
     ctx: BookingContext,
-    service: ServiceType,
     fileSessionIds?: string[]
   ): Promise<Array<{ fileSessionId: string; fileName: string; mimeType: string; fileSize: number; fileKey: string }> | null> {
     const ids = Array.isArray(fileSessionIds) ? fileSessionIds.filter((s) => typeof s === 'string' && s) : [];
     if (!ids.length) return null;
-    if (!service.fileUploadAllowed) {
-      throw new BookingError('This service does not accept file uploads', 'FILE_UPLOAD_NOT_ALLOWED', 400);
-    }
     const distinct = [...new Set(ids)];
     if (distinct.length > 5) {
       throw new BookingError('Too many files attached', 'TOO_MANY_FILES', 400);
@@ -2259,6 +2252,27 @@ export class InternalProvider implements BookingProvider {
       if (row) out.push(row);
     }
     return out.length ? out : null;
+  }
+
+  /**
+   * A required-file service cannot book without a ready file, unless the
+   * tenant cannot upload at all (Free). Skipping FILE_REQUIRED there avoids
+   * a service that can never be booked.
+   */
+  private async assertRequiredFile(
+    ctx: BookingContext,
+    service: ServiceType,
+    uploadedFiles: Array<{ fileSessionId: string; fileName: string; mimeType: string; fileSize: number; fileKey: string }> | null,
+  ): Promise<void> {
+    if (!service.fileUploadRequired) return;
+    if (uploadedFiles && uploadedFiles.length > 0) return;
+    const entitlements = await getEntitlements(ctx.tenant.id);
+    if (!entitlements.features.fileUpload) return;
+    throw new BookingError(
+      'A file is required for this service. Invite the customer to attach one (for example a photo of the job) and call again. Files they already sent in this chat attach on their own. Do not tell the customer the service is unavailable, and do not capture a request or a lead.',
+      'FILE_REQUIRED',
+      400,
+    );
   }
 
   /**

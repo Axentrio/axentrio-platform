@@ -48,6 +48,9 @@ vi.mock('../../channels/outbound-router', () => ({
 }));
 
 import { AppDataSource } from '../../database/data-source';
+import { ChannelConnection } from '../../database/entities/ChannelConnection';
+import { ChatSession } from '../../database/entities/ChatSession';
+import { ConversationBinding } from '../../database/entities/ConversationBinding';
 import { Lead } from '../../database/entities/Lead';
 import { LeadConversation } from '../../database/entities/LeadConversation';
 import {
@@ -178,17 +181,42 @@ describe('Superadmin conversation reset', () => {
   it('wipes every store so the next Ik wil boeken turn cannot reuse the previous booking', async () => {
     const tenant = await createTestTenant();
     const bot = await createTestAnchorBot(tenant);
-    // Explicit startedAt: the transcript wipe cuts on (started_at, id), so the
-    // fixture must pin which siblings are earlier and which is newer.
+    // The wipe resolves identity through the SAME predicate as
+    // GET /chats/:id/thread: the conversation_bindings triple, not the phone
+    // number. So the fixture stamps the identity facts the inbound pipeline
+    // writes, and pins startedAt because the cut is on (started_at, id).
+    const connRepo = AppDataSource.getRepository(ChannelConnection);
+    const connection = await connRepo.save(
+      connRepo.create({
+        tenantId: tenant.id,
+        channel: 'whatsapp',
+        status: 'active',
+        platformAccountId: `wa_${randomUUID().slice(0, 8)}`,
+      }),
+    );
+    const THREAD = `wa-thread-${VISITOR}`;
     const BASE = new Date('2026-08-30T12:00:00.000Z');
-    const first = await createTestSession(tenant.id, {
-      botId: bot.id,
-      visitorId: VISITOR,
-      channel: 'whatsapp',
-      source: 'whatsapp',
-      status: 'bot',
-      startedAt: BASE,
-    });
+    const external = (overrides: Partial<ChatSession>) =>
+      createTestSession(tenant.id, {
+        botId: bot.id,
+        visitorId: VISITOR,
+        channel: 'whatsapp',
+        source: 'whatsapp',
+        channelConnectionId: connection.id,
+        metadata: { customData: { externalUserId: VISITOR, externalThreadId: THREAD } },
+        ...overrides,
+      });
+
+    const first = await external({ status: 'bot', startedAt: BASE });
+    const bindingRepo = AppDataSource.getRepository(ConversationBinding);
+    await bindingRepo.save(
+      bindingRepo.create({
+        sessionId: first.id,
+        channelConnectionId: connection.id,
+        externalUserId: VISITOR,
+        externalThreadId: THREAD,
+      }),
+    );
     const participant = await createTestParticipant(first.id, { type: 'user' });
     const inbound = await createTestMessage(first.id, tenant.id, participant.id, {
       content: `Ik wil boeken ${SLOT_TEXT}`,
@@ -203,11 +231,7 @@ describe('Superadmin conversation reset', () => {
       [first.id, inbound.id],
     );
 
-    const older = await createTestSession(tenant.id, {
-      botId: bot.id,
-      visitorId: VISITOR,
-      channel: 'whatsapp',
-      source: 'whatsapp',
+    const older = await external({
       status: 'closed',
       startedAt: new Date(BASE.getTime() - 24 * 60 * 60 * 1000),
     });
@@ -219,11 +243,7 @@ describe('Superadmin conversation reset', () => {
     // A NEWER sibling on the same number is the live conversation: a WhatsApp
     // inbound reopens into a new row. Reset on an older row must NOT delete
     // the message the bot still owes an answer to.
-    const newer = await createTestSession(tenant.id, {
-      botId: bot.id,
-      visitorId: VISITOR,
-      channel: 'whatsapp',
-      source: 'whatsapp',
+    const newer = await external({
       status: 'bot',
       startedAt: new Date(BASE.getTime() + 60 * 60 * 1000),
     });
@@ -231,6 +251,26 @@ describe('Superadmin conversation reset', () => {
     const newerMessage = await createTestMessage(newer.id, tenant.id, newerParticipant.id, {
       content: 'ben je er nog?',
     });
+
+    // Same number, same connection, DIFFERENT thread (e.g. a group chat). The
+    // pane never shows it above this DM, so the wipe must not touch it.
+    const otherThread = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'closed',
+      channelConnectionId: connection.id,
+      metadata: { customData: { externalUserId: VISITOR, externalThreadId: `${THREAD}-group` } },
+      startedAt: new Date(BASE.getTime() - 2 * 60 * 60 * 1000),
+    });
+    const otherThreadParticipant = await createTestParticipant(otherThread.id, { type: 'user' });
+    const otherThreadMessage = await createTestMessage(
+      otherThread.id,
+      tenant.id,
+      otherThreadParticipant.id,
+      { content: `Group booking ${SLOT_TEXT}` },
+    );
 
     const widget = await createTestSession(tenant.id, {
       botId: bot.id,
@@ -399,8 +439,16 @@ describe('Superadmin conversation reset', () => {
     expect(newerLeft).toHaveLength(1);
     expect(newerLeft[0].id).toBe(newerMessage.id);
 
+    const otherThreadLeft = await AppDataSource.query(
+      `SELECT id FROM messages WHERE session_id = $1`,
+      [otherThread.id],
+    );
+    expect(otherThreadLeft).toHaveLength(1);
+    expect(otherThreadLeft[0].id).toBe(otherThreadMessage.id);
+
     expect(reset.transcriptSessionIds).toEqual(expect.arrayContaining([first.id, older.id]));
     expect(reset.transcriptSessionIds).not.toContain(newer.id);
+    expect(reset.transcriptSessionIds).not.toContain(otherThread.id);
     expect(reset.transcriptSessionIds).not.toContain(widget.id);
     expect(reset.transcriptSessionIds).not.toContain(messenger.id);
 

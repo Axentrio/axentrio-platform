@@ -12,7 +12,10 @@
  *
  * Close alone starts a new ChatSession. Identity-keyed stores do not.
  */
+import { type EntityManager } from 'typeorm';
 import { getRedisClient } from '../config/redis';
+import { ChatSession } from '../database/entities/ChatSession';
+import { resetWipeSessionIds } from './customer-thread';
 import {
   clearConversationMemory,
   type MemorySessionIdentity,
@@ -116,12 +119,12 @@ export async function clearIdentityScratch(sessionIds: string[]): Promise<boolea
  * channels, and person_key siblings keep their transcripts.
  */
 export async function clearConversationResetState(
-  manager: Queryable,
-  session: ResetSessionIdentity,
+  manager: EntityManager,
+  session: ChatSession,
 ): Promise<ConversationResetClearance> {
   const memory = await clearConversationMemory(manager, session);
   const sessionIds = memory.sessionIds.length > 0 ? memory.sessionIds : [session.id];
-  const transcriptSessionIds = await channelIdentitySessionIds(manager, session);
+  const transcriptSessionIds = await resetWipeSessionIds(manager, session);
 
   await clearAddressBindings(manager, sessionIds);
   await clearLeadConversationState(manager, sessionIds);
@@ -194,61 +197,6 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
       WHERE id = ANY($1::uuid[])`,
     [sessionIds],
   );
-}
-
-/**
- * The Reset session plus the "earlier" chats the Inbox shows above it: same
- * tenant + channel + visitor, STRICTLY OLDER, and already closed.
- *
- * The `(started_at, id)` row-value cut is the one threadSessionsQuery uses,
- * so what Reset deletes is exactly what the pane renders as earlier history.
- * Two bounds matter:
- *  - strictly older: a NEWER sibling can be the live session (a WhatsApp
- *    inbound reopens into a new row), and wiping it would delete a message
- *    the bot still owes an answer to.
- *  - closed: never touch a session an operator or the bot is working right
- *    now. The selected row is always included; Reset closes it first.
- * Widget is also bot-scoped. Does not follow person_key onto other channels.
- */
-async function channelIdentitySessionIds(
-  manager: Queryable,
-  session: ResetSessionIdentity,
-): Promise<string[]> {
-  const ids = new Set<string>([session.id]);
-  if (!session.visitorId || !session.channel) return [...ids];
-
-  const olderClosed = `
-       AND s.status = 'closed'
-       AND (COALESCE(s.started_at, s.created_at), s.id)
-         < (COALESCE(sel.started_at, sel.created_at), sel.id)`;
-
-  const rows = (
-    session.channel === 'widget'
-      ? await manager.query(
-          `SELECT s.id
-             FROM chat_sessions s
-             JOIN chat_sessions sel ON sel.id = $1
-            WHERE s.tenant_id = $2
-              AND s.channel = 'widget'
-              AND s.bot_id = $3
-              AND s.visitor_id = $4${olderClosed}`,
-          [session.id, session.tenantId, session.botId, session.visitorId],
-        )
-      : await manager.query(
-          `SELECT s.id
-             FROM chat_sessions s
-             JOIN chat_sessions sel ON sel.id = $1
-            WHERE s.tenant_id = $2
-              AND s.channel = $3
-              AND s.visitor_id = $4${olderClosed}`,
-          [session.id, session.tenantId, session.channel, session.visitorId],
-        )
-  ) as Array<{ id: string }>;
-
-  for (const row of rows) {
-    if (row?.id) ids.add(row.id);
-  }
-  return [...ids];
 }
 
 /**

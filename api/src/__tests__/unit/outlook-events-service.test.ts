@@ -111,6 +111,38 @@ describe('createOutlookEvent', () => {
     expect(body.transactionId).toBe('booking123');
     expect(body.start).toEqual({ dateTime: '2026-06-10T07:00:00.000', timeZone: 'UTC' });
     expect(cfg.headers.Prefer).toContain('IdType="ImmutableId"');
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  it('GETs the event when create omits the Teams join URL', async () => {
+    // Graph often returns the event before onlineMeeting.joinUrl is populated.
+    // Without a follow-up GET, a video booking stores meetUrl null and the
+    // customer invite has no Teams link even though isOnlineMeeting was set.
+    (axios.post as any).mockResolvedValue({ data: { id: 'IMMUTABLE_ID' } });
+    (axios.get as any).mockResolvedValue({
+      data: { id: 'IMMUTABLE_ID', onlineMeeting: { joinUrl: 'https://teams.example/join' } },
+    });
+    const res = await createOutlookEvent(
+      'b1',
+      { startISO: '2026-06-10T07:00:00.000Z', endISO: '2026-06-10T07:30:00.000Z', timezone: 'Europe/Brussels', summary: 'Video consult', conferencing: true },
+      { eventId: 'booking123' }
+    );
+    expect(res).toEqual({ eventId: 'IMMUTABLE_ID', meetUrl: 'https://teams.example/join', calendarId: 'primary' });
+    const [url, cfg] = (axios.get as any).mock.calls[0];
+    expect(url).toContain('/me/events/IMMUTABLE_ID');
+    expect(url).toContain('$select=');
+    expect(url).toContain('onlineMeeting');
+    expect(cfg.headers.Prefer).toContain('IdType="ImmutableId"');
+  });
+
+  it('keeps the event when the join-URL GET fails', async () => {
+    (axios.post as any).mockResolvedValue({ data: { id: 'IMMUTABLE_ID' } });
+    (axios.get as any).mockRejectedValue({ response: { status: 500 } });
+    const res = await createOutlookEvent(
+      'b1',
+      { startISO: '2026-06-10T07:00:00.000Z', endISO: '2026-06-10T07:30:00.000Z', timezone: 'UTC', summary: 'Video consult', conferencing: true },
+    );
+    expect(res).toEqual({ eventId: 'IMMUTABLE_ID', meetUrl: null, calendarId: 'primary' });
   });
 
   it('retries without online-meeting fields ONLY on an online-meeting error', async () => {

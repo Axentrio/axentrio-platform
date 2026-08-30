@@ -119,6 +119,20 @@ function parseGraphUtc(dateTime: string): Date {
   return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(dateTime) ? dateTime : `${dateTime}Z`);
 }
 
+/** Graph often returns the event before `onlineMeeting.joinUrl` is set. */
+async function readOutlookJoinUrl(token: string, eventId: string): Promise<string | null> {
+  const { data } = await withGraphRetry(() =>
+    axios.get<GraphEvent>(
+      `${GRAPH}/me/events/${encodeURIComponent(eventId)}?$select=id,isOnlineMeeting,onlineMeeting`,
+      {
+        headers: { Authorization: `Bearer ${token}`, Prefer: PREFER_IMMUTABLE_UTC },
+        timeout: 12000,
+      },
+    ),
+  );
+  return data.onlineMeeting?.joinUrl ?? null;
+}
+
 /**
  * Create an owner-only event with a Teams meeting on the default calendar.
  * `opts.eventId` (the deterministic booking-derived id) is sent as Graph's
@@ -126,6 +140,8 @@ function parseGraphUtc(dateTime: string): Date {
  * duplicating. Returns the IMMUTABLE event id + Teams join URL, or null when
  * there's no connection. On an account that can't host Teams, retries once
  * WITHOUT the online-meeting fields (same transactionId) → `meetUrl: null`.
+ * When Graph creates the meeting but omits `joinUrl` on the POST body, GET
+ * the event once so the customer invite still carries the Teams link.
  */
 export async function createOutlookEvent(
   botId: string,
@@ -161,18 +177,32 @@ export async function createOutlookEvent(
       )
     );
 
+  const wantTeams = input.conferencing === true;
+  let postedWithTeams = wantTeams;
   let resp;
   try {
-    resp = await post(input.conferencing === true);
+    resp = await post(wantTeams);
   } catch (err) {
     if (!isOnlineMeetingUnsupported(err)) throw err;
     logger.info('[Outlook] account cannot host Teams; creating event without online meeting', { botId });
+    postedWithTeams = false;
     resp = await post(false);
   }
   const data = resp.data as GraphEvent;
+  let meetUrl = data.onlineMeeting?.joinUrl ?? null;
+  if (postedWithTeams && !meetUrl && data.id) {
+    try {
+      meetUrl = await readOutlookJoinUrl(token, data.id);
+    } catch (err) {
+      logger.warn('[Outlook] Teams join URL GET failed; event stands without meetUrl', {
+        botId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   return {
     eventId: data.id as string,
-    meetUrl: data.onlineMeeting?.joinUrl ?? null,
+    meetUrl,
     calendarId: cred.calendarId,
   };
 }

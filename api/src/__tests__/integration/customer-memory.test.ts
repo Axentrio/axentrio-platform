@@ -230,7 +230,7 @@ describe('customer memory', () => {
     const tenant = await createTestTenant();
     const bot = await createTestAnchorBot(tenant, {
       settings: {
-        features: { fileUploadEnabled: true, handoffEnabled: true, customerMemoryEnabled: false },
+        features: { handoffEnabled: true, customerMemoryEnabled: false },
       },
     });
     const session = await createTestSession(tenant.id, { botId: bot.id, channel: 'widget' });
@@ -250,11 +250,11 @@ describe('customer memory', () => {
     expect(facts).toBe(0);
   });
 
-  it('still injects when features has only fileUploadEnabled and handoffEnabled', async () => {
+  it('still injects when features has only handoffEnabled', async () => {
     const tenant = await createTestTenant();
     const bot = await createTestAnchorBot(tenant, {
       settings: {
-        features: { fileUploadEnabled: true, handoffEnabled: true },
+        features: { handoffEnabled: true },
       },
     });
     const visitorId = 'widget-memory-default-on';

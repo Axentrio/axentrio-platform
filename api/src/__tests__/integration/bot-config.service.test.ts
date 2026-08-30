@@ -135,12 +135,11 @@ describe('getAnchorBotConfig', () => {
   it('returns the anchor bot and its settings', async () => {
     const tenant = await createTestTenant();
     const anchor = await createTestAnchorBot(tenant, {
-      settings: { features: { fileUploadEnabled: true, handoffEnabled: false } } as Bot['settings'],
+      settings: { features: { handoffEnabled: false } } as Bot['settings'],
     });
 
     const { bot, settings } = await getAnchorBotConfig(tenant.id);
     expect(bot.id).toBe(anchor.id);
-    expect(settings.features?.fileUploadEnabled).toBe(true);
     expect(settings.features?.handoffEnabled).toBe(false);
   });
 });

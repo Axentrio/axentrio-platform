@@ -352,7 +352,7 @@ describe('forwardMessageToN8n', () => {
       initializeAgentService({ run: runMock } as unknown as AgentService);
       try {
         const tenant = await createTestTenant({
-          settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+          settings: { ai: aiSettings(), features: { handoffEnabled: true } },
         });
         const { session, message } = await setup(tenant.id, 'I want to speak to human now');
 
@@ -440,7 +440,7 @@ describe('forwardMessageToN8n', () => {
       const tenant = await createTestTenant({
         webhookUrl: 'https://n8n.test/hook',
         webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+        settings: { ai: aiSettings(), features: { handoffEnabled: true } },
       });
       const { session, message } = await setup(tenant.id, 'I want to speak to human now');
 
@@ -458,7 +458,7 @@ describe('forwardMessageToN8n', () => {
       const tenant = await createTestTenant({
         webhookUrl: 'https://n8n.test/hook',
         webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+        settings: { ai: aiSettings(), features: { handoffEnabled: true } },
       });
 
       // Case insensitive
@@ -482,7 +482,7 @@ describe('forwardMessageToN8n', () => {
           ai: aiSettings({
             guardrails: { escalationKeywords: ['help me'], fallbackMessage: 'Getting someone now!' },
           }),
-          features: { fileUploadEnabled: true, handoffEnabled: true },
+          features: { handoffEnabled: true },
         },
       });
       const { session, message } = await setup(tenant.id, 'Please help me');
@@ -515,7 +515,7 @@ describe('forwardMessageToN8n', () => {
         const tenant = await createTestTenant({
           settings: {
             ai: aiSettings({ guardrails: { escalationKeywords: [], offHoursMessage: 'We are closed.' } }),
-            features: { fileUploadEnabled: true, handoffEnabled: true },
+            features: { handoffEnabled: true },
             businessHours: closedNowHours,
           },
         });
@@ -537,7 +537,7 @@ describe('forwardMessageToN8n', () => {
         const tenant = await createTestTenant({
           settings: {
             ai: aiSettings({ guardrails: { escalationKeywords: ['speak to human'], offHoursMessage: 'We are closed.' } }),
-            features: { fileUploadEnabled: true, handoffEnabled: true },
+            features: { handoffEnabled: true },
             businessHours: closedNowHours,
           },
         });
@@ -565,7 +565,7 @@ describe('forwardMessageToN8n', () => {
         webhookSecret: 's',
         settings: {
           ai: aiSettings({ guardrails: { escalationKeywords: ['help me'] } }),
-          features: { fileUploadEnabled: true, handoffEnabled: false },
+          features: { handoffEnabled: false },
         },
       });
       const { session, message } = await setup(tenant.id, 'help me now');
@@ -590,7 +590,7 @@ describe('forwardMessageToN8n', () => {
         }),
       } as unknown as AgentService);
       const tenant = await createTestTenant({
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+        settings: { ai: aiSettings(), features: { handoffEnabled: true } },
       });
       const { session, message } = await setup(tenant.id, 'hello');
 
@@ -608,7 +608,7 @@ describe('forwardMessageToN8n', () => {
         }),
       } as unknown as AgentService);
       const tenant = await createTestTenant({
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+        settings: { ai: aiSettings(), features: { handoffEnabled: true } },
       });
       const { session, message } = await setup(tenant.id, 'hello');
 
@@ -658,7 +658,7 @@ describe('forwardMessageToN8n', () => {
       const tenant = await createTestTenant({
         webhookUrl: 'https://n8n.test/hook',
         webhookSecret: 's',
-        settings: { ai: settings, features: { fileUploadEnabled: true, handoffEnabled: true } },
+        settings: { ai: settings, features: { handoffEnabled: true } },
       });
       const { session, message } = await setup(tenant.id);
 

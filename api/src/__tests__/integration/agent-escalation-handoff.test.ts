@@ -217,7 +217,7 @@ describe('escalation bridge — real agent loop through the legacy mapping', () 
 
   it('handoffEnabled: false withholds the tool — never offered, never promised, never handed off', async () => {
     initializeAgentService(realAgent());
-    const tenant = await makeTenant({ fileUploadEnabled: true, handoffEnabled: false });
+    const tenant = await makeTenant({ handoffEnabled: false });
     const session = await createTestSession(tenant.id, { status: 'bot' });
     const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
 

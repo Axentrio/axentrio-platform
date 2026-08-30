@@ -340,7 +340,7 @@ describe('requestHandoff / cancelHandoff', () => {
   });
 
   it('a handoffEnabled:false bot creates NO handoff and does not move ownership', async () => {
-    const tenant = await makeTenantWithAi({ fileUploadEnabled: true, handoffEnabled: false });
+    const tenant = await makeTenantWithAi({ handoffEnabled: false });
     const session = await createTestSession(tenant.id, { status: 'bot' });
 
     const result = await conversationCommands.requestHandoff(session.id, 'user_request', 'widget');

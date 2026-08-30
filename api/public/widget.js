@@ -1418,7 +1418,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.sessionId = null;
       this.tenantId = null;
       this.visitorId = null;
-      // Owner opt-in for file uploads, answered by /widget/config. Starts FALSE so the
+      // Plan entitlement for file uploads, answered by /widget/config. Starts FALSE so the
       // attach button stays hidden until the server says otherwise — the previous default
       // showed it on every embed and every upload then failed.
       this.serverFileUploadEnabled = false;
@@ -1701,7 +1701,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
         // The attach button is gated on the SERVER's answer, which defaults to false. The
         // embed option alone defaulted to true, so every widget on every site rendered an
-        // attach button whose uploads then 404'd. Owner opt-in decides this, not the embed.
+        // attach button whose uploads then 404'd. The plan fileUpload flag decides this, not the embed.
         this.serverFileUploadEnabled = data.features ? data.features.fileUploadEnabled === true : false;
         this._applyAppearance();
       } catch (err) {

@@ -46,7 +46,6 @@ export interface BotSettings {
     launcherLabel?: string | null;
   };
   features?: {
-    fileUploadEnabled: boolean;
     handoffEnabled: boolean;
     /** Long-term customer memory. Absent ⇒ ON. */
     customerMemoryEnabled?: boolean;

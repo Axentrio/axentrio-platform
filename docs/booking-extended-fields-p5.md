@@ -1,5 +1,12 @@
 # P5: Extended service fields
 
+> **Superseded on 2026-08-31, file upload only:** `ServiceType.fileUploadAllowed` is now
+> `fileUploadRequired`, and it means the opposite. The widget offers an upload whenever the
+> tenant's plan includes `fileUpload`, and the service flag decides whether a booking *needs*
+> a file. A required service with no ready file raises `FILE_REQUIRED`. The
+> `FILE_UPLOAD_NOT_ALLOWED` path, the "Allow file upload" checkbox, and the "permission, not
+> obligation" rule below no longer describe the code. See `docs/widget-file-upload-status.md`.
+
 The keystone added the *columns* for five capabilities and left their *behavior* to a
 later slice. P5 wires that behavior: the agent collects address/phone/files, capacity is
 enforced, duration can vary, and price can be quoted on a request. Almost every column

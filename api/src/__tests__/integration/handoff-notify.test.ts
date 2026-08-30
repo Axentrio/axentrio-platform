@@ -61,7 +61,7 @@ async function makeBotHandoffFixture() {
   await createTestAnchorBot(tenant, {
     name: 'Acme Assistant',
     settings: {
-      features: { fileUploadEnabled: true, handoffEnabled: true },
+      features: { handoffEnabled: true },
       ai: {
         enabled: true,
         brandVoice: { name: 'Acme Assistant', tone: 'friendly' },
@@ -203,7 +203,7 @@ describe('widget-initiated handoff notifications', () => {
     const bot = await createTestAnchorBot(tenant, {
       name: 'Widget Assistant',
       settings: {
-        features: { fileUploadEnabled: true, handoffEnabled: true },
+        features: { handoffEnabled: true },
         ai: { enabled: true },
       } as unknown as Bot['settings'],
     });

@@ -97,7 +97,6 @@ export class Tenant {
       launcherLabel?: string | null;
     };
     features?: {
-      fileUploadEnabled: boolean;
       handoffEnabled: boolean;
     };
     businessHours?: {

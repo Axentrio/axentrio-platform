@@ -19,6 +19,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 // installed — otherwise the whole upload/scan path (widget + channel) breaks at
 // import time and files never leave 'pending'.
 import { config as appConfig } from '../config/environment';
+import { createS3Client } from '../config/s3.config';
 import { logger } from '../utils/logger';
 
 // ============================================================================
@@ -67,9 +68,13 @@ export interface ClamAVHealth {
 // ============================================================================
 
 const DEFAULT_CONFIG: VirusScanConfig = {
-  clamavHost: process.env.CLAMAV_HOST || 'clamav',
-  clamavPort: parseInt(process.env.CLAMAV_PORT || '3310'),
-  timeoutMs: 60000, // 60 seconds
+  // Read the VALIDATED config, not process.env. CLAMAV_TIMEOUT was plumbed all
+  // the way to `config.clamav.timeout` and then ignored here, so the documented
+  // env var did nothing. Both callers cap the wait lower anyway (25s sync in
+  // virus-scan-trigger, 60s fire-and-forget), so this is the ceiling, not the wait.
+  clamavHost: appConfig.clamav.host || 'clamav',
+  clamavPort: appConfig.clamav.port,
+  timeoutMs: appConfig.clamav.timeout,
   maxFileSize: 25 * 1024 * 1024, // 25MB
   quarantineBucket: process.env.S3_QUARANTINE_BUCKET,
   enableStreaming: true,
@@ -98,13 +103,12 @@ export class VirusScanService {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.enabled = appConfig.clamav.enabled;
 
-    this.s3Client = new S3Client({
-      region: process.env.AWS_REGION || 'us-east-1',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-      },
-    });
+    // Centralized builder, same as upload.service. A bare S3Client ignores
+    // S3_ENDPOINT + forcePathStyle and resolves `<bucket>.s3.auto.amazonaws.com`
+    // (ENOTFOUND) on the prod object store, whose region is 'auto'. Because the
+    // scan fails closed, that bare client would have turned every upload into a
+    // 500 the moment CLAMAV_HOST was set.
+    this.s3Client = createS3Client();
 
     if (!this.enabled) {
       logger.warn('ClamAV not configured — virus scanning disabled');
@@ -188,7 +192,7 @@ export class VirusScanService {
     try {
       // Get file from S3
       const command = new GetObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET!,
+        Bucket: appConfig.s3.bucket!,
         Key: fileKey,
       });
 
@@ -429,7 +433,7 @@ export class VirusScanService {
     // Copy to quarantine bucket
     const { CopyObjectCommand } = await import('@aws-sdk/client-s3');
     const copyCommand = new CopyObjectCommand({
-      CopySource: `${process.env.AWS_S3_BUCKET}/${fileKey}`,
+      CopySource: `${appConfig.s3.bucket}/${fileKey}`,
       Bucket: this.config.quarantineBucket,
       Key: quarantineKey,
       Metadata: {

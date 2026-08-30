@@ -88,7 +88,6 @@ export interface ITenantSettings {
     customCss?: string;
   };
   features?: {
-    fileUploadEnabled: boolean;
     handoffEnabled: boolean;
   };
   businessHours?: {

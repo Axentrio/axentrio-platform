@@ -311,7 +311,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
                   onReschedule={() => setRescheduleTarget(b)}
                   onAccept={() =>
                     accept.mutate(
-                      { id: b.id },
+                      { id: b.id, requestKind: b.requestKind },
                       {
                         onError: (err) => {
                           const refusal = duplicateRefusalOf(err);
@@ -385,7 +385,11 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
               variant="ghost"
               onClick={() => {
                 if (duplicateTarget) {
-                  accept.mutate({ id: duplicateTarget.request.id, allowDuplicate: true });
+                  accept.mutate({
+                    id: duplicateTarget.request.id,
+                    allowDuplicate: true,
+                    requestKind: duplicateTarget.request.requestKind,
+                  });
                 }
                 setDuplicateTarget(null);
               }}

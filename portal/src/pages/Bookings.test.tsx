@@ -7,14 +7,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const { hasFeatureMock, apiGet } = vi.hoisted(() => ({
+const { hasFeatureMock, apiGet, apiPost } = vi.hoisted(() => ({
   hasFeatureMock: vi.fn<(_key: string) => boolean>(),
   apiGet: vi.fn(),
+  apiPost: vi.fn(),
 }));
 
 vi.mock('../queries/useEntitlementsQueries', async () => {
@@ -33,7 +34,7 @@ vi.mock('../queries/useEntitlementsQueries', async () => {
 vi.mock('../services/apiClient', () => ({
   api: {
     get: apiGet,
-    post: vi.fn(),
+    post: apiPost,
     put: vi.fn(),
     patch: vi.fn(),
     delete: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
+import { toast } from 'sonner';
 import Bookings, { travelVerdictLookup } from './Bookings';
 
 function renderUI({ services = [] }: { services?: Array<Record<string, unknown>> } = {}) {
@@ -115,6 +117,8 @@ const entitlementsPayload = {
 beforeEach(() => {
   hasFeatureMock.mockReset();
   apiGet.mockReset();
+  apiPost.mockReset();
+  apiPost.mockResolvedValue({});
 });
 
 describe('Bookings — locked (Essential tenant)', () => {
@@ -363,5 +367,49 @@ describe('Bookings — which reschedule slots carry a drive nobody vouched for',
   it('lets impossible win over merely tight if a slot somehow appears in both', () => {
     const verdict = travelVerdictLookup({ unreachableSlots: [slot(7)], requestableSlots: [slot(7)] });
     expect(verdict(slot(7).start)).toBe('unreachable');
+  });
+});
+
+describe('Bookings — Accept move passes requestKind so the toast can name the move', () => {
+  const moveRequest = {
+    id: 'req-move',
+    serviceName: 'Haircut',
+    attendeeName: 'Ada',
+    startTime: '2026-09-11T08:00:00.000Z',
+    endTime: '2026-09-11T08:30:00.000Z',
+    status: 'request_created',
+    requestKind: 'reschedule',
+  };
+
+  it('toasts that the appointment moved, not that it was confirmed', async () => {
+    hasFeatureMock.mockReturnValue(true);
+    apiGet.mockImplementation(async (url: string) => {
+      if (url.includes('/scheduler/services')) {
+        return { services: [{ id: 's1', name: 'Haircut', durationMin: 30, active: true }] };
+      }
+      const scope = /scope=(\w+)/.exec(url)?.[1];
+      if (scope === 'requests') return { bookings: [moveRequest], total: 1 };
+      if (scope) return { bookings: [], total: 0 };
+      return entitlementsPayload;
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Bookings />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /accept move/i }));
+
+    await waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith('/scheduler/bookings/req-move/accept', {});
+    });
+    expect(toast.success).toHaveBeenCalledWith('Request accepted — appointment moved');
+    expect(toast.success).not.toHaveBeenCalledWith('Request accepted — appointment confirmed');
   });
 });

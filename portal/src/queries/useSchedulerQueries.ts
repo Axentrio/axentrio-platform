@@ -545,17 +545,36 @@ export function duplicateRefusalOf(err: unknown): DuplicateRefusal | undefined {
   };
 }
 
-/** Accept a request_created lead → confirm it (creates the calendar event + email). */
+/**
+ * Owner-facing toast after Accept. The verb has to match the request: a move is not a
+ * confirmation, and a cancellation is not an appointment being created.
+ */
+export function acceptSuccessMessage(requestKind?: string | null): string {
+  if (requestKind === 'reschedule') return 'Request accepted — appointment moved';
+  if (requestKind === 'cancel') return 'Request accepted — appointment cancelled';
+  return 'Request accepted — appointment confirmed';
+}
+
+/** Accept a request_created row (new lead, move, or cancellation). */
 export function useAcceptRequest() {
   const queryClient = useQueryClient();
   return useMutation({
     // `allowDuplicate` is the owner's SECOND click, after being shown the appointment this
     // would duplicate. Never a default — that is the whole guard.
-    mutationFn: ({ id, allowDuplicate }: { id: string; allowDuplicate?: boolean }) =>
-      api.post(`/scheduler/bookings/${id}/accept`, allowDuplicate ? { allowDuplicate: true } : {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: bookingsKey });
-      toast.success('Request accepted — appointment confirmed');
+    // `requestKind` is not sent to the API — the server already knows — but the toast does,
+    // and Upcoming is a different query than Requests. With a 30s staleTime it will keep
+    // showing the old slot unless inactive scopes refetch too (`refetchType: 'all'`).
+    mutationFn: ({
+      id,
+      allowDuplicate,
+    }: {
+      id: string;
+      allowDuplicate?: boolean;
+      requestKind?: string | null;
+    }) => api.post(`/scheduler/bookings/${id}/accept`, allowDuplicate ? { allowDuplicate: true } : {}),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: bookingsKey, refetchType: 'all' });
+      toast.success(acceptSuccessMessage(variables.requestKind));
     },
     onError: (err: Any) => {
       // A duplicate refusal is handled by the page, which offers a choice. Toasting it here too

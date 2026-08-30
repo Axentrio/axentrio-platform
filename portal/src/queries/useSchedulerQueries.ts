@@ -561,9 +561,11 @@ export function useAcceptRequest() {
   return useMutation({
     // `allowDuplicate` is the owner's SECOND click, after being shown the appointment this
     // would duplicate. Never a default — that is the whole guard.
-    // `requestKind` is not sent to the API — the server already knows — but the toast does,
-    // and Upcoming is a different query than Requests. With a 30s staleTime it will keep
-    // showing the old slot unless inactive scopes refetch too (`refetchType: 'all'`).
+    // `requestKind` is not sent to the API — the server already knows — but the toast does.
+    // Upcoming is a different query than Requests. With a 30s staleTime the old slot stays
+    // on screen unless inactive scopes refetch too (`refetchType: 'all'`), and unless that
+    // refetch finishes BEFORE the success toast — `mutate` keeps `isPending` until this
+    // promise settles, so the owner cannot switch tabs onto stale Upcoming.
     mutationFn: ({
       id,
       allowDuplicate,
@@ -572,8 +574,8 @@ export function useAcceptRequest() {
       allowDuplicate?: boolean;
       requestKind?: string | null;
     }) => api.post(`/scheduler/bookings/${id}/accept`, allowDuplicate ? { allowDuplicate: true } : {}),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: bookingsKey, refetchType: 'all' });
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({ queryKey: bookingsKey, refetchType: 'all' });
       toast.success(acceptSuccessMessage(variables.requestKind));
     },
     onError: (err: Any) => {

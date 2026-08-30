@@ -2,6 +2,8 @@
  * Accept-request mutation: the toast has to name the thing that actually happened, and
  * Upcoming has to refetch even while the owner is still on Requests. A 30s staleTime plus
  * the default `refetchType: 'active'` is how the old date survived a successful move.
+ * The refetch also has to finish before toast.success — otherwise the owner can switch
+ * tabs onto stale Upcoming while the toast already claims the move happened.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, renderHook, waitFor } from '@testing-library/react';
@@ -47,6 +49,9 @@ import {
   useAdminBookings,
   type BookingScope,
 } from './useSchedulerQueries';
+
+const THURSDAY = { bookings: [{ id: 'orig', startTime: '2026-09-10T08:00:00.000Z' }], total: 1 };
+const FRIDAY = { bookings: [{ id: 'orig', startTime: '2026-09-11T08:00:00.000Z' }], total: 1 };
 
 function makeClient() {
   return new QueryClient({
@@ -98,13 +103,50 @@ describe('useAcceptRequest', () => {
     expect(toastSuccess).toHaveBeenCalledWith(message);
   });
 
-  it('refetches inactive Upcoming after accepting a move', async () => {
+  it('invalidates booking scopes with refetchType all', async () => {
+    const queryClient = makeClient();
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useAcceptRequest(), { wrapper: wrapperFor(queryClient) });
+    await result.current.mutateAsync({ id: 'req-1', requestKind: 'reschedule' });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: ['scheduler', 'bookings'],
+      refetchType: 'all',
+    });
+  });
+
+  it('does not toast until invalidateQueries has settled', async () => {
+    const queryClient = makeClient();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(queryClient, 'invalidateQueries').mockReturnValue(held as Promise<void>);
+
+    const { result } = renderHook(() => useAcceptRequest(), { wrapper: wrapperFor(queryClient) });
+    let settled = false;
+    const pending = result.current.mutateAsync({ id: 'req-1', requestKind: 'reschedule' }).then(() => {
+      settled = true;
+    });
+
+    await waitFor(() => {
+      expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['scheduler', 'bookings'],
+        refetchType: 'all',
+      });
+    });
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(settled).toBe(false);
+
+    release();
+    await pending;
+    expect(toastSuccess).toHaveBeenCalledWith('Request accepted — appointment moved');
+  });
+
+  it('writes the moved slot into inactive Upcoming cache before toasting', async () => {
     const queryClient = makeClient();
     apiGet.mockImplementation(async (url: string) => {
       const scope = /scope=(\w+)/.exec(url)?.[1];
-      if (scope === 'upcoming') {
-        return { bookings: [{ id: 'orig', startTime: '2026-09-10T08:00:00.000Z' }], total: 1 };
-      }
+      if (scope === 'upcoming') return THURSDAY;
       if (scope === 'requests') {
         return { bookings: [{ id: 'req-1', requestKind: 'reschedule' }], total: 1 };
       }
@@ -132,7 +174,7 @@ describe('useAcceptRequest', () => {
 
     const { getByRole } = render(<Harness />, { wrapper: wrapperFor(queryClient) });
     await waitFor(() =>
-      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('scope=upcoming')),
+      expect(queryClient.getQueryData(['scheduler', 'bookings', 'upcoming'])).toEqual(THURSDAY),
     );
 
     await userEvent.click(getByRole('button', { name: 'requests' }));
@@ -140,22 +182,26 @@ describe('useAcceptRequest', () => {
       expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('scope=requests')),
     );
 
+    apiGet.mockImplementation(async (url: string) => {
+      const scope = /scope=(\w+)/.exec(url)?.[1];
+      if (scope === 'upcoming') return FRIDAY;
+      if (scope === 'requests') return { bookings: [], total: 0 };
+      return { bookings: [], total: 0 };
+    });
     apiGet.mockClear();
+    toastSuccess.mockClear();
+
     await userEvent.click(getByRole('button', { name: 'accept' }));
 
     await waitFor(() => {
-      expect(apiGet).toHaveBeenCalledWith(expect.stringContaining('scope=upcoming'));
+      expect(queryClient.getQueryData(['scheduler', 'bookings', 'upcoming'])).toEqual(FRIDAY);
     });
-  });
-
-  it('invalidates booking scopes with refetchType all', async () => {
-    const queryClient = makeClient();
-    const spy = vi.spyOn(queryClient, 'invalidateQueries');
-    const { result } = renderHook(() => useAcceptRequest(), { wrapper: wrapperFor(queryClient) });
-    await result.current.mutateAsync({ id: 'req-1', requestKind: 'reschedule' });
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: ['scheduler', 'bookings'],
-      refetchType: 'all',
-    });
+    expect(toastSuccess).toHaveBeenCalledWith('Request accepted — appointment moved');
+    const fridayAt = toastSuccess.mock.invocationCallOrder[0];
+    const upcomingGets = apiGet.mock.calls
+      .map((call, i) => ({ url: String(call[0]), order: apiGet.mock.invocationCallOrder[i] }))
+      .filter((c) => c.url.includes('scope=upcoming'));
+    expect(upcomingGets.length).toBeGreaterThan(0);
+    expect(upcomingGets.every((c) => c.order < fridayAt)).toBe(true);
   });
 });

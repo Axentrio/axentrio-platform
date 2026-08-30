@@ -1,8 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
-import { DateTime } from 'luxon';
 import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
-import { luxonChipTitleFormat, luxonTimeFormat } from '../contracts/clock-format';
+import { resolveBotLanguage, slotChipQuickReply } from '../config/bot-language';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
@@ -244,17 +243,14 @@ interface PendingAvailability {
  * replies are disabled on the Telegram adapter; the widget + Messenger/IG/
  * WhatsApp have ample payload room.)
  */
-function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | undefined {
+function buildSlotQuickReplies(
+  av: PendingAvailability | null,
+  language: ReturnType<typeof resolveBotLanguage>,
+): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
-  const forService = av.serviceName ? `${av.serviceName} on ` : '';
-  return av.slots.slice(0, 8).map((s) => {
-    const dt = DateTime.fromISO(s.start).setZone(av.timezone);
-    const timeFmt = luxonTimeFormat(av.timezone);
-    return {
-      title: dt.toFormat(luxonChipTitleFormat(av.timezone)),
-      value: `Book ${forService}${dt.toFormat('cccc d LLLL')} at ${dt.toFormat(timeFmt)}`,
-    };
-  });
+  return av.slots.slice(0, 8).map((s) =>
+    slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
+  );
 }
 
 /**
@@ -1718,7 +1714,9 @@ export class AgentService {
       (namesSingleOfferedTime(customerTimeText, times.confirmableLocal) ||
         namesSingleOfferedTime(finalContent, times.confirmableLocal))
     );
-    const slotChips = alreadyChoseTime ? undefined : buildSlotQuickReplies(av);
+    const slotChips = alreadyChoseTime
+      ? undefined
+      : buildSlotQuickReplies(av, resolveBotLanguage(ctx.aiSettings?.language));
     const safeContent = await this.safeReplyContent({
       ctx, finalContent, av, times, customerTimeText, onScreen: !!slotChips?.length,
     });

@@ -2,6 +2,9 @@
  * Default language for greeting chips and replies. The bot switches only when
  * the visitor writes clearly in another language. jsonb on settings.ai - no migration.
  */
+import { DateTime } from 'luxon';
+import { luxonChipTitleFormat, luxonTimeFormat } from '../contracts/clock-format';
+
 export const BOT_LANGUAGES = ['en', 'nl', 'fr'] as const;
 export type BotLanguage = (typeof BOT_LANGUAGES)[number];
 
@@ -59,4 +62,82 @@ export function resolveGreetingMessage(stored: string | undefined, language: Bot
 
 export function greetingQuickReplies(language: BotLanguage): readonly string[] {
   return GREETING_QUICK_REPLIES_BY_LANGUAGE[language];
+}
+
+/** Verb that starts a tapped slot-chip sentence. isConfirmingChip reads the same list. */
+export const SLOT_CHIP_VERBS: Record<BotLanguage, string> = {
+  en: 'Book',
+  nl: 'Boek',
+  fr: 'Réservez',
+};
+
+/**
+ * Weekday tokens Luxon `ccc` emits for en/nl/fr. French keeps a trailing
+ * period (`mar.`), so the confirm prefix cannot rely on `\b` after the token.
+ */
+export const SLOT_CHIP_WEEKDAYS = [
+  'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+  'lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim',
+  'ma', 'di', 'wo', 'do', 'vr', 'za', 'zo',
+] as const;
+
+function slotChipVerbAlternation(): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const verb of Object.values(SLOT_CHIP_VERBS)) {
+    for (const form of [verb, verb.normalize('NFD').replace(/\p{M}/gu, '')]) {
+      const key = form.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parts.push(form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    }
+  }
+  return parts.join('|');
+}
+
+/**
+ * Prefix of a chip we issued: Book/Boek/Réservez, or weekday+time (`Tue 09:00`,
+ * `di 09:00`, `mar. 09:00`). A period is not a word character, so `mar.` would
+ * fail `\b`; the weekday arm therefore allows an optional trailing dot and
+ * then whitespace.
+ */
+export const SLOT_CHIP_CONFIRM_PREFIX = new RegExp(
+  `^(?:(?:${slotChipVerbAlternation()})\\b|(?:${SLOT_CHIP_WEEKDAYS.join('|')})\\.?\\s)`,
+  'i',
+);
+
+/**
+ * A tapped slot chip is sent back as a customer sentence. It has to be in the
+ * bot language: an English "Book … on Tuesday" under a Dutch reply is the same
+ * class of leak as a canned fallback that never went through localizeMessage.
+ */
+export function slotChipQuickReply(
+  startIso: string,
+  timezone: string,
+  language: BotLanguage,
+  serviceName?: string | null,
+): { title: string; value: string } {
+  const dt = DateTime.fromISO(startIso).setZone(timezone).setLocale(language);
+  const date = dt.toFormat('cccc d LLLL');
+  const time = dt.toFormat(luxonTimeFormat(timezone));
+  const service = serviceName?.trim() || '';
+  return {
+    title: dt.toFormat(luxonChipTitleFormat(timezone)),
+    value: slotChipValue(language, { service, date, time }),
+  };
+}
+
+function slotChipValue(
+  language: BotLanguage,
+  parts: { service: string; date: string; time: string },
+): string {
+  const { service, date, time } = parts;
+  const verb = SLOT_CHIP_VERBS[language];
+  if (language === 'nl') {
+    return service ? `${verb} ${service} op ${date} om ${time}` : `${verb} ${date} om ${time}`;
+  }
+  if (language === 'fr') {
+    return service ? `${verb} ${service} le ${date} à ${time}` : `${verb} le ${date} à ${time}`;
+  }
+  return service ? `${verb} ${service} on ${date} at ${time}` : `${verb} ${date} at ${time}`;
 }

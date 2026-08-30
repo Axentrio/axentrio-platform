@@ -12,6 +12,7 @@
 import type { ToolContext, ToolResult } from './tool-adapter';
 import { contentToText } from '../llm/llm.types';
 import { namesSingleOfferedTime, parseClockTimes } from './clock-times';
+import { SLOT_CHIP_CONFIRM_PREFIX } from '../config/bot-language';
 import { getRedisClient } from '../config/redis';
 import { wallClockKey } from './offered-slots-store';
 import { logger } from '../utils/logger';
@@ -56,7 +57,7 @@ export function isAffirmativeReply(text: string): boolean {
 export function isConfirmingChip(text: string, startTime: string): boolean {
   const trimmed = text.trim();
   if (!trimmed || trimmed.length > CHIP_MAX_CHARS || trimmed.includes('?')) return false;
-  if (!/^(book\b|(?:mon|tue|wed|thu|fri|sat|sun|ma|di|wo|do|vr|za|zo)\b)/i.test(trimmed)) {
+  if (!SLOT_CHIP_CONFIRM_PREFIX.test(trimmed)) {
     return false;
   }
   const clock = startTime.match(/T(\d{2}):(\d{2})/);

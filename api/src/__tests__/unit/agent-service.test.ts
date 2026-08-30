@@ -391,9 +391,9 @@ describe('AgentService', () => {
       expect(result.quickReplies![0]).toHaveProperty('value');
       // value carries the absolute date+time so the next turn can re-book it;
       // IANA timezone stays off the customer-visible bubble (slot ISO + tool JSON
-      // identify the slot).
+      // identify the slot). UTC is a 24-hour zone, so the chip says 08:00 not 8:00 AM.
       expect(result.quickReplies![0].value).toContain('10 June');
-      expect(result.quickReplies![0].value).toContain('8:00 AM');
+      expect(result.quickReplies![0].value).toContain('08:00');
       expect(result.quickReplies![0].value).not.toContain('UTC');
       expect(result.quickReplies![0].value).not.toMatch(/\([A-Za-z]+\/[A-Za-z_]+\)/);
     }

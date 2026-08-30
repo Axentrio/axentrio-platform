@@ -297,25 +297,26 @@ export class UploadService {
    * Hydrate an UploadSession (the in-memory interface) from a DB row.
    * Keeps callers reading the same field shape as before.
    */
-  private rowToSession(row: Record<string, unknown>): UploadSession {
+  private rowToSession(row: UploadSessionEntity | Record<string, unknown>): UploadSession {
+    const rec = row as unknown as Record<string, unknown>;
     return {
-      sessionId: row.sessionId as string,
-      uploadUrl: row.uploadUrl as string,
-      publicUrl: row.publicUrl as string,
-      expiresAt: row.expiresAt as Date,
-      fileKey: row.fileKey as string,
-      fileHash: row.fileHash as string,
-      status: row.status as UploadSession['status'],
-      tenantId: row.tenantId as string,
-      userId: row.userId as string,
-      chatSessionId: (row.chatSessionId as string) ?? '',
-      originalName: row.originalName as string,
+      sessionId: rec.sessionId as string,
+      uploadUrl: rec.uploadUrl as string,
+      publicUrl: rec.publicUrl as string,
+      expiresAt: rec.expiresAt as Date,
+      fileKey: rec.fileKey as string,
+      fileHash: rec.fileHash as string,
+      status: rec.status as UploadSession['status'],
+      tenantId: rec.tenantId as string,
+      userId: rec.userId as string,
+      chatSessionId: (rec.chatSessionId as string) ?? '',
+      originalName: rec.originalName as string,
       // bigint columns come back as strings from node-postgres — coerce.
-      fileSize: typeof row.fileSize === 'string' ? Number(row.fileSize) : (row.fileSize as number),
-      mimeType: row.mimeType as string,
-      createdAt: row.createdAt as Date,
-      scanResult: row.scanResult as UploadSession['scanResult'] | undefined,
-      thumbnailUrl: (row.thumbnailUrl as string | null) ?? undefined,
+      fileSize: typeof rec.fileSize === 'string' ? Number(rec.fileSize) : (rec.fileSize as number),
+      mimeType: rec.mimeType as string,
+      createdAt: rec.createdAt as Date,
+      scanResult: rec.scanResult as UploadSession['scanResult'] | undefined,
+      thumbnailUrl: (rec.thumbnailUrl as string | null) ?? undefined,
     };
   }
 

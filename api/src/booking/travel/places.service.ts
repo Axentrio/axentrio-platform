@@ -22,6 +22,7 @@
 import axios from 'axios';
 import { config } from '../../config/environment';
 import { logger } from '../../utils/logger';
+import { hasStreetAndHouseNumber } from '../booking-providers/contact';
 import { recordCause } from './degradation-monitor';
 import { reserveTravelElements } from './travel-usage.service';
 
@@ -46,7 +47,11 @@ const REGION_CODES = ['be'];
  */
 const PRIMARY_TYPES = ['street_address', 'premise', 'subpremise'];
 
-/** Place types that are a city, station, or other map hit - never a customer's door. */
+/**
+ * Place types that are a city, station, or other map hit - never a customer's door.
+ * `establishment` / `point_of_interest` are omitted: Google often tags a house
+ * with only those, and a street + house number is still a door.
+ */
 const NOT_A_STREET = new Set([
   'locality',
   'sublocality',
@@ -63,8 +68,6 @@ const NOT_A_STREET = new Set([
   'subway_station',
   'light_rail_station',
   'airport',
-  'point_of_interest',
-  'establishment',
 ]);
 
 const STREET_TYPES = new Set(['street_address', 'premise', 'subpremise', 'street_number', 'route']);
@@ -74,10 +77,11 @@ const STREET_TYPES = new Set(['street_address', 'premise', 'subpremise', 'street
  *
  * Google still returns "Antwerp, Belgium" and "Antwerpen-Centraal" for a city query even
  * when `includedPrimaryTypes` asks for streets. Those rows used to ship as booking options.
+ * A house tagged only `establishment` is kept when the text is a street with a house number.
  */
 export function isStreetAddressSuggestion(text: string, types: string[] = []): boolean {
   if (/centraal|\bstation\b|luchthaven|\bairport\b/i.test(text)) return false;
-  if (!/\b\d{1,4}[A-Za-z]?\b/.test(text)) return false;
+  if (!hasStreetAndHouseNumber(text)) return false;
   if (types.some((type) => STREET_TYPES.has(type))) {
     return !types.some((type) => type === 'transit_station' || type === 'train_station' || type === 'bus_station');
   }

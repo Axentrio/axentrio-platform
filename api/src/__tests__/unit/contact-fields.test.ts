@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assertRequiredAddress,
   assertRequiredPhone,
+  hasStreetAndHouseNumber,
   isCompleteCustomerAddress,
   resolveContactFields,
 } from '../../booking/booking-providers/contact';
@@ -56,9 +57,31 @@ describe('isCompleteCustomerAddress', () => {
     '2000 Antwerpen',
     'Kerkstraat 12',
     'Kerkstraat 12, Antwerpen',
+    'Grote Markt 1, Antwerpen',
     'the house behind the church',
   ])('rejects %s', (address) => {
     expect(isCompleteCustomerAddress(address)).toBe(false);
+  });
+});
+
+describe('hasStreetAndHouseNumber', () => {
+  it.each([
+    'Kerkstraat 12, 9000 Gent',
+    'Grote Markt 1, Antwerpen',
+    'Kerkstraat 12, Antwerpen',
+    'Passtraat 248 bus B, 9100 Sint-Niklaas',
+  ])('accepts a door at %s', (address) => {
+    expect(hasStreetAndHouseNumber(address)).toBe(true);
+  });
+
+  it.each([
+    'Antwerp',
+    'Antwerp, Belgium',
+    '2000 Antwerpen',
+    'Atomium, 1020 Brussel',
+    'the house behind the church',
+  ])('rejects %s', (address) => {
+    expect(hasStreetAndHouseNumber(address)).toBe(false);
   });
 });
 
@@ -145,6 +168,24 @@ describe('assertRequiredPhone', () => {
 
   it('accepts a phone call once the number is given', () => {
     expect(() => assertRequiredPhone(call, { customerPhone: '+32470000000' })).not.toThrow();
+  });
+
+  it('treats a whitespace-only number as absent on a phone call', () => {
+    expect(() => assertRequiredPhone(call, { customerPhone: '   ' })).toThrow(BookingError);
+  });
+
+  it('fills the number from a WhatsApp session on a phone call', () => {
+    // resolvePhone is keyed on the SESSION, not the service, so a row that never had the
+    // flag set must still get the channel fallback rather than a dead end.
+    expect(() =>
+      assertRequiredPhone(call, undefined, { channel: 'whatsapp', visitorId: '32470000000' }),
+    ).not.toThrow();
+  });
+
+  it('does not invent a number from a Messenger PSID', () => {
+    expect(() =>
+      assertRequiredPhone(call, undefined, { channel: 'messenger', visitorId: '1234567890' }),
+    ).toThrow(BookingError);
   });
 
   it('does not demand an address for that same phone-call row', () => {

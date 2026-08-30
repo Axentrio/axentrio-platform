@@ -1658,6 +1658,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
   });
 
+
   it('throws FILE_REQUIRED when the service requires a file and none are ready', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: true }]);
     getReadyFileIds.mockResolvedValue([]);
@@ -2243,6 +2244,11 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
   it('REFUSES a city-only address rather than treating it as the job location', async () => {
     await expect(check('Antwerp')).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
     await expect(check('Antwerpen, Antwerp, Belgium')).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+    expect(placeAddressFor).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES a street without a postal code rather than treating it as the job location', async () => {
+    await expect(check('Grote Markt 1, Antwerpen')).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
     expect(placeAddressFor).not.toHaveBeenCalled();
   });
 

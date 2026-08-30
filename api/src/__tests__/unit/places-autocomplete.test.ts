@@ -23,7 +23,7 @@ vi.mock('../../config/environment', () => ({
   config: { travel: { googleMapsApiKey: 'test-key', monthlyElementCapPerTenant: 5000 } },
 }));
 
-import { autocompleteAddress } from '../../booking/travel/places.service';
+import { autocompleteAddress, isStreetAddressSuggestion } from '../../booking/travel/places.service';
 import { config } from '../../config/environment';
 
 const ok = (rows: Array<{ id: string; text: string }>) => ({
@@ -36,6 +36,35 @@ beforeEach(() => {
   vi.clearAllMocks();
   reserve.mockResolvedValue(true);
   (config as { travel: { googleMapsApiKey?: string } }).travel.googleMapsApiKey = 'test-key';
+});
+
+describe('isStreetAddressSuggestion', () => {
+  it('keeps a house Google tagged only as establishment', () => {
+    expect(
+      isStreetAddressSuggestion('Kerkstraat 12, 2060 Antwerpen, Belgium', ['establishment']),
+    ).toBe(true);
+  });
+
+  it('keeps a street with a house number even when the postal is still missing', () => {
+    expect(isStreetAddressSuggestion('Grote Markt 1, Antwerpen', ['establishment'])).toBe(true);
+  });
+
+  it('drops a landmark whose digits are a postal code, not a house number', () => {
+    expect(isStreetAddressSuggestion('Atomium, 1020 Brussel', ['point_of_interest', 'establishment'])).toBe(
+      false,
+    );
+  });
+
+  it('still drops cities and stations', () => {
+    expect(isStreetAddressSuggestion('Antwerp, Belgium', ['locality', 'political'])).toBe(false);
+    expect(
+      isStreetAddressSuggestion('Antwerpen-Centraal, Koningin Astridplein, Antwerp, Belgium', [
+        'train_station',
+        'transit_station',
+        'establishment',
+      ]),
+    ).toBe(false);
+  });
 });
 
 describe('autocompleteAddress', () => {
@@ -124,6 +153,20 @@ describe('autocompleteAddress', () => {
               types: ['street_address', 'geocode'],
             },
           },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_house',
+              text: { text: 'Kerkstraat 12A, 2060 Antwerpen, Belgium' },
+              types: ['establishment'],
+            },
+          },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_atomium',
+              text: { text: 'Atomium, 1020 Brussel' },
+              types: ['point_of_interest', 'establishment'],
+            },
+          },
         ],
       },
     });
@@ -131,7 +174,10 @@ describe('autocompleteAddress', () => {
     const result = await autocompleteAddress('ten-1', 'Antwerp');
     expect(result).toEqual({
       status: 'ok',
-      suggestions: [{ placeId: 'ChIJ_street', text: 'Kerkstraat 12, 2060 Antwerpen, Belgium' }],
+      suggestions: [
+        { placeId: 'ChIJ_street', text: 'Kerkstraat 12, 2060 Antwerpen, Belgium' },
+        { placeId: 'ChIJ_house', text: 'Kerkstraat 12A, 2060 Antwerpen, Belgium' },
+      ],
     });
   });
 

@@ -45,6 +45,33 @@ function resolvePhone(
   return phone;
 }
 
+function customerAddressShape(value: string | null | undefined): { street: boolean; postalCity: boolean } {
+  if (!value) return { street: false, postalCity: false };
+  const n = value.trim().replace(/\s+/g, ' ');
+  if (!n) return { street: false, postalCity: false };
+
+  const postalCity = n.match(/\b([1-9]\d{3})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]*)/);
+  const city = postalCity?.[2]?.replace(/\b(belgium|belgie|belgië|be)\b/gi, '').trim() ?? '';
+  const postalOk = Boolean(postalCity && /[A-Za-zÀ-ÿ]{2,}/.test(city));
+
+  const before =
+    postalCity && postalCity.index !== undefined
+      ? n.slice(0, postalCity.index).replace(/[,\s]+$/, '')
+      : n;
+  const hasHouse = /\b\d{1,4}[A-Za-z]?\b/.test(before);
+  const street = before.replace(/\b\d{1,4}[A-Za-z]?\b/g, ' ').replace(/[,.\s]+/g, ' ').trim();
+  return { street: hasHouse && /[A-Za-zÀ-ÿ]{2,}/.test(street), postalCity: postalOk };
+}
+
+/**
+ * Street and house number the van can be sent to. Postal code may still be
+ * missing — autocomplete uses this so a chip can be a door without yet being a
+ * complete booking address.
+ */
+export function hasStreetAndHouseNumber(value: string | null | undefined): boolean {
+  return customerAddressShape(value).street;
+}
+
 /**
  * A Belgian appointment address the van can be sent to: street, house number,
  * postal code, and city. A city name, a station, or the business location is not
@@ -52,17 +79,8 @@ function resolvePhone(
  * inventing fields the API does not have.
  */
 export function isCompleteCustomerAddress(value: string | null | undefined): boolean {
-  if (!value) return false;
-  const n = value.trim().replace(/\s+/g, ' ');
-  if (!n) return false;
-  const postalCity = n.match(/\b([1-9]\d{3})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' \-]*)/);
-  if (!postalCity || postalCity.index === undefined) return false;
-  const city = postalCity[2].replace(/\b(belgium|belgie|belgië|be)\b/gi, '').trim();
-  if (!/[A-Za-zÀ-ÿ]{2,}/.test(city)) return false;
-  const before = n.slice(0, postalCity.index).replace(/[,\s]+$/, '');
-  if (!/\b\d{1,4}[A-Za-z]?\b/.test(before)) return false;
-  const street = before.replace(/\b\d{1,4}[A-Za-z]?\b/g, ' ').replace(/[,.\s]+/g, ' ').trim();
-  return /[A-Za-zÀ-ÿ]{2,}/.test(street);
+  const shape = customerAddressShape(value);
+  return shape.street && shape.postalCity;
 }
 
 const ADDRESS_REQUIRED_MESSAGE =

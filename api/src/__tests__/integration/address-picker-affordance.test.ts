@@ -196,6 +196,24 @@ describe('offering to verify the address', () => {
     },
   );
 
+  it.each(['Grote Markt 1, Antwerpen', 'Kerkstraat 12, Antwerpen'])(
+    'does not offer map search when %s has no postal code',
+    async (customerAddress) => {
+      mockCheckAvailability.mockResolvedValue({
+        ...TRAVELS,
+        travel: { requestableSlots: [{ start: '2026-09-01T09:00:00Z' }], addressTooVague: true },
+      });
+
+      const res = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress },
+        { ...ctx(), channel: 'whatsapp' },
+      );
+
+      expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+      expect(res.affordance).toBeUndefined();
+    },
+  );
+
   it('does not offer map search when no address was given', async () => {
     mockCheckAvailability.mockResolvedValue({
       ...TRAVELS,

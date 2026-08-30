@@ -65,6 +65,20 @@ describe('channel address controls', () => {
     ]);
   });
 
+  it('does not mint numbered Meta replies when the picker has no street options', () => {
+    const response = { type: 'text' as const, content: 'I need the street, house number, postal code, and city.' };
+    const emptyPicker = {
+      kind: 'address_picker' as const,
+      reason: 'too_vague' as const,
+      query: 'Antwerp',
+      options: [] as Array<{ id: string; placeId: string; text: string }>,
+    };
+    expect(renderChannelAddressControls(response, emptyPicker, 'whatsapp')).toEqual(response);
+    expect(renderChannelAddressControls(response, { ...emptyPicker, options: undefined }, 'messenger')).toEqual(
+      response,
+    );
+  });
+
   it('does not turn Telegram or widget affordances into channel quick replies', () => {
     const response = { type: 'text' as const, content: 'hello' };
     const affordance = {

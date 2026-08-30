@@ -225,6 +225,7 @@ function formFromService(s: Service): FormState {
     customerAddressRequired: !!s.customerAddressRequired,
     customerChoosesLocation: !!s.customerChoosesLocation,
     customerLocationRequired: !!s.customerLocationRequired,
+    ...locationTypeSideEffects(s.locationType),
     fileUploadAllowed: !!s.fileUploadAllowed,
     maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
@@ -288,6 +289,7 @@ function toInput(f: FormState): ServiceInput {
     customerAddressRequired: f.customerAddressRequired,
     customerChoosesLocation: f.customerChoosesLocation,
     customerLocationRequired: f.customerLocationRequired,
+    ...locationTypeSideEffects(f.locationType),
     fileUploadAllowed: f.fileUploadAllowed,
     maxBookingsPerDay: num(f.maxBookingsPerDay),
     // Always send the array (even []) so the server replaces/clears; echo each id.
@@ -985,16 +987,39 @@ function locationHint(locationType: string): string {
   return 'No location is put on the invite.';
 }
 
+/** Client-side mirror of api/src/booking/service-location.ts locationTypeSideEffects. */
+function locationTypeSideEffects(locationType: string): Partial<
+  Pick<FormState, 'customerAddressRequired' | 'customerChoosesLocation' | 'customerLocationRequired'>
+> {
+  if (locationType === 'customer_location') {
+    return { customerAddressRequired: true, customerChoosesLocation: false };
+  }
+  if (locationType === 'business_location') {
+    return { customerAddressRequired: false };
+  }
+  if (locationType === 'phone') {
+    return {
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+      customerLocationRequired: true,
+    };
+  }
+  return {};
+}
+
 /** Location + on-site flags block. Split out of ServiceEditorDialog (complexity). */
 const LocationFields: React.FC<{
   form: FormState;
   set: FieldSetter;
   workLocation: WorkLocation;
 }> = ({ form, set, workLocation }) => {
-  // 'business_location' and 'customer_location' both pin the address flag, so the
-  // checkbox is locked for them.
+  // business_location, customer_location and phone all pin the address flag.
+  // Phone also pins the phone flag on.
   const addressPinned =
-    form.locationType === 'business_location' || form.locationType === 'customer_location';
+    form.locationType === 'business_location'
+    || form.locationType === 'customer_location'
+    || form.locationType === 'phone';
+  const phonePinned = form.locationType === 'phone';
   return (
     <div className="space-y-2 border-t border-edge pt-3">
       {/*
@@ -1013,11 +1038,15 @@ const LocationFields: React.FC<{
           onChange={(e) => {
             const locationType = e.target.value;
             set('locationType', locationType);
-            if (locationType === 'customer_location') {
-              set('customerAddressRequired', true);
-              set('customerChoosesLocation', false);
-            } else if (locationType === 'business_location') {
-              set('customerAddressRequired', false);
+            const effects = locationTypeSideEffects(locationType);
+            if (effects.customerAddressRequired !== undefined) {
+              set('customerAddressRequired', effects.customerAddressRequired);
+            }
+            if (effects.customerChoosesLocation !== undefined) {
+              set('customerChoosesLocation', effects.customerChoosesLocation);
+            }
+            if (effects.customerLocationRequired !== undefined) {
+              set('customerLocationRequired', effects.customerLocationRequired);
             }
           }}
         >
@@ -1061,10 +1090,14 @@ const LocationFields: React.FC<{
           <span className="text-sm text-text-secondary">Customer can choose: at the business or at their address</span>
         </label>
       )}
-      <label htmlFor="svc-phone-req" className="flex items-center gap-2 cursor-pointer">
+      <label
+        htmlFor="svc-phone-req"
+        className={`flex items-center gap-2 ${phonePinned ? '' : 'cursor-pointer'}`}
+      >
         <Checkbox
           id="svc-phone-req"
           checked={form.customerLocationRequired}
+          disabled={phonePinned}
           onCheckedChange={(c) => set('customerLocationRequired', c === true)}
         />
         <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>

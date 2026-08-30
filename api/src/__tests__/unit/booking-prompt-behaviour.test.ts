@@ -768,10 +768,25 @@ describe('phone-call Auto-book stays in the booking flow', () => {
     expect(section).toMatch(/Keep any date and time the customer already named/i);
   });
 
-  it('does not tell a premises-only catalog to collect a phone before availability', () => {
+  it('does not tell a premises-only catalog to collect a phone before availability', async () => {
     const section = buildServicesSection([svc()])!;
     expect(line(section)).not.toMatch(/phone call/i);
     expect(section).not.toMatch(/BEFORE you call check_availability/);
+  });
+
+  it('flags needs phone on a phone-call row that never had the phone flag set', () => {
+    const stale = svc({
+      name: 'Telefonisch advies',
+      locationType: 'phone',
+      customerLocationRequired: false,
+      customerAddressRequired: true,
+      bookingMode: 'auto',
+      durationMin: 30,
+    });
+    const section = buildServicesSection([stale])!;
+    expect(line(section)).toMatch(/needs phone/);
+    expect(section).toMatch(/BEFORE you call check_availability/i);
+    expect(line(section)).not.toMatch(/needs address/);
   });
 });
 

@@ -31,6 +31,7 @@ import { formatVenueLine } from '../contracts/venue-address';
 import { resolveQuotedAddress } from '../account/quoted-address';
 import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
+import { serviceNeedsCustomerAddress } from '../booking/service-location';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { getModule, gatedToolNames, skillPromptAllowed, featureGatedSkillIds } from '../modules/module-catalog';
@@ -1290,7 +1291,7 @@ export class AgentService {
       });
       bookingConfigured = isBookingConfigured(services, !!rule);
       bookingServices = formatServicesForPlaceholder(services, bookingTimezone, new Date());
-      hasTravelServices = services.some((s) => s.customerAddressRequired);
+      hasTravelServices = services.some((s) => serviceNeedsCustomerAddress(s));
     } catch (error) {
       // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
       // must not falsely decline a CONFIGURED tenant. Worst case is the prior

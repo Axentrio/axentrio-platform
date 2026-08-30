@@ -228,6 +228,17 @@ describe('resolveEventLocation', () => {
     expect(resolveEventLocation({ locationType: 'custom', customerAddressRequired: false, venue })).toBeUndefined();
   });
 
+  it('omits for a phone call even when a leftover address flag is set', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'phone',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        venue,
+      }),
+    ).toBeUndefined();
+  });
+
   it("uses the customer's address even when locationType was never set away from 'custom'", () => {
     // `custom` is the default the column shipped with, so every service created by hand
     // before the dropdown existed still carries it and no migration ever backfilled them.

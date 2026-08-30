@@ -42,6 +42,7 @@ import {
   resolveServiceLocationMode,
   serviceCatalogLocationFlags,
   serviceNeedsCustomerAddress,
+  serviceNeedsCustomerPhone,
 } from '../booking/service-location';
 import {
   isBusinessHoursConfigured,
@@ -441,7 +442,7 @@ function catalogServiceLine(s: ServiceType, tz: string, now: Date): string {
   const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
   const contact = [
     ...serviceCatalogLocationFlags(s),
-    s.customerLocationRequired ? 'needs phone' : '',
+    serviceNeedsCustomerPhone(s) ? 'needs phone' : '',
     s.fileUploadAllowed ? 'accepts files' : '',
   ]
     .filter(Boolean)
@@ -464,9 +465,9 @@ function catalogServiceFlags(services: ServiceType[], businessCapacity: boolean)
   return {
     hasIntake: services.some((s) => intakeLines(s) !== ''),
     hasContact: services.some(
-      (s) => serviceNeedsCustomerAddress(s) || s.customerLocationRequired || s.customerChoosesLocation,
+      (s) => serviceNeedsCustomerAddress(s) || serviceNeedsCustomerPhone(s) || s.customerChoosesLocation,
     ),
-    hasPhone: services.some((s) => s.customerLocationRequired),
+    hasPhone: services.some((s) => serviceNeedsCustomerPhone(s)),
     hasChoice: services.some((s) => s.customerChoosesLocation),
     hasTravelJob: services.some((s) => {
       const loc = resolveServiceLocationMode(s);

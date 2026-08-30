@@ -16,6 +16,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
+import { serviceNeedsCustomerAddress } from './service-location';
 import { Bot, type BotSettings } from '../database/entities/Bot';
 import { getBotBusinessTimezone } from './business-timezone';
 import {
@@ -459,7 +460,7 @@ async function travelEstimatesForRequests(
   services: ServiceType[]
 ): Promise<Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>> {
   const out = new Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>();
-  const travelServices = new Set(services.filter((s) => s.customerAddressRequired).map((s) => s.id));
+  const travelServices = new Set(services.filter((s) => serviceNeedsCustomerAddress(s)).map((s) => s.id));
   const candidates = rows.filter((b) => b.eventTypeId && travelServices.has(b.eventTypeId));
   if (!candidates.length) return out;
 

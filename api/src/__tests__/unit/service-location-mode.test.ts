@@ -17,6 +17,7 @@ import {
   resolveWorkLocation,
   isPhysical,
   serviceNeedsCustomerAddress,
+  serviceNeedsCustomerPhone,
   locationTypeSideEffects,
   type ServiceLocationFacts,
 } from '../../booking/service-location';
@@ -36,9 +37,10 @@ const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', coun
 
 describe('who travels', () => {
   it('the customer address wins on leftover types, whatever the modality says', () => {
-    // Service-area gating refuses a booking on this flag ALONE for google_meet / phone / custom /
-    // in_person / unset, so those rows cannot be "no location" here either.
-    for (const locationType of ['google_meet', 'phone', 'in_person', 'custom', 'unset'] as LocationType[]) {
+    // Service-area gating refuses a booking on this flag ALONE for google_meet / custom /
+    // in_person / unset, so those rows cannot be "no location" here either. phone is
+    // stored authority and is not in this list.
+    for (const locationType of ['google_meet', 'in_person', 'custom', 'unset'] as LocationType[]) {
       expect(resolveServiceLocationMode({ locationType, customerAddressRequired: true })).toBe(
         'customer_location'
       );
@@ -53,6 +55,12 @@ describe('who travels', () => {
     expect(
       resolveServiceLocationMode({ locationType: 'business_location', customerAddressRequired: true }),
     ).toBe('business_location');
+  });
+
+  it('explicit phone ignores a stale travel flag', () => {
+    expect(
+      resolveServiceLocationMode({ locationType: 'phone', customerAddressRequired: true }),
+    ).toBe('remote');
   });
 
   it('in_person without a customer address is the premises', () => {
@@ -207,6 +215,25 @@ describe('does THIS booking need the customer address', () => {
   it('never, for explicit business_location', () => {
     expect(serviceNeedsCustomerAddress({ locationType: 'business_location' })).toBe(false);
   });
+
+  it('never, for an explicit phone call, even with a stale address flag', () => {
+    expect(serviceNeedsCustomerAddress({ locationType: 'phone', customerAddressRequired: true })).toBe(false);
+  });
+});
+
+describe('does THIS booking need the customer phone', () => {
+  it('always, for an explicit phone call, even without the flag', () => {
+    expect(serviceNeedsCustomerPhone({ locationType: 'phone' })).toBe(true);
+    expect(serviceNeedsCustomerPhone({ locationType: 'phone', customerLocationRequired: false })).toBe(true);
+  });
+
+  it('when the owner set the phone flag on another type', () => {
+    expect(serviceNeedsCustomerPhone({ locationType: 'customer_location', customerLocationRequired: true })).toBe(true);
+  });
+
+  it('never, for a premises service without the flag', () => {
+    expect(serviceNeedsCustomerPhone({ locationType: 'business_location' })).toBe(false);
+  });
 });
 
 describe('locationTypeSideEffects', () => {
@@ -219,6 +246,14 @@ describe('locationTypeSideEffects', () => {
 
   it('clears the address flag for business_location', () => {
     expect(locationTypeSideEffects('business_location')).toEqual({ customerAddressRequired: false });
+  });
+
+  it('requires a phone and clears the address for a phone call', () => {
+    expect(locationTypeSideEffects('phone')).toEqual({
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+      customerLocationRequired: true,
+    });
   });
 
   it('leaves leftover types alone', () => {

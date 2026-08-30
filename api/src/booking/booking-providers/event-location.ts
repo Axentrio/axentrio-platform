@@ -75,9 +75,11 @@ export function resolveEventLocation(input: EventLocationInput): string | undefi
   };
 
   // Explicit stored types win. A stale address flag must not send a business-location
-  // booking to the customer, or a customer-location booking to the shop.
+  // booking to the customer, a customer-location booking to the shop, or a phone call
+  // to anyone's street address.
   if (input.locationType === 'customer_location') return customerLine();
   if (input.locationType === 'business_location') return formatVenueLine(input.venue) ?? undefined;
+  if (input.locationType === 'phone') return undefined;
 
   // Legacy / review leftovers: the travel flag is still the stronger statement, because
   // service-area gating already refuses those rows on the flag alone.

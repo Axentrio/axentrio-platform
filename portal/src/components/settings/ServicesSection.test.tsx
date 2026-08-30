@@ -175,6 +175,27 @@ describe('ServicesSection — where does it happen?', () => {
     expect(box).not.toBeChecked();
     expect(box).toBeDisabled();
   });
+
+  it('requires phone and clears address on a phone call', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    fireEvent.change(select, { target: { value: 'phone' } });
+    const address = screen.getByLabelText(/requires customer address/i);
+    const phone = screen.getByLabelText(/requires customer phone/i);
+    expect(address).not.toBeChecked();
+    expect(address).toBeDisabled();
+    expect(phone).toBeChecked();
+    expect(phone).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Call' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][1]).toMatchObject({
+      locationType: 'phone',
+      customerAddressRequired: false,
+      customerLocationRequired: true,
+    });
+  });
 });
 
 /**

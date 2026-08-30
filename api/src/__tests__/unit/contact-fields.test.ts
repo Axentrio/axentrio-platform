@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   assertRequiredAddress,
+  assertRequiredPhone,
   isCompleteCustomerAddress,
   resolveContactFields,
 } from '../../booking/booking-providers/contact';
@@ -127,5 +128,26 @@ describe('resolveContactFields', () => {
     expect(() => resolveContactFields(mobile, { customerAddress: 'Antwerp' })).toThrow(
       BookingError,
     );
+  });
+});
+
+describe('assertRequiredPhone', () => {
+  const call: ServiceType = {
+    locationType: 'phone',
+    customerLocationRequired: false,
+    customerAddressRequired: true,
+  } as ServiceType;
+
+  it('throws PHONE_REQUIRED for a phone call that never had the phone flag set', () => {
+    expect(() => assertRequiredPhone(call)).toThrow(BookingError);
+    expect(() => assertRequiredPhone(call)).toThrow(/customerPhone/);
+  });
+
+  it('accepts a phone call once the number is given', () => {
+    expect(() => assertRequiredPhone(call, { customerPhone: '+32470000000' })).not.toThrow();
+  });
+
+  it('does not demand an address for that same phone-call row', () => {
+    expect(() => assertRequiredAddress(call)).not.toThrow();
   });
 });

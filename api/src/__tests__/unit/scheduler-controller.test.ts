@@ -433,6 +433,53 @@ describe('locationType side effects', () => {
       customerAddressRequired: false,
     });
   });
+
+  it('requires a phone and clears the address for a phone call on create', async () => {
+    await createService(
+      {
+        tenantId: 'ten-1',
+        body: {
+          name: 'Call',
+          durationMin: 30,
+          locationType: 'phone',
+          customerAddressRequired: true,
+          customerLocationRequired: false,
+        },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'phone',
+      customerAddressRequired: false,
+      customerLocationRequired: true,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('requires a phone and clears the address for a phone call on update', async () => {
+    etFindOne.mockResolvedValue({
+      id: 's1',
+      botId: 'bot-1',
+      locationType: 'custom',
+      customerAddressRequired: true,
+      customerLocationRequired: false,
+      customerChoosesLocation: true,
+    });
+    await updateService(
+      {
+        tenantId: 'ten-1',
+        params: { id: 's1' },
+        body: { locationType: 'phone' },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'phone',
+      customerAddressRequired: false,
+      customerLocationRequired: true,
+      customerChoosesLocation: false,
+    });
+  });
 });
 
 describe('presets endpoints (P4a)', () => {

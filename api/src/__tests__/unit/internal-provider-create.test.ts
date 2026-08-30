@@ -1086,6 +1086,39 @@ describe('InternalProvider.createBooking', () => {
     ).resolves.toMatchObject({ locationMode: 'remote' });
   });
 
+  it('throws PHONE_REQUIRED for an existing phone-call row that never had the phone flag set', async () => {
+    const stale = {
+      ...EVENT_TYPE,
+      locationType: 'phone',
+      bookingMode: 'auto',
+      customerLocationRequired: false,
+      customerAddressRequired: true,
+    };
+    serviceTypeFind.mockResolvedValue([stale]);
+    eventTypeFindOne.mockResolvedValue(stale);
+    await expect(
+      provider.createBooking(ctx, 'idem-phone-stale', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }),
+    ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('offers slots for that existing phone-call row once the number is given, without an address', async () => {
+    const stale = {
+      ...EVENT_TYPE,
+      locationType: 'phone',
+      bookingMode: 'auto',
+      customerLocationRequired: false,
+      customerAddressRequired: true,
+    };
+    serviceTypeFind.mockResolvedValue([stale]);
+    eventTypeFindOne.mockResolvedValue(stale);
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, '+32470000000',
+    );
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.locationMode).toBe('remote');
+  });
+
   it('throws ADDRESS_REQUIRED on checkAvailability for a customer-location job with no address', async () => {
     const mobile = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
     serviceTypeFind.mockResolvedValue([mobile]);

@@ -1229,8 +1229,8 @@ export class InternalProvider implements BookingProvider {
     if (
       recentDup &&
       recentDup.status !== 'cancelled' &&
-      rowDedupIdentity(recentDup, service.customerAddressRequired) ===
-        callDedupIdentity(service.customerAddressRequired, extras)
+      rowDedupIdentity(recentDup, serviceNeedsCustomerAddress(service, extras)) ===
+        callDedupIdentity(serviceNeedsCustomerAddress(service, extras), extras)
     ) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true, rule.timezone, service.name, service.preparationInstructions);
@@ -2116,8 +2116,8 @@ export class InternalProvider implements BookingProvider {
     if (
       recentDup &&
       recentDup.status !== 'cancelled' &&
-      rowDedupIdentity(recentDup, service.customerAddressRequired) ===
-        callDedupIdentity(service.customerAddressRequired, extras)
+      rowDedupIdentity(recentDup, serviceNeedsCustomerAddress(service, extras)) ===
+        callDedupIdentity(serviceNeedsCustomerAddress(service, extras), extras)
     ) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true);
@@ -3363,7 +3363,9 @@ export class InternalProvider implements BookingProvider {
     travelCheck: 'ok' | 'degraded' | 'overridden' | null;
   }> {
     const { booking, bookingId, service, rule, start, end } = input;
-    const travelEligibility: TravelEligibility = service.customerAddressRequired
+    const travelEligibility: TravelEligibility = serviceNeedsCustomerAddress(service, {
+      customerAddress: booking.customerAddress,
+    })
       ? await resolveTravelEligibility({
           tenantId: ctx.tenant.id,
           botId: ctx.bot.id,
@@ -3467,7 +3469,7 @@ export class InternalProvider implements BookingProvider {
    * rewrites `calendar_key` and a move can therefore cross itineraries. Deduplicated, or a
    * same-day move asserts one day twice.
    * RESOLVED INDEPENDENTLY OF THE MOVED BOOKING'S SERVICE, and that is the whole of finding 2.
-   * `travelEligibility` is gated on `service.customerAddressRequired`, because a phone
+   * `travelEligibility` is gated on `serviceNeedsCustomerAddress`, because a phone
    * consultation is not a travel job. But exposure is not about the booking being MOVED — it is
    * about the one left behind, and an at-premises job (the owner's own workshop) is a
    * constraining neighbour whose removal exposes a first job just as surely as a mobile one.

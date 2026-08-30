@@ -120,31 +120,39 @@ already on the entity.
 selected service requires an address/phone (the catalog will flag it), ask for it before
 booking or capturing the request, and pass it as customerAddress / customerPhone."*
 
-**Flag semantics (locked — the two booleans are orthogonal):**
+**Flag semantics (locked):**
 - `customerAddressRequired` → **address is required** (hard gate). Maps to
   `Booking.customerAddress`.
 - `customerLocationRequired` → **phone is required** (a callback number for a mobile/on-site
   job). Maps to `Booking.customerPhone`.
 
-These are independent: an owner can require address only, phone only, both, or neither. (We
-deliberately do **not** couple them.) The catalog appends a `needs address` and/or
-`needs phone` hint to the SERVICES line per the flags set.
+For most location types these two flags stay independent. An owner can require
+address only, phone only, both, or neither.
+
+`locationType: 'phone'` is the exception. A phone call always requires a phone
+number. A phone call never requires an address. Save writes those flags through
+`locationTypeSideEffects`. Booking time reads `serviceNeedsCustomerPhone` and
+`serviceNeedsCustomerAddress`, so an old row that was never saved again still
+follows the same rule.
+
+The catalog appends a `needs address` and/or `needs phone` hint to the SERVICES
+line from those helpers, not from the raw columns.
 
 **Naming wart (acknowledged, not renamed — issue 12):** the column name
 `customerLocationRequired` reads like "address" but P5 maps it to **phone**. This is a keystone
 column name we are **not** renaming (a prod migration + external-payload churn for cosmetics
 is out of scope, per the keystone's column-stability rule). To prevent misuse, the mapping is
-centralized in **one** place — a `requiredContactFields(service)` helper returning
-`{ address: boolean, phone: boolean }` — used by both the prompt catalog and the provider gate,
-and the portal labels describe **behavior** ("Requires customer phone (mobile / on-site job)"),
+centralized in **one** place — `serviceNeedsCustomerAddress` / `serviceNeedsCustomerPhone`
+(and `requiredContactFields` in `contact.ts`) — used by both the prompt catalog and the
+provider gate. The portal labels describe **behavior** ("Requires customer phone (mobile / on-site job)"),
 never the raw column name. Future readers touch the helper, not scattered `service.customerLocationRequired`
 checks.
 
 **Enforcement point:** in `InternalProvider.createBooking` **and** `requestAppointment`,
 after `resolveService`:
-- if `service.customerAddressRequired` and no non-empty `customerAddress` → throw
+- if `serviceNeedsCustomerAddress(service)` and no complete `customerAddress` → throw
   `BookingError('Address is required for this service', 'ADDRESS_REQUIRED', 400)`;
-- if `service.customerLocationRequired` and no non-empty `customerPhone` → throw
+- if `serviceNeedsCustomerPhone(service)` and no non-empty `customerPhone` → throw
   `BookingError('A contact phone number is required for this service', 'PHONE_REQUIRED', 400)`.
 Both are recoverable (the agent asks and retries). Whitespace-only values are treated as
 absent. When not required, both fields are best-effort: stored if the agent supplies them,
@@ -155,9 +163,11 @@ oversized value never reaches the INSERT as a raw `varchar` overflow. Phone-form
 locale validation is explicitly **out of scope** — presence + length only, no regex/locale
 drift. Threaded into both INSERTs as two new columns.
 
-**Portal authoring:** two independent checkboxes in `ServicesSection.tsx` ("Requires customer
+**Portal authoring:** two checkboxes in `ServicesSection.tsx` ("Requires customer
 address" → `customerAddressRequired`; "Requires customer phone (mobile / on-site job)" →
-`customerLocationRequired`). API already accepts them (schema verified).
+`customerLocationRequired`). For a phone call both boxes lock: phone on, address off.
+Other location types keep the independent checkboxes. API already accepts the columns
+(schema verified).
 
 **Display:** `AdminBookingRow` (`booking.service.ts`) gains `customerAddress?` /
 `customerPhone?`; `adminListBookings` selects them; `Bookings.tsx` row renders them under the

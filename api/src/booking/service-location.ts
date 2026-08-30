@@ -1,15 +1,16 @@
 /**
  * WHO TRAVELS - one answer, from locationType, with a legacy fallback.
  *
- * `business_location` and `customer_location` are stored authority. The owner picks them
- * in the service editor. `customerAddressRequired` is then forced to match, so travel
- * gates and ADDRESS_REQUIRED keep working without a second source of truth.
+ * `business_location`, `customer_location` and `phone` are stored authority. The owner
+ * picks them in the service editor. Contact flags are then forced to match, so travel
+ * gates, ADDRESS_REQUIRED and PHONE_REQUIRED keep working without a second source of truth.
  *
  * `in_person` is a review leftover: it still means the premises unless the travel flag
  * is on. The dropdown no longer offers it. `unset` is still "nobody was asked" (#71).
  *
- * For google_meet / phone / custom, a leftover travel flag still wins, because service-area
+ * For google_meet / custom, a leftover travel flag still wins, because service-area
  * gating already refuses those rows on the flag alone. New writes do not create that pair.
+ * `phone` does not honour a leftover travel flag: a phone call is not a travel job.
  *
  * The resolver stays read-only. `remote` still collapses video / phone / custom, so nothing
  * may write a locationType back through this.
@@ -49,14 +50,16 @@ export function isPremisesLocationType(locationType: string | null | undefined):
 }
 
 /**
- * Force the address flag to match an explicit location type.
+ * Force contact flags to match an explicit location type.
  *
  * customer_location cannot exist without an address. business_location cannot require one.
+ * A phone call requires a phone number and cannot require an address.
  * Other types are left alone, including review leftovers.
  */
 export function locationTypeSideEffects(locationType: string | undefined): {
   customerAddressRequired?: boolean;
   customerChoosesLocation?: boolean;
+  customerLocationRequired?: boolean;
 } {
   if (locationType === 'customer_location') {
     return { customerAddressRequired: true, customerChoosesLocation: false };
@@ -64,15 +67,22 @@ export function locationTypeSideEffects(locationType: string | undefined): {
   if (locationType === 'business_location') {
     return { customerAddressRequired: false };
   }
+  if (locationType === 'phone') {
+    return {
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+      customerLocationRequired: true,
+    };
+  }
   return {};
 }
 
 /**
  * Who travels for this Service.
  *
- * Explicit stored types win. `business_location` and `customer_location` do not read the
- * address flag, so a stale checkbox cannot move the appointment. Legacy values still honour
- * the flag, because that is how travel jobs were stored before the split.
+ * Explicit stored types win. `business_location`, `customer_location` and `phone` do not
+ * read the address flag, so a stale checkbox cannot move the appointment. Legacy values
+ * still honour the flag, because that is how travel jobs were stored before the split.
  */
 export function resolveServiceLocationMode(service: ServiceLocationFacts): ServiceLocationMode {
   if (service.locationType === 'customer_location') return 'customer_location';
@@ -80,6 +90,7 @@ export function resolveServiceLocationMode(service: ServiceLocationFacts): Servi
     if (service.customerChoosesLocation) return 'customer_choice';
     return 'business_location';
   }
+  if (service.locationType === 'phone') return 'remote';
   // Legacy / review: the travel flag is still the stronger statement.
   if (service.customerAddressRequired) return 'customer_location';
   if (service.locationType === 'in_person' || service.locationType === 'unset') {
@@ -115,6 +126,20 @@ export function serviceNeedsCustomerAddress(
   // Unstated choice: an address already given is a strong signal they picked theirs;
   // otherwise fail safe to the business (no invented travel).
   return !!extras?.customerAddress?.trim();
+}
+
+/**
+ * Does THIS booking need the customer's phone number?
+ *
+ * A phone call always does. Other types honour the stored flag, which is how an
+ * on-site job asks for a callback number.
+ */
+export function serviceNeedsCustomerPhone(service: {
+  locationType?: string | null;
+  customerLocationRequired?: boolean | null;
+}): boolean {
+  if (service.locationType === 'phone') return true;
+  return !!service.customerLocationRequired;
 }
 
 /**

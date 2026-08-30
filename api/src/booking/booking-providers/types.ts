@@ -343,7 +343,7 @@ export interface CancelResult {
  * expose individual params (e.g. customerAddress); they're collected into this.
  */
 export interface BookingExtras {
-  /** P5a — required when service.customerAddressRequired. */
+  /** P5a — required when serviceNeedsCustomerAddress. */
   customerAddress?: string;
   /**
    * #149 — for a `customer_choice` Service: the Booking Customer's pick.
@@ -362,7 +362,7 @@ export interface BookingExtras {
   customerPlaceId?: string;
   /** Server-injected Address Binding generation, consumed with the booking row. */
   addressBinding?: { version: number; formattedAddress: string };
-  /** P5a — required when service.customerLocationRequired (a callback phone). */
+  /** P5a — required when serviceNeedsCustomerPhone (a callback phone, including every phone call). */
   customerPhone?: string;
   /** P5c — chosen/estimated length for a range/ai service (ignored for fixed). */
   durationMin?: number;

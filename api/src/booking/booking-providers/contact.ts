@@ -6,19 +6,21 @@ import { ServiceType } from '../../database/entities/ServiceType';
 import { BookingError, type BookingExtras } from './types';
 import {
   serviceNeedsCustomerAddress,
+  serviceNeedsCustomerPhone,
   type ServiceLocationFacts,
 } from '../service-location';
 
 /** P5a — which contact fields a service requires. Single mapping for the column-name
  *  wart: customerLocationRequired maps to PHONE (a callback number), not address.
- *  #149: a choose-at-booking Service only needs an address when the customer picked theirs. */
+ *  #149: a choose-at-booking Service only needs an address when the customer picked theirs.
+ *  A phone call always needs a number, even when the stored flag was never ticked. */
 function requiredContactFields(
   service: ServiceType,
   extras?: BookingExtras,
 ): { address: boolean; phone: boolean } {
   return {
     address: serviceNeedsCustomerAddress(service, extras),
-    phone: !!service.customerLocationRequired,
+    phone: serviceNeedsCustomerPhone(service),
   };
 }
 
@@ -86,11 +88,11 @@ export function assertRequiredAddress(
  * PHONE_REQUIRED the write path already raises.
  */
 export function assertRequiredPhone(
-  service: Pick<ServiceType, 'customerLocationRequired'>,
+  service: { locationType?: string | null; customerLocationRequired?: boolean | null },
   extras?: { customerPhone?: string },
   session?: { channel?: string | null; visitorId?: string | null },
 ): void {
-  if (!service.customerLocationRequired) return;
+  if (!serviceNeedsCustomerPhone(service)) return;
   if (resolvePhone(extras, session)) return;
   throw new BookingError(
     'A contact phone number is required for this service. Ask for it and call again with customerPhone. Do not tell the customer the service is unavailable, and do not capture a request or a lead.',

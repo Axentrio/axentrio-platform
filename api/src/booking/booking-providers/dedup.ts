@@ -61,8 +61,8 @@ export async function consumeBindingAfterIdempotentReturn(
  * A phone consult can still carry an address - inherited from an earlier turn in the session, or
  * volunteered by a customer who mentioned where they live. Letting that participate would make an
  * incidental detail decide whether two calls are the same booking, and produce duplicates for the
- * services that never had this problem. `customerAddressRequired` is the question of whether the
- * address is part of the booking at all.
+ * services that never had this problem. `serviceNeedsCustomerAddress` is the question of whether
+ * the address is part of the booking at all.
  *
  * ## A geocoded place id is NOT the customer's identity for the place
  *

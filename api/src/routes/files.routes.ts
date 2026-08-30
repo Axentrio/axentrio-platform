@@ -82,14 +82,31 @@ router.post(
     if (!fileName || !fileSize || !mimeType) {
       throw new BadRequestError('fileName, fileSize, and mimeType are required');
     }
+    // `UploadSession.chatSessionId` is a NOT-NULL **uuid** column, and it is the
+    // key /upload-complete re-checks the caller against. `sessionId || ''` sent
+    // an empty string straight into Postgres, so every caller that omitted it
+    // got `invalid input syntax for type uuid: ""` as a 500 INTERNAL_ERROR.
+    // Name the missing field instead. `null` is not an option: the column is
+    // NOT NULL, and an upload with no chat session can never be completed or
+    // attached to a booking.
+    if (!isUuid(sessionId)) {
+      throw new BadRequestError('sessionId is required and must be a UUID');
+    }
+    // Same route, same shape: `user_id` is varchar, so '' did not throw, it just
+    // persisted an upload owned by nobody. This route is behind requireClerkAuth
+    // + autoProvision, so a missing id is a bug, not a caller error.
+    const userId = authReq.user?.id;
+    if (!userId) {
+      throw new BadRequestError('User context required');
+    }
 
     const uploadSession = await uploadService.generateUploadUrl({
       fileName,
       fileSize,
       mimeType,
       tenantId,
-      userId: authReq.user?.id || '',
-      chatSessionId: sessionId || '',
+      userId,
+      chatSessionId: sessionId,
     });
 
     sendSuccess(res, {
@@ -101,13 +118,9 @@ router.post(
       },
     });
 
-    // Audit AFTER `generateUploadUrl` because the service-generated
-    // `uploadSession.sessionId` is the only id guaranteed to be a UUID — the
-    // chatSessionId from the request body is unvalidated. Divergence from
-    // upload.controller.ts (which audits BEFORE) — that controller has
-    // express-validator's `isUUID()` on chatSessionId; we don't. Trade-off:
-    // a `generateUploadUrl` failure leaves no audit row, but the global
-    // errorHandler + Sentry still capture the exception path.
+    // Audit AFTER `generateUploadUrl` so the row records the real upload id.
+    // Trade-off: a `generateUploadUrl` failure leaves no audit row, but the
+    // global errorHandler + Sentry still capture the exception path.
     // actorId is `req.userId` (User entity id), NOT `req.user.id` (which is
     // the agent id alias for backward-compat — see clerk.middleware.ts:381).
     logAudit(
@@ -120,7 +133,7 @@ router.post(
         fileName,
         fileSize,
         mimeType,
-        chatSessionId: isUuid(sessionId) ? sessionId : undefined,
+        chatSessionId: sessionId,
         ip: req.ip,
       },
     );

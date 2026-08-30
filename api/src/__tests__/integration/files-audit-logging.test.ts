@@ -131,21 +131,30 @@ describe('POST /files/upload audit', () => {
     });
   });
 
-  it('drops a non-UUID chatSessionId from audit metadata (entity_id is a UUID column)', async () => {
-    generateUploadUrlMock.mockResolvedValue({
-      sessionId: FILE_SESSION_ID,
-      uploadUrl: 'https://s3/upload',
-      publicUrl: 'https://s3/public',
-      expiresAt: '2026-01-01T00:00:00Z',
-    });
-
-    await request(makeApp())
+  // Was: "drops a non-UUID chatSessionId from audit metadata". That guarded the
+  // audit row while `sessionId || ''` still reached Postgres, where an empty
+  // string hit `invalid input syntax for type uuid: ""` and surfaced as a 500.
+  // The route now rejects at the door, so the audit path is unreachable and the
+  // stronger guarantee is: no insert, no audit row, and a 400 that names the field.
+  it('rejects a non-UUID sessionId with 400 and writes no audit row', async () => {
+    const res = await request(makeApp())
       .post('/files/upload')
       .send({ fileName: 'x.pdf', fileSize: 1024, mimeType: 'application/pdf', sessionId: 'not-a-uuid' });
 
-    expect(logAuditMock).toHaveBeenCalledTimes(1);
-    const meta = logAuditMock.mock.calls[0][5];
-    expect(meta.chatSessionId).toBeUndefined();
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/sessionId is required and must be a UUID/);
+    expect(generateUploadUrlMock).not.toHaveBeenCalled();
+    expect(logAuditMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a MISSING sessionId with 400 instead of a uuid cast 500', async () => {
+    const res = await request(makeApp())
+      .post('/files/upload')
+      .send({ fileName: 'x.pdf', fileSize: 1024, mimeType: 'application/pdf' });
+
+    expect(res.status).toBe(400);
+    expect(generateUploadUrlMock).not.toHaveBeenCalled();
+    expect(logAuditMock).not.toHaveBeenCalled();
   });
 
   it('does NOT audit when the upload request fails validation (no row written)', async () => {

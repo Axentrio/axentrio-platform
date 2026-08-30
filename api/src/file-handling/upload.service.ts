@@ -24,6 +24,8 @@ import { createHash } from 'crypto';
 import sharp from 'sharp';
 import { logger } from '../utils/logger';
 import { safeOutboundRequest } from '../security/ssrf-guard';
+import { AppDataSource } from '../database/data-source';
+import { UploadSession as UploadSessionEntity } from '../database/entities/UploadSession';
 
 /**
  * Fixed namespace UUID for deriving a deterministic upload-session id from a
@@ -195,12 +197,6 @@ export class UploadService {
    * AppDataSource initialized.
    */
   private getUploadSessionRepo() {
-    // Local import keeps this file from cycling on a fresh boot when
-    // AppDataSource hasn't initialized yet.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { AppDataSource } = require('../database/data-source');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { UploadSession: UploadSessionEntity } = require('../database/entities/UploadSession');
     return AppDataSource.getRepository(UploadSessionEntity);
   }
 

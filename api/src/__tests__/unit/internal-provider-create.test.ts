@@ -1658,6 +1658,21 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
   });
 
+  it('throws PHONE_REQUIRED on the REQUEST path for a phone-call row that never had the flag set', async () => {
+    // The auto path has its own stale-row test. requestAppointment reaches the gate through
+    // resolveContactFields rather than assertRequiredPhone, so the two paths can drift.
+    serviceTypeFind.mockResolvedValue([{
+      ...EVENT_TYPE,
+      locationType: 'phone',
+      customerLocationRequired: false,
+      customerAddressRequired: true,
+    }]);
+    await expect(
+      provider.requestAppointment(ctx, 'idem-phone-stale-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined, { customerPhone: '   ' })
+    ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+    expect(bookingQuery).not.toHaveBeenCalled();
+  });
+
 
   it('throws FILE_REQUIRED when the service requires a file and none are ready', async () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadRequired: true }]);

@@ -199,6 +199,30 @@ describe('ServicesSection — where does it happen?', () => {
       customerLocationRequired: true,
     });
   });
+
+  it('unlocks the phone box when the service stops being a phone call, and keeps the answer', async () => {
+    // Leaving Phone call must not silently clear the flag: the same column is the owner-set
+    // callback number for an on-site job, and there is no way to tell the two apart from the
+    // destination type alone. So it stays ticked and becomes editable again.
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'phone' } });
+    expect(screen.getByLabelText(/requires customer phone/i)).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'custom' } });
+    const phone = screen.getByLabelText(/requires customer phone/i);
+    expect(phone).toBeChecked();
+    expect(phone).not.toBeDisabled();
+    fireEvent.click(phone);
+    expect(screen.getByLabelText(/requires customer phone/i)).not.toBeChecked();
+  });
+
+  it('keeps an owner-set callback number when the service becomes an on-site job', async () => {
+    const select = await openNew();
+    fireEvent.click(screen.getByLabelText(/requires customer phone/i));
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    const phone = screen.getByLabelText(/requires customer phone/i);
+    expect(phone).toBeChecked();
+    expect(phone).not.toBeDisabled();
+  });
 });
 
 /**

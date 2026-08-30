@@ -96,12 +96,43 @@ describe('autocompleteAddress', () => {
     expect(body).toEqual({
       input: 'Grote Markt',
       includedRegionCodes: ['be'],
-      includedPrimaryTypes: ['street_address'],
+      includedPrimaryTypes: ['street_address', 'premise', 'subpremise'],
     });
     // A wide mask is what turns a cheap autocomplete into an expensive one.
     expect(opts.headers['X-Goog-FieldMask']).toBe(
-      'suggestions.placePrediction.placeId,suggestions.placePrediction.text'
+      'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.types'
     );
+  });
+
+  it('drops cities and stations so they cannot ship as booking location options', async () => {
+    post.mockResolvedValue({
+      data: {
+        suggestions: [
+          { placePrediction: { placeId: 'ChIJ_city', text: { text: 'Antwerp, Belgium' }, types: ['locality', 'political'] } },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_station',
+              text: { text: 'Antwerpen-Centraal, Koningin Astridplein, Antwerp, Belgium' },
+              types: ['train_station', 'transit_station', 'establishment'],
+            },
+          },
+          { placePrediction: { placeId: 'ChIJ_dup', text: { text: 'Antwerpen, Antwerp, Belgium' }, types: ['locality'] } },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_street',
+              text: { text: 'Kerkstraat 12, 2060 Antwerpen, Belgium' },
+              types: ['street_address', 'geocode'],
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await autocompleteAddress('ten-1', 'Antwerp');
+    expect(result).toEqual({
+      status: 'ok',
+      suggestions: [{ placeId: 'ChIJ_street', text: 'Kerkstraat 12, 2060 Antwerpen, Belgium' }],
+    });
   });
 
   it('FAILS OPEN when Google errors — never throws', async () => {

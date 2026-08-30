@@ -23,6 +23,7 @@ import { retryRange } from '../../booking/booking-providers/booking-dates';
 import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
+import { isCompleteCustomerAddress } from '../../booking/booking-providers/contact';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
@@ -260,6 +261,10 @@ function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined 
  * (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
  * changes anything - and suggestions are billed per request, so offering it anywhere else
  * spends the tenant's money on a question with no answer worth having.
+ *
+ * A city name is not that moment. Autocomplete of "Antwerp" returns the city and the
+ * station, which then ship as booking location options. The picker verifies a door the
+ * customer already gave; it must not invent a place for them.
  */
 async function availabilityAffordance(
   ctx: ToolContext,
@@ -267,6 +272,7 @@ async function availabilityAffordance(
   chosen: TurnAddress,
 ) {
   if (!travel || chosen.placeId) return {};
+  if (!isCompleteCustomerAddress(chosen.address)) return {};
   return addressPickerAffordance(ctx, travel.addressTooVague ? 'too_vague' : 'unverified', chosen.address);
 }
 

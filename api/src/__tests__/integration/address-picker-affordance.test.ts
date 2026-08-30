@@ -175,6 +175,42 @@ describe('offering to verify the address', () => {
     expect(res.affordance).toMatchObject({ kind: 'address_picker', reason: 'too_vague' });
   });
 
+  it.each(['Antwerp', 'Antwerp, Belgium', 'Antwerpen, Antwerp, Belgium'])(
+    'does not offer map search results when the address is only %s',
+    async (customerAddress) => {
+      // The live failure: the model passed a city, availability treated it as the job
+      // location, and Meta rendered Google's city/station hits as booking options.
+      // A city is not an appointment address, so the picker must not open.
+      mockCheckAvailability.mockResolvedValue({
+        ...TRAVELS,
+        travel: { requestableSlots: [{ start: '2026-09-01T09:00:00Z' }], addressTooVague: true },
+      });
+
+      const res = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress },
+        { ...ctx(), channel: 'whatsapp' },
+      );
+
+      expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+      expect(res.affordance).toBeUndefined();
+    },
+  );
+
+  it('does not offer map search when no address was given', async () => {
+    mockCheckAvailability.mockResolvedValue({
+      ...TRAVELS,
+      travel: { requestableSlots: [{ start: '2026-09-01T09:00:00Z' }], addressTooVague: true },
+    });
+
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-01', endDate: '2026-09-02' },
+      { ...ctx(), channel: 'whatsapp' },
+    );
+
+    expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+    expect(res.affordance).toBeUndefined();
+  });
+
   it('offers the CONFIRM control when it asks which address is right', async () => {
     // #95 itself. The question has been askable since the presentation split landed, but the
     // answer had nowhere to go: only a server-observed event may move an Address Binding, and

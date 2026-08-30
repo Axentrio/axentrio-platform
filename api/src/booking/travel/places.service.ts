@@ -38,12 +38,52 @@ const AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const REGION_CODES = ['be'];
 
 /**
- * Street addresses only. Autocomplete (New) `includedPrimaryTypes` takes Table A
- * or Table B types; `street_address` is the Table B filter. Without it, a short
- * query returns cities, stations, and other map hits, which then ship as booking
- * location options. `(cities)` is the opposite collection and must never be sent.
+ * Street-level Places only. Autocomplete (New) `includedPrimaryTypes` takes Table A
+ * or Table B types. `street_address` alone misses houses tagged `premise`. `(cities)`
+ * is the opposite collection and must never be sent. The API filter is not enough:
+ * a city query still returns locality and station hits, so `isStreetAddressSuggestion`
+ * drops those after the response.
  */
-const PRIMARY_TYPES = ['street_address'];
+const PRIMARY_TYPES = ['street_address', 'premise', 'subpremise'];
+
+/** Place types that are a city, station, or other map hit - never a customer's door. */
+const NOT_A_STREET = new Set([
+  'locality',
+  'sublocality',
+  'administrative_area_level_1',
+  'administrative_area_level_2',
+  'administrative_area_level_3',
+  'country',
+  'colloquial_area',
+  'natural_feature',
+  'plus_code',
+  'transit_station',
+  'train_station',
+  'bus_station',
+  'subway_station',
+  'light_rail_station',
+  'airport',
+  'point_of_interest',
+  'establishment',
+]);
+
+const STREET_TYPES = new Set(['street_address', 'premise', 'subpremise', 'street_number', 'route']);
+
+/**
+ * A suggestion the van can be sent to: a street with a house number, not a city or station.
+ *
+ * Google still returns "Antwerp, Belgium" and "Antwerpen-Centraal" for a city query even
+ * when `includedPrimaryTypes` asks for streets. Those rows used to ship as booking options.
+ */
+export function isStreetAddressSuggestion(text: string, types: string[] = []): boolean {
+  if (/centraal|\bstation\b|luchthaven|\bairport\b/i.test(text)) return false;
+  if (!/\b\d{1,4}[A-Za-z]?\b/.test(text)) return false;
+  if (types.some((type) => STREET_TYPES.has(type))) {
+    return !types.some((type) => type === 'transit_station' || type === 'train_station' || type === 'bus_station');
+  }
+  if (types.some((type) => NOT_A_STREET.has(type))) return false;
+  return true;
+}
 
 /**
  * Below this, suggestions are noise and every keystroke is billable.
@@ -71,7 +111,7 @@ export type AutocompleteResult =
 
 interface AutocompleteResponse {
   suggestions?: Array<{
-    placePrediction?: { placeId?: string; text?: { text?: string } };
+    placePrediction?: { placeId?: string; text?: { text?: string }; types?: string[] };
   }>;
 }
 
@@ -109,8 +149,9 @@ export async function autocompleteAddress(tenantId: string, query: string): Prom
         headers: {
           'X-Goog-Api-Key': apiKey,
           // Without a mask the API refuses the request outright, and a WIDE mask is what turns a
-          // cheap autocomplete into an expensive one. Exactly the two fields a list row needs.
-          'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
+          // cheap autocomplete into an expensive one. Id, label, and types so cities can be dropped.
+          'X-Goog-FieldMask':
+            'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.types',
           'Content-Type': 'application/json',
         },
       }
@@ -122,7 +163,9 @@ export async function autocompleteAddress(tenantId: string, query: string): Prom
       const text = entry.placePrediction?.text?.text?.trim();
       // Both or neither. A row without an id cannot be selected, and one without text cannot be
       // read, so a half-formed prediction is dropped rather than rendered as a dead entry.
-      if (placeId && text) suggestions.push({ placeId, text });
+      if (!placeId || !text) continue;
+      if (!isStreetAddressSuggestion(text, entry.placePrediction?.types ?? [])) continue;
+      suggestions.push({ placeId, text });
     }
     return { status: 'ok', suggestions };
   } catch (error) {

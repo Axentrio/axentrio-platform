@@ -7,8 +7,12 @@ import { useTenantContextStore } from '../stores/tenantContextStore';
 import { useUiStore } from '../stores/uiStore';
 import { useSocket } from '../websocket/SocketContext';
 
-/** Query key prefixes that are tenant-scoped and must be flushed on switch */
-const TENANT_SCOPED_KEYS = [
+/**
+ * Query key prefixes that are tenant-scoped and must be flushed on switch.
+ * Bookings live under `['scheduler','bookings',scope]` — omitting `scheduler`
+ * left the previous tenant's appointments on screen after impersonation.
+ */
+export const TENANT_SCOPED_KEYS = [
   'tenants',
   'dashboard',
   'analytics',
@@ -19,7 +23,8 @@ const TENANT_SCOPED_KEYS = [
   'notifications',
   'webhooks',
   'agents',
-];
+  'scheduler',
+] as const;
 
 export function useTenantSwitch() {
   const queryClient = useQueryClient();

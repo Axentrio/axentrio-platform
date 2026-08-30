@@ -40,6 +40,8 @@ describe('isCompleteCustomerAddress', () => {
     'Meir 78, 2000 Antwerpen',
     'Grote Baan 220, 9310 Herdersem',
     'Turnhoutsebaan 100, 2140 Antwerpen',
+    'Rue de la Station 12, 4000 Liège',
+    'Centraallaan 5, 2000 Antwerpen',
   ])('accepts %s', (address) => {
     expect(isCompleteCustomerAddress(address)).toBe(true);
   });
@@ -70,6 +72,8 @@ describe('hasStreetAndHouseNumber', () => {
     'Grote Markt 1, Antwerpen',
     'Kerkstraat 12, Antwerpen',
     'Passtraat 248 bus B, 9100 Sint-Niklaas',
+    'Rue de la Station 12, 4000 Liège',
+    'Centraallaan 5, 2000 Antwerpen',
   ])('accepts a door at %s', (address) => {
     expect(hasStreetAndHouseNumber(address)).toBe(true);
   });

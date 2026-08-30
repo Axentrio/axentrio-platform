@@ -78,15 +78,38 @@ const STREET_TYPES = new Set(['street_address', 'premise', 'subpremise', 'street
  * Google still returns "Antwerp, Belgium" and "Antwerpen-Centraal" for a city query even
  * when `includedPrimaryTypes` asks for streets. Those rows used to ship as booking options.
  * A house tagged only `establishment` is kept when the text is a street with a house number.
+ *
+ * Do not scan the label for "station" / "centraal" before the type check: Walloon
+ * streets (Rue/Place/Avenue de la Station) and names like Centraallaan are doors.
+ * Transit types still drop a real station. The label fallback is only for rows
+ * with no street type, and it does not treat a street named Station as a station.
  */
 export function isStreetAddressSuggestion(text: string, types: string[] = []): boolean {
-  if (/centraal|\bstation\b|luchthaven|\bairport\b/i.test(text)) return false;
   if (!hasStreetAndHouseNumber(text)) return false;
-  if (types.some((type) => STREET_TYPES.has(type))) {
-    return !types.some((type) => type === 'transit_station' || type === 'train_station' || type === 'bus_station');
-  }
+  if (types.some((type) => TRANSIT_TYPES.has(type))) return false;
+  if (types.some((type) => STREET_TYPES.has(type))) return true;
   if (types.some((type) => NOT_A_STREET.has(type))) return false;
-  return true;
+  return !isStationOrAirportLabel(text);
+}
+
+const TRANSIT_TYPES = new Set([
+  'transit_station',
+  'train_station',
+  'bus_station',
+  'subway_station',
+  'light_rail_station',
+  'airport',
+]);
+
+/** A named station/airport, not a street whose name happens to include those words. */
+function isStationOrAirportLabel(text: string): boolean {
+  if (/luchthaven|\bairport\b/i.test(text)) return true;
+  // Antwerpen-Centraal — not Centraallaan (no word boundary after "centraal").
+  if (/\bcentraal\b/i.test(text)) return true;
+  if (!/\bstation\b/i.test(text)) return false;
+  return !/(?:rue|place|avenue|straat|laan|chemin|all[eé]e|weg)\s+(?:de\s+la\s+|de\s+|du\s+|van\s+(?:de\s+|het\s+)?)?station\b/i.test(
+    text,
+  );
 }
 
 /**

@@ -65,6 +65,22 @@ describe('isStreetAddressSuggestion', () => {
       ]),
     ).toBe(false);
   });
+
+  it('drops a transit hit even when the label looks like a street', () => {
+    expect(
+      isStreetAddressSuggestion('Rue de la Station 12, 4000 Liège', ['train_station', 'street_address']),
+    ).toBe(false);
+  });
+
+  it.each([
+    ['Rue de la Station 12, 4000 Liège', ['street_address', 'geocode']],
+    ['Place de la Station 1, 5000 Namur', ['street_address']],
+    ['Avenue de la Station 8, 6000 Charleroi', ['street_address']],
+    ['Centraallaan 5, 2000 Antwerpen', ['street_address']],
+    ['Rue de la Station 12, 4000 Liège', ['establishment']],
+  ])('keeps a street named Station or Centraal: %s', (text, types) => {
+    expect(isStreetAddressSuggestion(text, types)).toBe(true);
+  });
 });
 
 describe('autocompleteAddress', () => {
@@ -167,6 +183,20 @@ describe('autocompleteAddress', () => {
               types: ['point_of_interest', 'establishment'],
             },
           },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_walloon',
+              text: { text: 'Rue de la Station 12, 4000 Liège, Belgium' },
+              types: ['street_address', 'geocode'],
+            },
+          },
+          {
+            placePrediction: {
+              placeId: 'ChIJ_centraallaan',
+              text: { text: 'Centraallaan 5, 2000 Antwerpen, Belgium' },
+              types: ['street_address'],
+            },
+          },
         ],
       },
     });
@@ -177,6 +207,8 @@ describe('autocompleteAddress', () => {
       suggestions: [
         { placeId: 'ChIJ_street', text: 'Kerkstraat 12, 2060 Antwerpen, Belgium' },
         { placeId: 'ChIJ_house', text: 'Kerkstraat 12A, 2060 Antwerpen, Belgium' },
+        { placeId: 'ChIJ_walloon', text: 'Rue de la Station 12, 4000 Liège, Belgium' },
+        { placeId: 'ChIJ_centraallaan', text: 'Centraallaan 5, 2000 Antwerpen, Belgium' },
       ],
     });
   });

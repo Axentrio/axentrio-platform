@@ -193,7 +193,47 @@ PRIVATE_HOST="clamav.railway.internal"
 
 require_railway() {
   command -v railway >/dev/null 2>&1 || { warn "railway CLI not found. brew install railway"; exit 1; }
+  command -v jq >/dev/null 2>&1 || { warn "jq not found. brew install jq"; exit 1; }
   railway whoami >/dev/null 2>&1 || { warn "railway CLI not logged in. Run: railway login"; exit 1; }
+}
+
+# service_count NAME — how many services in this environment carry NAME.
+# `railway service list` is NOT usable here: it prints the LINKED service's
+# deployment status, and it has been seen to abort with signal 6. The project
+# status JSON is the only reliable name list, and an exact match stops this from
+# creating a second 'clamav' when one already exists.
+service_count() {
+  railway status --json 2>/dev/null \
+    | jq -r --arg n "$1" '[.services.edges[].node.name | select(. == $n)] | length' 2>/dev/null \
+    || printf '0'
+}
+
+# mount_count PATH — how many volumes in this environment mount PATH.
+# Same reason as service_count: the human-readable `railway volume list` aborts
+# with signal 6 when its stdout is a pipe, so the table renderer is unusable in
+# a script. The --json shape is { environment, project, volumes: [...] }.
+mount_count() {
+  railway volume list --json 2>/dev/null \
+    | jq -r --arg p "$1" '[.volumes[]? | select(.mountPath == $p)] | length' 2>/dev/null \
+    || printf '0'
+}
+
+# stream_logs SERVICE — follow a service's logs until the human presses Ctrl-C.
+# The wizard installs a no-op SIGINT handler for the duration, so Ctrl-C stops
+# only the log stream. Without it the terminal delivers SIGINT to the whole
+# process group and kills the wizard itself, which is exactly what the prompt
+# tells the human to do. Verified: child exits 130, the script continues.
+stream_logs() {
+  local svc="$1"
+  # ':' not '': a handler keeps SIGINT out of the wizard while the child still
+  # gets the default disposition and dies. `trap '' INT` would be INHERITED as
+  # SIG_IGN by railway logs, so Ctrl-C would never stop the stream.
+  trap ':' INT
+  set +e
+  railway logs --service "$svc"
+  set -e
+  trap - INT
+  printf '\n'
 }
 
 banner "Provision ClamAV for Axentrio file uploads"
@@ -230,7 +270,8 @@ warn "healthcheck, which pings port 3310 over IPv4 localhost."
 printf '\n'
 say "StreamMaxLength is raised to 26M so it clears the app's own 25 MB cap."
 printf '\n'
-if railway service list 2>/dev/null | grep -q "${CLAMAV_SERVICE}"; then
+EXISTING=$(service_count "$CLAMAV_SERVICE")
+if [[ "${EXISTING:-0}" =~ ^[0-9]+$ ]] && (( EXISTING >= 1 )); then
   note "A service matching '$CLAMAV_SERVICE' already exists. Skipping creation."
 else
   confirm "Create service '$CLAMAV_SERVICE' from $CLAMAV_IMAGE?" || { warn "Stopped."; exit 0; }
@@ -247,7 +288,8 @@ say "outage for every upload, because the scan now fails closed."
 printf '\n'
 step "Linking the CLI to '$CLAMAV_SERVICE' so the volume lands on the right service."
 railway service "$CLAMAV_SERVICE"
-if railway volume list 2>/dev/null | grep -q '/var/lib/clamav'; then
+MOUNTED=$(mount_count /var/lib/clamav)
+if [[ "${MOUNTED:-0}" =~ ^[0-9]+$ ]] && (( MOUNTED >= 1 )); then
   note "A volume is already mounted at /var/lib/clamav. Skipping."
 else
   confirm "Add a volume mounted at /var/lib/clamav?" || { warn "Stopped."; exit 0; }
@@ -262,7 +304,7 @@ say "First boot takes a few minutes."
 printf '\n'
 step "Streaming logs. Watch for clamd listening, then press Ctrl-C to come back."
 pause "Press Enter to start streaming logs"
-railway logs --service "$CLAMAV_SERVICE" || true
+stream_logs "$CLAMAV_SERVICE"
 printf '\n'
 confirm "Did clamd report that it is listening?" || { warn "Stopped before touching the API. Nothing customer-facing changed."; exit 0; }
 
@@ -329,7 +371,7 @@ printf '  %s✓%s variables set; Railway redeploys %s\n' "$GREEN" "$RESET" "$API
 printf '\n'
 step "Waiting for the redeploy. Watch for the API to come back up."
 pause "Press Enter to stream API logs, then Ctrl-C when it is live"
-railway logs --service "$API_SERVICE" || true
+stream_logs "$API_SERVICE"
 
 # ── Stage 8 ───────────────────────────────────────────────────────────────
 stage "Verify both directions, then know how to roll back"

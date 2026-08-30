@@ -2,8 +2,8 @@
 
 **Status as of 2026-08-31:** the path works end to end and is deployed. The attach button is
 visible whenever the tenant's plan includes the `fileUpload` entitlement, and hidden for every
-plan that does not. There is no per-bot switch. Virus scanning is **off** in production, so
-item 1 below is an accepted live risk, not a future decision.
+plan that does not. There is no per-bot switch. Virus scanning is **on** as of 2026-08-31,
+backed by a ClamAV service on Railway, and verified with a real EICAR upload.
 
 > This document previously described a ~2-day, four-PR rebuild, and it stayed wrong for two
 > months. The server half had already shipped; only the widget client was still calling a
@@ -57,27 +57,39 @@ it was dead, and it is what made this look like a rebuild every time someone loo
 
 Upload is on, so these are no longer pre-launch decisions. Each is a risk being carried:
 
-1. **Virus scanning is OFF in production.** Confirmed twice on 2026-08-31: `CLAMAV_HOST` is
-   absent from the Railway `chatbot-api` production variables, and
-   `POST /api/v1/knowledge/storage/import` returns `503 virus_scanning_unavailable`, which
-   fires only when `config.clamav.enabled` is false. `scanFile` then short-circuits to
-   `{ clean: true, scanDurationMs: 0 }`, so **every visitor file is stamped `ready` without
-   being read**, and is then attachable to a booking and openable by staff. Re-check with
-   `railway variables --service chatbot-api | grep CLAMAV_HOST` rather than trusting this line.
+1. **Virus scanning is ON, and it fails closed.** Provisioned on 2026-08-31 with
+   `scripts/provision-clamav.sh`. `CLAMAV_HOST=clamav.railway.internal`, `CLAMAV_PORT=3310`,
+   backed by the `clamav` service (image `clamav/clamav:1.4`) and a volume at
+   `/var/lib/clamav`. Verified end to end through `POST /widget/files/:id/upload-complete`:
 
-   Turning it on used to be a one-line env change that would have broken every upload.
+   | Upload | Result |
+   | --- | --- |
+   | 1x1 PNG | `status: ready`, `clean: true`, `scanDurationMs: 542` |
+   | EICAR signature | `status: quarantined`, `threats: ["Eicar-Test-Signature"]`, 496 ms |
+
+   A non-zero `scanDurationMs` is the tell. The disabled path returned `0`, because
+   `scanFile` short-circuited to `{ clean: true, scanDurationMs: 0 }` and stamped every file
+   `ready` without reading it. Re-check with
+   `railway variables --service chatbot-api | grep CLAMAV_HOST`.
+
+   **Fails closed now.** Any scan error throws `VirusScanError`, and the trigger marks the
+   session `failed` rather than promoting it to `ready`. So an unreachable clamd, or one
+   still loading its database after a restart, blocks every upload. That is why the volume
+   matters, and why the wizard proves reachability before it sets `CLAMAV_HOST`.
+   Rollback is one command: `railway variables --service chatbot-api --set 'CLAMAV_HOST='`.
+
+   Turning it on was nearly a one-line env change that would have broken every upload.
    `virus-scan.service.ts` built a **bare** `S3Client`, which ignores `S3_ENDPOINT` and
-   `forcePathStyle` and resolves `<bucket>.s3.auto.amazonaws.com` on the prod object store,
-   whose region is `auto`. Because a scan error fails closed, the first `GET` would have
-   turned every upload into a 500. It now uses `createS3Client()`, the same builder
+   `forcePathStyle` and resolves `<bucket>.s3.auto.amazonaws.com` on the prod object store
+   (Cloudflare R2, region `auto`). Because a scan error fails closed, the first `GET` would
+   have turned every upload into a 500. It now uses `createS3Client()`, the same builder
    `upload.service.ts` uses, and reads the validated `config.s3.bucket`.
 
-   To provision it, run `scripts/provision-clamav.sh`. That wizard pins `clamav/clamav:1.4`,
-   which binds `0.0.0.0:3310` **and** `[::]:3310`, so Railway's IPv6-only private network
-   reaches it with no custom `clamd.conf`. Do not set `CLAMD_CONF_TCPAddr`: forcing `::`
-   breaks the image's own healthcheck, which pings 3310 over IPv4 localhost. Budget 3 GiB
-   minimum and 4 GiB preferred, and mount a volume at `/var/lib/clamav` so a restart does
-   not re-download the database and leave clamd refusing connections.
+   Sizing: 3 GiB minimum, 4 GiB preferred. clamd holds about 1.2 GiB of signatures and about
+   2.4 GiB briefly during the daily reload. Size the API replica too, because `scanStream`
+   does a `Buffer.concat` of the whole object, so a 25 MB upload sits in the replica's heap.
+   Do not set `CLAMD_CONF_TCPAddr`: the image already binds `0.0.0.0:3310` and `[::]:3310`,
+   and forcing `::` breaks its own healthcheck, which pings 3310 over IPv4 localhost.
 2. **No durable storage quota.** The cap is an in-memory map, per-replica, reset on every
    deploy. Anonymous visitors uploading 25 MB files is a real cost and abuse vector.
 3. **Should a completed upload become a chat `Message`?** Today, outside a booking, a

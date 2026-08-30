@@ -129,7 +129,7 @@ export async function clearConversationResetState(
   await clearAddressBindings(manager, sessionIds);
   await clearLeadConversationState(manager, sessionIds);
   await clearSessionTempMetadata(manager, sessionIds);
-  await clearChannelIdentityTranscripts(manager, transcriptSessionIds);
+  await clearChannelIdentityTranscripts(manager, transcriptSessionIds, session.id);
 
   logger.info('[reset] conversation state cleared', {
     sessionId: session.id,
@@ -201,28 +201,40 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
 
 /**
  * Hard-delete Inbox/LLM transcripts for the Reset session and its older
- * closed siblings. `message_deliveries` cascade. Coalescer watermarks are
- * cleared so a retry cannot answer a deleted high-water mark. Newer sessions
- * and other channels are untouched.
+ * closed siblings. `message_deliveries` cascade. Newer sessions and other
+ * channels are untouched.
+ *
+ * The Reset session KEEPS its `system` rows - the "Session closed: …" marker.
+ * The Inbox list renders a conversation only when it has a last-message
+ * preview, so wiping those too made the customer disappear from the Inbox
+ * and took the Reset button with it, which broke retrying a Redis 503. System
+ * markers are not conversation content and cannot feed the next prompt.
+ *
+ * `message_count` is recomputed from the rows that survive, and the coalescer
+ * watermark is cleared so a retry cannot answer a deleted high-water mark.
  */
 async function clearChannelIdentityTranscripts(
   manager: Queryable,
   sessionIds: string[],
+  selectedSessionId: string,
 ): Promise<void> {
   if (sessionIds.length === 0) return;
+  await manager.query(
+    `DELETE FROM messages
+      WHERE session_id = ANY($1::uuid[])
+        AND (session_id <> $2 OR type <> 'system')`,
+    [sessionIds, selectedSessionId],
+  );
   await manager.query(
     `UPDATE chat_sessions
         SET last_coalesced_answer_at = NULL,
             last_coalesced_answer_message_id = NULL,
-            message_count = 0,
+            message_count = (
+              SELECT count(*) FROM messages m WHERE m.session_id = chat_sessions.id
+            ),
             unread_count = 0,
             updated_at = now()
       WHERE id = ANY($1::uuid[])`,
-    [sessionIds],
-  );
-  await manager.query(
-    `DELETE FROM messages
-      WHERE session_id = ANY($1::uuid[])`,
     [sessionIds],
   );
 }

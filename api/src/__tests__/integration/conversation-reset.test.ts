@@ -406,11 +406,21 @@ describe('Superadmin conversation reset', () => {
     );
     expect(Number(newMessages[0].n)).toBe(0);
 
+    // The Reset row keeps its "Session closed: …" system marker: the Inbox
+    // list only renders a conversation that has a preview, so wiping it too
+    // hid the customer and the Reset button with them.
     const selectedLeft = await AppDataSource.query(
-      `SELECT count(*)::int AS n FROM messages WHERE session_id = $1`,
+      `SELECT type, content FROM messages WHERE session_id = $1`,
       [first.id],
     );
-    expect(Number(selectedLeft[0].n)).toBe(0);
+    expect(selectedLeft.length).toBeGreaterThan(0);
+    expect(selectedLeft.every((m: { type: string }) => m.type === 'system')).toBe(true);
+    expect(
+      selectedLeft.some((m: { content: string }) => /Session closed/i.test(m.content)),
+    ).toBe(true);
+    expect(
+      selectedLeft.some((m: { content: string }) => m.content.includes(SLOT_TEXT)),
+    ).toBe(false);
 
     const olderLeft = await AppDataSource.query(
       `SELECT count(*)::int AS n FROM messages WHERE session_id = $1`,
@@ -457,9 +467,16 @@ describe('Superadmin conversation reset', () => {
          FROM chat_sessions WHERE id = $1`,
       [first.id],
     );
-    expect(sessionStats[0].message_count).toBe(0);
+    // Recomputed from the rows that survive, not blindly zeroed.
+    expect(sessionStats[0].message_count).toBe(selectedLeft.length);
     expect(sessionStats[0].unread_count).toBe(0);
     expect(sessionStats[0].last_coalesced_answer_message_id).toBeNull();
+
+    const olderStats = await AppDataSource.query(
+      `SELECT message_count FROM chat_sessions WHERE id = $1`,
+      [older.id],
+    );
+    expect(olderStats[0].message_count).toBe(0);
 
     expect(await peekPendingBooking(first.id)).toBeNull();
     expect(await peekPendingBooking(second.id)).toBeNull();

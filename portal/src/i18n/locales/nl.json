@@ -2239,7 +2239,7 @@
     },
     "resetDialog": {
       "title": "Dit gesprek resetten?",
-      "description": "Het volgende bericht van deze klant start een nieuw gesprek. Deze reset wist de geschiedenis van dit gesprek, onthouden feiten en andere teststatus van deze klant. Eerdere gesprekken blijven. Bevestigde boekingen blijven. Er gaat niets naar hen.",
+      "description": "Het volgende bericht van deze klant start een nieuw gesprek. Deze reset wist de chatgeschiedenis van deze klant op dit kanaal, inclusief eerdere gesprekken, plus onthouden feiten en andere teststatus. Andere kanalen blijven. Bevestigde boekingen blijven. Er gaat niets naar hen.",
       "confirm": "Resetten"
     },
     "transferModal": {

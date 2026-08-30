@@ -936,12 +936,18 @@ const Inbox: React.FC = () => {
     setConfirmClose(false);
     setConfirmReset(false);
     try {
-      const res = await api.post<{ outcome: string; conversation?: CommandConversationSummary }>(
+      const res = await api.post<{
+        outcome: string;
+        conversation?: CommandConversationSummary;
+        transcriptSessionIds?: string[];
+      }>(
         `/chats/${prev.id}/${command}`,
         { idempotencyKey: newUuid() },
       );
       applyCommandConversation(queryClient, res.conversation);
-      if (command === 'reset') clearSelectedTranscriptCache(queryClient, prev.id);
+      if (command === 'reset') {
+        clearResetTranscriptCaches(queryClient, res.transcriptSessionIds?.length ? res.transcriptSessionIds : [prev.id]);
+      }
       toast.success(t(toasts.success));
     } catch (error) {
       console.error('Failed to close or reset chat:', error);
@@ -951,7 +957,7 @@ const Inbox: React.FC = () => {
       if (command === 'reset' && isResetScratchIncomplete(error)) {
         const summary = conversationFromResetScratchError(error) ?? closedSummaryFromChat(prev);
         applyCommandConversation(queryClient, summary);
-        clearSelectedTranscriptCache(queryClient, prev.id);
+        clearResetTranscriptCaches(queryClient, [prev.id]);
         setSelectedChat((current) => mergeDefined(current ?? prev, commandSummaryToChatPatch(summary)));
         return;
       }
@@ -1126,11 +1132,13 @@ const Inbox: React.FC = () => {
   );
 };
 
-function clearSelectedTranscriptCache(queryClient: QueryClient, sessionId: string): void {
-  queryClient.setQueryData(queryKeys.chats.detail(sessionId), (old: { messages?: unknown[] } | undefined) =>
-    old ? { ...old, messages: [] } : old,
-  );
-  queryClient.removeQueries({ queryKey: queryKeys.chats.thread(sessionId) });
+function clearResetTranscriptCaches(queryClient: QueryClient, sessionIds: string[]): void {
+  for (const sessionId of sessionIds) {
+    queryClient.setQueryData(queryKeys.chats.detail(sessionId), (old: { messages?: unknown[] } | undefined) =>
+      old ? { ...old, messages: [] } : old,
+    );
+  }
+  queryClient.removeQueries({ queryKey: [...queryKeys.chats.all(), 'thread'] });
 }
 
 function isResetScratchIncomplete(error: unknown): boolean {

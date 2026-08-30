@@ -3,8 +3,9 @@
  * into the next inbound from the same visitor (memory, draft booking/tool
  * scratch, address, lead extraction). Confirmed calendar bookings stay.
  *
- * Message transcript is deleted only for the Reset session. Earlier closed
- * chats and other channels keep their logs.
+ * Message transcripts are deleted for this Reset session and every other
+ * session on the same tenant + channel + visitor (the Inbox "earlier"
+ * list). Other channels and person_key siblings keep their logs.
  *
  * Close alone starts a new ChatSession. Identity-keyed stores do not.
  */
@@ -39,6 +40,7 @@ export type ResetSessionIdentity = MemorySessionIdentity;
 
 export interface ConversationResetClearance {
   sessionIds: string[];
+  transcriptSessionIds: string[];
   factsSuperseded: number;
   runsSkipped: number;
 }
@@ -106,8 +108,8 @@ export async function clearIdentityScratch(sessionIds: string[]): Promise<boolea
  * lives in Redis (`booking:confirm`, `booking:offered`) and customer memory,
  * which Reset clears separately.
  *
- * Message rows are deleted only for `session.id`. Identity siblings keep
- * their transcripts.
+ * Message rows are deleted for this tenant + channel + visitor. Other
+ * channels keep their transcripts. person_key siblings are not included.
  */
 export async function clearConversationResetState(
   manager: Queryable,
@@ -115,21 +117,24 @@ export async function clearConversationResetState(
 ): Promise<ConversationResetClearance> {
   const memory = await clearConversationMemory(manager, session);
   const sessionIds = memory.sessionIds.length > 0 ? memory.sessionIds : [session.id];
+  const transcriptSessionIds = await channelIdentitySessionIds(manager, session);
 
   await clearAddressBindings(manager, sessionIds);
   await clearLeadConversationState(manager, sessionIds);
   await clearSessionTempMetadata(manager, sessionIds);
-  await clearSelectedSessionTranscript(manager, session.id);
+  await clearChannelIdentityTranscripts(manager, transcriptSessionIds);
 
   logger.info('[reset] conversation state cleared', {
     sessionId: session.id,
     sessions: sessionIds.length,
+    transcripts: transcriptSessionIds.length,
     factsSuperseded: memory.factsSuperseded,
     runsSkipped: memory.runsSkipped,
   });
 
   return {
     sessionIds,
+    transcriptSessionIds,
     factsSuperseded: memory.factsSuperseded,
     runsSkipped: memory.runsSkipped,
   };
@@ -188,11 +193,46 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
 }
 
 /**
- * Hard-delete the Inbox/LLM transcript for the Reset session only.
- * `message_deliveries` cascade. Coalescer watermarks are cleared so a retry
- * cannot answer a deleted high-water mark. Sibling sessions are untouched.
+ * Sessions that share this Inbox identity: same tenant + channel + visitor.
+ * Widget is also bot-scoped. Does not follow person_key onto other channels.
  */
-async function clearSelectedSessionTranscript(manager: Queryable, sessionId: string): Promise<void> {
+async function channelIdentitySessionIds(
+  manager: Queryable,
+  session: ResetSessionIdentity,
+): Promise<string[]> {
+  const ids = new Set<string>([session.id]);
+  if (!session.visitorId || !session.channel) return [...ids];
+
+  const rows = (
+    session.channel === 'widget'
+      ? await manager.query(
+          `SELECT id FROM chat_sessions
+            WHERE tenant_id = $1 AND channel = 'widget' AND bot_id = $2 AND visitor_id = $3`,
+          [session.tenantId, session.botId, session.visitorId],
+        )
+      : await manager.query(
+          `SELECT id FROM chat_sessions
+            WHERE tenant_id = $1 AND channel = $2 AND visitor_id = $3`,
+          [session.tenantId, session.channel, session.visitorId],
+        )
+  ) as Array<{ id: string }>;
+
+  for (const row of rows) {
+    if (row?.id) ids.add(row.id);
+  }
+  return [...ids];
+}
+
+/**
+ * Hard-delete Inbox/LLM transcripts for this channel identity.
+ * `message_deliveries` cascade. Coalescer watermarks are cleared so a retry
+ * cannot answer a deleted high-water mark. Other channels are untouched.
+ */
+async function clearChannelIdentityTranscripts(
+  manager: Queryable,
+  sessionIds: string[],
+): Promise<void> {
+  if (sessionIds.length === 0) return;
   await manager.query(
     `UPDATE chat_sessions
         SET last_coalesced_answer_at = NULL,
@@ -200,12 +240,12 @@ async function clearSelectedSessionTranscript(manager: Queryable, sessionId: str
             message_count = 0,
             unread_count = 0,
             updated_at = now()
-      WHERE id = $1`,
-    [sessionId],
+      WHERE id = ANY($1::uuid[])`,
+    [sessionIds],
   );
   await manager.query(
     `DELETE FROM messages
-      WHERE session_id = $1`,
-    [sessionId],
+      WHERE session_id = ANY($1::uuid[])`,
+    [sessionIds],
   );
 }

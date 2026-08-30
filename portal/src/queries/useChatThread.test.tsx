@@ -130,6 +130,42 @@ describe('useChatThread (B-PR4b)', () => {
     expect(client.getQueryData(queryKeys.chats.detail('c-current'))).toBe(detailEntry);
   });
 
+  it('hides emptied earlier chats after a Reset wipe', async () => {
+    apiGetMock.mockResolvedValue({
+      ...threadPayload(),
+      sessions: [
+        {
+          summary: { id: 'c-old', sessionId: 'c-old', status: 'closed' },
+          boundary: {
+            startedAt: '2026-08-01T09:00:00.000Z',
+            endedAt: '2026-08-01T09:30:00.000Z',
+            status: 'closed',
+          },
+          isCurrent: false,
+          messages: [],
+        },
+        {
+          summary: { id: 'c-current', sessionId: 'c-current', status: 'closed' },
+          boundary: {
+            startedAt: '2026-08-14T09:00:00.000Z',
+            endedAt: '2026-08-14T09:05:00.000Z',
+            status: 'closed',
+          },
+          isCurrent: true,
+          messages: [],
+        },
+      ],
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useChatThread('c-current'), {
+      wrapper: makeWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.thread).not.toBeNull());
+    expect(result.current.earlierSessions).toEqual([]);
+    expect(result.current.earlierCount).toBe(0);
+  });
+
   it('does not fetch without a selected chat id', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useChatThread(undefined), {

@@ -370,6 +370,7 @@ router.post(
       outcome: result.outcome,
       conversation: result.conversation,
       scratchCleared: result.scratchCleared ?? false,
+      transcriptSessionIds: result.transcriptSessionIds ?? [req.params.sessionId],
     });
   }),
 );

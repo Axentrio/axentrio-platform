@@ -344,23 +344,30 @@ export function useChatThread(chatId: string | undefined): UseChatThreadReturn {
     const result: EarlierThreadSession[] = [];
     for (const s of thread?.sessions ?? []) {
       if (s.isCurrent) continue;
+      const messages = s.messages.map(threadMessageToMessage);
+      if (messages.length === 0) continue;
       result.push({
         id: s.summary.sessionId ?? s.summary.id,
         boundary: s.boundary,
         status: normalizeChatStatus(s.boundary.status),
-        messages: s.messages.map(threadMessageToMessage),
+        messages,
       });
     }
     return result;
   }, [thread]);
 
+  const returnedEarlier = (thread?.sessions ?? []).filter((s) => !s.isCurrent).length;
+  const emptiedEarlier = returnedEarlier > 0 && earlierSessions.length === 0;
+
   return {
     thread,
     earlierSessions,
-    earlierCount: Math.max(
-      earlierSessions.length,
-      (thread?.totalSessions ?? 1) - 1,
-    ),
+    earlierCount: emptiedEarlier
+      ? 0
+      : Math.max(
+          earlierSessions.length,
+          (thread?.totalSessions ?? 1) - 1,
+        ),
     truncated: thread?.truncated ?? false,
     possibleDuplicates: thread?.possibleDuplicates ?? [],
     isLoading,

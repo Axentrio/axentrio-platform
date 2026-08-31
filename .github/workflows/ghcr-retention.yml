@@ -1,0 +1,40 @@
+name: GHCR retention
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [axentrio-api]
+    steps:
+      - name: Keep the newest 10 versions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const package_name = '${{ matrix.package }}';
+            const org = 'Axentrio';
+            const keep = 10;
+            const versions = await github.paginate(
+              github.rest.packages.getAllPackageVersionsForOrganization,
+              { org, package_type: 'container', package_name, per_page: 100 },
+            );
+            versions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const stale = versions.slice(keep);
+            core.info(`${package_name}: ${versions.length} versions, deleting ${stale.length}`);
+            for (const version of stale) {
+              await github.rest.packages.deletePackageVersionForOrg({
+                org,
+                package_type: 'container',
+                package_name,
+                package_version_id: version.id,
+              });
+            }

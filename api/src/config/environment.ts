@@ -307,6 +307,30 @@ if (env.NODE_ENV !== 'test') {
   }
 }
 
+export function resolveDatabaseSsl(opts: {
+  nodeEnv: string;
+  host: string | null | undefined;
+  databaseUrl?: string;
+  dbSsl: boolean;
+}): boolean {
+  if (opts.nodeEnv === 'test') return false;
+  const host = opts.host ?? '';
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === 'postgres') {
+    return false;
+  }
+  if (opts.databaseUrl) {
+    try {
+      if (new URL(opts.databaseUrl).searchParams.get('sslmode') === 'disable') {
+        return false;
+      }
+    } catch {
+      // Unparseable URL still implies TLS, matching the previous DATABASE_URL heuristic.
+    }
+    return true;
+  }
+  return opts.dbSsl;
+}
+
 // Parse DATABASE_URL if present
 const parsedDbUrl = env.DATABASE_URL ? parsePgConnectionString(env.DATABASE_URL) : null;
 
@@ -329,7 +353,12 @@ export const config = {
     name: parsedDbUrl ? parsedDbUrl.database ?? 'chatbot_platform' : env.DB_NAME,
     user: parsedDbUrl ? parsedDbUrl.user ?? 'postgres' : env.DB_USER,
     password: parsedDbUrl ? parsedDbUrl.password ?? '' : env.DB_PASSWORD,
-    ssl: env.NODE_ENV === 'test' || (parsedDbUrl?.host ?? env.DB_HOST) === 'localhost' || (parsedDbUrl?.host ?? env.DB_HOST) === '127.0.0.1' ? false : (parsedDbUrl ? true : env.DB_SSL),
+    ssl: resolveDatabaseSsl({
+      nodeEnv: env.NODE_ENV,
+      host: parsedDbUrl?.host ?? env.DB_HOST,
+      databaseUrl: env.DATABASE_URL,
+      dbSsl: env.DB_SSL,
+    }),
     poolSize: env.DB_POOL_SIZE,
     connectionTimeout: env.DB_CONNECTION_TIMEOUT,
     url: env.DATABASE_URL ?? `postgresql://${env.DB_USER}:${env.DB_PASSWORD}@${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME}`,

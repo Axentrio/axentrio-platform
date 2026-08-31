@@ -1,0 +1,13 @@
+# HTTP-01 via Let's Encrypt. Domain DNS stays on Netlify (NS1).
+# No Cloudflare token. Port 80 must stay open for the ACME challenge.
+api.axentrio.com {
+	reverse_proxy api:3000 {
+		health_uri /health
+		health_interval 5s
+		health_timeout 2s
+	}
+}
+
+ops.axentrio.com {
+	reverse_proxy n8n:5678
+}

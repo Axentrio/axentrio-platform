@@ -1,0 +1,195 @@
+#cloud-config
+# TEMPLATE. Do not paste this file raw.
+# Render with: ./infra/vps/render-user-data.sh prod|nonprod
+# axentrio.service is installed but not enabled until deploy.sh finds files.
+
+hostname: __AXENTRIO_HOSTNAME__
+manage_etc_hosts: true
+
+users:
+  - name: deploy
+    gecos: Axentrio deploy
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+ssh_pwauth: false
+disable_root: false
+
+package_update: true
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - jq
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+  - cron
+  - rsync
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {"log-driver":"local","log-opts":{"max-size":"20m","max-file":"5"}}
+
+  # Write as root. The users module runs after write_files on Ubuntu 26.04,
+  # so owner: deploy:deploy makes the whole write_files module abort.
+  # runcmd chowns /opt/axentrio after the deploy user exists.
+  - path: /opt/axentrio/host.env
+    permissions: "0644"
+    content: |
+      COMPOSE_FILE=__AXENTRIO_COMPOSE_FILE__
+      TAG=latest
+      STAGING_TAG=latest
+      DEV_TAG=latest
+
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+  - path: /etc/apt/apt.conf.d/51axentrio-unattended
+    permissions: "0644"
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}-security";
+              "${distro_id}ESMApps:${distro_codename}-apps-security";
+              "${distro_id}ESM:${distro_codename}-infra-security";
+      };
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+  - path: /etc/fail2ban/jail.d/sshd.local
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 1h
+
+  - path: /etc/systemd/system/axentrio.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Axentrio compose stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      Restart=always
+      RestartSec=10
+      User=deploy
+      Group=docker
+      WorkingDirectory=/opt/axentrio
+      EnvironmentFile=-/opt/axentrio/host.env
+      ExecStartPre=/usr/bin/test -f /opt/axentrio/.env
+      ExecStartPre=/usr/bin/test -f /opt/axentrio/${COMPOSE_FILE}
+      ExecStart=/usr/bin/docker compose --env-file /opt/axentrio/.env -f /opt/axentrio/${COMPOSE_FILE} up --remove-orphans
+      ExecStop=/usr/bin/docker compose --env-file /opt/axentrio/.env -f /opt/axentrio/${COMPOSE_FILE} stop
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/docker-prune.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Prune unused Docker data older than 168h
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/docker system prune -af --filter until=168h
+
+  - path: /etc/systemd/system/docker-prune.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Weekly Docker prune
+
+      [Timer]
+      OnCalendar=weekly
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /usr/local/sbin/axentrio-resource-alert
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      COOLDOWN=/var/tmp/axentrio-resource-alert.stamp
+      NOW=$(date +%s)
+      if [[ -f "$COOLDOWN" ]]; then
+        LAST=$(cat "$COOLDOWN" || echo 0)
+        if (( NOW - LAST < 3600 )); then
+          exit 0
+        fi
+      fi
+      disk=$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')
+      mem=$(free | awk '/Mem:/ {printf "%d", ($3/$2)*100}')
+      reasons=()
+      (( disk > 80 )) && reasons+=("disk ${disk}%")
+      (( mem > 90 )) && reasons+=("memory ${mem}%")
+      (( ${#reasons[@]} )) || exit 0
+      key_of() {
+        local file="$1" key="$2"
+        [[ -f "$file" ]] || return 0
+        grep -E "^${key}=" "$file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'"
+      }
+      RESEND_API_KEY=""
+      EMAIL_FROM_ADDRESS=""
+      PLATFORM_ALERT_EMAIL=""
+      for f in /opt/axentrio/.env /opt/axentrio/staging.env; do
+        v=$(key_of "$f" RESEND_API_KEY); [[ -n "$v" ]] && RESEND_API_KEY="$v"
+        v=$(key_of "$f" EMAIL_FROM_ADDRESS); [[ -n "$v" ]] && EMAIL_FROM_ADDRESS="$v"
+        v=$(key_of "$f" PLATFORM_ALERT_EMAIL); [[ -n "$v" ]] && PLATFORM_ALERT_EMAIL="$v"
+      done
+      [[ -n "$RESEND_API_KEY" && -n "$PLATFORM_ALERT_EMAIL" && -n "$EMAIL_FROM_ADDRESS" ]] || exit 0
+      host=$(hostname)
+      body="Axentrio ${host}: ${reasons[*]}"
+      curl -sS -X POST https://api.resend.com/emails \
+        -H "Authorization: Bearer ${RESEND_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"from\":\"${EMAIL_FROM_ADDRESS}\",\"to\":[\"${PLATFORM_ALERT_EMAIL}\"],\"subject\":\"Axentrio ${host} resource alert\",\"text\":\"${body}\"}" \
+        >/dev/null
+      echo "$NOW" > "$COOLDOWN"
+
+  - path: /etc/cron.d/axentrio-resource-alert
+    permissions: "0644"
+    content: |
+      */5 * * * * root /usr/local/sbin/axentrio-resource-alert
+
+runcmd:
+  - mkdir -p /opt/axentrio /home/deploy/.ssh
+  - if [ -f /root/.ssh/authorized_keys ]; then cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys; fi
+  - chown -R deploy:deploy /home/deploy/.ssh /opt/axentrio
+  - chmod 700 /home/deploy/.ssh
+  - chmod 600 /home/deploy/.ssh/authorized_keys || true
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - . /etc/os-release && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker deploy
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 443/udp
+  - ufw --force enable
+  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  - if [ -d /etc/ssh/sshd_config.d ]; then printf 'PermitRootLogin no\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/axentrio.conf; fi
+  - systemctl reload ssh || systemctl reload sshd || true
+  - systemctl daemon-reload
+  - systemctl enable --now fail2ban docker.service docker-prune.timer

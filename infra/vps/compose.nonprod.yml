@@ -1,0 +1,143 @@
+# Project env file: /opt/axentrio/.env
+# Compose interpolates POSTGRES_PASSWORD, REDIS_PASSWORD, STAGING_TAG, and
+# DEV_TAG from that file (and the process environment) BEFORE any service
+# env_file is loaded. Caddy uses stock caddy:2 (HTTP-01). No Cloudflare token.
+# staging.env and dev.env are API env_file only. They are not used for interpolation.
+
+networks:
+  axentrio:
+    driver: bridge
+
+volumes:
+  pg-data:
+  staging-redis-data:
+  dev-redis-data:
+  caddy-data:
+  caddy-config:
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in /opt/axentrio/.env}"
+      POSTGRES_DB: axentrio_staging
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axentrio_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - axentrio
+
+  staging-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - "${REDIS_PASSWORD:?set REDIS_PASSWORD in /opt/axentrio/.env}"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 2gb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - staging-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in /opt/axentrio/.env}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - axentrio
+
+  dev-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - "${REDIS_PASSWORD:?set REDIS_PASSWORD in /opt/axentrio/.env}"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 2gb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - dev-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in /opt/axentrio/.env}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - axentrio
+
+  staging-api:
+    image: ghcr.io/axentrio/axentrio-api:${STAGING_TAG:?set STAGING_TAG}
+    restart: unless-stopped
+    env_file:
+      - /opt/axentrio/staging.env
+    expose:
+      - "3000"
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      staging-redis:
+        condition: service_healthy
+    networks:
+      - axentrio
+
+  dev-api:
+    image: ghcr.io/axentrio/axentrio-api:${DEV_TAG:?set DEV_TAG}
+    restart: unless-stopped
+    env_file:
+      - /opt/axentrio/dev.env
+    expose:
+      - "3000"
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dev-redis:
+        condition: service_healthy
+    networks:
+      - axentrio
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./Caddyfile.nonprod:/etc/caddy/Caddyfile:ro
+    networks:
+      - axentrio

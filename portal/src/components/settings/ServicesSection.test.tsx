@@ -179,6 +179,22 @@ describe('ServicesSection — where does it happen?', () => {
     expect(box).toBeDisabled();
   });
 
+  it('locks the address flag off on a new Something else service', async () => {
+    await openNew();
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
+  });
+
+  it('locks the address flag back on when a video call becomes a customer-location job', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'google_meet' } });
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).toBeChecked();
+    expect(box).toBeDisabled();
+  });
+
   it('requires phone and clears address on a phone call', async () => {
     const select = await openNew();
     fireEvent.change(select, { target: { value: 'customer_location' } });
@@ -198,6 +214,56 @@ describe('ServicesSection — where does it happen?', () => {
       customerAddressRequired: false,
       customerLocationRequired: true,
     });
+  });
+
+  it('clears and locks the address flag on a video call', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    fireEvent.change(select, { target: { value: 'google_meet' } });
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Consult' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][1]).toMatchObject({
+      locationType: 'google_meet',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears and locks the address flag on something else', async () => {
+    const select = await openNew();
+    fireEvent.change(select, { target: { value: 'customer_location' } });
+    fireEvent.change(select, { target: { value: 'custom' } });
+    const box = screen.getByLabelText(/requires customer address/i);
+    expect(box).not.toBeChecked();
+    expect(box).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Other' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPost.mock.calls[0][1]).toMatchObject({
+      locationType: 'custom',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('drops customer-can-choose when a Both service becomes a video call', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'both' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'business_location' } });
+    fireEvent.click(screen.getByLabelText(/customer can choose/i));
+    fireEvent.change(select, { target: { value: 'google_meet' } });
+    fireEvent.change(select, { target: { value: 'business_location' } });
+    expect(screen.getByLabelText(/customer can choose/i)).not.toBeChecked();
   });
 
   it('unlocks the phone box when the service stops being a phone call, and keeps the answer', async () => {

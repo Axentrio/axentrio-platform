@@ -165,16 +165,53 @@ describe('createOutlookEvent', () => {
 describe('updateOutlookEvent / deleteOutlookEvent', () => {
   it('update maps 404→not_found, 403→no_access, ok otherwise', async () => {
     (axios.patch as any).mockResolvedValueOnce({ data: {} });
-    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toBe('ok');
+    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toEqual({ status: 'ok', meetUrl: null });
     (axios.patch as any).mockRejectedValueOnce({ response: { status: 404 } });
-    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toBe('not_found');
+    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toEqual({ status: 'not_found' });
     (axios.patch as any).mockRejectedValueOnce({ response: { status: 403 } });
-    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toBe('no_access');
+    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toEqual({ status: 'no_access' });
+  });
+
+  it('update writes location and drops Teams when conferencing is off', async () => {
+    (axios.patch as any).mockResolvedValueOnce({ data: {} });
+    expect(
+      await updateOutlookEvent('b1', 'e1', {
+        startISO: '2026-06-10T07:00:00Z',
+        endISO: '2026-06-10T07:30:00Z',
+        timezone: 'UTC',
+        location: 'Kerkstraat 12, 9310 Herdersem',
+        conferencing: false,
+      }),
+    ).toEqual({ status: 'ok', meetUrl: null });
+    expect((axios.patch as any).mock.calls[0][1]).toMatchObject({
+      location: { displayName: 'Kerkstraat 12, 9310 Herdersem' },
+      isOnlineMeeting: false,
+    });
+  });
+
+  it('update mints Teams and returns the join URL when conferencing is on', async () => {
+    (axios.patch as any).mockResolvedValueOnce({
+      data: { id: 'e1', onlineMeeting: { joinUrl: 'https://teams.microsoft.com/l/meetup-join/x' } },
+    });
+    expect(
+      await updateOutlookEvent('b1', 'e1', {
+        startISO: '2026-06-10T07:00:00Z',
+        endISO: '2026-06-10T07:30:00Z',
+        timezone: 'UTC',
+        location: '',
+        conferencing: true,
+      }),
+    ).toEqual({ status: 'ok', meetUrl: 'https://teams.microsoft.com/l/meetup-join/x' });
+    expect((axios.patch as any).mock.calls[0][1]).toMatchObject({
+      isOnlineMeeting: true,
+      onlineMeetingProvider: 'teamsForBusiness',
+      location: { displayName: '' },
+    });
   });
 
   it('update returns no_connection when no cred', async () => {
     getActiveCredential.mockResolvedValue(null);
-    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toBe('no_connection');
+    expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toEqual({ status: 'no_connection' });
   });
 
   it('delete swallows 404 as ok, maps 403→no_access', async () => {

@@ -1005,6 +1005,9 @@ function locationTypeSideEffects(locationType: string): Partial<
       customerLocationRequired: true,
     };
   }
+  if (locationType === 'google_meet' || locationType === 'custom') {
+    return { customerAddressRequired: false, customerChoosesLocation: false };
+  }
   return {};
 }
 
@@ -1015,12 +1018,14 @@ const LocationFields: React.FC<{
   workLocation: WorkLocation;
 }> = ({ form, set, workLocation }) => {
   const canRequireFile = useIsEntitled('fileUpload');
-  // business_location, customer_location and phone all pin the address flag.
-  // Phone also pins the phone flag on.
+  // business_location, customer_location, phone, video and something else all pin the
+  // address flag. Phone also pins the phone flag on.
   const addressPinned =
     form.locationType === 'business_location'
     || form.locationType === 'customer_location'
-    || form.locationType === 'phone';
+    || form.locationType === 'phone'
+    || form.locationType === 'google_meet'
+    || form.locationType === 'custom';
   const phonePinned = form.locationType === 'phone';
   return (
     <div className="space-y-2 border-t border-edge pt-3">

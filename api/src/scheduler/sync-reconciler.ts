@@ -217,11 +217,11 @@ async function processOne(row: ClaimedRow): Promise<void> {
   if (ref) {
     const provider = providerFor(ref.providerType as 'google' | 'microsoft');
     const res = await provider.updateEvent(row.bot_id, ref.externalEventId, input, ref.externalCalendarId);
-    if (res === 'no_access') return terminal(row, 'reconnect needed: no access to update event');
-    if (res === 'no_connection') {
+    if (res.status === 'no_access') return terminal(row, 'reconnect needed: no access to update event');
+    if (res.status === 'no_connection') {
       return terminal(row, `reconnect needed: no active ${ref.providerType} credential for stored ref`);
     }
-    if (res === 'not_found') {
+    if (res.status === 'not_found') {
       await applyExternalRemoval({ tenantId: row.tenant_id, botId: row.bot_id, bookingId: row.id });
       return clear(row);
     }

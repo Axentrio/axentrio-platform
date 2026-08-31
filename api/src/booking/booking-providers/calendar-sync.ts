@@ -121,45 +121,57 @@ export async function syncCalendarReschedule(
   end: Date,
   timezone: string,
   /**
-   * What a RECREATE needs, and an update does not.
+   * Placement for BOTH a live update and a recreate.
    *
-   * Grouped rather than trailing positionally, because the difference is the whole point and
-   * a signature should not need a paragraph to say which arguments apply when. A plain update
-   * deliberately PATCHes times alone so the owner's own edits to the event survive. A recreate
-   * builds the event from nothing, so anything omitted here is gone for good: the recreate
-   * SUCCEEDS, so `markSyncPending` never fires and the reconciler - which claims
-   * `sync_pending` rows only - never revisits it. Omitting them cost the venue AND nulled the
-   * stored Meet URL, which then blanked the join link on every later reschedule and in the
-   * portal's booking list.
+   * A plain update used to PATCH times alone so owner body edits survived. That
+   * also left a leftover Meet conference and Meet LOCATION after a type change.
+   * Current service type wins: a non-video reschedule writes the resolved place
+   * and drops conferencing. Description is still not patched. A recreate builds
+   * the event from nothing, so anything omitted here is gone for good.
    */
-  recreate?: { location?: string; conferencing?: boolean }
-): Promise<void> {
-  const { location, conferencing } = recreate ?? {};
-  // Plan D9: no external calendar calls when sync is entitlement-disabled.
-  // The booking itself is already updated internally; the mirror is
-  // intentionally suspended (re-enables with the entitlement).
-  if (!(await isCalendarSyncAllowed(ctx.tenant.id))) return;
+  placement?: { location?: string; conferencing?: boolean }
+): Promise<string | null> {
+  const { location, conferencing } = placement ?? {};
+  if (!(await isCalendarSyncAllowed(ctx.tenant.id))) {
+    return conferencing ? (await canonicalRef(ctx.bot.id, bookingId))?.meetingUrl ?? null : null;
+  }
   const refRepo = AppDataSource.getRepository(BookingReference);
   const ref = await canonicalRef(ctx.bot.id, bookingId);
+  let latestMeetUrl = conferencing ? (ref?.meetingUrl ?? null) : null;
   try {
-    const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
+    const times = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
+    // Video with an existing join link: times only, keep the conference.
+    // Video with no join link: mint one and clear any leftover street.
+    // Anything else: write the resolved place and drop conferencing.
+    const updateInput =
+      conferencing === false
+        ? { ...times, location: location ?? '', conferencing: false as const }
+        : conferencing === true && !ref?.meetingUrl
+          ? { ...times, location: location ?? '', conferencing: true as const }
+          : times;
     const recreateInput = {
-      ...input,
+      ...times,
       summary: content.summary,
       description: content.description,
       ...(location ? { location } : {}),
       ...(conferencing ? { conferencing } : {}),
     };
     if (ref) {
-      // Route by the REF's provider — the event lives there. After a provider
-      // switch, rescheduling an OLD event targets its original provider, which
-      // returns no_connection (cred gone) → sync_pending for manual attention.
       const provider = providerFor(ref.providerType as 'google' | 'microsoft');
-      const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
-      if (res === 'not_found') {
-        // Live reschedule instruction: recreate the mirror. The background
-        // reconciler takes the opposite branch (cancel the booking) when the
-        // owner deleted the event with no Axentrio action in flight.
+      const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, updateInput, ref.externalCalendarId);
+      if (res.status === 'ok') {
+        if (conferencing === false) {
+          if (ref.meetingUrl) {
+            ref.meetingUrl = null;
+            await refRepo.save(ref);
+          }
+          latestMeetUrl = null;
+        } else if (conferencing === true && res.meetUrl) {
+          ref.meetingUrl = res.meetUrl;
+          await refRepo.save(ref);
+          latestMeetUrl = res.meetUrl;
+        }
+      } else if (res.status === 'not_found') {
         const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
           eventId: googleEventId(bookingId),
           calendarId: ref.externalCalendarId,
@@ -169,16 +181,14 @@ export async function syncCalendarReschedule(
           ref.externalCalendarId = ev.calendarId;
           ref.meetingUrl = ev.meetUrl;
           await refRepo.save(ref);
+          latestMeetUrl = conferencing ? ev.meetUrl : null;
         }
-      } else if (res === 'no_access' || res === 'no_connection') {
-        // Event lives on a now-inaccessible / disconnected account.
+      } else if (res.status === 'no_access' || res.status === 'no_connection') {
         await markSyncPending(bookingId);
       }
     } else {
-      // Calendar connected after the booking was created → create on the bot's
-      // current active provider now.
       const provider = await resolveCalendarProvider(ctx.bot.id);
-      if (!provider) return;
+      if (!provider) return latestMeetUrl;
       const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
         eventId: googleEventId(bookingId),
       });
@@ -192,6 +202,7 @@ export async function syncCalendarReschedule(
             meetingUrl: ev.meetUrl,
           })
         );
+        latestMeetUrl = conferencing ? ev.meetUrl : null;
       }
     }
   } catch (err) {
@@ -201,6 +212,7 @@ export async function syncCalendarReschedule(
     });
     await markSyncPending(bookingId);
   }
+  return latestMeetUrl;
 }
 
 export async function syncCalendarCancel(ctx: BookingContext, bookingId: string): Promise<void> {

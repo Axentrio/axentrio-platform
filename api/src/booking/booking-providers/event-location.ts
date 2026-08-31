@@ -9,12 +9,14 @@
  *
  * Cases:
  *
- *   1. A meeting URL exists             → the URL. Unchanged, and it wins outright.
+ *   1. A video call with a meeting URL → the URL. Only `google_meet`. A leftover
+ *                                        Meet link from a type change does not win.
  *   2. `customer_location`              → the CUSTOMER's address. Never the business address.
  *   3. `business_location`              → the venue address, IF the owner has entered one.
- *   4. Legacy travel flag               → customer address, for leftover custom/unset/in_person.
+ *   4. Legacy travel flag               → customer address, for leftover in_person/unset.
  *   5. Legacy `in_person` / `unset`     → the venue, same as today until the owner reviews.
  *   6. Phone, video, something else     → OMIT. Not `''`, not a placeholder, not the venue.
+ *                                        A leftover travel flag does not put a street here.
  *
  * Case 6 is conformant, not degraded: RFC 5546 lists LOCATION as `0 or 1` for a VEVENT
  * REQUEST. An absent property means "no venue stated"; an empty one means "the venue is
@@ -67,7 +69,7 @@ export interface EventLocationInput {
  */
 export function resolveEventLocation(input: EventLocationInput): string | undefined {
   const meetUrl = input.meetUrl?.trim();
-  if (meetUrl) return meetUrl;
+  if (meetUrl && input.locationType === 'google_meet') return meetUrl;
 
   const customerLine = () => {
     const customer = input.customerAddress?.replace(/\s+/g, ' ').trim();
@@ -75,18 +77,24 @@ export function resolveEventLocation(input: EventLocationInput): string | undefi
   };
 
   // Explicit stored types win. A stale address flag must not send a business-location
-  // booking to the customer, a customer-location booking to the shop, or a phone call
-  // to anyone's street address.
+  // booking to the customer, a customer-location booking to the shop, or a phone /
+  // video / something-else booking to anyone's street address.
   if (input.locationType === 'customer_location') return customerLine();
   if (input.locationType === 'business_location') return formatVenueLine(input.venue) ?? undefined;
-  if (input.locationType === 'phone') return undefined;
+  if (
+    input.locationType === 'phone'
+    || input.locationType === 'google_meet'
+    || input.locationType === 'custom'
+  ) {
+    return undefined;
+  }
 
   // Legacy / review leftovers: the travel flag is still the stronger statement, because
   // service-area gating already refuses those rows on the flag alone.
   if (input.customerAddressRequired) return customerLine();
 
   // `in_person` (review leftover) and `unset` (#71) still mean the premises until the
-  // owner picks. `custom` stays empty on purpose.
+  // owner picks.
   if (input.locationType !== 'in_person' && input.locationType !== 'unset') return undefined;
   return formatVenueLine(input.venue) ?? undefined;
 }

@@ -50,7 +50,6 @@ import {
   hasHealthyCalendarConnection,
 } from '../../scheduler/calendar-provider';
 import {
-  canonicalRef,
   syncCalendarCreate,
   syncCalendarReschedule,
   syncCalendarCancel,
@@ -3595,12 +3594,15 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
-   * The invite, the reminders and the mirrored event, after a move has committed.
+   * Mail the customer an updated invite after a successful reschedule.
    *
-   * Carry the meeting join URL onto the rescheduled invite. The ICS reuses the same UID with a
-   * bumped SEQUENCE (an in-place UPDATE), so omitting LOCATION/DESCRIPTION here would BLANK the
-   * join link on the attendee's calendar event. The mirrored event is updated (not recreated)
-   * on reschedule, so the stored meetingUrl is still valid. Mirrors the create path's
+   * Carry the meeting join URL onto the rescheduled invite only while the service
+   * is still a video call. The ICS reuses the same UID with a bumped SEQUENCE (an
+   * in-place UPDATE), so omitting LOCATION/DESCRIPTION here would BLANK the join
+   * link on a video booking. A leftover Meet link from a type change must not
+   * replace the street, the venue, or an omitted phone/custom location.
+   * The mirrored event is updated (not recreated) on reschedule, so the stored
+   * meetingUrl is still valid for a video call. Mirrors the create path's
    * location/description.
    */
   private async notifyRescheduledBooking(
@@ -3618,11 +3620,42 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { booking, bookingId, service, rule, start, end, sequence, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
-    const ref = await canonicalRef(ctx.bot.id, bookingId);
-    const meetUrl = ref?.meetingUrl ?? null;
-    // The venue comes off the same booking-settings row the rules do; read at the tail
-    // because the transaction has already committed by here.
     const { venue } = await loadBusinessRules(ctx.bot.id);
+    const rescheduledContent = buildBookingEventContent(
+      {
+        attendeeName: booking.attendeeName,
+        attendeeEmail: booking.attendeeEmail,
+        customerPhone: booking.customerPhone,
+        customerAddress: booking.customerAddress,
+        aiSummary: booking.aiSummary,
+        notes: booking.notes,
+        intakeAnswers: booking.intakeAnswers,
+        bookingId,
+        durationMin: effectiveDuration,
+        sourceChannel: booking.sourceChannel,
+        uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
+      },
+      { ...service, priceDisplay },
+      buildManageUrl(bookingId)
+    );
+    // Mirror first so a change TO video can mint a join URL before the ICS is sent.
+    const mintedMeetUrl = await syncCalendarReschedule(
+      ctx,
+      bookingId,
+      rescheduledContent,
+      start,
+      end,
+      rule.timezone,
+      {
+        location: resolveBookingEventLocation(service, {
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        conferencing: service.locationType === 'google_meet',
+      }
+    ).catch(() => null);
+    const meetUrl = service.locationType === 'google_meet' ? mintedMeetUrl : null;
     await sendBookingEmail({
       method: 'REQUEST',
       uid: booking.icsUid,
@@ -3630,15 +3663,11 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: service.name,
-      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
-      // which is a modality — it told the customer nothing and occupied the field their
-      // calendar would otherwise use for directions. Omitted entirely when unknown.
       location: resolveBookingEventLocation(service, {
         meetUrl,
         customerAddress: booking.customerAddress,
         venue,
       }),
-      // The CUSTOMER's copy — what they need, not the owner's operational detail.
       description: buildCustomerEventDescription({
         serviceName: service.name,
         serviceDescription: service.description,
@@ -3661,47 +3690,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
     });
 
-    // Replace reminders: drop the old jobs, schedule fresh ones for the new time.
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
     await scheduleAndPersistReminders(bookingId, start, sequence);
-
-    // Move the mirrored Google event (best-effort).
-    const rescheduledContent = buildBookingEventContent(
-      {
-        attendeeName: booking.attendeeName,
-        attendeeEmail: booking.attendeeEmail,
-        customerPhone: booking.customerPhone,
-        customerAddress: booking.customerAddress,
-        aiSummary: booking.aiSummary,
-        notes: booking.notes,
-        intakeAnswers: booking.intakeAnswers,
-        bookingId,
-        durationMin: effectiveDuration,
-        sourceChannel: booking.sourceChannel,
-        uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
-      },
-      { ...service, priceDisplay },
-      buildManageUrl(bookingId)
-    );
-    await syncCalendarReschedule(
-      ctx,
-      bookingId,
-      rescheduledContent,
-      start,
-      end,
-      rule.timezone,
-      // Same derivation as the create path — a recreate has to rebuild the whole event, so it
-      // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
-      // event: Google mints a fresh one from `conferencing` and we store what comes back.
-      {
-        location: resolveBookingEventLocation(service, {
-          meetUrl: null,
-          customerAddress: booking.customerAddress,
-          venue,
-        }),
-        conferencing: service.locationType === 'google_meet',
-      }
-    ).catch(() => undefined);
   }
 
   async cancelBooking(

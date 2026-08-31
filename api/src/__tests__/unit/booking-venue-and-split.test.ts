@@ -107,7 +107,18 @@ describe('venue address — normalise and flatten', () => {
 describe('resolveEventLocation', () => {
   const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null };
 
-  it('uses the meeting URL when there is one, whatever the service says', () => {
+  it('uses the meeting URL on a video call', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: false,
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('does not let a leftover meeting URL replace an in-person venue', () => {
     expect(
       resolveEventLocation({
         locationType: 'in_person',
@@ -115,8 +126,45 @@ describe('resolveEventLocation', () => {
         meetUrl: 'https://meet.google.com/abc-defg-hij',
         venue,
       }),
-    ).toBe('https://meet.google.com/abc-defg-hij');
+    ).toBe('Grote Markt 1, 9300 Aalst');
   });
+
+  it('does not let a leftover meeting URL replace a customer address', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'customer_location',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('Kerkstraat 12, 9310 Herdersem');
+  });
+
+  it('does not let a leftover meeting URL replace a business venue', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'business_location',
+        customerAddressRequired: false,
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it.each(['phone', 'custom'] as const)(
+    'does not put a leftover meeting URL on a %s service',
+    (locationType) => {
+      expect(
+        resolveEventLocation({
+          locationType,
+          customerAddressRequired: false,
+          meetUrl: 'https://meet.google.com/abc-defg-hij',
+          venue,
+        }),
+      ).toBeUndefined();
+    },
+  );
 
   it('puts the venue on a service NOBODY WAS EVER ASKED about (#71)', () => {
     // `unset` is a Service created before the dropdown existed. The column defaulted to
@@ -239,12 +287,7 @@ describe('resolveEventLocation', () => {
     ).toBeUndefined();
   });
 
-  it("uses the customer's address even when locationType was never set away from 'custom'", () => {
-    // `custom` is the default the column shipped with, so every service created by hand
-    // before the dropdown existed still carries it and no migration ever backfilled them.
-    // Checking locationType first meant a service that geocodes and REFUSES bookings outside
-    // the service area — on customerAddressRequired alone — simultaneously put no address on
-    // the invite at all. The two authorities have to agree about what kind of job it is.
+  it('omits for something else even when a leftover address flag is set', () => {
     expect(
       resolveEventLocation({
         locationType: 'custom',
@@ -252,10 +295,55 @@ describe('resolveEventLocation', () => {
         customerAddress: 'Kerkstraat 12, 9310 Herdersem',
         venue,
       }),
-    ).toBe('Kerkstraat 12, 9310 Herdersem');
+    ).toBeUndefined();
   });
 
-  it('still prefers a meeting URL over the customer address', () => {
+  it('omits a street for a video call even when a leftover address flag is set', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        venue,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('does not put the venue on a video call with a leftover address flag', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: true,
+        venue,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('does not treat a blank meeting URL as a location on a video call', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        meetUrl: '   ',
+        venue,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('still prefers a meeting URL on a video call with a leftover address flag', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12',
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('does not prefer a leftover meeting URL over something else', () => {
     expect(
       resolveEventLocation({
         locationType: 'custom',
@@ -264,7 +352,7 @@ describe('resolveEventLocation', () => {
         meetUrl: 'https://meet.google.com/abc-defg-hij',
         venue,
       }),
-    ).toBe('https://meet.google.com/abc-defg-hij');
+    ).toBeUndefined();
   });
 
   it('never falls back to the VENUE for a travel job with no address yet', () => {
@@ -502,9 +590,9 @@ describe('conferencing belongs to video services only', () => {
     ).toBe('Grote Markt 1, 9300 Aalst');
   });
 
-  it('would have shown the meeting URL instead — the defect, reproduced', () => {
-    // Exactly what happened before conferencing was gated: same in-person service, but a
-    // link exists because one was minted unconditionally.
+  it('does not let a leftover meeting URL steal an in-person venue', () => {
+    // Conferencing used to be minted for every booking; a leftover Meet link then
+    // occupied LOCATION. After a type change the street must win.
     expect(
       resolveEventLocation({
         locationType: 'in_person',
@@ -512,7 +600,7 @@ describe('conferencing belongs to video services only', () => {
         meetUrl: 'https://meet.google.com/abc-defg-hij',
         venue,
       }),
-    ).toBe('https://meet.google.com/abc-defg-hij');
+    ).toBe('Grote Markt 1, 9300 Aalst');
   });
 
   it('still puts the link on a genuine video service', () => {

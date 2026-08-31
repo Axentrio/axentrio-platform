@@ -480,6 +480,98 @@ describe('locationType side effects', () => {
       customerChoosesLocation: false,
     });
   });
+
+  it('clears address and choose flags for a video call on create', async () => {
+    await createService(
+      {
+        tenantId: 'ten-1',
+        body: {
+          name: 'Consult',
+          durationMin: 30,
+          locationType: 'google_meet',
+          customerAddressRequired: true,
+          customerChoosesLocation: true,
+        },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'google_meet',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears address and choose flags for something else on update', async () => {
+    etFindOne.mockResolvedValue({
+      id: 's1',
+      botId: 'bot-1',
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+      customerChoosesLocation: false,
+    });
+    await updateService(
+      {
+        tenantId: 'ten-1',
+        params: { id: 's1' },
+        body: { locationType: 'custom' },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'custom',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears stale video flags on a name-only update', async () => {
+    etFindOne.mockResolvedValue({
+      id: 's1',
+      botId: 'bot-1',
+      name: 'Old',
+      locationType: 'google_meet',
+      customerAddressRequired: true,
+      customerChoosesLocation: true,
+    });
+    await updateService(
+      {
+        tenantId: 'ten-1',
+        params: { id: 's1' },
+        body: { name: 'New' },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      name: 'New',
+      locationType: 'google_meet',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('turns a video call back into a customer-location job with a required address', async () => {
+    etFindOne.mockResolvedValue({
+      id: 's1',
+      botId: 'bot-1',
+      locationType: 'google_meet',
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+    await updateService(
+      {
+        tenantId: 'ten-1',
+        params: { id: 's1' },
+        body: { locationType: 'customer_location' },
+      } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0]).toMatchObject({
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+      customerChoosesLocation: false,
+    });
+  });
 });
 
 describe('presets endpoints (P4a)', () => {

@@ -22,6 +22,7 @@ import type {
   CalendarEventInput,
   CalendarEventResult,
   CreateEventOpts,
+  UpdateEventResult,
   GoogleBusyInterval as BusyInterval,
 } from '../../integrations/google/google-calendar.service';
 import type { ExternalEventState, ExternalChangeBatch } from '../../scheduler/calendar-provider';
@@ -207,36 +208,67 @@ export async function createOutlookEvent(
   };
 }
 
-/** Patch an event's times. Returns 'not_found' (404), 'no_access' (403),
- *  'no_connection' (no cred), else 'ok'. Never touches the body. */
+/** Patch an event's times. When `location` or `conferencing` is present, those
+ *  fields are rewritten too. Never touches the body. */
 export async function updateOutlookEvent(
   botId: string,
   eventId: string,
-  input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'>
-): Promise<'ok' | 'not_found' | 'no_access' | 'no_connection'> {
+  input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'> &
+    Partial<Pick<CalendarEventInput, 'location' | 'conferencing'>>
+): Promise<UpdateEventResult> {
   const cred = await getActiveCredential(botId);
-  if (!cred) return 'no_connection';
+  if (!cred) return { status: 'no_connection' };
   const token = await getValidAccessTokenMicrosoft(cred);
-  try {
-    await withGraphRetry(() =>
-      axios.patch(
-        `${GRAPH}/me/events/${encodeURIComponent(eventId)}`,
-        { start: utcDateTime(input.startISO), end: utcDateTime(input.endISO) },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            Prefer: PREFER_IMMUTABLE_UTC,
-          },
-          timeout: 12000,
-        }
-      )
+  const times = {
+    start: utcDateTime(input.startISO),
+    end: utcDateTime(input.endISO),
+  };
+  const base: Record<string, unknown> = { ...times };
+  if (input.location !== undefined) base.location = { displayName: input.location };
+  if (input.conferencing === false) base.isOnlineMeeting = false;
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+    Prefer: PREFER_IMMUTABLE_UTC,
+  };
+  const patch = (body: Record<string, unknown>) =>
+    withGraphRetry(() =>
+      axios.patch(`${GRAPH}/me/events/${encodeURIComponent(eventId)}`, body, {
+        headers,
+        timeout: 12000,
+      }),
     );
-    return 'ok';
+
+  try {
+    let data: GraphEvent;
+    if (input.conferencing === true) {
+      try {
+        const resp = await patch({
+          ...base,
+          isOnlineMeeting: true,
+          onlineMeetingProvider: 'teamsForBusiness',
+        });
+        data = resp.data as GraphEvent;
+      } catch (err) {
+        if (!isOnlineMeetingUnsupported(err)) throw err;
+        logger.info('[Outlook] account cannot host Teams; updating event without online meeting', { botId });
+        const resp = await patch(base);
+        data = resp.data as GraphEvent;
+        return { status: 'ok', meetUrl: null };
+      }
+      let meetUrl = data.onlineMeeting?.joinUrl ?? null;
+      if (!meetUrl && data.id) {
+        meetUrl = await readOutlookJoinUrl(token, data.id);
+      }
+      return { status: 'ok', meetUrl };
+    }
+    await patch(base);
+    return { status: 'ok', meetUrl: null };
   } catch (err) {
     const status = (err as { response?: { status?: number } })?.response?.status;
-    if (status === 404 || status === 410) return 'not_found';
-    if (status === 403) return 'no_access';
+    if (status === 404 || status === 410) return { status: 'not_found' };
+    if (status === 403) return { status: 'no_access' };
     throw err;
   }
 }

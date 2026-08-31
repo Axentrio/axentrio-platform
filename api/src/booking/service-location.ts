@@ -1,19 +1,18 @@
 /**
  * WHO TRAVELS - one answer, from locationType, with a legacy fallback.
  *
- * `business_location`, `customer_location` and `phone` are stored authority. The owner
- * picks them in the service editor. Contact flags are then forced to match, so travel
- * gates, ADDRESS_REQUIRED and PHONE_REQUIRED keep working without a second source of truth.
+ * `business_location`, `customer_location`, `phone`, `google_meet` and `custom`
+ * are stored authority. The owner picks them in the service editor. Contact flags
+ * are then forced to match, so travel gates, ADDRESS_REQUIRED and PHONE_REQUIRED
+ * keep working without a second source of truth.
  *
- * `in_person` is a review leftover: it still means the premises unless the travel flag
- * is on. The dropdown no longer offers it. `unset` is still "nobody was asked" (#71).
+ * `in_person` is a review leftover: it still means the premises unless the travel
+ * flag is on. The dropdown no longer offers it. `unset` is still "nobody was asked"
+ * (#71). A leftover travel flag on video or something else does not win: those
+ * types have no physical address, including on rows that were never saved again.
  *
- * For google_meet / custom, a leftover travel flag still wins, because service-area
- * gating already refuses those rows on the flag alone. New writes do not create that pair.
- * `phone` does not honour a leftover travel flag: a phone call is not a travel job.
- *
- * The resolver stays read-only. `remote` still collapses video / phone / custom, so nothing
- * may write a locationType back through this.
+ * The resolver stays read-only. `remote` still collapses video / phone / custom, so
+ * nothing may write a locationType back through this.
  */
 import type { LocationType } from '../database/entities/ServiceType';
 
@@ -53,8 +52,8 @@ export function isPremisesLocationType(locationType: string | null | undefined):
  * Force contact flags to match an explicit location type.
  *
  * customer_location cannot exist without an address. business_location cannot require one.
- * A phone call requires a phone number and cannot require an address.
- * Other types are left alone, including review leftovers.
+ * A phone call, a video call and something else cannot require an address. A phone call
+ * requires a phone number. Review leftovers are left alone.
  */
 export function locationTypeSideEffects(locationType: string | undefined): {
   customerAddressRequired?: boolean;
@@ -74,15 +73,19 @@ export function locationTypeSideEffects(locationType: string | undefined): {
       customerLocationRequired: true,
     };
   }
+  if (locationType === 'google_meet' || locationType === 'custom') {
+    return { customerAddressRequired: false, customerChoosesLocation: false };
+  }
   return {};
 }
 
 /**
  * Who travels for this Service.
  *
- * Explicit stored types win. `business_location`, `customer_location` and `phone` do not
- * read the address flag, so a stale checkbox cannot move the appointment. Legacy values
- * still honour the flag, because that is how travel jobs were stored before the split.
+ * Explicit stored types win. `business_location`, `customer_location`, `phone`,
+ * `google_meet` and `custom` do not read the address flag, so a stale checkbox
+ * cannot move the appointment. Legacy `in_person` / `unset` still honour the flag,
+ * because that is how travel jobs were stored before the split.
  */
 export function resolveServiceLocationMode(service: ServiceLocationFacts): ServiceLocationMode {
   if (service.locationType === 'customer_location') return 'customer_location';
@@ -90,7 +93,13 @@ export function resolveServiceLocationMode(service: ServiceLocationFacts): Servi
     if (service.customerChoosesLocation) return 'customer_choice';
     return 'business_location';
   }
-  if (service.locationType === 'phone') return 'remote';
+  if (
+    service.locationType === 'phone'
+    || service.locationType === 'google_meet'
+    || service.locationType === 'custom'
+  ) {
+    return 'remote';
+  }
   // Legacy / review: the travel flag is still the stronger statement.
   if (service.customerAddressRequired) return 'customer_location';
   if (service.locationType === 'in_person' || service.locationType === 'unset') {

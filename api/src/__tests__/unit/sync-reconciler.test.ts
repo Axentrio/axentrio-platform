@@ -143,7 +143,7 @@ describe('reconcilePendingBookingSyncs', () => {
   it('updates the event on its real calendar when a reference exists', async () => {
     claim({ ...baseRow, status: 'confirmed' });
     refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'team@grp', bookingId: BID }, providerType: 'google' }]);
-    updateCalendarEvent.mockResolvedValue('ok');
+    updateCalendarEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
 
     await reconcilePendingBookingSyncs();
 
@@ -154,7 +154,7 @@ describe('reconcilePendingBookingSyncs', () => {
   it('cancels the booking when the existing event is gone (404)', async () => {
     claim({ ...baseRow, status: 'confirmed' });
     refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
-    updateCalendarEvent.mockResolvedValue('not_found');
+    updateCalendarEvent.mockResolvedValue({ status: 'not_found' });
 
     await reconcilePendingBookingSyncs();
 
@@ -166,7 +166,7 @@ describe('reconcilePendingBookingSyncs', () => {
   it('goes terminal when the account is inaccessible (403)', async () => {
     claim({ ...baseRow, status: 'confirmed' });
     refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
-    updateCalendarEvent.mockResolvedValue('no_access');
+    updateCalendarEvent.mockResolvedValue({ status: 'no_access' });
 
     await reconcilePendingBookingSyncs();
 
@@ -411,6 +411,16 @@ describe('reconciler content parity', () => {
     claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
     await reconcilePendingBookingSyncs();
     expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
+  });
+
+  it('does not put the customer street on a leftover video job', async () => {
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'google_meet', customerAddressRequired: true });
+    bsFindOne.mockResolvedValue({ venueStreet: 'Werfplein 3', venuePostalCode: '9060', venueCity: 'Zelzate' });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    const sent = createCalendarEvent.mock.calls[0][1];
+    expect(sent.location).toBeUndefined();
+    expect(sent.conferencing).toBe(true);
   });
 
   it('prefers the stored duration over the span when it is set', async () => {

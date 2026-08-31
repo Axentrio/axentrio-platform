@@ -80,7 +80,7 @@ vi.mock('../../services/notification.service', () => ({
 vi.mock('../../integrations/google/google-calendar.service', () => ({
   getGoogleBusyForBot: vi.fn().mockResolvedValue(null),
   createCalendarEvent: vi.fn().mockResolvedValue(null),
-  updateCalendarEvent: vi.fn().mockResolvedValue('no_connection'),
+  updateCalendarEvent: vi.fn().mockResolvedValue({ status: 'no_connection' }),
   deleteCalendarEvent: vi.fn().mockResolvedValue(undefined),
   resolveCalendarIdentity: vi.fn().mockResolvedValue(null),
 }));
@@ -202,7 +202,7 @@ const NEW_START = '2026-06-10T08:00:00Z'; // 10:00 Brussels CEST — an offered 
  */
 describe('InternalProvider.rescheduleBooking — travel', () => {
   let provider: InternalProvider;
-  const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
+  const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
   const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
@@ -227,7 +227,7 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
     bookingRefFind.mockResolvedValue([]);
     chatSessionFindOne.mockResolvedValue(null);
     providerGetBusy.mockResolvedValue(null);
-    providerUpdateEvent.mockResolvedValue('no_connection');
+    providerUpdateEvent.mockResolvedValue({ status: 'no_connection' });
     bookingQuery.mockImplementation(async (sql: string) => (sql.includes('lower(blocked_range)') ? [] : []));
     managerQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) return [];
@@ -355,7 +355,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
     chatSessionFindOne.mockResolvedValue(null); // owning session not found by default
     providerGetBusy.mockResolvedValue(null); // no external busy by default
     providerCreateEvent.mockResolvedValue(null);
-    providerUpdateEvent.mockResolvedValue('no_connection');
+    providerUpdateEvent.mockResolvedValue({ status: 'no_connection' });
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('lower(blocked_range)')) return []; // busy
       if (sql.includes("status='cancelled'")) return [{ sequence: 1 }]; // cancel update
@@ -443,6 +443,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
   });
 
   it('reschedule invite keeps the meeting join link (location + description)', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'google_meet' });
     bookingRefFind.mockResolvedValue([
       { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },
     ]);
@@ -457,6 +458,146 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0].description)
       .toContain('Join the meeting: https://meet.google.com/abc-defg-hij');
     expect(sendBookingEmail.mock.calls[0][0].description).toContain('Reschedule or cancel:');
+  });
+
+  it('does not keep a leftover Meet link after the service becomes a customer-location job', async () => {
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    });
+    bookingRefFind.mockResolvedValue([
+      { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const mail = sendBookingEmail.mock.calls[0][0];
+    expect(mail.location).toBe('Kerkstraat 12, 9310 Herdersem');
+    expect(mail.description).not.toContain('meet.google.com');
+  });
+
+  it('does not keep a leftover Meet link after the service becomes a business-location job', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'business_location' });
+    bookingSettingsFindOne.mockResolvedValue({
+      venueStreet: 'Grote Markt 1',
+      venuePostalCode: '9300',
+      venueCity: 'Aalst',
+      venueCountry: null,
+    } as any);
+    bookingRefFind.mockResolvedValue([
+      { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const mail = sendBookingEmail.mock.calls[0][0];
+    expect(mail.location).toBe('Grote Markt 1, 9300 Aalst');
+    expect(mail.description).not.toContain('meet.google.com');
+  });
+
+  it.each(['phone', 'custom'] as const)(
+    'does not keep a leftover Meet link after the service becomes %s',
+    async (locationType) => {
+      eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType });
+      bookingFindOne.mockResolvedValue({
+        ...confirmedBooking(),
+        customerPhone: '+32470000000',
+      });
+      bookingRefFind.mockResolvedValue([
+        { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },
+      ]);
+      await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+      const mail = sendBookingEmail.mock.calls[0][0];
+      expect(mail.location).toBeUndefined();
+      expect(mail.description).not.toContain('meet.google.com');
+    },
+  );
+
+  it('rewrites the existing calendar mirror on a type change, not only the emailed ICS', async () => {
+    providerUpdateEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    });
+    bookingRefFind.mockResolvedValue([
+      {
+        bookingId: 'bk-1',
+        providerType: 'google',
+        externalEventId: 'ev-1',
+        externalCalendarId: 'primary',
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        createdAt: new Date('2026-06-01T00:00:00Z'),
+      },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(providerUpdateEvent).toHaveBeenCalledWith(
+      'bot-1',
+      'ev-1',
+      expect.objectContaining({
+        location: 'Kerkstraat 12, 9310 Herdersem',
+        conferencing: false,
+      }),
+      'primary',
+    );
+    expect(providerCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not drop conferencing when the service is still a video call', async () => {
+    providerUpdateEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'google_meet' });
+    bookingRefFind.mockResolvedValue([
+      {
+        bookingId: 'bk-1',
+        providerType: 'google',
+        externalEventId: 'ev-1',
+        externalCalendarId: 'primary',
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        createdAt: new Date('2026-06-01T00:00:00Z'),
+      },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(providerUpdateEvent).toHaveBeenCalledWith(
+      'bot-1',
+      'ev-1',
+      expect.not.objectContaining({ conferencing: false }),
+      'primary',
+    );
+    expect(providerUpdateEvent.mock.calls[0][2]).not.toHaveProperty('location');
+  });
+
+  it('mints a conference on the existing mirror when a booking becomes a video call', async () => {
+    providerUpdateEvent.mockResolvedValue({
+      status: 'ok',
+      meetUrl: 'https://meet.google.com/new-link',
+    });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'google_meet' });
+    bookingRefFind.mockResolvedValue([
+      {
+        bookingId: 'bk-1',
+        providerType: 'google',
+        externalEventId: 'ev-1',
+        externalCalendarId: 'primary',
+        meetingUrl: null,
+        createdAt: new Date('2026-06-01T00:00:00Z'),
+      },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(providerUpdateEvent).toHaveBeenCalledWith(
+      'bot-1',
+      'ev-1',
+      expect.objectContaining({ conferencing: true, location: '' }),
+      'primary',
+    );
+    expect(sendBookingEmail.mock.calls[0][0].location).toBe('https://meet.google.com/new-link');
+    expect(sendBookingEmail.mock.calls[0][0].description).toContain(
+      'Join the meeting: https://meet.google.com/new-link',
+    );
   });
 
   describe('the mirror was deleted in the calendar (not_found → recreate)', () => {
@@ -476,7 +617,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
           createdAt: new Date('2026-06-01T00:00:00Z'),
         },
       ]);
-      providerUpdateEvent.mockResolvedValue('not_found');
+      providerUpdateEvent.mockResolvedValue({ status: 'not_found' });
       providerCreateEvent.mockResolvedValue({
         eventId: 'ev-new',
         calendarId: 'cal-1',
@@ -798,7 +939,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
  */
 describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
   let provider: InternalProvider;
-  const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
+  const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
   const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
   const GENT = { lat: 51.05, lng: 3.72 };
@@ -1007,7 +1148,7 @@ describe('InternalProvider customer change policy', () => {
     bookingRefFind.mockResolvedValue([]);
     chatSessionFindOne.mockResolvedValue(null);
     providerGetBusy.mockResolvedValue(null);
-    providerUpdateEvent.mockResolvedValue('no_connection');
+    providerUpdateEvent.mockResolvedValue({ status: 'no_connection' });
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'req-change' }];
       if (sql.includes('lower(blocked_range)')) return [];

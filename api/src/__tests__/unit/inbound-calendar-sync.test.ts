@@ -134,7 +134,7 @@ beforeEach(() => {
   bookingFindOne.mockResolvedValue(booking);
   serviceFindOne.mockResolvedValue({ name: 'Intro call' });
   listChanges.mockResolvedValue({ eventIds: ['ev-1'], cursor: 'tok-2', bootstrapped: false });
-  updateEvent.mockResolvedValue('ok');
+  updateEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
   externalRescheduleBooking.mockResolvedValue({ success: true });
   externalCancelBooking.mockResolvedValue({ success: true });
 });

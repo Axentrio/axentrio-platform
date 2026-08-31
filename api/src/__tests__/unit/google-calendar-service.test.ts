@@ -59,6 +59,7 @@ import {
   withGoogleRetry,
   CalendarNotWritableError,
   CalendarNotConnectedError,
+  updateCalendarEvent,
 } from '../../integrations/google/google-calendar.service';
 
 describe('google-calendar.service', () => {
@@ -257,6 +258,51 @@ describe('google-calendar.service', () => {
     it('throws when the bot has no active calendar credential', async () => {
       credFindOne.mockResolvedValue(null);
       await expect(setBotCalendar('b1', 'primary')).rejects.toBeInstanceOf(CalendarNotConnectedError);
+    });
+  });
+
+  describe('updateCalendarEvent', () => {
+    const cred = {
+      accessTokenEnc: 'enc(tok)',
+      refreshTokenEnc: 'enc(refresh)',
+      tokenExpiry: new Date(Date.now() + 10 * 60_000),
+      calendarId: 'primary',
+      status: 'active',
+    };
+    const times = {
+      startISO: '2026-06-10T07:00:00Z',
+      endISO: '2026-06-10T07:30:00Z',
+      timezone: 'Europe/Brussels',
+    };
+
+    beforeEach(() => {
+      credFindOne.mockResolvedValue(cred);
+    });
+
+    it('clears conferenceData with conferenceDataVersion 1 when conferencing is off', async () => {
+      (axios.patch as any).mockResolvedValue({ data: {} });
+      expect(
+        await updateCalendarEvent('bot1', 'ev-1', { ...times, location: 'Kerkstraat 12', conferencing: false }),
+      ).toEqual({ status: 'ok', meetUrl: null });
+      expect((axios.patch as any).mock.calls[0][1]).toMatchObject({
+        location: 'Kerkstraat 12',
+        conferenceData: null,
+      });
+      expect((axios.patch as any).mock.calls[0][2].params).toEqual({ conferenceDataVersion: 1 });
+    });
+
+    it('mints a Meet conference and returns the hangout link when conferencing is on', async () => {
+      (axios.patch as any).mockResolvedValue({
+        data: { hangoutLink: 'https://meet.google.com/new-link' },
+      });
+      expect(
+        await updateCalendarEvent('bot1', 'ev-1', { ...times, location: '', conferencing: true }),
+      ).toEqual({ status: 'ok', meetUrl: 'https://meet.google.com/new-link' });
+      expect((axios.patch as any).mock.calls[0][1].conferenceData.createRequest.conferenceSolutionKey).toEqual({
+        type: 'hangoutsMeet',
+      });
+      expect((axios.patch as any).mock.calls[0][1].location).toBe('');
+      expect((axios.patch as any).mock.calls[0][2].params).toEqual({ conferenceDataVersion: 1 });
     });
   });
 

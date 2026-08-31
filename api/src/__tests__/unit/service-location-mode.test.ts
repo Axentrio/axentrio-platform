@@ -37,10 +37,10 @@ const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', coun
 
 describe('who travels', () => {
   it('the customer address wins on leftover types, whatever the modality says', () => {
-    // Service-area gating refuses a booking on this flag ALONE for google_meet / custom /
-    // in_person / unset, so those rows cannot be "no location" here either. phone is
-    // stored authority and is not in this list.
-    for (const locationType of ['google_meet', 'in_person', 'custom', 'unset'] as LocationType[]) {
+    // Service-area gating refuses a booking on this flag ALONE for in_person / unset,
+    // so those rows cannot be "no location" here either. Video, phone and something
+    // else are stored authority and ignore the flag.
+    for (const locationType of ['in_person', 'unset'] as LocationType[]) {
       expect(resolveServiceLocationMode({ locationType, customerAddressRequired: true })).toBe(
         'customer_location'
       );
@@ -57,11 +57,14 @@ describe('who travels', () => {
     ).toBe('business_location');
   });
 
-  it('explicit phone ignores a stale travel flag', () => {
-    expect(
-      resolveServiceLocationMode({ locationType: 'phone', customerAddressRequired: true }),
-    ).toBe('remote');
-  });
+  it.each<LocationType>(['phone', 'google_meet', 'custom'])(
+    'explicit %s ignores a stale travel flag',
+    (locationType) => {
+      expect(
+        resolveServiceLocationMode({ locationType, customerAddressRequired: true }),
+      ).toBe('remote');
+    },
+  );
 
   it('in_person without a customer address is the premises', () => {
     expect(resolveServiceLocationMode({ locationType: 'in_person' })).toBe('business_location');
@@ -101,6 +104,19 @@ describe('who travels', () => {
       }),
     ).toBe('customer_choice');
   });
+
+  it.each<LocationType>(['google_meet', 'custom', 'phone'])(
+    'customerChoosesLocation on %s is ignored',
+    (locationType) => {
+      expect(
+        resolveServiceLocationMode({
+          locationType,
+          customerAddressRequired: true,
+          customerChoosesLocation: true,
+        }),
+      ).toBe('remote');
+    },
+  );
 });
 
 describe('what kind of business this is', () => {
@@ -219,6 +235,25 @@ describe('does THIS booking need the customer address', () => {
   it('never, for an explicit phone call, even with a stale address flag', () => {
     expect(serviceNeedsCustomerAddress({ locationType: 'phone', customerAddressRequired: true })).toBe(false);
   });
+
+  it.each<LocationType>(['google_meet', 'custom'])(
+    'never, for explicit %s, even with a stale address flag',
+    (locationType) => {
+      expect(serviceNeedsCustomerAddress({ locationType, customerAddressRequired: true })).toBe(false);
+    },
+  );
+
+  it.each<LocationType>(['google_meet', 'custom'])(
+    'never, for explicit %s, even when a fake customer locationChoice is passed',
+    (locationType) => {
+      expect(
+        serviceNeedsCustomerAddress(
+          { locationType, customerAddressRequired: true, customerChoosesLocation: true },
+          { locationChoice: 'customer', customerAddress: 'Kerkstraat 12, 9000 Gent' },
+        ),
+      ).toBe(false);
+    },
+  );
 });
 
 describe('does THIS booking need the customer phone', () => {
@@ -256,8 +291,22 @@ describe('locationTypeSideEffects', () => {
     });
   });
 
+  it('clears address and choose flags for a video call', () => {
+    expect(locationTypeSideEffects('google_meet')).toEqual({
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
+  it('clears address and choose flags for something else', () => {
+    expect(locationTypeSideEffects('custom')).toEqual({
+      customerAddressRequired: false,
+      customerChoosesLocation: false,
+    });
+  });
+
   it('leaves leftover types alone', () => {
     expect(locationTypeSideEffects('in_person')).toEqual({});
-    expect(locationTypeSideEffects('google_meet')).toEqual({});
+    expect(locationTypeSideEffects('unset')).toEqual({});
   });
 });

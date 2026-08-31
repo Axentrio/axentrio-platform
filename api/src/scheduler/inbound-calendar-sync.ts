@@ -321,7 +321,7 @@ async function restoreExternalEvent(
     },
     input.ref.externalCalendarId
   );
-  if (res !== 'ok') return 'failed';
+  if (res.status !== 'ok') return 'failed';
 
   if (!(await holdLease(input.lease))) return 'lost';
   await notifyOwnerRejected({

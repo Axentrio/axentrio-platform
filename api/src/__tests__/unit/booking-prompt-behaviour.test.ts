@@ -716,7 +716,7 @@ describe('{openingHours} carries closures', () => {
  * travel time is off. Travel time then adds the requestable-slots rule.
  */
 describe('travel time — asking for the address before the times', () => {
-  const mobile = svc({ customerAddressRequired: true, locationType: 'custom' });
+  const mobile = svc({ customerAddressRequired: true, locationType: 'customer_location' });
 
   it('still collects the full address before times when travel time is not running', () => {
     const section = buildServicesSection([mobile])!;
@@ -829,6 +829,23 @@ describe('explicit location type reaches the catalog', () => {
     const section = buildServicesSection([svc({ locationType: 'google_meet' })])!;
     expect(line(section)).toMatch(/video call/);
     expect(line(section)).not.toMatch(/at business location/);
+  });
+
+  it('does not ask for an address on a video call with a leftover travel flag', () => {
+    const section = buildServicesSection([
+      svc({ locationType: 'google_meet', customerAddressRequired: true }),
+    ])!;
+    expect(line(section)).toMatch(/video call/);
+    expect(line(section)).not.toMatch(/needs address/);
+    expect(line(section)).not.toMatch(/at customer location/);
+  });
+
+  it('does not ask for an address on something else with a leftover travel flag', () => {
+    const section = buildServicesSection([
+      svc({ locationType: 'custom', customerAddressRequired: true }),
+    ])!;
+    expect(line(section)).not.toMatch(/needs address/);
+    expect(line(section)).not.toMatch(/at customer location/);
   });
 });
 

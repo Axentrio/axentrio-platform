@@ -92,6 +92,33 @@ describe('placeBookingAddress - who is allowed to spend', () => {
     expect(geocode).not.toHaveBeenCalled();
   });
 
+  it.each(['google_meet', 'custom', 'phone'] as const)(
+    'never spends for a leftover travel flag on %s',
+    async (locationType) => {
+      expect(
+        await call({
+          service: { locationType, customerAddressRequired: true } as ServiceType,
+        }),
+      ).toEqual({ applies: false });
+      expect(eligibility).not.toHaveBeenCalled();
+      expect(geocode).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not travel when a video call is given a fake customer locationChoice', async () => {
+    expect(
+      await call({
+        service: {
+          locationType: 'google_meet',
+          customerAddressRequired: true,
+          customerChoosesLocation: true,
+        } as ServiceType,
+        locationChoice: 'customer',
+      }),
+    ).toEqual({ applies: false });
+    expect(eligibility).not.toHaveBeenCalled();
+  });
+
   it.each([null, '', '   '])('does nothing with an address of %p', async (address) => {
     expect(await call({ address })).toEqual({ applies: false });
     expect(geocode).not.toHaveBeenCalled();

@@ -23,8 +23,10 @@ import {
   getCalendarEvent,
   listChangedGoogleEvents,
   type CalendarEventInput,
+  type CalendarEventPatch,
   type CalendarEventResult,
   type CreateEventOpts,
+  type UpdateEventResult,
   type GoogleBusyInterval as BusyInterval,
 } from '../integrations/google/google-calendar.service';
 import {
@@ -37,8 +39,7 @@ import {
 } from '../integrations/microsoft/outlook-events.service';
 import { resolveOutlookIdentity } from '../integrations/microsoft/outlook-calendar.service';
 
-export type { CalendarEventInput, CalendarEventResult, CreateEventOpts, BusyInterval };
-export type UpdateEventResult = 'ok' | 'not_found' | 'no_access' | 'no_connection';
+export type { CalendarEventInput, CalendarEventPatch, CalendarEventResult, CreateEventOpts, BusyInterval, UpdateEventResult };
 export type DeleteEventResult = 'ok' | 'no_access' | 'no_connection';
 
 export type ExternalEventState =
@@ -64,11 +65,11 @@ export interface CalendarProvider {
   getBusy(botId: string, startISO: string, endISO: string, timezone?: string): Promise<BusyInterval[] | null>;
   /** Create the owner event; null when no connection; throws on non-idempotent failure. */
   createEvent(botId: string, input: CalendarEventInput, opts?: CreateEventOpts): Promise<CalendarEventResult | null>;
-  /** Patch event times only (never the body). */
+  /** Patch event times. Location and conferencing only when the caller sends them. Never the body. */
   updateEvent(
     botId: string,
     eventId: string,
-    input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'>,
+    input: CalendarEventPatch,
     calendarId?: string
   ): Promise<UpdateEventResult>;
   deleteEvent(botId: string, eventId: string, calendarId?: string): Promise<DeleteEventResult>;

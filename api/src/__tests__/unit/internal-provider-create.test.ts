@@ -58,7 +58,7 @@ vi.mock('../../booking/booking-providers/booking-email', () => ({
 
 const getGoogleBusyForBot = vi.fn().mockResolvedValue(null);
 const createCalendarEvent = vi.fn().mockResolvedValue(null);
-const updateCalendarEvent = vi.fn().mockResolvedValue('no_connection');
+const updateCalendarEvent = vi.fn().mockResolvedValue({ status: 'no_connection' });
 const deleteCalendarEvent = vi.fn().mockResolvedValue(undefined);
 const resolveCalendarIdentity = vi.fn().mockResolvedValue(null);
 // Auto-confirm now gates on a healthy connected calendar via the provider-agnostic
@@ -1163,6 +1163,24 @@ describe('InternalProvider.createBooking', () => {
       ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, 'Kerkstraat 12, 9000 Gent',
     );
     expect(res.slots.length).toBeGreaterThan(0);
+  });
+
+  it('offers slots for a leftover video row without an address', async () => {
+    const video = { ...EVENT_TYPE, locationType: 'google_meet', customerAddressRequired: true };
+    serviceTypeFind.mockResolvedValue([video]);
+    eventTypeFindOne.mockResolvedValue(video);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.locationMode).toBe('remote');
+  });
+
+  it('offers slots for leftover something-else without an address', async () => {
+    const other = { ...EVENT_TYPE, locationType: 'custom', customerAddressRequired: true };
+    serviceTypeFind.mockResolvedValue([other]);
+    eventTypeFindOne.mockResolvedValue(other);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.locationMode).toBe('remote');
   });
 
 

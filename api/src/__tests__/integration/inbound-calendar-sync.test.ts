@@ -11,7 +11,7 @@ const sendBookingEmail = vi.fn();
 vi.mock('../../integrations/google/google-calendar.service', () => ({
   getGoogleBusyForBot: vi.fn(async () => []),
   createCalendarEvent: vi.fn(),
-  updateCalendarEvent: vi.fn(async () => 'ok'),
+  updateCalendarEvent: vi.fn(async () => ({ status: 'ok', meetUrl: null })),
   deleteCalendarEvent: vi.fn(async () => 'ok'),
   resolveCalendarIdentity: vi.fn(async () => null),
   getCalendarEvent: (...a: unknown[]) => getCalendarEvent(...a),

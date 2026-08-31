@@ -20,13 +20,16 @@ export class RenamePlansEnumToEssentialPro1782000000000 implements MigrationInte
   name = 'RenamePlansEnumToEssentialPro1782000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Cast tenants.tier to text. TypeORM's default transaction mode is `all`,
+    // so this runs in the same transaction as AddBillingTables' ADD VALUE
+    // 'premium'. Postgres refuses to use that new enum value until commit.
     // Pre-migration: informational counts. Pre-launch posture means production
     // should always see 0 here; logging it makes any surprise visible.
     await queryRunner.query(`
       DO $$
       BEGIN
         RAISE NOTICE 'Pre-migration premium-tier tenants: %',
-          (SELECT COUNT(*) FROM tenants WHERE tier = 'premium');
+          (SELECT COUNT(*) FROM tenants WHERE tier::text = 'premium');
         RAISE NOTICE 'Pre-migration premium-plan billing accounts: %',
           (SELECT COUNT(*) FROM tenant_billing_accounts
              WHERE current_plan_id = 'premium' OR pending_plan_id = 'premium');
@@ -34,7 +37,7 @@ export class RenamePlansEnumToEssentialPro1782000000000 implements MigrationInte
     `);
 
     // 1. Remap any legacy 'premium' rows. Dev/staging only in practice.
-    await queryRunner.query(`UPDATE tenants SET tier = 'enterprise' WHERE tier = 'premium'`);
+    await queryRunner.query(`UPDATE tenants SET tier = 'enterprise' WHERE tier::text = 'premium'`);
     await queryRunner.query(`
       UPDATE tenant_billing_accounts SET current_plan_id = 'enterprise' WHERE current_plan_id = 'premium'
     `);

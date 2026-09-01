@@ -17,6 +17,14 @@ import {
 
 export type EmailDeliveryStatus = 'pending' | 'sent' | 'failed';
 
+export interface EmailDeliveryPayload {
+  from?: string;
+  replyTo?: string;
+  subject: string;
+  body: string;
+  attachments?: Array<{ filename: string; content: string; contentType?: string }>;
+}
+
 @Entity('email_deliveries')
 @Check('ck_email_deliveries_status', "status IN ('pending', 'sent', 'failed')")
 @Index(['tenantId'])
@@ -58,6 +66,12 @@ export class EmailDelivery {
 
   @Column({ type: 'text', nullable: true })
   error!: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  payload?: EmailDeliveryPayload | null;
+
+  @Column({ type: 'timestamptz', name: 'next_attempt_at', nullable: true })
+  nextAttemptAt?: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

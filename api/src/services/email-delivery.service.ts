@@ -11,6 +11,10 @@ export interface SendDurableInput {
   kind: string;
   relatedId: string;
   idempotencyKey: string;
+  from?: string;
+  replyTo?: string;
+  attachments?: Array<{ filename: string; content: string; contentType?: string }>;
+  retainPayload?: boolean;
 }
 
 export type SendDurableResult =
@@ -63,6 +67,15 @@ async function findOrCreateDelivery(input: SendDurableInput): Promise<EmailDeliv
         idempotencyKey: input.idempotencyKey,
         providerMessageId: null,
         error: null,
+        payload: input.retainPayload === true
+          ? {
+              from: input.from,
+              replyTo: input.replyTo,
+              subject: input.subject,
+              body: input.body,
+              attachments: input.attachments,
+            }
+          : null,
       }),
     );
   } catch (error) {
@@ -116,6 +129,9 @@ export const emailDeliveryService = {
           to: input.recipientEmail,
           subject: input.subject,
           body: input.body,
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           // Provider-level idempotency (ADR-0018): the same key that guards the
           // ledger row also guards Resend, so a retry after a crash between
           // provider-accept and our commit cannot produce a second email.
@@ -125,6 +141,7 @@ export const emailDeliveryService = {
         delivery.status = 'failed' as EmailDeliveryStatus;
         delivery.attemptCount += 1;
         delivery.error = errorMessage(error);
+        delivery.nextAttemptAt = new Date(Date.now() + 60_000);
         await repo.save(delivery);
         return {
           status: 'failed' as const,
@@ -137,6 +154,7 @@ export const emailDeliveryService = {
       if (!result || result.success !== true) {
         delivery.status = 'failed';
         delivery.error = providerFailureMessage(result);
+        delivery.nextAttemptAt = new Date(Date.now() + 60_000);
         await repo.save(delivery);
         return {
           status: 'failed' as const,
@@ -148,6 +166,7 @@ export const emailDeliveryService = {
       delivery.status = 'sent';
       delivery.providerMessageId = result.messageId ?? null;
       delivery.error = null;
+      delivery.nextAttemptAt = null;
       await repo.save(delivery);
       return {
         status: 'sent' as const,

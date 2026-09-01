@@ -8,6 +8,7 @@ import { EmailDelivery } from '../../database/entities/EmailDelivery';
 import { createTestTenant } from '../helpers/factories';
 import { emailDeliveryService } from '../../services/email-delivery.service';
 import { renderHandoffEmail } from '../../services/handoff-notification.service';
+import { sweepFailedEmailDeliveries } from '../../notifications/email-retry.worker';
 
 beforeEach(() => {
   send.mockReset();
@@ -102,6 +103,80 @@ describe('emailDeliveryService.sendDurable', () => {
       providerMessageId: 'provider-message-1',
     });
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sweepFailedEmailDeliveries', () => {
+  it('resends a retainPayload failure with the same idempotency key', async () => {
+    const tenant = await createTestTenant();
+    const key = `booking:uid:${Date.now()}:REQUEST:invite`;
+    send.mockRejectedValueOnce(new Error('outage'));
+
+    await emailDeliveryService.sendDurable({
+      ...input(tenant.id, key),
+      kind: 'booking_email',
+      retainPayload: true,
+      from: 'bookings@example.com',
+    });
+
+    const repo = AppDataSource.getRepository(EmailDelivery);
+    const failed = await repo.findOneByOrFail({ idempotencyKey: key });
+    expect(failed.status).toBe('failed');
+    expect(failed.payload).toMatchObject({
+      subject: 'New handoff request',
+      body: '<p>A new handoff request needs attention.</p>',
+      from: 'bookings@example.com',
+    });
+    expect(failed.nextAttemptAt).toBeTruthy();
+
+    failed.nextAttemptAt = new Date(Date.now() - 1000);
+    await repo.save(failed);
+
+    send.mockReset();
+    send.mockResolvedValue({ success: true, messageId: 'retry-1' });
+
+    const result = await sweepFailedEmailDeliveries();
+    expect(result.resent).toBe(1);
+
+    const row = await repo.findOneByOrFail({ idempotencyKey: key });
+    expect(row.status).toBe('sent');
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'operator@example.com',
+        idempotencyKey: key,
+      }),
+    );
+  });
+
+  it('never claims a row at attempt_count 6', async () => {
+    const tenant = await createTestTenant();
+    const key = `booking:cap:${Date.now()}:REQUEST:invite`;
+    const repo = AppDataSource.getRepository(EmailDelivery);
+    await repo.insert(
+      repo.create({
+        tenantId: tenant.id,
+        recipientUserId: null,
+        recipientEmail: 'ada@example.com',
+        subject: 'Confirmed: x',
+        kind: 'booking_email',
+        relatedId: '00000000-0000-0000-0000-000000000002',
+        status: 'failed',
+        attemptCount: 6,
+        idempotencyKey: key,
+        providerMessageId: null,
+        error: 'outage',
+        payload: { subject: 'Confirmed: x', body: '<p>x</p>' },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      }),
+    );
+
+    send.mockClear();
+    const result = await sweepFailedEmailDeliveries();
+    expect(result.resent).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+    const row = await repo.findOneByOrFail({ idempotencyKey: key });
+    expect(row.status).toBe('failed');
+    expect(row.attemptCount).toBe(6);
   });
 });
 

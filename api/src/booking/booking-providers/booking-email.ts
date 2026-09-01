@@ -11,6 +11,7 @@ import { EmailService, type EmailAttachment } from '../../automations/email.serv
 import { logger } from '../../utils/logger';
 import { buildIcs, IcsMethod } from './ics';
 import { senderFor, parseAddress } from './organizer-address';
+import { emailDeliveryService } from '../../services/email-delivery.service';
 
 let emailService: EmailService | null = null;
 function getEmailService(): EmailService {
@@ -40,12 +41,39 @@ async function sendOrReport(
   what: string,
   /** Optional because the reminder and request-notification params carry no `uid`, and their
    *  log lines never did either. Omitted rather than faked. */
-  params: { uid?: string },
-  options: Parameters<EmailService['send']>[0],
-  context: Record<string, unknown> = {}
+  params: { uid?: string; tenantId?: string; bookingId?: string },
+  options: Parameters<EmailService['send']>[0] & { retainPayload?: boolean },
+  context: Record<string, unknown> = {},
 ): Promise<boolean> {
+  const { retainPayload, ...sendOptions } = options;
   try {
-    const result = await getEmailService().send(options);
+    if (params.tenantId && sendOptions.idempotencyKey) {
+      const to = sendOptions.to;
+      const recipientEmail = Array.isArray(to) ? to[0] : to;
+      const result = await emailDeliveryService.sendDurable({
+        recipientEmail,
+        subject: sendOptions.subject,
+        body: sendOptions.body,
+        from: sendOptions.from,
+        replyTo: sendOptions.replyTo,
+        attachments: sendOptions.attachments,
+        idempotencyKey: sendOptions.idempotencyKey,
+        kind: 'booking_email',
+        tenantId: params.tenantId,
+        relatedId: params.bookingId ?? params.uid ?? params.tenantId,
+        retainPayload: retainPayload === true,
+      });
+      if (result.status === 'failed') {
+        logger.warn(`[Booking] ${what} failed (non-fatal)`, {
+          ...(params.uid ? { uid: params.uid } : {}),
+          ...context,
+          error: result.error ?? 'delivery reported failure',
+        });
+        return false;
+      }
+      return true;
+    }
+    const result = await getEmailService().send(sendOptions);
     if (result?.success === false) {
       logger.error(`[Booking] ${what} failed (non-fatal)`, {
         ...(params.uid ? { uid: params.uid } : {}),
@@ -56,7 +84,8 @@ async function sendOrReport(
     }
     return true;
   } catch (err) {
-    logger.error(`[Booking] ${what} failed (non-fatal)`, {
+    const log = params.tenantId && sendOptions.idempotencyKey ? logger.warn : logger.error;
+    log(`[Booking] ${what} failed (non-fatal)`, {
       ...(params.uid ? { uid: params.uid } : {}),
       ...context,
       error: err instanceof Error ? err.message : String(err),
@@ -80,6 +109,8 @@ export interface BookingEmailParams {
    *  customer gives no email. The invite email is then skipped (they're
    *  confirmed in-channel and the owner sees it on their calendar). */
   attendeeEmail?: string;
+  tenantId: string;
+  bookingId?: string;
   /** The business's own address. Gets its OWN message now, not a seat on the customer's. */
   ownerEmail?: string;
   /**
@@ -205,6 +236,7 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
       idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
       // The customer's uploaded files ride on the OWNER's copy only.
       ...(params.ownerAttachments?.length ? { attachments: params.ownerAttachments } : {}),
+      retainPayload: false,
   });
 }
 
@@ -298,6 +330,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
           contentType: `text/calendar; method=${params.method}; charset=utf-8`,
         },
       ],
+      retainPayload: true,
   }, { method: params.method });
 
   // Owner's own copy, sent whether or not the customer's invite succeeded — a failed

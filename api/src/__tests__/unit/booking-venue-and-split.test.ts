@@ -22,13 +22,16 @@ import {
   VENUE_FIELD_MAX,
 } from '../../contracts/venue-address';
 
-const send = vi.fn();
-// booking-email constructs its own `new EmailService(...)` and caches it, so the class is
-// what has to be replaced — there is no injectable accessor to stub.
+const sendDurable = vi.fn();
+vi.mock('../../services/email-delivery.service', () => ({
+  emailDeliveryService: {
+    sendDurable: (...a: unknown[]) => sendDurable(...a),
+  },
+}));
 vi.mock('../../automations/email.service', () => ({
   EmailService: class {
-    send(...a: unknown[]) {
-      return send(...a);
+    send() {
+      return Promise.resolve({ success: true });
     }
   },
 }));
@@ -378,16 +381,22 @@ const BASE = {
   attendeeEmail: 'ada@example.com',
   ownerEmail: 'owner@valyro.be',
   organizerEmail: 'bookings@notifications.axentrio.com',
+  tenantId: '00000000-0000-0000-0000-000000000001',
+  bookingId: '00000000-0000-0000-0000-000000000002',
 };
 
-const sent = () => send.mock.calls.map((c) => c[0] as Record<string, unknown>);
+const sent = (): Array<Record<string, unknown>> =>
+  sendDurable.mock.calls.map((c) => {
+    const input = c[0] as Record<string, unknown>;
+    return { ...input, to: [input.recipientEmail] };
+  });
 const toCustomer = () => sent().find((m) => (m.to as string[]).includes('ada@example.com'));
 const toOwner = () => sent().find((m) => (m.to as string[]).includes('owner@valyro.be'));
 
 describe('booking email — owner and customer get separate messages', () => {
   beforeEach(() => {
-    send.mockReset();
-    send.mockResolvedValue(undefined);
+    sendDurable.mockReset();
+    sendDurable.mockResolvedValue({ status: 'sent' });
   });
 
   it('sends exactly two messages, one per audience', async () => {
@@ -395,6 +404,8 @@ describe('booking email — owner and customer get separate messages', () => {
     expect(sent()).toHaveLength(2);
     expect(toCustomer()!.to).toEqual(['ada@example.com']);
     expect(toOwner()!.to).toEqual(['owner@valyro.be']);
+    expect(toCustomer()!.retainPayload).toBe(true);
+    expect(toOwner()!.retainPayload).toBe(false);
   });
 
   it('keeps the owner’s address off the customer’s message', async () => {
@@ -462,7 +473,7 @@ describe('booking email — owner and customer get separate messages', () => {
 
   it('tells the owner even when the customer send throws', async () => {
     // A failed customer send is exactly when the owner most needs to know a booking exists.
-    send.mockRejectedValueOnce(new Error('resend 500'));
+    sendDurable.mockRejectedValueOnce(new Error('resend 500'));
     await sendBookingEmail({ ...BASE });
     expect(toOwner()).toBeDefined();
   });
@@ -568,8 +579,8 @@ describe('per-tenant sending address', () => {
 
 describe('booking email — From is aligned with the frozen ORGANIZER', () => {
   beforeEach(() => {
-    send.mockReset();
-    send.mockResolvedValue(undefined);
+    sendDurable.mockReset();
+    sendDurable.mockResolvedValue({ status: 'sent' });
   });
 
   const domain = organizerAddressForTenant('a3f2c1d0-0000-0000-0000-000000000000').split('@')[1];

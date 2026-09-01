@@ -19,14 +19,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // `vi.mock` factories are hoisted above every top-level binding, so the doubles they close over
 // have to be hoisted with them or they are read before initialisation.
-const { send, logger } = vi.hoisted(() => ({
+const { send, sendDurable, logger } = vi.hoisted(() => ({
   send: vi.fn(),
+  sendDurable: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock('../../automations/email.service', () => ({
   EmailService: class {
     send = send;
   },
+}));
+vi.mock('../../services/email-delivery.service', () => ({
+  emailDeliveryService: { sendDurable: (...a: unknown[]) => sendDurable(...a) },
 }));
 vi.mock('../../utils/logger', () => ({ logger }));
 
@@ -47,22 +51,25 @@ const bookingParams = {
   attendeeName: 'Jan',
   attendeeEmail: 'jan@example.com',
   organizerEmail: 'bookings@axentrio.com',
+  tenantId: '00000000-0000-0000-0000-000000000001',
+  bookingId: '00000000-0000-0000-0000-000000000002',
 };
 
 /** Every failure line this file can emit, whatever the shape of the failure. */
 const failures = () =>
-  logger.error.mock.calls.filter((c) => String(c[0]).includes('failed (non-fatal)'));
+  [...logger.error.mock.calls, ...logger.warn.mock.calls].filter((c) => String(c[0]).includes('failed (non-fatal)'));
 
 beforeEach(() => {
   vi.clearAllMocks();
   send.mockResolvedValue({ success: true });
+  sendDurable.mockResolvedValue({ status: 'sent' });
 });
 
 describe('a delivery failure is reported however it arrives', () => {
   it('reports a RETURNED failure, which is the one that was silent', async () => {
     // The likeliest failure and the one that reads as success. Before this, nothing was logged:
     // `send` resolved normally, so the catch did not run.
-    send.mockResolvedValue({ success: false, error: 'not configured' });
+    sendDurable.mockResolvedValue({ status: 'failed', error: 'not configured' });
 
     await sendBookingEmail(bookingParams);
 
@@ -72,7 +79,7 @@ describe('a delivery failure is reported however it arrives', () => {
   });
 
   it('still reports a THROWN failure, which already worked', async () => {
-    send.mockRejectedValue(new Error('SMTP refused'));
+    sendDurable.mockRejectedValue(new Error('SMTP refused'));
 
     await sendBookingEmail(bookingParams);
 
@@ -88,10 +95,10 @@ describe('a delivery failure is reported however it arrives', () => {
     // Non-fatal is the design and stays the design. The fix is that the failure is now VISIBLE,
     // not that it became fatal - rolling back a confirmed booking because an invite bounced
     // would be a far worse trade.
-    send.mockResolvedValue({ success: false, error: 'not configured' });
+    sendDurable.mockResolvedValue({ status: 'failed', error: 'not configured' });
     await expect(sendBookingEmail(bookingParams)).resolves.toBeUndefined();
 
-    send.mockRejectedValue(new Error('SMTP refused'));
+    sendDurable.mockRejectedValue(new Error('SMTP refused'));
     await expect(sendBookingEmail(bookingParams)).resolves.toBeUndefined();
   });
 });

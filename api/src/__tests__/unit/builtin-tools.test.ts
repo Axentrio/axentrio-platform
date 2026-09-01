@@ -1158,6 +1158,36 @@ describe('RescheduleBookingTool', () => {
     expect(result.success).toBe(true);
     expect(mockRescheduleBooking).toHaveBeenCalledWith('agent', 'sess-4', 'bk-3', '2026-04-10T14:00:00Z', undefined);
   });
+
+  it('writes the address the customer confirmed, even when the model drops it', async () => {
+    // The gate holds the door the customer agreed to in a summary. Reading `args` here instead
+    // would open the fence and then move the job to the address the row already had (WaterFix,
+    // 2026-09-01: the move never landed at all, and this is the write it owed them).
+    const tool = new RescheduleBookingTool();
+    const ctx = makeCtx({
+      sessionId: 'sess-5',
+      conversationHistory: [
+        {
+          role: 'assistant',
+          content: 'Ter bevestiging: donderdag om 13:00 op Turnhoutsebaan 100, 2140 Antwerpen. Zal ik dit boeken?',
+        },
+        { role: 'user', content: 'ja doe maar' },
+      ],
+    });
+    mockRescheduleBooking.mockResolvedValue({ success: true, booking: { id: 'bk-9' } });
+
+    // First call records the pending move with the address; the confirming call omits it.
+    await tool.execute(
+      { bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      makeCtx({ sessionId: 'sess-5', conversationHistory: [{ role: 'user', content: 'verzet naar 13:00' }] }),
+    );
+    const result = await tool.execute({ bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockRescheduleBooking).toHaveBeenLastCalledWith('agent', 'sess-5', 'bk-9', '2026-09-03T13:00:00', {
+      customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen',
+    });
+  });
 });
 
 describe('CancelBookingTool', () => {

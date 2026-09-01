@@ -1161,14 +1161,19 @@ export class RescheduleBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const needsConfirm = await refuseUnlessRescheduleConfirmed(args, ctx);
-      if (needsConfirm) return needsConfirm;
+      const gate = await refuseUnlessRescheduleConfirmed(args, ctx);
+      if (gate.refusal) return gate.refusal;
+      // The gate's address, not the caller's: the confirming call is often the one that drops it,
+      // and the customer agreed to a summary naming that door. Falling back to `args` here would
+      // move the job to the address the row already held.
+      const customerAddress =
+        gate.customerAddress ?? (typeof args.customerAddress === 'string' ? args.customerAddress : undefined);
       const result = await rescheduleBooking(
         'agent',
         ctx.sessionId,
         args.bookingId as string,
         args.newStartTime as string,
-        typeof args.customerAddress === 'string' ? { customerAddress: args.customerAddress } : undefined,
+        customerAddress ? { customerAddress } : undefined,
       );
       return { success: true, data: result };
     } catch (err) {

@@ -226,7 +226,7 @@ describe('confirmation keys do not cross kinds', () => {
       { bookingId: 'bk-1', newStartTime: '2026-06-10T10:00:00' },
       toolCtx([]),
     );
-    expect(refused).toBeNull();
+    expect(refused.refusal).toBeNull();
   });
 
   it('a pending create does not satisfy a reschedule yes', async () => {
@@ -245,7 +245,7 @@ describe('confirmation keys do not cross kinds', () => {
       { bookingId: 'bk-1', newStartTime: '2026-06-10T10:00:00' },
       toolCtx(history),
     );
-    expect(refused?.error).toMatch(CONFIRMATION_REQUIRED);
+    expect(refused.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
     expect(store.has('booking:confirm:sess-confirm')).toBe(true);
     expect(store.has('booking:confirm-reschedule:sess-confirm')).toBe(true);
   });
@@ -255,7 +255,7 @@ describe('confirmation keys do not cross kinds', () => {
       { bookingId: 'bk-1', newStartTime: '2026-06-10T10:00:00' },
       toolCtx([{ role: 'user', content: 'verzetten naar 10:00' }]),
     );
-    expect(first?.error).toMatch(CONFIRMATION_REQUIRED);
+    expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
 
     const history = [
       { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
@@ -282,6 +282,106 @@ describe('confirmation keys do not cross kinds', () => {
       toolCtx([{ role: 'user', content: 'Ja, dat klopt' }]),
     );
     expect(refused?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+});
+
+/**
+ * THE MOVE THAT COULD NEVER LAND (live, WaterFix, 2026-09-01).
+ *
+ * A customer asked to move an at-home appointment, then said yes three times. The tool answered
+ * CONFIRMATION_REQUIRED every time, the appointment never moved, and no change request was
+ * written. The gate compares the stored record field by field and REWRITES it on every miss, so
+ * one field that the model does not repeat on the confirming call restarts the question forever.
+ */
+describe('a reschedule the customer keeps confirming', () => {
+  beforeEach(() => {
+    store.clear();
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+  });
+
+  const summary = {
+    role: 'assistant' as const,
+    content: 'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00. Zal ik dit boeken?',
+  };
+
+  /** The same summary, but it reads the door back to the customer. */
+  const summaryWithAddress = {
+    role: 'assistant' as const,
+    content:
+      'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00 op Turnhoutsebaan 100, 2140 Antwerpen. Zal ik dit boeken?',
+  };
+
+  it('accepts the yes when the model repeats every argument', async () => {
+    const first = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(second.refusal).toBeNull();
+  });
+
+  it('accepts a dropped address when the summary read that door back', async () => {
+    // The model drops an argument it already passed. That is not a different move when the
+    // customer has just agreed to a summary naming the same door, and treating it as one is
+    // what produced the live loop.
+    const first = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([summaryWithAddress, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(second.refusal).toBeNull();
+  });
+
+  it('refuses a dropped address when the summary never named the door', async () => {
+    // Carrying a stored address forward on a bare yes would move the job to an address the
+    // customer never read. A summary about the time alone confirms the time alone.
+    const first = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(second.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+
+  it('still refuses a move to a DIFFERENT time', async () => {
+    await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    const other = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T15:00:00' },
+      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+
+  it('still refuses when the model names a DIFFERENT address than the one confirmed', async () => {
+    await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    const other = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Kerkstraat 12, 2060 Antwerpen' },
+      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
   });
 });
 

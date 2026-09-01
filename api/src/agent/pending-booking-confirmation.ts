@@ -274,15 +274,87 @@ export async function refuseUnlessConfirmed(
   };
 }
 
+/**
+ * Did a summary the customer already saw name this exact address?
+ *
+ * The gate may only carry a stored address forward on that evidence. An address the customer
+ * never read is a door they never agreed to, and applying one on a bare "yes" would move a job
+ * to an address nobody confirmed - the failure the whole confirmation area exists to prevent.
+ */
+function summaryNamedAddress(history: ToolContext['conversationHistory'], address?: string): boolean {
+  if (!address || !Array.isArray(history)) return false;
+  const needle = address.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!needle) return false;
+  let lastUser = -1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== 'user') continue;
+    if (contentToText(m.content).trim().startsWith('(Internal note')) continue;
+    lastUser = i;
+    break;
+  }
+  if (lastUser < 0) return false;
+  for (let i = 0; i < lastUser; i++) {
+    const m = history[i];
+    if (m.role !== 'assistant') continue;
+    if (contentToText(m.content).toLowerCase().replace(/\s+/g, ' ').includes(needle)) return true;
+  }
+  return false;
+}
+
+/**
+ * The gate's answer, and the address the move must use once it proceeds.
+ *
+ * The address travels WITH the verdict because the confirming call is often the one that drops
+ * it: the gate is what knows the customer already agreed to that door, so it is the only place
+ * that can say which address the write owes them. A verdict alone would open the fence and then
+ * move the job to the address it had before.
+ */
+export type RescheduleConfirmation = {
+  /** Non-null means the move must not proceed yet. */
+  refusal: ToolResult | null;
+  /** The caller's address, or the pending one they confirmed. Undefined leaves the row alone. */
+  customerAddress?: string;
+};
+
+/**
+ * Is this call the same move the customer already agreed to?
+ *
+ * THE ADDRESS IS THE ONE ARGUMENT THE MODEL DROPS AND RE-ADDS BETWEEN CALLS, and every miss
+ * rewrites the pending record, so the next yes is measured against the shape just stored and the
+ * customer can agree forever (WaterFix, 2026-09-01: three yes answers, three refusals, and the
+ * appointment never moved). Unstated therefore repeats the pending address - but only on
+ * evidence, because the address is the customer's, and one they never read is a door they never
+ * agreed to. A DIFFERENT address, time or booking is a different move and still refuses.
+ */
+function rescheduleWasConfirmed(
+  pending: PendingBookingDetails | null,
+  asked: { bookingId: string; newStartTime: string; customerAddress?: string },
+  ctx: ToolContext,
+  last: string,
+): boolean {
+  if (!pending || pending.kind !== 'reschedule') return false;
+  if (pending.bookingId !== asked.bookingId || pending.startTime !== asked.newStartTime) return false;
+  const addressAgreed =
+    asked.customerAddress === undefined
+      ? !pending.customerAddress || summaryNamedAddress(ctx.conversationHistory, pending.customerAddress)
+      : pending.customerAddress === asked.customerAddress;
+  if (!addressAgreed) return false;
+  return (
+    isConfirmingChip(last, pending.startTime) ||
+    (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime))
+  );
+}
+
 export async function refuseUnlessRescheduleConfirmed(
   args: Record<string, unknown>,
   ctx: ToolContext,
-): Promise<ToolResult | null> {
+): Promise<RescheduleConfirmation> {
   const last = lastCustomerUtterance(ctx);
-  if (!last) return null;
+  if (!last) return { refusal: null };
 
   const lookup = await readPending(ctx.sessionId, RESCHEDULE_PREFIX);
-  if (lookup.store === 'down') return null;
+  if (lookup.store === 'down') return { refusal: null };
 
   const newStartTime = await wallClockKey(ctx.sessionId, String(args.newStartTime ?? ''));
   const bookingId = String(args.bookingId ?? '');
@@ -291,18 +363,11 @@ export async function refuseUnlessRescheduleConfirmed(
       ? args.customerAddress.trim()
       : undefined;
   const pending = lookup.pending;
-  const confirmed =
-    !!pending &&
-    pending.kind === 'reschedule' &&
-    pending.bookingId === bookingId &&
-    pending.startTime === newStartTime &&
-    (pending.customerAddress ?? '') === (customerAddress ?? '') &&
-    (isConfirmingChip(last, pending.startTime) ||
-      (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime)));
+  const confirmed = rescheduleWasConfirmed(pending, { bookingId, newStartTime, customerAddress }, ctx, last);
 
   if (confirmed) {
     await clearPending(ctx.sessionId, RESCHEDULE_PREFIX);
-    return null;
+    return { refusal: null, customerAddress: customerAddress ?? pending?.customerAddress };
   }
 
   const stored = await writePending(
@@ -318,17 +383,19 @@ export async function refuseUnlessRescheduleConfirmed(
     },
     RESCHEDULE_PREFIX,
   );
-  if (!stored) return null;
+  if (!stored) return { refusal: null };
 
   const addressBit = customerAddress ? ' and the new address' : '';
   return {
-    success: false,
-    error:
-      `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Send a short summary ` +
-      `of the existing appointment, the new time${addressBit}, then wait for an explicit yes. Call reschedule_booking ` +
-      `again only after they confirm this same move. Do not pick a different time than the one they named.`,
-    errorSafeForModel: true,
-    data: { needsConfirmation: true, bookingId, newStartTime, customerAddress },
+    refusal: {
+      success: false,
+      error:
+        `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Send a short summary ` +
+        `of the existing appointment, the new time${addressBit}, then wait for an explicit yes. Call reschedule_booking ` +
+        `again only after they confirm this same move. Do not pick a different time than the one they named.`,
+      errorSafeForModel: true,
+      data: { needsConfirmation: true, bookingId, newStartTime, customerAddress },
+    },
   };
 }
 

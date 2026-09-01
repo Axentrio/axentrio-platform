@@ -275,16 +275,23 @@ export async function refuseUnlessConfirmed(
 }
 
 /**
- * Did a summary the customer already saw name this exact address?
+ * Did ONE summary the customer already read carry this move whole: the question, the hour, and
+ * this exact door?
  *
- * The gate may only carry a stored address forward on that evidence. An address the customer
- * never read is a door they never agreed to, and applying one on a bare "yes" would move a job
- * to an address nobody confirmed - the failure the whole confirmation area exists to prevent.
+ * All three in the SAME message, deliberately. Split across messages, an old turn that happened
+ * to mention the address would pair with a fresh time-only summary, and a bare "yes" would then
+ * move the job to a door the customer never saw beside that hour. That is the wrong-door failure
+ * this whole area exists to prevent, so the evidence has to be one sentence they actually read.
  */
-function summaryNamedAddress(history: ToolContext['conversationHistory'], address?: string): boolean {
-  if (!address || !Array.isArray(history)) return false;
+function summaryCarriedMove(
+  history: ToolContext['conversationHistory'],
+  startTime: string,
+  address: string,
+): boolean {
+  const clock = startTime.match(/T(\d{2}):(\d{2})/);
   const needle = address.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!needle) return false;
+  if (!clock || !needle || !Array.isArray(history)) return false;
+  const hhmm = `${clock[1]}:${clock[2]}`;
   let lastUser = -1;
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
@@ -297,7 +304,10 @@ function summaryNamedAddress(history: ToolContext['conversationHistory'], addres
   for (let i = 0; i < lastUser; i++) {
     const m = history[i];
     if (m.role !== 'assistant') continue;
-    if (contentToText(m.content).toLowerCase().replace(/\s+/g, ' ').includes(needle)) return true;
+    const text = contentToText(m.content);
+    if (!text.includes('?') || !SUMMARY_ASK.test(text)) continue;
+    if (!text.toLowerCase().replace(/\s+/g, ' ').includes(needle)) continue;
+    if (parseClockTimes(text).some((t) => t.key === hhmm)) return true;
   }
   return false;
 }
@@ -335,11 +345,18 @@ function rescheduleWasConfirmed(
 ): boolean {
   if (!pending || pending.kind !== 'reschedule') return false;
   if (pending.bookingId !== asked.bookingId || pending.startTime !== asked.newStartTime) return false;
-  const addressAgreed =
-    asked.customerAddress === undefined
-      ? !pending.customerAddress || summaryNamedAddress(ctx.conversationHistory, pending.customerAddress)
-      : pending.customerAddress === asked.customerAddress;
-  if (!addressAgreed) return false;
+  if (asked.customerAddress !== undefined && pending.customerAddress !== asked.customerAddress) return false;
+  // A MOVE THAT CARRIES A DOOR NEEDS THE DOOR IN THE SUMMARY, whether or not the confirming call
+  // repeats it. Tool arguments are the model's output, not the customer's word: an address it
+  // invented on the first call and repeated on the second is no more agreed to than one it
+  // dropped. So the evidence is the same either way - one message the customer read holding the
+  // question, the hour and this address. A slot chip is not that evidence: it names an hour.
+  if (pending.customerAddress) {
+    return (
+      isAffirmativeReply(last) &&
+      summaryCarriedMove(ctx.conversationHistory, pending.startTime, pending.customerAddress)
+    );
+  }
   return (
     isConfirmingChip(last, pending.startTime) ||
     (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime))

@@ -313,7 +313,7 @@ describe('a reschedule the customer keeps confirming', () => {
       'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00 op Turnhoutsebaan 100, 2140 Antwerpen. Zal ik dit boeken?',
   };
 
-  it('accepts the yes when the model repeats every argument', async () => {
+  it('accepts the yes when the summary named the hour and the door', async () => {
     const first = await refuseUnlessRescheduleConfirmed(
       { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
       toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
@@ -322,9 +322,41 @@ describe('a reschedule the customer keeps confirming', () => {
 
     const second = await refuseUnlessRescheduleConfirmed(
       { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
-      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+      toolCtx([summaryWithAddress, { role: 'user', content: 'ja doe maar' }]),
     );
     expect(second.refusal).toBeNull();
+  });
+
+  it('refuses a REPEATED address when the summary named only the hour', async () => {
+    // Tool arguments are the model's output. An address it names twice is not an address the
+    // customer read, so a time-only summary may not write that door.
+    await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
+    );
+    expect(second.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+
+  it('refuses when the door was named in an OLDER turn than the summary', async () => {
+    // The stale-door path: an earlier reply mentioned the address, a fresh summary named only the
+    // hour, and a bare yes would move the job to a door the customer never saw beside that hour.
+    await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([
+        { role: 'assistant', content: 'Je adres staat genoteerd als Turnhoutsebaan 100, 2140 Antwerpen.' },
+        summary,
+        { role: 'user', content: 'ja doe maar' },
+      ]),
+    );
+    expect(second.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
   });
 
   it('accepts a dropped address when the summary read that door back', async () => {

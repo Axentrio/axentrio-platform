@@ -230,6 +230,15 @@ describe('a service that requires an email for the calendar invite', () => {
     expect(p).not.toMatch(/EMAIL \(optional\)/);
   });
 
+  it('forbids offering to book without the address, found by a live production test', () => {
+    // The agent asked "shall I book this without an email address?", called the tool on the
+    // customer's yes, and only then hit EMAIL_REQUIRED. Refused correctly, promised wrongly.
+    const p = buildServicesSection([svc({ customerEmailRequired: true })])!;
+    expect(p).toMatch(/NEVER offer to book without the address/i);
+    expect(p).toMatch(/never ask whether to book without it/i);
+    expect(p).toMatch(/If the customer declines to give one/i);
+  });
+
   it('keeps the optional EMAIL wording when every service has the flag off', () => {
     const p = buildServicesSection([svc({ customerEmailRequired: false })])!;
     expect(line(p)).not.toContain('needs email');

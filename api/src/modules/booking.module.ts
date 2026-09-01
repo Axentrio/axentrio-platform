@@ -446,8 +446,13 @@ const FILE_REQUIRED_RULE = `- Required file: for a service flagged "needs file",
  *
  * The gate lives on the server, so the rule only has to stop the model from
  * turning EMAIL_REQUIRED into "unavailable" or a captured request.
+ *
+ * The "never offer to book without it" clause is from a live production test: after the
+ * customer declined twice, the agent asked "shall I book this without an email address?",
+ * called the tool on their yes, and only then hit EMAIL_REQUIRED. The booking was correctly
+ * refused, but the customer had already been offered something that cannot happen.
  */
-const EMAIL_REQUIRED_RULE = `- Required email: for a service flagged "needs email", ask for the customer's email address BEFORE you call create_booking or request_appointment, and pass it as attendeeEmail. The calendar invite is sent to that address. A missing email does not make the service unavailable. Never capture a request, never say the service is unavailable, and never hand off to the team because the email is still missing. If a booking tool returns EMAIL_REQUIRED, ask for the address (or ask them to repeat it when it was not valid) and retry. Keep any date and time the customer already named.`;
+const EMAIL_REQUIRED_RULE = `- Required email: for a service flagged "needs email", ask for the customer's email address BEFORE you call create_booking or request_appointment, and pass it as attendeeEmail. The calendar invite is sent to that address. A missing email does not make the service unavailable. Never capture a request, never say the service is unavailable, and never hand off to the team because the email is still missing. If a booking tool returns EMAIL_REQUIRED, ask for the address (or ask them to repeat it when it was not valid) and retry. Keep any date and time the customer already named. NEVER offer to book without the address, and never ask whether to book without it: for this service there is no such option. If the customer declines to give one, say plainly that the appointment needs an email address for the calendar invite, and ask again.`;
 
 const FILES_ALWAYS_RULE = `- Files: the customer may attach a file at any time (for example a photo of the job). During create_booking or request_appointment, files they already sent in this chat attach on their own. After an appointment already exists, call update_booking so the new file is added to it. Never invent file ids, and never mention ids to the customer. Never escalate to a human just to attach a file.`;
 

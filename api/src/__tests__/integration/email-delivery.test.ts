@@ -254,7 +254,157 @@ describe('sweepFailedEmailDeliveries', () => {
     // The batch carried on: the row after the thrower still went out.
     expect((await repo.findOneByOrFail({ idempotencyKey: goodKey })).status).toBe('sent');
     expect((await repo.findOneByOrFail({ idempotencyKey: poisonKey })).status).toBe('failed');
+    // ...and the thrower ADVANCED. Without that it stays permanently due and re-fills the
+    // oldest claim slot on every tick.
+    const poisoned = await repo.findOneByOrFail({ idempotencyKey: poisonKey });
+    expect(poisoned.attemptCount).toBe(2);
+    expect(poisoned.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
     spy.mockRestore();
+  });
+
+  it('a full batch of throwers cannot starve a newer invite past one tick', async () => {
+    // The catch alone was not enough. A thrower whose attempt_count and next_attempt_at never
+    // moved stayed due forever, so CLAIM_LIMIT of them held the oldest slots on every tick and
+    // no newer invite was ever reached. One sweep is allowed to be spent on the flood; the one
+    // after it must get through.
+    const tenant = await createTestTenant();
+    const stamp = Date.now();
+    const repo = AppDataSource.getRepository(EmailDelivery);
+    const goodKey = `booking:survivor:${stamp}:REQUEST:invite`;
+    const poisonKeys = Array.from({ length: 20 }, (_, i) => `booking:flood-${i}:${stamp}:REQUEST:invite`);
+
+    const floodRow = (key: string, email: string) =>
+      repo.create({
+        tenantId: tenant.id,
+        recipientUserId: null,
+        recipientEmail: email,
+        subject: 'Confirmed: klantenafspraak',
+        kind: 'booking_email',
+        relatedId: '00000000-0000-0000-0000-000000000002',
+        status: 'failed' as const,
+        attemptCount: 1,
+        idempotencyKey: key,
+        providerMessageId: null,
+        error: 'outage',
+        payload: { subject: 'Confirmed: klantenafspraak', body: '<p>x</p>' },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      });
+    for (const key of poisonKeys) await repo.insert(floodRow(key, 'poison@example.com'));
+    await repo.insert(floodRow(goodKey, 'survivor@example.com'));
+    // The flood has to be older, so it wins the whole LIMIT on the first tick.
+    await AppDataSource.query(
+      `UPDATE email_deliveries SET created_at = now() - interval '2 hours' WHERE idempotency_key = ANY($1)`,
+      [poisonKeys],
+    );
+
+    const real = emailDeliveryService.sendDurable;
+    const spy = vi
+      .spyOn(emailDeliveryService, 'sendDurable')
+      .mockImplementation((sendInput) =>
+        sendInput.recipientEmail.startsWith('poison')
+          ? Promise.reject(new Error('poison row'))
+          : real.call(emailDeliveryService, sendInput),
+      );
+
+    send.mockReset();
+    send.mockResolvedValue({ success: true, messageId: 'survivor-1' });
+
+    await sweepFailedEmailDeliveries();
+    expect((await repo.findOneByOrFail({ idempotencyKey: goodKey })).status).toBe('failed');
+
+    await sweepFailedEmailDeliveries();
+    expect((await repo.findOneByOrFail({ idempotencyKey: goodKey })).status).toBe('sent');
+    spy.mockRestore();
+  });
+
+  it('clears next_attempt_at when a thrower reaches the attempt cap', async () => {
+    // Attempt 5 plus one more throw is 6. The row has to fall out of the claim filter for
+    // good, not sit there due with a payload nobody will ever send again.
+    const tenant = await createTestTenant();
+    const key = `booking:cap-throw:${Date.now()}:REQUEST:invite`;
+    const repo = AppDataSource.getRepository(EmailDelivery);
+    await repo.insert(
+      repo.create({
+        tenantId: tenant.id,
+        recipientUserId: null,
+        recipientEmail: 'poison@example.com',
+        subject: 'Confirmed: klantenafspraak',
+        kind: 'booking_email',
+        relatedId: '00000000-0000-0000-0000-000000000002',
+        status: 'failed' as const,
+        attemptCount: 5,
+        idempotencyKey: key,
+        providerMessageId: null,
+        error: 'outage',
+        payload: { subject: 'Confirmed: klantenafspraak', body: '<p>x</p>' },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      }),
+    );
+
+    const spy = vi
+      .spyOn(emailDeliveryService, 'sendDurable')
+      .mockRejectedValue(new Error('poison row'));
+
+    const result = await sweepFailedEmailDeliveries();
+
+    const row = await repo.findOneByOrFail({ idempotencyKey: key });
+    expect(row.attemptCount).toBe(6);
+    expect(row.nextAttemptAt).toBeNull();
+    expect(row.status).toBe('failed');
+    expect(result.gaveUp).toBeGreaterThanOrEqual(1);
+    spy.mockRestore();
+  });
+
+  it('never counts a second attempt when only the backoff UPDATE fails', async () => {
+    // sendDurable commits its own attempt_count + 1 for a failed RESULT. The backoff UPDATE
+    // that follows used to sit in the same try, so a database blip there was read as a thrown
+    // send and the same attempt was counted twice.
+    const tenant = await createTestTenant();
+    const key = `booking:backoff-blip:${Date.now()}:REQUEST:invite`;
+    const repo = AppDataSource.getRepository(EmailDelivery);
+    await repo.insert(
+      repo.create({
+        tenantId: tenant.id,
+        recipientUserId: null,
+        recipientEmail: 'blip@example.com',
+        subject: 'Confirmed: klantenafspraak',
+        kind: 'booking_email',
+        relatedId: '00000000-0000-0000-0000-000000000002',
+        status: 'failed' as const,
+        attemptCount: 1,
+        idempotencyKey: key,
+        providerMessageId: null,
+        error: 'outage',
+        payload: { subject: 'Confirmed: klantenafspraak', body: '<p>x</p>' },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      }),
+    );
+
+    // The provider keeps failing, so sendDurable returns `failed` rather than throwing.
+    send.mockReset();
+    send.mockResolvedValue({ success: false, error: 'still down' });
+
+    // Reject only the worker's non-incrementing backoff UPDATE ($2 = 0). Everything else,
+    // including the claim SELECT, goes to the real query path.
+    const realQuery = AppDataSource.query.bind(AppDataSource);
+    const incrementing: unknown[][] = [];
+    const querySpy = vi
+      .spyOn(AppDataSource, 'query')
+      .mockImplementation((sql: string, params?: unknown[]) => {
+        if (typeof sql === 'string' && sql.includes('SET attempt_count = attempt_count +')) {
+          if (params?.[1] === 0) return Promise.reject(new Error('backoff blip'));
+          incrementing.push(params ?? []);
+        }
+        return realQuery(sql, params);
+      });
+
+    await sweepFailedEmailDeliveries();
+    querySpy.mockRestore();
+
+    // No incrementing advance was attempted, so the failed send was counted once.
+    expect(incrementing).toHaveLength(0);
+    const row = await repo.findOneByOrFail({ idempotencyKey: key });
+    expect(row.attemptCount).toBe(2);
   });
 });
 

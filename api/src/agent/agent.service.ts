@@ -1620,7 +1620,7 @@ export class AgentService {
     content: string,
   ): Promise<GuardVerdict> {
     const pass: GuardVerdict = { kind: 'content', content };
-    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded) return pass;
+    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded || state.heldBooking) return pass;
     if (!promisesAvailabilityCheck(content, ctx.message)) return pass;
     if (!state.availabilityChecked) return this.promisedCheckNothingRan(i, ctx, state, content);
     // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the

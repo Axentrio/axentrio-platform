@@ -474,6 +474,68 @@ describe('AgentService', () => {
     recordSpy.mockRestore();
   });
 
+  it('does not replace a promised check with diary-failed after confirm_existing', async () => {
+    // pendingAvailability is cleared on confirm_existing. The promised-check guard
+    // used to treat that as a failed diary read and ship CHECK_FAILED_FALLBACK.
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          suggestedAction: 'confirm_existing',
+          alreadyHeld: [
+            { bookingId: 'bk-1', start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T10:00:00.000Z' },
+          ],
+          slots: [
+            { start: '2026-09-03T08:00:00.000Z', end: '2026-09-03T08:30:00.000Z' },
+          ],
+        },
+        availability: {
+          slots: [
+            { start: '2026-09-03T08:00:00.000Z', end: '2026-09-03T08:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{
+          id: 'tc_1',
+          name: 'check_availability',
+          arguments: { startDate: '2026-09-03', endDate: '2026-09-03' },
+        }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik kijk even wat er vrij is en de zaak bevestigt je afspraak.',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Is donderdag 3 september om 11:00 nog vrij?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.content).not.toMatch(/^I cannot see the diary at the moment/);
+      expect(result.content).toMatch(/ik kijk even/i);
+      expect(result.quickReplies).toBeUndefined();
+    }
+    expect(vi.mocked(mockProvider.chat)).toHaveBeenCalledTimes(2);
+  });
+
+
   it('records availability_unchecked_claim after a failed check still claims a date is closed', async () => {
     const checkAvailability: ToolAdapter = {
       name: 'check_availability',

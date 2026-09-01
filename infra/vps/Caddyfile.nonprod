@@ -16,7 +16,7 @@ api.dev.axentrio.com {
 	}
 }
 
-app.staging.axentrio.com {
+staging.axentrio.com {
 	root * /srv/portal-staging
 	encode gzip
 	try_files {path} /index.html
@@ -25,11 +25,19 @@ app.staging.axentrio.com {
 	header /meta-oauth-complete.html Cache-Control "no-cache"
 }
 
-app.dev.axentrio.com {
+dev.axentrio.com {
 	root * /srv/portal-dev
 	encode gzip
 	try_files {path} /index.html
 	file_server
 	header /index.html Cache-Control "no-cache"
 	header /meta-oauth-complete.html Cache-Control "no-cache"
+}
+
+app.staging.axentrio.com {
+	redir https://staging.axentrio.com{uri} permanent
+}
+
+app.dev.axentrio.com {
+	redir https://dev.axentrio.com{uri} permanent
 }

@@ -3344,9 +3344,12 @@ export class InternalProvider implements BookingProvider {
             409,
           );
         }
+        const addressChanged =
+          (request.customerAddress ?? null) !== (original.customerAddress ?? null);
         const alreadyMoved =
           original.startUtc.getTime() === request.startUtc.getTime() &&
-          original.endUtc.getTime() === request.endUtc.getTime();
+          original.endUtc.getTime() === request.endUtc.getTime() &&
+          !addressChanged;
         if (!alreadyMoved) {
           const durationMin = Math.round(
             (request.endUtc.getTime() - request.startUtc.getTime()) / 60_000,
@@ -3354,6 +3357,9 @@ export class InternalProvider implements BookingProvider {
           await this.rescheduleBooking(ownerCtx, original.id, request.startUtc.toISOString(), {
             durationMin,
             skipCloseChangeRequests: true,
+            ...(addressChanged && request.customerAddress
+              ? { customerAddress: request.customerAddress }
+              : {}),
           });
         }
       } else if (original.status !== 'cancelled') {
@@ -3421,7 +3427,7 @@ export class InternalProvider implements BookingProvider {
     }
     let areaMatch: 'inside' | 'outside' | 'unknown' | null = null;
     if (newAddress !== undefined) {
-      await assertInServiceArea(ctx, service, newAddress);
+      if (!ctx.isAdmin) await assertInServiceArea(ctx, service, newAddress);
       areaMatch = (await evaluateServiceArea(ctx, service, newAddress)).match;
     }
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);

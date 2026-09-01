@@ -1380,6 +1380,43 @@ describe('InternalProvider customer change policy', () => {
     expect(sendBookingEmail).not.toHaveBeenCalled();
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('start_utc'))).toBe(false);
   });
+
+  it('stores the requested address on the change Request', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'request' });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    });
+    await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START, {
+      customerAddress: 'Nieuwstraat 5, 1000 Brussel',
+    });
+    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insert?.[1]).toContain('Nieuwstraat 5, 1000 Brussel');
+  });
+
+  it('acceptRequest applies a same-time address change instead of closing as already moved', async () => {
+    const original = {
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    };
+    const requestRow = {
+      ...original,
+      id: 'req-1',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+      customerAddress: 'Nieuwstraat 5, 1000 Brussel',
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      if (opts?.where?.id === 'req-1') return requestRow;
+      if (opts?.where?.status === 'confirmed' && opts?.where?.endUtc) return null;
+      return original;
+    });
+    await provider.acceptRequest({ ...ctx, isAdmin: true }, 'req-1');
+    const update = managerQuery.mock.calls.find((c) => String(c[0]).includes('UPDATE chatbot_bookings') && String(c[0]).includes('customer_address'));
+    expect(update).toBeTruthy();
+    expect(update?.[1]).toContain('Nieuwstraat 5, 1000 Brussel');
+  });
 });
 
 describe('InternalProvider.updateBooking', () => {

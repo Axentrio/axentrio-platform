@@ -40,6 +40,8 @@ import {
   CreateBookingResult,
   RescheduleResult,
   CancelResult,
+  type UpdateBookingPatch,
+  type UpdateBookingResult,
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
@@ -71,6 +73,7 @@ import {
   bookingPlaceColumns,
   requestTravelCheck,
   type BookingPlacement,
+  type BookingPlaceColumns,
 } from '../travel/booking-place';
 import type { GeoPoint } from '../../contracts/travel';
 import {
@@ -112,7 +115,7 @@ import {
   requestTooFar,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
-import { resolveContactFields, assertRequiredPhone, assertRequiredAddress } from './contact';
+import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
 import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
 import {
   resolveDuration,
@@ -1259,6 +1262,10 @@ export class InternalProvider implements BookingProvider {
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
     const contact = resolveContactFields(service, extras, ctx.session);
+    // The calendar invite has to have somewhere to go, and it goes to the SANITIZED address:
+    // the ICS ATTENDEE line and the Resend `to` read this value, so the raw argument must not
+    // survive past this point. Runs before every INSERT on this path.
+    const customer = { ...attendee, email: resolveCustomerEmail(service, attendee.email) ?? undefined };
     // P6: a job outside the business's service area must not be auto-confirmed. Recoverable
     // (the agent captures it with request_appointment instead) and deliberately AUTO-ONLY —
     // a request is exactly the right outcome for an out-of-area job, so createRequest never
@@ -1396,8 +1403,8 @@ export class InternalProvider implements BookingProvider {
             blockedStart.toISOString(),
             blockedEnd.toISOString(),
             itineraryKey,
-            attendee.name,
-            attendee.email ?? null,
+            customer.name,
+            customer.email ?? null,
             notes ?? null,
             icsUid,
             idempotencyKey,
@@ -1445,8 +1452,8 @@ export class InternalProvider implements BookingProvider {
         idempotencyKey,
         calBookingId: bookingId,
         eventType: 'created',
-        attendeeName: attendee.name,
-        attendeeEmail: attendee.email,
+        attendeeName: customer.name,
+        attendeeEmail: customer.email,
         startTime: start,
         endTime: end,
         notes,
@@ -1466,7 +1473,7 @@ export class InternalProvider implements BookingProvider {
       rule,
       start,
       end,
-      attendee,
+      attendee: customer,
       notes,
       contact,
       intakeJson,
@@ -1781,6 +1788,10 @@ export class InternalProvider implements BookingProvider {
       service.locationType === 'google_meet'
     );
 
+    // A video service that produced no join link: the connected account likely can't host
+    // online meetings (a personal Microsoft account cannot host Teams). Flag it for the owner.
+    const videoLinkMissing = this.videoLinkMissingFor(service, meetUrl, bookingId, ctx);
+
     // The customer's uploaded files ride along on the OWNER's copy (best-effort), so the
     // "N files attached" pointer is no longer the only way for them to see them.
     const ownerAttachments = await this.ownerFileAttachments(
@@ -1823,6 +1834,7 @@ export class InternalProvider implements BookingProvider {
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       organizerEmail: frozenOrganizerFor(ctx.tenant.id),
       ownerAttachments,
+      videoLinkMissing,
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
@@ -1867,6 +1879,9 @@ export class InternalProvider implements BookingProvider {
     assertRequiredIntake(service, intakeJson);
     // P5a: required address/phone gate (request path).
     const contact = resolveContactFields(service, extras, ctx.session);
+    // Same gate on the request path, and the same normalisation: the accepted request mails
+    // this address, so the owner gets a request they can actually answer.
+    const customer = { ...attendee, email: resolveCustomerEmail(service, attendee.email) ?? undefined };
     // Travel time: place the address here too, and NEVER enforce it. A request the owner
     // will read is exactly the right home for a job we could not locate — refusing one is
     // the single outcome the prompt forbids — but capturing it silently is how an owner
@@ -1922,8 +1937,8 @@ export class InternalProvider implements BookingProvider {
           start.toISOString(),
           end.toISOString(),
           itineraryKey,
-          attendee.name,
-          attendee.email ?? null,
+          customer.name,
+          customer.email ?? null,
           notes ?? null,
           icsUid,
           idempotencyKey,
@@ -1987,8 +2002,8 @@ export class InternalProvider implements BookingProvider {
           idempotencyKey,
           calBookingId: bookingId,
           eventType: 'created',
-          attendeeName: attendee.name,
-          attendeeEmail: attendee.email,
+          attendeeName: customer.name,
+          attendeeEmail: customer.email,
           startTime: start,
           endTime: end,
           notes,
@@ -2009,7 +2024,7 @@ export class InternalProvider implements BookingProvider {
       bookingId,
       start,
       end,
-      attendee,
+      attendee: customer,
       notes,
       aiSummary,
     });
@@ -2021,7 +2036,7 @@ export class InternalProvider implements BookingProvider {
         id: bookingId,
         startTime: start.toISOString(),
         endTime: end.toISOString(),
-        attendee,
+        attendee: customer,
       },
     };
   }
@@ -2252,6 +2267,28 @@ export class InternalProvider implements BookingProvider {
       });
       return undefined;
     }
+  }
+
+  /**
+   * A video booking with no join link means the connected account could not host the meeting
+   * (commonly a personal Microsoft account, which cannot host Teams for Business). Logs it and
+   * returns the flag so the OWNER email can tell them to reconnect a work account.
+   */
+  private videoLinkMissingFor(
+    service: Pick<ResolvedService, 'locationType'>,
+    meetUrl: string | null,
+    bookingId: string,
+    ctx: BookingContext,
+  ): boolean {
+    const missing = service.locationType === 'google_meet' && !meetUrl;
+    if (missing) {
+      logger.warn('[Booking] video booking created without a meeting link', {
+        bookingId,
+        botId: ctx.bot.id,
+        tenantId: ctx.tenant.id,
+      });
+    }
+    return missing;
   }
 
   /**
@@ -2578,6 +2615,9 @@ export class InternalProvider implements BookingProvider {
       service.locationType === 'google_meet'
     );
 
+    // A video service that produced no join link (see mirrorCreatedBooking) — flag it for the owner.
+    const videoLinkMissing = this.videoLinkMissingFor(service, meetUrl, bookingId, ctx);
+
     // The customer's uploaded files on the OWNER's copy (best-effort), read from the row snapshot.
     const ownerAttachments = await this.ownerFileAttachments(
       (Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles : [])
@@ -2619,6 +2659,7 @@ export class InternalProvider implements BookingProvider {
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       organizerEmail: confirmed.organizerEmail,
       ownerAttachments,
+      videoLinkMissing,
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
@@ -2675,6 +2716,12 @@ export class InternalProvider implements BookingProvider {
     // so a returning customer sees the bookings they made in earlier sessions too —
     // never another visitor's. Falls back to the current session when no visitor id.
     const visitor = ctx.session.visitorId;
+    // Writes store the SANITIZED address (resolveCustomerEmail), so the lookup has to be
+    // sanitized the same way or "Ada@Example.com" stops finding "ada@example.com". The SQL
+    // compares LOWER(TRIM(...)) as well, because rows written before that gate existed still
+    // hold whatever the agent typed. A malformed argument keeps its own trimmed shape: this is
+    // a read path, so it may find nothing, but it must never throw at the customer.
+    const email = normalizeCustomerEmail(attendeeEmail) ?? attendeeEmail.trim().toLowerCase();
     const rows: Array<{
       id: string;
       start_utc: Date;
@@ -2688,17 +2735,17 @@ export class InternalProvider implements BookingProvider {
              FROM chatbot_bookings b
              JOIN chat_sessions s ON s.id = b.session_id
             WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
-              AND s.visitor_id = $3 AND b.attendee_email = $4
+              AND s.visitor_id = $3 AND LOWER(TRIM(b.attendee_email)) = $4
             ORDER BY b.start_utc ASC`,
-          [ctx.tenant.id, ctx.bot.id, visitor, attendeeEmail]
+          [ctx.tenant.id, ctx.bot.id, visitor, email]
         )
       : await AppDataSource.getRepository(Booking).query(
           `SELECT id, start_utc, end_utc, attendee_name, attendee_email, status
              FROM chatbot_bookings
             WHERE tenant_id = $1 AND bot_id = $2 AND status = 'confirmed'
-              AND session_id = $3 AND attendee_email = $4
+              AND session_id = $3 AND LOWER(TRIM(attendee_email)) = $4
             ORDER BY start_utc ASC`,
-          [ctx.tenant.id, ctx.bot.id, ctx.session.id, attendeeEmail]
+          [ctx.tenant.id, ctx.bot.id, ctx.session.id, email]
         );
     return {
       bookings: rows.map((b) => ({
@@ -2710,6 +2757,254 @@ export class InternalProvider implements BookingProvider {
       })),
     };
   }
+
+  async updateBooking(ctx: BookingContext, patch: UpdateBookingPatch): Promise<UpdateBookingResult> {
+    const booking = await this.resolveUpdatableBooking(ctx, patch.bookingId);
+    const nextName = patch.attendeeName !== undefined
+      ? (cleanContact(patch.attendeeName, 255) ?? booking.attendeeName ?? null)
+      : booking.attendeeName ?? null;
+    const nextEmail = patch.attendeeEmail !== undefined
+      ? (cleanContact(patch.attendeeEmail, 320) ?? booking.attendeeEmail ?? null)
+      : booking.attendeeEmail ?? null;
+    const nextPhone = patch.customerPhone !== undefined
+      ? (cleanContact(patch.customerPhone, 64) ?? booking.customerPhone ?? null)
+      : booking.customerPhone ?? null;
+    const extraNotes = patch.notes !== undefined ? cleanContact(patch.notes, 4000) : null;
+    const nextNotes = extraNotes
+      ? (booking.notes && booking.notes.includes(extraNotes)
+          ? booking.notes
+          : `${booking.notes ? `${booking.notes}\n` : ''}${extraNotes}`.slice(0, 4000))
+      : booking.notes ?? null;
+    const merged = await this.mergeChatFiles(ctx, booking.uploadedFiles);
+    const changed =
+      (nextName ?? null) !== (booking.attendeeName ?? null) ||
+      (nextEmail ?? null) !== (booking.attendeeEmail ?? null) ||
+      (nextPhone ?? null) !== (booking.customerPhone ?? null) ||
+      (nextNotes ?? null) !== (booking.notes ?? null) ||
+      merged.changed;
+    if (!changed) {
+      throw new BookingError(
+        'Nothing new to add to this appointment. If they named a new time or address, that is a reschedule — call reschedule_booking. Do not escalate to a human just to add details.',
+        'NOTHING_TO_UPDATE',
+        400,
+      );
+    }
+    const sendInvite = booking.status === 'confirmed' && (nextEmail ?? null) !== (booking.attendeeEmail ?? null) && !!nextEmail;
+    const rows = returningRows<{ sequence: number }>(await AppDataSource.getRepository(Booking).query(
+      `UPDATE chatbot_bookings
+          SET attendee_name=$1, attendee_email=$2, customer_phone=$3, notes=$4,
+              uploaded_files=$5::jsonb, sequence=CASE WHEN $6 THEN sequence+1 ELSE sequence END, updated_at=now()
+        WHERE id=$7 AND tenant_id=$8 AND status = ANY($9::text[])
+        RETURNING sequence`,
+      [
+        nextName,
+        nextEmail,
+        nextPhone,
+        nextNotes,
+        merged.files ? JSON.stringify(merged.files) : null,
+        sendInvite,
+        booking.id,
+        ctx.tenant.id,
+        ['confirmed', 'pending', 'request_created'],
+      ],
+    ));
+    if (!rows.length) {
+      throw new BookingError('That appointment can no longer be updated.', 'BOOKING_NOT_UPDATABLE', 409);
+    }
+    await this.writeLog(
+      ctx,
+      'updated',
+      { ...booking, attendeeName: nextName, attendeeEmail: nextEmail },
+      booking.startUtc,
+      booking.endUtc,
+    ).catch(() => undefined);
+    if (sendInvite) {
+      await this.sendInviteAfterContactUpdate(ctx, booking, nextName ?? '', nextEmail!, rows[0].sequence);
+    }
+    return {
+      success: true,
+      emailSent: sendInvite,
+      booking: {
+        id: booking.id,
+        attendeeName: nextName ?? undefined,
+        attendeeEmail: nextEmail ?? undefined,
+        customerPhone: nextPhone ?? undefined,
+        notes: nextNotes ?? undefined,
+        uploadedFileCount: Array.isArray(merged.files) ? merged.files.length : 0,
+      },
+    };
+  }
+
+  private async resolveUpdatableBooking(ctx: BookingContext, bookingId?: string): Promise<Booking> {
+    if (bookingId && bookingId.trim()) {
+      const booking = await this.loadOwned(ctx, bookingId.trim());
+      this.assertUpdatable(booking);
+      return booking;
+    }
+    const live = await this.liveBookingsForCaller(ctx);
+    if (live.length === 0) {
+      throw new BookingError(
+        'No appointment for this customer to update. Do not escalate just to add details.',
+        'BOOKING_NOT_FOUND',
+        404,
+      );
+    }
+    return this.pickSoonestUpdatable(live);
+  }
+
+  /**
+   * Repeat visitors often have more than one live row. Prefer confirmed, then the
+   * soonest start. Only refuse when two share that start instant.
+   */
+  private pickSoonestUpdatable(live: Booking[]): Booking {
+    const confirmed = live.filter((b) => b.status === 'confirmed');
+    const pool = confirmed.length > 0 ? confirmed : live;
+    const sorted = [...pool].sort((a, b) => a.startUtc.getTime() - b.startUtc.getTime());
+    const soonestAt = sorted[0].startUtc.getTime();
+    const tied = sorted.filter((b) => b.startUtc.getTime() === soonestAt);
+    if (tied.length > 1) {
+      throw new BookingError(
+        `This customer has more than one appointment at the same time. Pass bookingId as one of: ${tied.map((b) => b.id).join(', ')}. Do not escalate.`,
+        'BOOKING_AMBIGUOUS',
+        400,
+      );
+    }
+    return sorted[0];
+  }
+
+
+  /** Same identity as callerOwnsBooking: this chat, or earlier chats with the same visitorId. */
+  private async liveBookingsForCaller(ctx: BookingContext): Promise<Booking[]> {
+    const sessionIds = [ctx.session.id];
+    const visitor = ctx.session.visitorId;
+    if (visitor) {
+      const siblings = await AppDataSource.getRepository(ChatSession).find({
+        where: { visitorId: visitor, botId: ctx.bot.id },
+        select: ['id'],
+      });
+      for (const s of siblings) if (!sessionIds.includes(s.id)) sessionIds.push(s.id);
+    }
+    const rows = await AppDataSource.getRepository(Booking).find({
+      where: {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        sessionId: In(sessionIds),
+        endUtc: MoreThan(new Date()),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.filter(
+      (b) => b.status === 'confirmed' || b.status === 'pending' || b.status === 'request_created',
+    );
+  }
+
+
+  private assertUpdatable(booking: Booking): void {
+    if (booking.status === 'cancelled') {
+      throw new BookingError('That appointment is cancelled, so its details cannot be changed.', 'BOOKING_NOT_UPDATABLE', 409);
+    }
+  }
+
+  private async mergeChatFiles(
+    ctx: BookingContext,
+    existing: Booking['uploadedFiles'],
+  ): Promise<{ files: unknown[] | null; changed: boolean }> {
+    const prior = Array.isArray(existing) ? existing : [];
+    let fresh: Array<{ fileSessionId: string; fileName: string; mimeType: string; fileSize: number; fileKey: string }> | null = null;
+    try {
+      const ids = await this.resolveFileSessionIds(ctx);
+      fresh = await this.validateUploadedFiles(ctx, ids);
+    } catch (error) {
+      logger.warn('[Booking] could not collect chat files for an update', {
+        sessionId: ctx.session.id,
+        error,
+      });
+      return { files: prior.length ? prior : null, changed: false };
+    }
+    if (!fresh?.length) return { files: prior.length ? prior : null, changed: false };
+    const have = new Set<string>();
+    for (const f of prior) {
+      if (!f || typeof f !== 'object' || !('fileSessionId' in f)) continue;
+      const id = f.fileSessionId;
+      if (typeof id === 'string' && id.length > 0) have.add(id);
+    }
+    const merged = [...prior];
+    for (const row of fresh) {
+      if (!have.has(row.fileSessionId)) merged.push(row);
+    }
+    if (merged.length > 5) {
+      throw new BookingError('Too many files attached', 'TOO_MANY_FILES', 400);
+    }
+    return { files: merged, changed: merged.length !== prior.length };
+  }
+
+  private async sendInviteAfterContactUpdate(
+    ctx: BookingContext,
+    booking: Booking,
+    attendeeName: string,
+    attendeeEmail: string,
+    sequence: number,
+  ): Promise<void> {
+    try {
+      const rule = await this.loadRule(ctx.bot);
+      const service = await this.serviceForBooking(booking);
+      const oldEmail = booking.attendeeEmail?.trim();
+      // No ownerEmail: a contact-detail edit must not send "New booking" to the business.
+      if (oldEmail && oldEmail.toLowerCase() !== attendeeEmail.toLowerCase()) {
+        await sendBookingEmail({
+          method: 'CANCEL',
+          uid: booking.icsUid,
+          sequence,
+          start: booking.startUtc,
+          end: booking.endUtc,
+          summary: service.name,
+          timezone: rule.timezone,
+          attendeeName: booking.attendeeName ?? '',
+          attendeeEmail: oldEmail,
+          organizerEmail: booking.organizerEmail,
+          organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+        });
+      }
+      const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
+      const { venue } = await loadBusinessRules(ctx.bot.id);
+      await sendBookingEmail({
+        method: 'REQUEST',
+        uid: booking.icsUid,
+        sequence,
+        start: booking.startUtc,
+        end: booking.endUtc,
+        summary: service.name,
+        location: resolveBookingEventLocation(service, {
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        description: buildCustomerEventDescription({
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: booking.bookedDurationMin ?? service.durationMin,
+          meetUrl: null,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(booking.id),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        }),
+        timezone: rule.timezone,
+        attendeeName,
+        attendeeEmail,
+        organizerEmail: booking.organizerEmail,
+        organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+        manageUrl: buildManageUrl(booking.id),
+        durationMin: booking.bookedDurationMin ?? service.durationMin,
+        preparationInstructions: service.preparationInstructions,
+        priceDisplay,
+      });
+    } catch (error) {
+      logger.warn('[Booking] contact-update invite failed (non-fatal)', { bookingId: booking.id, error });
+    }
+  }
+
+
 
   /** Load a booking and verify it belongs to this tenant + bot (else 404). */
   private async loadOwned(ctx: BookingContext, bookingId: string): Promise<Booking> {
@@ -2927,6 +3222,7 @@ export class InternalProvider implements BookingProvider {
     start: Date,
     end: Date,
     timezone: string,
+    customerAddress?: string | null,
   ): Promise<RescheduleResult & CancelResult> {
     const icsUid = `${uuidv4()}@axentrio`;
     const note =
@@ -2955,7 +3251,7 @@ export class InternalProvider implements BookingProvider {
         icsUid,
         original.sourceChannel ?? ctx.session?.channel ?? null,
         original.aiSummary ?? null,
-        original.customerAddress ?? null,
+        customerAddress ?? original.customerAddress ?? null,
         original.customerPhone ?? null,
         original.bookedDurationMin ?? null,
         original.organizerEmail ?? null,
@@ -2972,7 +3268,6 @@ export class InternalProvider implements BookingProvider {
     });
     return this.requestedChangeResult(rows[0].id, start, end, timezone, service.name);
   }
-
   private async createChangeRequest(
     ctx: BookingContext,
     original: Booking,
@@ -2981,6 +3276,7 @@ export class InternalProvider implements BookingProvider {
     start: Date,
     end: Date,
     timezone: string,
+    customerAddress?: string | null,
   ): Promise<RescheduleResult & CancelResult> {
     const existing = await AppDataSource.getRepository(Booking).findOne({
       where: { relatedBookingId: original.id, status: 'request_created' },
@@ -2989,7 +3285,7 @@ export class InternalProvider implements BookingProvider {
       return this.reuseOpenChangeRequest(ctx, original, service, existing, kind, start, end, timezone);
     }
     try {
-      return await this.insertChangeRequest(ctx, original, service, kind, start, end, timezone);
+      return await this.insertChangeRequest(ctx, original, service, kind, start, end, timezone, customerAddress);
     } catch (err) {
       if ((err as { code?: string })?.code !== '23505') throw err;
       return this.resolveRacedChangeRequest(original, service, kind, timezone, err);
@@ -3079,6 +3375,8 @@ export class InternalProvider implements BookingProvider {
       excludeExternalInterval?: { start: Date; end: Date };
       /** Accept of a change Request closes that row itself; do not auto-decline it here. */
       skipCloseChangeRequests?: boolean;
+      /** New appointment address. Bound into this confirmed move; original row is untouched until it commits. */
+      customerAddress?: string;
     }
   ): Promise<RescheduleResult> {
     const booking = await this.loadOwned(ctx, bookingId);
@@ -3100,6 +3398,16 @@ export class InternalProvider implements BookingProvider {
     // against the service's current bounds). Legacy rows fall back to service.durationMin.
     const effectiveDuration = opts?.durationMin ?? booking.bookedDurationMin ?? service.durationMin;
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
+    const newAddress = opts?.customerAddress !== undefined
+      ? cleanContact(opts.customerAddress, 512)
+      : undefined;
+    if (opts?.customerAddress !== undefined && !isCompleteCustomerAddress(newAddress)) {
+      throw new BookingError(
+        "This service is carried out at the customer's address. Ask for the full appointment address (street, house number, postal code, and city) and call reschedule_booking again with customerAddress. Do not invent a different time.",
+        'ADDRESS_REQUIRED',
+        400,
+      );
+    }
     if (ctx.subjectToCustomerChangePolicy) {
       const decision = resolveCustomerChange(
         service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
@@ -3108,7 +3416,7 @@ export class InternalProvider implements BookingProvider {
       );
       if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule');
       if (decision === 'request') {
-        return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone);
+        return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone, newAddress);
       }
     }
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
@@ -3144,7 +3452,7 @@ export class InternalProvider implements BookingProvider {
     }
 
     // CAN THE OWNER STILL GET THERE, at the new time? See `travelGateForReschedule`.
-    const { travelEligibility, travelSnapshot, travelCheck } = await this.travelGateForReschedule(ctx, {
+    const { travelEligibility, travelSnapshot, travelCheck, addressPatch } = await this.travelGateForReschedule(ctx, {
       booking,
       bookingId,
       service,
@@ -3152,6 +3460,7 @@ export class InternalProvider implements BookingProvider {
       rule,
       start,
       end,
+      newAddress: newAddress ?? undefined,
     });
 
     const { exposureEligibility, exposure, exposureSnapshot } = await this.exposureForReschedule(ctx, {
@@ -3232,12 +3541,13 @@ export class InternalProvider implements BookingProvider {
           // enforced, against a job nobody could see.
           //
           // `acceptRequest` has always refreshed the key here, for exactly this reason. This is
-          // the same line, in the path that was missing it.
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
                   calendar_key=$5, travel_check=$8,
                   booked_duration_min = COALESCE($9, booked_duration_min),
                   sequence=sequence+1, updated_at=now()
+                  ${addressPatch ? `, customer_address=$10, customer_place_id=$11, customer_lat=$12, customer_lng=$13,
+                  customer_coords_at=$14, customer_address_verified=$15, geocode_precision=$16, location_source=$17` : ''}
             WHERE id=$6 AND tenant_id=$7 AND status='confirmed'
             RETURNING sequence`,
           [
@@ -3248,11 +3558,20 @@ export class InternalProvider implements BookingProvider {
             itineraryKey,
             bookingId,
             ctx.tenant.id,
-            // Null when travel did not apply, which also CLEARS a stale value from a booking
-            // whose service or Agent stopped needing one. A check nobody ran must not be
-            // inherited from a time nobody is keeping.
             travelCheck,
             opts?.durationMin ?? null,
+            ...(addressPatch
+              ? [
+                  addressPatch.address,
+                  addressPatch.columns.placeId,
+                  addressPatch.columns.lat,
+                  addressPatch.columns.lng,
+                  addressPatch.columns.coordsAt,
+                  addressPatch.columns.addressVerified,
+                  addressPatch.columns.precision,
+                  addressPatch.columns.locationSource,
+                ]
+              : []),
           ]
         ));
         if (!rows.length) {
@@ -3347,6 +3666,17 @@ export class InternalProvider implements BookingProvider {
       throw this.rescheduleFailure(err);
     }
 
+    if (addressPatch) {
+      booking.customerAddress = addressPatch.address;
+      booking.customerAddressVerified = addressPatch.columns.addressVerified;
+      booking.customerPlaceId = addressPatch.columns.placeId;
+      booking.customerLat = addressPatch.columns.lat;
+      booking.customerLng = addressPatch.columns.lng;
+      booking.customerCoordsAt = addressPatch.columns.coordsAt;
+      booking.geocodePrecision = addressPatch.columns.precision;
+      booking.locationSource = addressPatch.columns.locationSource;
+    }
+
     await this.writeLog(ctx, 'rescheduled', booking, start, end);
 
     await this.notifyRescheduledBooking(ctx, {
@@ -3359,6 +3689,7 @@ export class InternalProvider implements BookingProvider {
       sequence,
       effectiveDuration,
     });
+
 
     if (!opts?.skipCloseChangeRequests) {
       await this.closeOpenChangeRequests(bookingId, ctx.tenant.id, 'declined');
@@ -3405,15 +3736,18 @@ export class InternalProvider implements BookingProvider {
       rule: DayRule;
       start: Date;
       end: Date;
+      newAddress?: string | null;
     }
   ): Promise<{
     travelEligibility: TravelEligibility;
     travelSnapshot: TravelSnapshot | null;
     travelCheck: 'ok' | 'degraded' | 'overridden' | null;
+    addressPatch?: { address: string; columns: BookingPlaceColumns };
   }> {
     const { booking, bookingId, service, rule, start, end } = input;
+    const addressForJob = input.newAddress ?? booking.customerAddress;
     const travelEligibility: TravelEligibility = serviceNeedsCustomerAddress(service, {
-      customerAddress: booking.customerAddress,
+      customerAddress: addressForJob,
     })
       ? await resolveTravelEligibility({
           tenantId: ctx.tenant.id,
@@ -3421,10 +3755,27 @@ export class InternalProvider implements BookingProvider {
           itineraryKey: input.itineraryKey,
         })
       : { active: false as const, reason: 'bot_disabled' as const };
-    if (!travelEligibility.active || !(booking.customerPlaceId || booking.customerAddress?.trim())) {
-      return { travelEligibility, travelSnapshot: null, travelCheck: null };
+    const addressPatch = input.newAddress
+      ? { address: input.newAddress, columns: bookingPlaceColumns({ applies: false }) }
+      : undefined;
+    if (!travelEligibility.active || !(booking.customerPlaceId || addressForJob?.trim())) {
+      return { travelEligibility, travelSnapshot: null, travelCheck: null, addressPatch };
     }
-    const placement = await placeExistingBooking(booking, travelEligibility);
+    const placement = input.newAddress
+      ? await placeBookingAddress({
+          tenantId: ctx.tenant.id,
+          botId: ctx.bot.id,
+          itineraryKey: input.itineraryKey,
+          service,
+          address: input.newAddress,
+        })
+      : await placeExistingBooking(booking, travelEligibility);
+    if (input.newAddress && addressPatch) {
+      addressPatch.columns = bookingPlaceColumns(placement);
+    }
+    if (input.newAddress && ctx.travelPolicy !== 'annotate') {
+      assertPlaceableForTravel(placement);
+    }
     // An owner moving a job in their own diary is warned by their picker, never blocked
     // (ADR-0015). A customer on a signed manage link gets the same enforcement the bot does:
     // they may not move themselves into a drive nobody can make.
@@ -3455,11 +3806,8 @@ export class InternalProvider implements BookingProvider {
               dayStart: checked.dayStart,
             }
           : null,
-      // The MOVE invalidates whatever the old time was checked against, so the column is
-      // rewritten rather than left describing a journey nobody is making any more. `ok` when
-      // routing answered every constraining leg, `degraded` when the proofs alone cleared it,
-      // and `overridden` when the owner moved it anyway past a verdict that did not clear.
       travelCheck: this.rescheduleTravelCheck(verdict, checked),
+      addressPatch,
     };
   }
 
@@ -3865,7 +4213,7 @@ export class InternalProvider implements BookingProvider {
 
   private async writeLog(
     ctx: BookingContext,
-    eventType: 'rescheduled' | 'cancelled' | 'created',
+    eventType: 'rescheduled' | 'cancelled' | 'created' | 'updated',
     booking: Booking,
     start: Date,
     end: Date,

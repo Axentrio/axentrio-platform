@@ -133,7 +133,7 @@ function buildUserContent(message: string, images?: AgentImageInput[]): string |
   return parts;
 }
 
-const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'];
+const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking', 'update_booking'];
 
 /** Broader than the hard output gate: future intent is useful for correcting the
  * model inside the Agent loop, but is not proof enough to replace a reply. */

@@ -10,6 +10,7 @@ const logSave = vi.fn();
 const managerQuery = vi.fn();
 const bookingRefFind = vi.fn();
 const chatSessionFindOne = vi.fn();
+const chatSessionFind = vi.fn(async (): Promise<Array<{ id: string }>> => []);
 /** No settings row = no business rules, which is every pre-existing test's world. */
 const bookingSettingsFindOne = vi.fn(async () => null as any);
 // The transaction manager is a real EntityManager in production — the provider reads
@@ -24,7 +25,7 @@ function repoFor(entity: any) {
   if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
   if (name === 'BookingLog') return { create: logCreate, save: logSave };
   if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
-  if (name === 'ChatSession') return { findOne: chatSessionFindOne };
+  if (name === 'ChatSession') return { findOne: chatSessionFindOne, find: chatSessionFind };
   if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
   return {};
 }
@@ -479,6 +480,27 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(mail.description).not.toContain('meet.google.com');
   });
 
+  it('mails the NEW address after an address-change reschedule, not the old one', async () => {
+    resolveTravelEligibility.mockResolvedValue({ active: false as const, reason: 'no_api_key' as const });
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    });
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START, {
+      customerAddress: 'Nieuwstraat 5, 1000 Brussel',
+    });
+    const mail = sendBookingEmail.mock.calls[0][0];
+    expect(mail.location).toBe('Nieuwstraat 5, 1000 Brussel');
+    expect(mail.location).not.toBe('Kerkstraat 12, 9310 Herdersem');
+  });
+
+
+
   it('does not keep a leftover Meet link after the service becomes a business-location job', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'business_location' });
     bookingSettingsFindOne.mockResolvedValue({
@@ -756,6 +778,18 @@ describe('InternalProvider reschedule / cancel / list', () => {
     const call = bookingQuery.mock.calls.at(-1)!;
     expect(String(call[0])).toMatch(/JOIN chat_sessions/);
     expect(call[1]).toContain('psid-1'); // scoped by the stable visitor id, not the session
+  });
+
+  it('looks up a booking by the SANITIZED address, so a capitalised retype still finds it', async () => {
+    // Writes store the sanitized address, so an exact-match lookup on the raw argument would
+    // miss. The SQL also lowercases the column, because rows written before that gate exists
+    // still hold whatever the agent typed.
+    bookingQuery.mockResolvedValueOnce([]);
+    await provider.listBookings(ctx, '  Ada@Example.COM ');
+    const call = bookingQuery.mock.calls.at(-1)!;
+    expect(call[1]).toContain('ada@example.com');
+    expect(call[1]).not.toContain('  Ada@Example.COM ');
+    expect(String(call[0])).toMatch(/LOWER\(TRIM\(b\.attendee_email\)\) = \$4/);
   });
 
   // ── accept / decline request ──────────────────────────────────────────────
@@ -1302,3 +1336,97 @@ describe('InternalProvider customer change policy', () => {
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('start_utc'))).toBe(false);
   });
 });
+
+describe('InternalProvider.updateBooking', () => {
+  let provider: InternalProvider;
+
+  const noEmailBooking = () => ({
+    ...confirmedBooking(),
+    attendeeEmail: null,
+    uploadedFiles: null,
+    notes: null,
+    customerPhone: null,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null as any);
+    chatSessionFind.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFind.mockResolvedValue([noEmailBooking()]);
+    bookingFindOne.mockResolvedValue(noEmailBooking());
+    bookingQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('UPDATE chatbot_bookings')) return [{ sequence: 1 }];
+      return [];
+    });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('finds the session booking with no email and writes the new address without mailing the owner', async () => {
+    const res = await provider.updateBooking(ctx, { attendeeEmail: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(res.emailSent).toBe(true);
+    expect(res.booking.attendeeEmail).toBe('ada@example.com');
+    const update = bookingQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'));
+    expect(update?.[1]).toContain('ada@example.com');
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({
+      method: 'REQUEST',
+      attendeeEmail: 'ada@example.com',
+    });
+    expect(sendBookingEmail.mock.calls[0][0].ownerEmail).toBeUndefined();
+  });
+
+  it('finds a booking from an earlier visitor session when this chat has none', async () => {
+    bookingFind.mockResolvedValue([
+      { ...noEmailBooking(), sessionId: 'sess-yesterday' },
+    ]);
+    chatSessionFind.mockResolvedValue([{ id: 'sess-yesterday' }]);
+    const res = await provider.updateBooking(
+      { ...ctx, session: { id: 'sess-today', visitorId: 'psid-1' } },
+      { attendeeEmail: 'ada@example.com' },
+    );
+    expect(res.success).toBe(true);
+    expect(res.booking.id).toBe('bk-1');
+  });
+
+  it('refuses a cancelled appointment', async () => {
+    bookingFindOne.mockResolvedValue({ ...noEmailBooking(), status: 'cancelled' });
+    await expect(provider.updateBooking(ctx, { bookingId: 'bk-1', notes: 'hi' })).rejects.toMatchObject({
+      code: 'BOOKING_NOT_UPDATABLE',
+    });
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('refuses when nothing new is supplied', async () => {
+    bookingFind.mockResolvedValue([{ ...confirmedBooking(), uploadedFiles: null, notes: null }]);
+    await expect(provider.updateBooking(ctx, { attendeeEmail: 'ada@example.com' })).rejects.toMatchObject({
+      code: 'NOTHING_TO_UPDATE',
+    });
+  });
+
+  it('picks the soonest upcoming confirmed booking when the visitor has two', async () => {
+    bookingFind.mockResolvedValue([
+      { ...noEmailBooking(), id: 'bk-later', startUtc: new Date('2026-06-12T07:00:00Z'), endUtc: new Date('2026-06-12T07:30:00Z') },
+      noEmailBooking(),
+    ]);
+    const res = await provider.updateBooking(ctx, { notes: 'gate code' });
+    expect(res.success).toBe(true);
+    expect(res.booking.id).toBe('bk-1');
+  });
+
+  it('refuses when two live appointments share the same start', async () => {
+    bookingFind.mockResolvedValue([
+      noEmailBooking(),
+      { ...noEmailBooking(), id: 'bk-2' },
+    ]);
+    await expect(provider.updateBooking(ctx, { notes: 'gate code' })).rejects.toMatchObject({
+      code: 'BOOKING_AMBIGUOUS',
+    });
+  });
+});
+

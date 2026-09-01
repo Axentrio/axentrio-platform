@@ -20,6 +20,7 @@ vi.mock('../../booking/booking.service', () => ({
   listBookings: vi.fn(),
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
+  updateBooking: vi.fn(),
 }));
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
@@ -64,7 +65,7 @@ import { getEntitlements } from '../../billing/entitlements';
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ToolRegistry', () => {
-  it('registers all 9 built-in tools on construction', () => {
+  it('registers all 10 built-in tools on construction', () => {
     const registry = new ToolRegistry();
     const builtins = registry.getBuiltinToolNames();
     expect(builtins).toContain('kb_search');
@@ -74,10 +75,12 @@ describe('ToolRegistry', () => {
     expect(builtins).toContain('list_bookings');
     expect(builtins).toContain('reschedule_booking');
     expect(builtins).toContain('cancel_booking');
+    expect(builtins).toContain('update_booking');
     expect(builtins).toContain('escalate_to_human');
     expect(builtins).toContain('capture_lead');
-    expect(builtins).toHaveLength(9);
+    expect(builtins).toHaveLength(10);
   });
+
 
   it('returns KB search + booking tools + escalation for tenant with calcom integration', async () => {
     const registry = new ToolRegistry();

@@ -33,6 +33,8 @@ export interface PendingBookingDetails {
   /** Set on reschedule/cancel pending records so a create yes cannot satisfy a move. */
   bookingId?: string;
   kind?: 'create' | 'reschedule' | 'cancel';
+  /** New appointment address when the reschedule is a location change. */
+  customerAddress?: string;
 }
 
 const AFFIRM_START =
@@ -142,6 +144,9 @@ function parsePending(raw: string | null): PendingBookingDetails | null {
       bookingId: typeof v.bookingId === 'string' ? v.bookingId : undefined,
       kind:
         v.kind === 'reschedule' || v.kind === 'cancel' || v.kind === 'create' ? v.kind : undefined,
+      customerAddress: typeof v.customerAddress === 'string' && v.customerAddress.trim()
+        ? v.customerAddress.trim()
+        : undefined,
     };
   } catch {
     return null;
@@ -281,12 +286,17 @@ export async function refuseUnlessRescheduleConfirmed(
 
   const newStartTime = await wallClockKey(ctx.sessionId, String(args.newStartTime ?? ''));
   const bookingId = String(args.bookingId ?? '');
+  const customerAddress =
+    typeof args.customerAddress === 'string' && args.customerAddress.trim()
+      ? args.customerAddress.trim()
+      : undefined;
   const pending = lookup.pending;
   const confirmed =
     !!pending &&
     pending.kind === 'reschedule' &&
     pending.bookingId === bookingId &&
     pending.startTime === newStartTime &&
+    (pending.customerAddress ?? '') === (customerAddress ?? '') &&
     (isConfirmingChip(last, pending.startTime) ||
       (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime)));
 
@@ -297,19 +307,28 @@ export async function refuseUnlessRescheduleConfirmed(
 
   const stored = await writePending(
     ctx.sessionId,
-    { startTime: newStartTime, attendeeName: '', serviceId: '', runId: ctx.runId, bookingId, kind: 'reschedule' },
+    {
+      startTime: newStartTime,
+      attendeeName: '',
+      serviceId: '',
+      runId: ctx.runId,
+      bookingId,
+      kind: 'reschedule',
+      customerAddress,
+    },
     RESCHEDULE_PREFIX,
   );
   if (!stored) return null;
 
+  const addressBit = customerAddress ? ' and the new address' : '';
   return {
     success: false,
     error:
       `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Send a short summary ` +
-      `of the existing appointment and the new time, then wait for an explicit yes. Call reschedule_booking ` +
-      `again only after they confirm this same move.`,
+      `of the existing appointment, the new time${addressBit}, then wait for an explicit yes. Call reschedule_booking ` +
+      `again only after they confirm this same move. Do not pick a different time than the one they named.`,
     errorSafeForModel: true,
-    data: { needsConfirmation: true, bookingId, newStartTime },
+    data: { needsConfirmation: true, bookingId, newStartTime, customerAddress },
   };
 }
 

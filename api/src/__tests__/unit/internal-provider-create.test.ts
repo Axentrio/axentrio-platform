@@ -595,6 +595,22 @@ describe('InternalProvider.createBooking', () => {
     expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
   });
 
+  it('flags videoLinkMissing on the owner email when a video booking gets no meeting link', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'google_meet' }]);
+    // The account could not host the meeting (e.g. a personal Microsoft account): no join URL.
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-z', meetUrl: null, calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-novideo', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(sendBookingEmail.mock.calls[0][0].videoLinkMissing).toBe(true);
+  });
+
+  it('does not flag videoLinkMissing when the video link is present', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'google_meet' }]);
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-w', meetUrl: 'https://meet.google.com/y', calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-video', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(sendBookingEmail.mock.calls[0][0].videoLinkMissing).toBe(false);
+  });
+
   it('puts the service price on the calendar event and the emails when it is not no-price', async () => {
     serviceTypeFind.mockResolvedValue([{
       ...EVENT_TYPE,
@@ -1077,6 +1093,43 @@ describe('InternalProvider.createBooking', () => {
       provider.createBooking(ctx, 'idem-phone-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }),
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('throws EMAIL_REQUIRED on the AUTO path when the calendar invite has nowhere to go', async () => {
+    await expect(
+      provider.createBooking(ctx, 'idem-email-auto', OFFERED_START, { name: 'Ada' }),
+    ).rejects.toMatchObject({ code: 'EMAIL_REQUIRED' });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('throws EMAIL_REQUIRED for an address the invite cannot reach', async () => {
+    await expect(
+      provider.createBooking(ctx, 'idem-email-bad', OFFERED_START, { name: 'Ada', email: 'not-an-email' }),
+    ).rejects.toMatchObject({ code: 'EMAIL_REQUIRED' });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'))).toBe(false);
+  });
+
+  it('books without an email once the owner unticks the flag', async () => {
+    // Default-on, so only an explicit false may skip the gate. An existing row that predates
+    // the column keeps the requirement.
+    const optional = { ...EVENT_TYPE, customerEmailRequired: false };
+    serviceTypeFind.mockResolvedValue([optional]);
+    eventTypeFindOne.mockResolvedValue(optional);
+    const res = await provider.createBooking(ctx, 'idem-email-off', OFFERED_START, { name: 'Ada' });
+    expect(res.success).toBe(true);
+    expect(insertParam(bookingInsertCall(), 'attendee_email')).toBeNull();
+  });
+
+  it('persists and mails the SANITIZED address, never the raw one', async () => {
+    // sanitizeEmail passes a padded, mixed-case value, so presence-only validation would put
+    // " Ada@Example.COM " in the INSERT, in the ICS ATTENDEE line and in the Resend `to`.
+    const res = await provider.createBooking(ctx, 'idem-email-norm', OFFERED_START, {
+      name: 'Ada',
+      email: '  Ada@Example.COM ',
+    });
+    expect(res.success).toBe(true);
+    expect(insertParam(bookingInsertCall(), 'attendee_email')).toBe('ada@example.com');
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ attendeeEmail: 'ada@example.com' });
   });
 
   it('confirms a phone-call Auto-book once the number is given - never a request', async () => {
@@ -1724,6 +1777,13 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     await expect(
       provider.requestAppointment(ctx, 'idem-phone-stale-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined, { customerPhone: '   ' })
     ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+    expect(bookingQuery).not.toHaveBeenCalled();
+  });
+
+  it('throws EMAIL_REQUIRED on the REQUEST path, where the owner cannot reply either', async () => {
+    await expect(
+      provider.requestAppointment(ctx, 'idem-email-req', OFFERED_START, { name: 'Ada' })
+    ).rejects.toMatchObject({ code: 'EMAIL_REQUIRED' });
     expect(bookingQuery).not.toHaveBeenCalled();
   });
 

@@ -46,6 +46,7 @@ const internalMethods = vi.hoisted(() => ({
   createBooking: vi.fn(),
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
+  updateBooking: vi.fn(),
 }));
 vi.mock('../../booking/booking-providers/internal.provider', () => ({
   // Regular function (not an arrow) so `new InternalProvider()` returns the stub.

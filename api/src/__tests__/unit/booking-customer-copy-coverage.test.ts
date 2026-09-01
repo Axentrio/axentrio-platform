@@ -48,6 +48,7 @@ const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   CAPACITY_REACHED: 'a ceiling on NEW bookings; a reschedule is checked as SLOT_UNAVAILABLE',
   DURATION_OUT_OF_RANGE: 'agent-side service configuration while creating',
   DURATION_REQUIRED: 'the agent re-asks for a length while CREATING a booking',
+  EMAIL_REQUIRED: 'raised while the agent collects details for a NEW booking',
   FILE_NOT_READY: 'attachment upload during creation',
   FILE_REQUIRED: 'raised while the agent collects a file for a NEW booking',
   TOO_MANY_FILES: 'attachment upload during creation',
@@ -65,6 +66,13 @@ const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   TENANT_NOT_FOUND: 'a data-integrity failure, not a customer-actionable state',
   BOOKING_NOT_CANCELLABLE: 'the page checks the status itself and says so before offering the button',
   BOOKING_NOT_RESCHEDULABLE: 'the page checks the status itself and says so before offering the button',
+  // The update path is agent-only: `updateBooking` is reached from `UpdateBookingTool`
+  // (booking.tool.ts) through `booking.service.updateBooking`, and the signed manage page
+  // offers reschedule and cancel only - it never calls it. BOOKING_AMBIGUOUS also lists raw
+  // booking ids, so it must stay off any customer surface.
+  NOTHING_TO_UPDATE: 'agent-only update tool; the manage page has no update action',
+  BOOKING_NOT_UPDATABLE: 'agent-only update tool; the manage page has no update action',
+  BOOKING_AMBIGUOUS: 'agent-only disambiguation, and its text carries internal booking ids',
 };
 
 /** Every `.ts` under a directory, recursively, excluding tests. */

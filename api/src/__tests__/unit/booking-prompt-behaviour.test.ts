@@ -214,6 +214,37 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
   });
 });
 
+/**
+ * The required-email flag is prompt-only on the model's side: the server gate returns
+ * EMAIL_REQUIRED, and only this prose stops the model from reading that as "unavailable"
+ * and capturing a request instead of asking for the address.
+ */
+describe('a service that requires an email for the calendar invite', () => {
+  it('flags the service, adds the rule, and keeps the named time recoverable', () => {
+    const p = buildServicesSection([svc({ customerEmailRequired: true })])!;
+    expect(line(p)).toContain('needs email');
+    expect(p).toMatch(/EMAIL_REQUIRED/);
+    expect(p).toMatch(/A missing email does not make the service unavailable/i);
+    expect(p).toMatch(/Keep any date and time the customer already named/i);
+    expect(p).toMatch(/you MUST have a valid address before you book or capture the request/i);
+    expect(p).not.toMatch(/EMAIL \(optional\)/);
+  });
+
+  it('keeps the optional EMAIL wording when every service has the flag off', () => {
+    const p = buildServicesSection([svc({ customerEmailRequired: false })])!;
+    expect(line(p)).not.toContain('needs email');
+    expect(p).not.toMatch(/EMAIL_REQUIRED/);
+    expect(p).toMatch(/EMAIL \(optional\)/);
+    expect(p).toMatch(/proceed without it/i);
+  });
+
+  it('treats an unset flag as required, so existing services gain the gate', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(line(p)).toContain('needs email');
+    expect(p).toMatch(/EMAIL_REQUIRED/);
+  });
+});
+
 describe('aiSummary — the ask the model needs', () => {
   it('tells the model to pass aiSummary, and that it is for the owner', () => {
     // The wiring is complete on both create paths; this line is the only reason anything
@@ -257,6 +288,7 @@ describe('customer change policy — catalog line and rules', () => {
 
   it('names an explicit auto, which is no longer the default', () => {
     const p = buildServicesSection([svc({ rescheduleMode: 'auto', cancelMode: 'auto' })])!;
+
     expect(line(p)).toContain('reschedule: auto');
     expect(line(p)).toContain('cancel: auto');
   });
@@ -286,6 +318,31 @@ describe('customer change policy — catalog line and rules', () => {
     expect(p).toMatch(/reschedule or cancel under a "request" customer-change policy/i);
   });
 });
+
+describe('after a booking exists — extra info vs reschedule vs price', () => {
+  it('tells the model to call update_booking for extra info, email, phone, name, or a file', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/After a booking exists/);
+    expect(p).toMatch(/Call update_booking/);
+    expect(p).toMatch(/Do not escalate to a human for that/);
+    expect(p).toMatch(/call update_booking so the new file is added/);
+  });
+
+  it('sends address and time changes through confirmed reschedule, never an invented time', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/Changing the appointment address: that is a reschedule/);
+    expect(p).toMatch(/never invent a time/);
+    expect(p).toMatch(/The original appointment stays until they confirm/);
+  });
+
+  it('quotes listed prices and only offers a human if they keep insisting', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/You cannot change a booked price/);
+    expect(p).toMatch(/keeps insisting on a different price/);
+    expect(p).toMatch(/call escalate_to_human/);
+  });
+});
+
 
 describe('check_availability — the empty result carries its own instruction', () => {
   const load = async (slots: unknown[]) => {

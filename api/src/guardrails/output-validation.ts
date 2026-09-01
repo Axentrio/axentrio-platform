@@ -144,7 +144,7 @@ const INTERNAL_MARKERS: Array<{ re: RegExp; reason: string }> = [
   { re: /\bLANGUAGE \(read first\):/i, reason: "language-directive header" },
   // Internal tool names (all built-in agent tools — a reply must never name them).
   {
-    re: /\b(?:kb_search|capture_lead|escalate_to_human|check_availability|create_booking|request_appointment|list_bookings|reschedule_booking|cancel_booking)\b/,
+    re: /\b(?:kb_search|capture_lead|escalate_to_human|check_availability|create_booking|request_appointment|list_bookings|reschedule_booking|cancel_booking|update_booking)\b/,
     reason: "internal tool name",
   },
   // Internal id field names (snake_case ids that only exist server-side).

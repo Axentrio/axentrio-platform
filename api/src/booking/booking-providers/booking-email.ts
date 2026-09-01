@@ -120,6 +120,12 @@ export interface BookingEmailParams {
    * empty leaves that pointer as the fallback (e.g. a file too big to attach).
    */
   ownerAttachments?: EmailAttachment[];
+  /**
+   * A video booking whose calendar account produced no meeting link (e.g. a personal
+   * Microsoft account, which cannot host Teams). Adds a heads-up to the OWNER's copy so they
+   * can reconnect a work account. Owner-only; the customer copy never shows it.
+   */
+  videoLinkMissing?: boolean;
 }
 
 function formatWhen(start: Date, timezone: string): string {
@@ -179,6 +185,9 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
     `<p>${who} ${cancelled ? 'cancelled their appointment' : 'booked an appointment'}.</p>` +
     `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
     (params.location ? `<p>Where: ${esc(params.location)}</p>` : '') +
+    (params.videoLinkMissing && !cancelled
+      ? `<p><strong>No video meeting link was created for this booking.</strong> Your connected calendar account may not support online meetings — a personal Microsoft account cannot host Teams. Reconnect a work or school account to add video links.</p>`
+      : '') +
     detail +
     (customerWasInvited
       ? ''

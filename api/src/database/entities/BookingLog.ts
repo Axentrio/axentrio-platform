@@ -36,7 +36,7 @@ export class BookingLog {
   calBookingId?: string;
 
   @Column({ type: 'varchar', length: 50, name: 'event_type' })
-  eventType!: 'created' | 'rescheduled' | 'cancelled';
+  eventType!: 'created' | 'rescheduled' | 'cancelled' | 'updated';
 
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'attendee_name' })
   attendeeName?: string;

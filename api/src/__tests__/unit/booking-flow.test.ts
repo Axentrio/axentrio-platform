@@ -44,6 +44,7 @@ vi.mock('../../booking/booking.service', () => ({
   listBookings: (...args: any[]) => mockListBookings(...args),
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
+  updateBooking: vi.fn(),
 }));
 
 // ── Mock RAG service ────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   assertRequiredAddress,
+  resolveCustomerEmail,
   assertRequiredPhone,
   hasStreetAndHouseNumber,
   isCompleteCustomerAddress,
@@ -194,5 +195,68 @@ describe('assertRequiredPhone', () => {
 
   it('does not demand an address for that same phone-call row', () => {
     expect(() => assertRequiredAddress(call)).not.toThrow();
+  });
+});
+
+describe('resolveCustomerEmail', () => {
+  const invited: ServiceType = { customerEmailRequired: true } as ServiceType;
+  const optional: ServiceType = { customerEmailRequired: false } as ServiceType;
+
+  it('returns a valid address unchanged', () => {
+    expect(resolveCustomerEmail(invited, 'ada@example.com')).toBe('ada@example.com');
+  });
+
+  it('returns the SANITIZED address, because the ICS ATTENDEE line and the mail `to` read it', () => {
+    // sanitizeEmail accepts this after trimming, so presence-only validation would persist the
+    // padded string and put a leading space inside mailto:.
+    expect(resolveCustomerEmail(invited, '  Ada@Example.COM ')).toBe('ada@example.com');
+  });
+
+  it('throws EMAIL_REQUIRED when the address is missing', () => {
+    expect(() => resolveCustomerEmail(invited)).toThrow(BookingError);
+    try {
+      resolveCustomerEmail(invited);
+    } catch (err) {
+      expect(err).toMatchObject({ code: 'EMAIL_REQUIRED' });
+      expect((err as BookingError).message).toMatch(/calendar invite/i);
+      expect((err as BookingError).message).toMatch(/attendeeEmail/);
+      expect((err as BookingError).message).toMatch(/do not capture a request or a lead/i);
+    }
+  });
+
+  it('treats a whitespace-only address as absent', () => {
+    expect(() => resolveCustomerEmail(invited, '   ')).toThrow(BookingError);
+  });
+
+  it('throws EMAIL_REQUIRED for a malformed address, so the invite cannot go nowhere', () => {
+    expect(() => resolveCustomerEmail(invited, 'not-an-email')).toThrow(BookingError);
+    try {
+      resolveCustomerEmail(invited, 'not-an-email');
+    } catch (err) {
+      expect(err).toMatchObject({ code: 'EMAIL_REQUIRED' });
+      expect((err as BookingError).message).toMatch(/not valid/i);
+    }
+  });
+
+  it('refuses an address longer than the attendee_email column, instead of overflowing the INSERT', () => {
+    const tooLong = `${'a'.repeat(310)}@example.com`;
+    expect(tooLong.length).toBeGreaterThan(320);
+    expect(() => resolveCustomerEmail(invited, tooLong)).toThrow(BookingError);
+    expect(resolveCustomerEmail(optional, tooLong)).toBeNull();
+  });
+
+  it('returns null when the owner unticked the flag', () => {
+    expect(resolveCustomerEmail(optional)).toBeNull();
+  });
+
+  it('returns null rather than junk for an unusable address once the flag is off', () => {
+    // Nothing can be mailed to it, and booking-email already treats null as "no invite sent".
+    expect(resolveCustomerEmail(optional, 'not-an-email')).toBeNull();
+  });
+
+  it('still requires the address when the property is absent, because the flag is default-on', () => {
+    // An existing row read before the column existed, or a partial fixture: undefined must
+    // mean required, or the migration default silently stops applying.
+    expect(() => resolveCustomerEmail({} as ServiceType)).toThrow(BookingError);
   });
 });

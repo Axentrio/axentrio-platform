@@ -13,6 +13,7 @@ vi.mock('../../booking/booking.service', () => ({
   listBookings: vi.fn(),
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
+  updateBooking: vi.fn(),
 }));
 
 vi.mock('../../services/message-forwarding.service', () => ({

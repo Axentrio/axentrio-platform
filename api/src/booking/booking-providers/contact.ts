@@ -9,6 +9,13 @@ import {
   serviceNeedsCustomerPhone,
   type ServiceLocationFacts,
 } from '../service-location';
+import { XSSProtectionService } from '../../security/xss-protection';
+
+// One instance for the module, not one per call: the tool layer does the same.
+const emails = new XSSProtectionService();
+
+/** `chatbot_bookings.attendee_email` column width (RFC-ish 320). */
+const ATTENDEE_EMAIL_MAX = 320;
 
 /** P5a — which contact fields a service requires. Single mapping for the column-name
  *  wart: customerLocationRequired maps to PHONE (a callback number), not address.
@@ -25,7 +32,7 @@ function requiredContactFields(
 }
 
 /** Trim + cap a contact value to its DB column width; empty/whitespace → null. */
-function cleanContact(v: string | undefined, max: number): string | null {
+export function cleanContact(v: string | undefined, max: number): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
   return t ? t.slice(0, max) : null;
@@ -115,6 +122,53 @@ export function assertRequiredPhone(
   throw new BookingError(
     'A contact phone number is required for this service. Ask for it and call again with customerPhone. Do not tell the customer the service is unavailable, and do not capture a request or a lead.',
     'PHONE_REQUIRED',
+    400,
+  );
+}
+
+/**
+ * Owner-facing flag: "email address required for the calendar invite". Default-on, so an
+ * undefined or null value still means required; only an explicit false turns it off.
+ */
+export function serviceRequiresCustomerEmail(service: { customerEmailRequired?: boolean | null }): boolean {
+  return service.customerEmailRequired !== false;
+}
+
+/**
+ * Sanitize a customer email to the ONE stored/queried shape: lowercased, trimmed, valid, and
+ * short enough for the column. Null = no usable address. Both the write gate and the
+ * `listBookings` lookup read this, so a stored address and a looked-up address cannot drift.
+ *
+ * 320 = the `attendee_email` column width. A longer address is not truncatable (a cut address
+ * is a wrong address), so it counts as unusable.
+ */
+export function normalizeCustomerEmail(email?: string | null): string | null {
+  const clean = typeof email === 'string' ? emails.sanitizeEmail(email) : null;
+  return clean && clean.length <= ATTENDEE_EMAIL_MAX ? clean : null;
+}
+
+/**
+ * The ONE place a customer email is JUDGED. Normalisation is `normalizeCustomerEmail`, and its
+ * output is what every downstream reader gets: the INSERT, the ICS ATTENDEE line and the
+ * Resend `to`. `sanitizeEmail` accepts " Ada@Example.com ", and that raw string inside a
+ * mailto: breaks the RSVP match, so the caller must never keep the value it passed in.
+ * Null means "no usable address", which only a service with the flag off can reach.
+ *
+ * The FORMAT is checked here and not only at the tool because the gate has to hold for every
+ * caller: a malformed address confirms a booking whose invite goes nowhere.
+ */
+export function resolveCustomerEmail(
+  service: { customerEmailRequired?: boolean | null },
+  email?: string | null,
+): string | null {
+  const clean = normalizeCustomerEmail(email);
+  if (clean) return clean;
+  if (!serviceRequiresCustomerEmail(service)) return null;
+  throw new BookingError(
+    typeof email === 'string' && email.trim()
+      ? 'That email address is not valid, so the calendar invite cannot reach the customer. Ask them to repeat it and call again with attendeeEmail. Do not tell the customer the service is unavailable, and do not capture a request or a lead.'
+      : 'An email address is required for this service, because the calendar invite is sent to it. Ask the customer for their email address and call again with attendeeEmail. Do not tell the customer the service is unavailable, and do not capture a request or a lead.',
+    'EMAIL_REQUIRED',
     400,
   );
 }

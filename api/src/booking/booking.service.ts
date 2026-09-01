@@ -25,7 +25,7 @@ import {
   getOwnedBot,
   getOwnedBotConfig,
 } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingExtras } from './booking-providers/types';
+import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
@@ -269,11 +269,38 @@ function captureLeadFromBooking(
   });
 }
 
-export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {
+export async function rescheduleBooking(
+  caller: BookingCaller,
+  sessionId: string,
+  bookingId: string,
+  newStartTime: string,
+  opts?: { customerAddress?: string },
+) {
   const ctx = await resolveContext(sessionId);
   ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
-  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
+  return opts
+    ? internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, opts)
+    : internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
+}
+
+export async function updateBooking(
+  caller: BookingCaller,
+  sessionId: string,
+  patch: UpdateBookingPatch,
+) {
+  const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller, patch.bookingId ? { manageableBookingId: patch.bookingId } : undefined);
+  const result = await internalProvider.updateBooking(ctx, patch);
+  if (patch.attendeeName || patch.attendeeEmail || patch.customerPhone) {
+    captureLeadFromBooking(
+      ctx,
+      { name: patch.attendeeName ?? '', email: patch.attendeeEmail },
+      patch.customerPhone ? { customerPhone: patch.customerPhone } : undefined,
+      result.booking.id,
+    );
+  }
+  return result;
 }
 
 export async function cancelBooking(caller: BookingCaller, sessionId: string, bookingId: string, reason?: string) {

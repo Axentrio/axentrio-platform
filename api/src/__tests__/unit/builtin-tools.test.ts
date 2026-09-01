@@ -7,6 +7,7 @@ const mockCreateBooking = vi.fn();
 const mockListBookings = vi.fn();
 const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
+const mockUpdateBooking = vi.fn();
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('../../booking/booking.service', () => ({
   listBookings: (...args: unknown[]) => mockListBookings(...args),
   rescheduleBooking: (...args: unknown[]) => mockRescheduleBooking(...args),
   cancelBooking: (...args: unknown[]) => mockCancelBooking(...args),
+  updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;
@@ -65,6 +67,7 @@ import {
   ListBookingsTool,
   RescheduleBookingTool,
   CancelBookingTool,
+  UpdateBookingTool,
 } from '../../agent/tools/booking.tool';
 import { EscalationTool } from '../../agent/tools/escalation.tool';
 import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
@@ -1109,7 +1112,7 @@ describe('RescheduleBookingTool', () => {
     const result = await tool.execute({ bookingId: 'bk-3', newStartTime: '2026-04-10T14:00:00Z' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(mockRescheduleBooking).toHaveBeenCalledWith('agent', 'sess-4', 'bk-3', '2026-04-10T14:00:00Z');
+    expect(mockRescheduleBooking).toHaveBeenCalledWith('agent', 'sess-4', 'bk-3', '2026-04-10T14:00:00Z', undefined);
   });
 });
 
@@ -1132,6 +1135,44 @@ describe('CancelBookingTool', () => {
     expect(mockCancelBooking).toHaveBeenCalledWith('agent', 'sess-5', 'bk-4', 'Not needed');
   });
 });
+
+describe('UpdateBookingTool', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('has hasSideEffects=true', () => {
+    const tool = new UpdateBookingTool();
+    expect(tool.name).toBe('update_booking');
+    expect(tool.hasSideEffects).toBe(true);
+  });
+
+  it('execute calls updateBooking with session contact fields', async () => {
+    const tool = new UpdateBookingTool();
+    const ctx = makeCtx({ sessionId: 'sess-6' });
+    mockUpdateBooking.mockResolvedValue({ success: true, emailSent: true, booking: { id: 'bk-5' } });
+
+    const result = await tool.execute(
+      { attendeeEmail: 'ada@example.com', notes: 'Gate code 12' },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockUpdateBooking).toHaveBeenCalledWith('agent', 'sess-6', {
+      bookingId: undefined,
+      attendeeName: undefined,
+      attendeeEmail: 'ada@example.com',
+      customerPhone: undefined,
+      notes: 'Gate code 12',
+    });
+  });
+
+  it('refuses a bad email before calling the service', async () => {
+    const tool = new UpdateBookingTool();
+    const result = await tool.execute({ attendeeEmail: 'not-an-email' }, makeCtx());
+    expect(result.success).toBe(false);
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+});
+
 
 describe('EscalationTool', () => {
   it('has hasSideEffects=true', () => {

@@ -338,6 +338,32 @@ export interface CancelResult {
 }
 
 /**
+ * Contact, notes, and files on an existing appointment. Not a time or address
+ * change — those go through reschedule_booking so the slot is re-checked.
+ */
+export interface UpdateBookingPatch {
+  bookingId?: string;
+  attendeeName?: string;
+  attendeeEmail?: string;
+  customerPhone?: string;
+  notes?: string;
+}
+
+export interface UpdateBookingResult {
+  success: boolean;
+  /** True when a calendar invite was sent to a new or changed email. */
+  emailSent?: boolean;
+  booking: {
+    id: string;
+    attendeeName?: string;
+    attendeeEmail?: string;
+    customerPhone?: string;
+    notes?: string;
+    uploadedFileCount: number;
+  };
+}
+
+/**
  * Optional create-path fields the agent may supply, bundled so new ones (P5)
  * thread through one param instead of growing the positional signature. Tools
  * expose individual params (e.g. customerAddress); they're collected into this.
@@ -412,7 +438,8 @@ export interface BookingProvider {
     ctx: BookingContext,
     bookingId: string,
     newStartTime: string,
-    opts?: { durationMin?: number; excludeExternalInterval?: { start: Date; end: Date } }
+    opts?: { durationMin?: number; excludeExternalInterval?: { start: Date; end: Date }; customerAddress?: string }
   ): Promise<RescheduleResult>;
+  updateBooking(ctx: BookingContext, patch: UpdateBookingPatch): Promise<UpdateBookingResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;
 }

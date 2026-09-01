@@ -8,6 +8,7 @@ import {
   listBookings,
   rescheduleBooking,
   cancelBooking,
+  updateBooking,
   BookingError,
 } from '../../booking/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
@@ -723,7 +724,7 @@ export class CreateBookingTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          'Email address of the person being booked. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
+          "Email address of the person being booked. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
       },
       notes: {
         type: 'string',
@@ -929,7 +930,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          'Email address of the person requesting the appointment. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
+          "Email address of the person requesting the appointment. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
       },
       notes: {
         type: 'string',
@@ -1064,7 +1065,8 @@ export class ListBookingsTool implements ToolAdapter {
 
 export class RescheduleBookingTool implements ToolAdapter {
   name = 'reschedule_booking';
-  description = 'Reschedule an existing booking to a new time.';
+  description =
+    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file.';
   parameters = {
     type: 'object',
     properties: {
@@ -1075,7 +1077,12 @@ export class RescheduleBookingTool implements ToolAdapter {
       newStartTime: {
         type: 'string',
         description:
-          'New start time. Prefer the exact slot start returned by check_availability, verbatim. If you must construct it from the customer\'s words, give a ZONELESS ISO 8601 local time in the business\'s timezone — e.g. "2026-06-19T14:00:00" — never append \'Z\' or an offset.',
+          'New start time. Prefer the exact slot start returned by check_availability, verbatim. If you must construct it from the customer\'s words, give a ZONELESS ISO 8601 local time in the business\'s timezone — e.g. "2026-06-19T14:00:00" — never append \'Z\' or an offset. If they are only changing the address, pass the existing appointment time.',
+      },
+      customerAddress: {
+        type: 'string',
+        description:
+          "The new full appointment address (street, house number, postal code, and city). Required when they are changing where the job is. The original appointment is not changed until they confirm this move.",
       },
     },
     required: ['bookingId', 'newStartTime'],
@@ -1090,7 +1097,8 @@ export class RescheduleBookingTool implements ToolAdapter {
         'agent',
         ctx.sessionId,
         args.bookingId as string,
-        args.newStartTime as string
+        args.newStartTime as string,
+        typeof args.customerAddress === 'string' ? { customerAddress: args.customerAddress } : undefined,
       );
       return { success: true, data: result };
     } catch (err) {
@@ -1134,3 +1142,54 @@ export class CancelBookingTool implements ToolAdapter {
     }
   }
 }
+
+export class UpdateBookingTool implements ToolAdapter {
+  name = 'update_booking';
+  description =
+    'Add or change details on an existing appointment: extra notes, a photo or file from this chat, email, phone, or name. Call this when the customer forgot an email or wants to add info after they are already booked. Do not escalate to a human for that. Do not use this to change the date, time, or appointment address — that is reschedule_booking.';
+  parameters = {
+    type: 'object',
+    properties: {
+      bookingId: {
+        type: 'string',
+        description: 'The appointment to update. Omit when this chat has exactly one appointment.',
+      },
+      attendeeName: {
+        type: 'string',
+        description: "The customer's name, when they are adding or correcting it.",
+      },
+      attendeeEmail: {
+        type: 'string',
+        description:
+          "The customer's email. Optional. When newly added or changed, a calendar invite is sent to this address. Never invent one.",
+      },
+      customerPhone: {
+        type: 'string',
+        description: "The customer's phone number, when they are adding or correcting it.",
+      },
+      notes: {
+        type: 'string',
+        description: 'Extra info to add to the appointment. Appended to any notes already stored.',
+      },
+    },
+  };
+  hasSideEffects = true;
+
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    try {
+      const badEmail = rejectBadEmail(args.attendeeEmail);
+      if (badEmail) return badEmail;
+      const result = await updateBooking('agent', ctx.sessionId, {
+        bookingId: typeof args.bookingId === 'string' ? args.bookingId : undefined,
+        attendeeName: typeof args.attendeeName === 'string' ? args.attendeeName : undefined,
+        attendeeEmail: typeof args.attendeeEmail === 'string' ? args.attendeeEmail : undefined,
+        customerPhone: typeof args.customerPhone === 'string' ? args.customerPhone : undefined,
+        notes: typeof args.notes === 'string' ? args.notes : undefined,
+      });
+      return { success: true, data: result };
+    } catch (err) {
+      return { success: false, ...toolError(err, 'Failed to update booking') };
+    }
+  }
+}
+

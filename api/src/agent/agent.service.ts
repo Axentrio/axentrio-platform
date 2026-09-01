@@ -1577,7 +1577,7 @@ export class AgentService {
     state: RunLoopState,
     content: string,
   ): boolean {
-    if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.bookingRecorded) return false;
+    if (!ctx.availabilityClaimGuardArmed || state.availabilityChecked || state.bookingRecorded) return false;
     if (!claimsDatedUnavailability(content)) return false;
     if (state.availabilityCorrectionAttempted || i >= MAX_ITERATIONS - 1) return false;
     state.availabilityCorrectionAttempted = true;
@@ -1938,13 +1938,11 @@ export class AgentService {
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
     if (tool.name === 'check_availability' && result.success && result.availability) {
-      // Live WaterFix 2026-09-01: data already said confirm_existing (no slots,
-      // alreadyHeld present, 635 chars) and the model still said the time was
-      // unavailable because absorbAvailability fed the leftover diary into chips.
+      this.absorbAvailability(toolCall, result, result.availability, ctx, state);
+      // Live WaterFix 2026-09-01: leftover diary chips made the model say the held
+      // time was unavailable. Record the call first (#80), then drop chips.
       if ((result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'confirm_existing') {
         state.pendingAvailability = null;
-      } else {
-        this.absorbAvailability(toolCall, result, result.availability, ctx, state);
       }
     } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
       state.pendingAvailability = null;

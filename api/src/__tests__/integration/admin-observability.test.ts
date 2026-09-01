@@ -386,14 +386,18 @@ describe('admin observability — agent traces', () => {
       }),
     );
     const res = await request(app).get(`${LIST}/${t.id}`);
-    expect(res.body.data.trace.iterations[0].toolCalls[0]).toMatchObject({
+    const call = res.body.data.trace.iterations[0].toolCalls[0];
+    expect(call).toMatchObject({
       name: 'check_availability',
       ok: true,
       suggestedAction: 'confirm_existing',
       requestedTimeUnavailable: '11:00',
       alreadyHeld: [{ bookingId: 'bk-1', start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T10:00:00.000Z' }],
-      dataKeys: ['alreadyHeld', 'suggestedAction', 'requestedTimeUnavailable', 'noSlotsInRange', 'address'],
     });
+    expect(call.dataKeys.sort()).toEqual(
+      ['address', 'alreadyHeld', 'noSlotsInRange', 'requestedTimeUnavailable', 'suggestedAction'],
+    );
+    expect(call.dataChars).toBeGreaterThan(0);
     expect(JSON.stringify(res.body)).not.toContain('LEAK-ADDRESS');
   });
 

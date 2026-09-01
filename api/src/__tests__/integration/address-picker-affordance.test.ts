@@ -92,6 +92,17 @@ const TRAVELS_WITH_SLOTS = {
   timezone: 'Europe/Brussels',
   travel: { requestableSlots: [], addressTooVague: false },
 };
+/**
+ * BOTH KINDS AT ONCE: times the gate cleared, and times it could not measure a drive for. This
+ * is the shape the plan reasoned about and nothing had ever exercised - a live diary produced a
+ * chip list with holes in it, which proves only that something was filtered, never that the
+ * result carried requestable times too.
+ */
+const TRAVELS_MIXED = {
+  slots: [{ start: '2026-09-01T09:00:00Z' }, { start: '2026-09-01T09:30:00Z' }],
+  timezone: 'Europe/Brussels',
+  travel: { requestableSlots: [{ start: '2026-09-01T11:00:00Z' }], addressTooVague: false },
+};
 /** A service the customer comes to. No `travel`, so no address is needed and none is offered. */
 const NO_TRAVEL = { slots: [{ start: '2026-09-01T09:00:00Z' }], timezone: 'Europe/Brussels' };
 
@@ -171,6 +182,26 @@ describe('offering to verify the address', () => {
 
     expect(res.affordance).toBeUndefined();
     expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+  });
+
+  it('leaves them alone when the same result also holds requestable times', async () => {
+    // The mixed case, which the plan decided by reasoning and no test had ever run: some times
+    // cleared the travel gate, others could not be measured. Requestable times come from an
+    // unmeasured drive or a spent budget, never from a vague address, so verifying the door
+    // would not upgrade them - and dropping the chips to ask would cost the customer the times
+    // that ARE bookable.
+    mockCheckAvailability.mockResolvedValue(TRAVELS_MIXED);
+
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: TYPED },
+      { ...ctx(), channel: 'whatsapp' },
+    );
+
+    expect(res.affordance).toBeUndefined();
+    expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+    // Both kinds really were in the one result, or the case above was not the mixed one.
+    expect(TRAVELS_MIXED.slots.length).toBeGreaterThan(0);
+    expect(TRAVELS_MIXED.travel.requestableSlots.length).toBeGreaterThan(0);
   });
 
   it('says nothing for a service the customer comes to', async () => {

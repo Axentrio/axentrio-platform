@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 import { logger } from '../utils/logger';
 
-interface EmailAttachment {
+export interface EmailAttachment {
   filename: string;
   /** Base64-encoded content. */
   content: string;

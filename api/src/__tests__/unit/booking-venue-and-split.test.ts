@@ -411,6 +411,25 @@ describe('booking email — owner and customer get separate messages', () => {
     expect(toOwner()!.attachments).toBeUndefined();
   });
 
+  it('attaches customer files to the owner copy only', async () => {
+    const ownerAttachments = [
+      { filename: 'room.jpg', content: Buffer.from('photo').toString('base64'), contentType: 'image/jpeg' },
+    ];
+    await sendBookingEmail({ ...BASE, ownerAttachments });
+    expect(toCustomer()!.attachments).toHaveLength(1);
+    expect((toCustomer()!.attachments as { filename: string }[])[0].filename).toBe('invite.ics');
+    expect(toOwner()!.attachments).toEqual(ownerAttachments);
+  });
+
+  it('attaches customer files to the owner when the customer has no email', async () => {
+    const ownerAttachments = [
+      { filename: 'room.jpg', content: Buffer.from('photo').toString('base64'), contentType: 'image/jpeg' },
+    ];
+    await sendBookingEmail({ ...BASE, attendeeEmail: undefined, ownerAttachments });
+    expect(sent()).toHaveLength(1);
+    expect(toOwner()!.attachments).toEqual(ownerAttachments);
+  });
+
   it('writes each body for its own audience', async () => {
     await sendBookingEmail({ ...BASE, ownerDetail: 'Phone: +32 470 11 22 33\nReference: AX-BKG-abc' });
     expect(toCustomer()!.body).toContain('Your appointment is confirmed');

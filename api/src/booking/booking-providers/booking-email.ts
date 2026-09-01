@@ -7,7 +7,7 @@
 import { DateTime } from 'luxon';
 import { config } from '../../config/environment';
 import { luxonEmailWhenFormat } from '../../contracts/clock-format';
-import { EmailService } from '../../automations/email.service';
+import { EmailService, type EmailAttachment } from '../../automations/email.service';
 import { logger } from '../../utils/logger';
 import { buildIcs, IcsMethod } from './ics';
 import { senderFor, parseAddress } from './organizer-address';
@@ -113,6 +113,13 @@ export interface BookingEmailParams {
    * string via `ownerDetail` (the calendar body).
    */
   priceDisplay?: string | null;
+  /**
+   * The customer's uploaded files, already read + base64-encoded, attached to the OWNER's
+   * copy so they see them inline instead of a "N files attached — open in Axentrio" pointer.
+   * Owner-only: the customer uploaded these, so their invite never carries them. Absent or
+   * empty leaves that pointer as the fallback (e.g. a file too big to attach).
+   */
+  ownerAttachments?: EmailAttachment[];
 }
 
 function formatWhen(start: Date, timezone: string): string {
@@ -187,6 +194,8 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
       // no-customer-email case so keys already issued for in-flight sends keep their
       // meaning; the accompanied case is a genuinely new message and gets a new key.
       idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
+      // The customer's uploaded files ride on the OWNER's copy only.
+      ...(params.ownerAttachments?.length ? { attachments: params.ownerAttachments } : {}),
   });
 }
 

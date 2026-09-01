@@ -111,8 +111,13 @@ vi.mock('../../scheduler/calendar-provider', () => {
 
 const getUploadSession = vi.fn();
 const getReadyFileIds = vi.fn(async (): Promise<string[]> => []);
+const getObjectBytes = vi.fn(async (): Promise<Buffer> => Buffer.from('file-bytes'));
 vi.mock('../../file-handling/upload.service', () => ({
-  getUploadService: () => ({ getSession: getUploadSession, getReadySessionFileIds: getReadyFileIds }),
+  getUploadService: () => ({
+    getSession: getUploadSession,
+    getReadySessionFileIds: getReadyFileIds,
+    getObjectBytes,
+  }),
 }));
 
 const emitWebhookEvent = vi.fn();
@@ -974,6 +979,37 @@ describe('InternalProvider.createBooking', () => {
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const files = JSON.parse(insertParam(insert as [string, unknown[]], 'uploaded_files') as string);
     expect(files).toEqual([{ fileSessionId: 'f-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
+  });
+
+  it('attaches the ready auto-collected file to the OWNER email as base64', async () => {
+    getReadyFileIds.mockResolvedValue(['f-1']);
+    getUploadSession.mockResolvedValue(readySession());
+    getObjectBytes.mockResolvedValue(Buffer.from('the-photo-bytes'));
+    await provider.createBooking(
+      { ...ctx, botSettings: { ai: { supportEmail: 'owner@example.com' } } },
+      'idem-attach', OFFERED_START, { name: 'Ada', email: 'ada@example.com' },
+    );
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(getObjectBytes).toHaveBeenCalledWith('uploads/ten-1/2026/06/abc.jpg');
+    expect(sendBookingEmail.mock.calls[0][0].ownerAttachments).toEqual([
+      {
+        filename: 'room.jpg',
+        content: Buffer.from('the-photo-bytes').toString('base64'),
+        contentType: 'image/jpeg',
+      },
+    ]);
+  });
+
+  it('still emails the owner when a file cannot be read', async () => {
+    getReadyFileIds.mockResolvedValue(['f-1']);
+    getUploadSession.mockResolvedValue(readySession());
+    getObjectBytes.mockRejectedValue(new Error('S3 down'));
+    await provider.createBooking(
+      { ...ctx, botSettings: { ai: { supportEmail: 'owner@example.com' } } },
+      'idem-attach-fail', OFFERED_START, { name: 'Ada', email: 'ada@example.com' },
+    );
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(sendBookingEmail.mock.calls[0][0].ownerAttachments).toBeUndefined();
   });
 
   it('skips an unscanned / foreign-tenant / wrong-session auto-collected file and still books', async () => {

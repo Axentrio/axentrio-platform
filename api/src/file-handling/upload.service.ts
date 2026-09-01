@@ -494,6 +494,22 @@ export class UploadService {
   // ==========================================================================
 
   /**
+   * Read a stored object's raw bytes. Used to attach a customer's uploaded files
+   * to the OWNER's booking-notification email so they don't have to open the
+   * portal. Reads the whole object into memory, so callers cap total size first.
+   */
+  async getObjectBytes(fileKey: string): Promise<Buffer> {
+    const command = new GetObjectCommand({
+      Bucket: this.config.bucketName,
+      Key: fileKey,
+    });
+    const response = await this.s3Client.send(command);
+    if (!response.Body) throw new Error(`empty S3 object body for ${fileKey}`);
+    const bytes = await response.Body.transformToByteArray();
+    return Buffer.from(bytes);
+  }
+
+  /**
    * Delete a file from S3
    */
   async deleteFile(fileKey: string): Promise<void> {

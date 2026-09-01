@@ -45,6 +45,8 @@ import { buildBookingEventContent } from './booking-content';
 import { formatServicePrice } from '../pricing/service-discount';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
+import { buildOwnerFileAttachments } from './booking-attachments';
+import type { EmailAttachment } from '../../automations/email.service';
 import {
   isCalendarSyncAllowed,
   hasHealthyCalendarConnection,
@@ -1729,7 +1731,7 @@ export class InternalProvider implements BookingProvider {
       notes?: string;
       contact: { address: string | null; phone: string | null };
       intakeJson: unknown;
-      uploadedFiles: Array<{ fileName: string }> | null;
+      uploadedFiles: Array<{ fileSessionId: string; fileName: string }> | null;
       effectiveDuration: number;
       extras?: BookingExtras;
     }
@@ -1778,6 +1780,11 @@ export class InternalProvider implements BookingProvider {
       service.locationType === 'google_meet'
     );
 
+    // The customer's uploaded files ride along on the OWNER's copy (best-effort), so the
+    // "N files attached" pointer is no longer the only way for them to see them.
+    const ownerAttachments = await this.ownerFileAttachments(
+      (input.uploadedFiles ?? []).map((f) => f.fileSessionId),
+    );
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
     await sendBookingEmail({
@@ -1814,6 +1821,7 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: attendee.email,
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       organizerEmail: frozenOrganizerFor(ctx.tenant.id),
+      ownerAttachments,
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
@@ -2227,6 +2235,25 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
+   * The customer's uploaded files as owner-email attachments (best-effort). Clean-only and
+   * size-capped — see booking-attachments.ts. Returns undefined when nothing attaches, so the
+   * email's "open in Axentrio" pointer stays as the fallback.
+   */
+  private async ownerFileAttachments(fileSessionIds: string[]): Promise<EmailAttachment[] | undefined> {
+    if (!fileSessionIds.length) return undefined;
+    try {
+      const { getUploadService } = await import('../../file-handling/upload.service');
+      const attachments = await buildOwnerFileAttachments(fileSessionIds, getUploadService());
+      return attachments.length ? attachments : undefined;
+    } catch (err) {
+      logger.warn('[Booking] could not attach uploaded files to owner email (non-fatal)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    }
+  }
+
+  /**
    * Snapshot ready uploads from this chat onto the booking. Auto-collect is the
    * only source of ids, so a malformed row is skipped (and logged) rather than
    * thrown: FILE_NOT_READY would poison every later booking in this chat.
@@ -2550,6 +2577,13 @@ export class InternalProvider implements BookingProvider {
       service.locationType === 'google_meet'
     );
 
+    // The customer's uploaded files on the OWNER's copy (best-effort), read from the row snapshot.
+    const ownerAttachments = await this.ownerFileAttachments(
+      (Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles : [])
+        .map((f) => (f && typeof f === 'object' ? (f as { fileSessionId?: unknown }).fileSessionId : undefined))
+        .filter((v): v is string => typeof v === 'string' && v.length > 0),
+    );
+
     await sendBookingEmail({
       method: 'REQUEST',
       uid: confirmed.icsUid,
@@ -2583,6 +2617,7 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: confirmed.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       organizerEmail: confirmed.organizerEmail,
+      ownerAttachments,
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,

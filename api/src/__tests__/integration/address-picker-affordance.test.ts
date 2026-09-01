@@ -184,12 +184,15 @@ describe('offering to verify the address', () => {
     expect(mockAutocompleteAddress).not.toHaveBeenCalled();
   });
 
-  it('leaves them alone when the same result also holds requestable times', async () => {
-    // The mixed case, which the plan decided by reasoning and no test had ever run: some times
-    // cleared the travel gate, others could not be measured. Requestable times come from an
-    // unmeasured drive or a spent budget, never from a vague address, so verifying the door
-    // would not upgrade them - and dropping the chips to ask would cost the customer the times
-    // that ARE bookable.
+  it('suppresses the picker on a payload that also holds requestable times', async () => {
+    // WHAT THIS COVERS, AND WHAT IT DOES NOT. `checkAvailability` is mocked here, so the payload
+    // below is written by hand: it shows the tool suppresses the picker when a result carries
+    // both kinds at once, and it says nothing about whether the provider ever classifies a real
+    // diary that way. That question belongs to the travel gate and is still open.
+    //
+    // The decision itself: requestable times come from an unmeasured drive or a spent budget,
+    // never from a vague address, so verifying the door would not upgrade them - and dropping
+    // the chips to ask would cost the customer the times that ARE bookable.
     mockCheckAvailability.mockResolvedValue(TRAVELS_MIXED);
 
     const res = await new CheckAvailabilityTool().execute(
@@ -199,9 +202,6 @@ describe('offering to verify the address', () => {
 
     expect(res.affordance).toBeUndefined();
     expect(mockAutocompleteAddress).not.toHaveBeenCalled();
-    // Both kinds really were in the one result, or the case above was not the mixed one.
-    expect(TRAVELS_MIXED.slots.length).toBeGreaterThan(0);
-    expect(TRAVELS_MIXED.travel.requestableSlots.length).toBeGreaterThan(0);
   });
 
   it('says nothing for a service the customer comes to', async () => {

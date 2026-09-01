@@ -427,8 +427,15 @@ jobs:
             "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh dev-${GITHUB_SHA} compose.nonprod.yml dev-api"
 
   deploy-prod:
-    if: github.event_name == 'workflow_dispatch' && vars.PROD_VPS_LIVE == 'true' && inputs.prod_tag != ''
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      vars.PROD_VPS_LIVE == 'true' &&
+      inputs.prod_tag != ''
     runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://api.axentrio.com
     permissions:
       contents: read
       packages: read

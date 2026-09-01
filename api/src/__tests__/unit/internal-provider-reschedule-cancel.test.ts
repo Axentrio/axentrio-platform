@@ -1163,11 +1163,20 @@ describe('InternalProvider customer change policy', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('auto (the default) still executes a customer reschedule', async () => {
+  it('an explicit auto executes a customer reschedule outright', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'auto' });
     const res = await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START);
     expect(res.success).toBe(true);
     expect(res.requested).toBeUndefined();
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(true);
+  });
+
+  it('a Service carrying no mode asks for approval instead of moving the appointment', async () => {
+    // The fixture has neither mode set, which is the shape of a partial select or a row the
+    // owner never configured. The fallback must be `request`, never `auto`.
+    const res = await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START);
+    expect(res.requested).toBe(true);
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(false);
   });
 
   it('not_allowed writes nothing and creates no request', async () => {

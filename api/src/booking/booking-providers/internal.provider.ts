@@ -26,6 +26,7 @@ import { BookingLog } from '../../database/entities/BookingLog';
 import {
   resolveCustomerChange,
   CHANGE_REQUEST_LOCK_CLASS,
+  DEFAULT_CUSTOMER_CHANGE_MODE,
 } from '../customer-change-policy';
 import { logger } from '../../utils/logger';
 import {
@@ -3101,7 +3102,7 @@ export class InternalProvider implements BookingProvider {
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
     if (ctx.subjectToCustomerChangePolicy) {
       const decision = resolveCustomerChange(
-        service.rescheduleMode ?? 'auto',
+        service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
         booking.startUtc,
         service.rescheduleUntilMin,
       );
@@ -3747,7 +3748,7 @@ export class InternalProvider implements BookingProvider {
     const service = await this.serviceForBooking(booking);
     if (ctx.subjectToCustomerChangePolicy) {
       const decision = resolveCustomerChange(
-        service.cancelMode ?? 'auto',
+        service.cancelMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
         booking.startUtc,
         service.cancelUntilMin,
       );

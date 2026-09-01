@@ -107,8 +107,11 @@ const BLANK: FormState = {
   description: '',
   preparationInstructions: '',
   bookingMode: 'auto',
-  rescheduleMode: 'auto',
-  cancelMode: 'auto',
+  // Matches the server default (DEFAULT_CUSTOMER_CHANGE_MODE): a new service asks for
+  // approval, so an owner who never opens these fields cannot hand the AI an automatic
+  // reschedule or cancellation by accident.
+  rescheduleMode: 'request',
+  cancelMode: 'request',
   rescheduleUntilValue: '',
   rescheduleUntilUnit: 'hours',
   cancelUntilValue: '',
@@ -187,8 +190,8 @@ function formFromService(s: Service): FormState {
     description: s.description ?? '',
     preparationInstructions: s.preparationInstructions ?? '',
     bookingMode: s.bookingMode,
-    rescheduleMode: s.rescheduleMode ?? 'auto',
-    cancelMode: s.cancelMode ?? 'auto',
+    rescheduleMode: s.rescheduleMode ?? 'request',
+    cancelMode: s.cancelMode ?? 'request',
     ...(() => {
       const r = untilToForm(s.rescheduleUntilMin);
       const c = untilToForm(s.cancelUntilMin);
@@ -539,12 +542,18 @@ export const ServicesSection: React.FC<{
                       {s.bookingMode === 'request' ? 'request-only' : 'auto-book'}
                     </span>
                   )}
-                  {(s.rescheduleMode ?? 'auto') !== 'auto' && (
+                  {/*
+                    A chip marks the EXCEPTION, not the standard. `request` is the default for
+                    every new service, so chipping it would tag the whole catalog and hide the
+                    two settings an owner really has to notice: `auto` (the AI moves or cancels
+                    on its own) and `not_allowed` (the customer cannot ask at all).
+                  */}
+                  {(s.rescheduleMode ?? 'request') !== 'request' && (
                     <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-sky-500/10 text-sky-400">
                       reschedule: {s.rescheduleMode}
                     </span>
                   )}
-                  {(s.cancelMode ?? 'auto') !== 'auto' && (
+                  {(s.cancelMode ?? 'request') !== 'request' && (
                     <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-orange-500/10 text-orange-400">
                       cancel: {s.cancelMode}
                     </span>

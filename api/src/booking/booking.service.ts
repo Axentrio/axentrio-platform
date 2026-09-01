@@ -27,7 +27,7 @@ import {
 } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
-import { subjectToCustomerChangePolicy } from './customer-change-policy';
+import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
@@ -824,8 +824,8 @@ export async function getManageBooking(
     booking,
     timezone,
     eventName: eventType?.name ?? 'Appointment',
-    rescheduleMode: eventType?.rescheduleMode ?? 'auto',
-    cancelMode: eventType?.cancelMode ?? 'auto',
+    rescheduleMode: eventType?.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
+    cancelMode: eventType?.cancelMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
     rescheduleUntilMin: eventType?.rescheduleUntilMin ?? null,
     cancelUntilMin: eventType?.cancelUntilMin ?? null,
   };

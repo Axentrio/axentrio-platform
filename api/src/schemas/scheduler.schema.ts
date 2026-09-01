@@ -204,8 +204,12 @@ export const serviceInputSchema = z.object({
   category: z.string().max(255).nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   bookingMode: z.enum(['auto', 'request']).default('auto'),
-  rescheduleMode: z.enum(['auto', 'request', 'not_allowed']).default('auto'),
-  cancelMode: z.enum(['auto', 'request', 'not_allowed']).default('auto'),
+  // `request` by default (DEFAULT_CUSTOMER_CHANGE_MODE): a Service whose owner never opened
+  // these fields asks for approval instead of letting the Agent move or cancel by itself.
+  // `serviceUpdateSchema` is `.partial()`, which suppresses the default, so a partial PUT
+  // still leaves a stored `auto` alone.
+  rescheduleMode: z.enum(['auto', 'request', 'not_allowed']).default('request'),
+  cancelMode: z.enum(['auto', 'request', 'not_allowed']).default('request'),
   // Null = no extra cutoff. 0 = until the start instant (a real cutoff, not absent).
   rescheduleUntilMin: z.number().int().min(0).max(43200).nullable().optional(),
   cancelUntilMin: z.number().int().min(0).max(43200).nullable().optional(),

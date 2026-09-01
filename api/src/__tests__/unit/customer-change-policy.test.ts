@@ -60,9 +60,9 @@ describe('subjectToCustomerChangePolicy', () => {
 });
 
 describe('catalogChangeClause', () => {
-  it('defaults missing mode to auto', () => {
-    expect(catalogChangeClause('reschedule', undefined, null)).toBe('reschedule: auto');
-    expect(catalogChangeClause('cancel', null, undefined)).toBe('cancel: auto');
+  it('defaults a missing mode to request, never to auto', () => {
+    expect(catalogChangeClause('reschedule', undefined, null)).toBe('reschedule: request');
+    expect(catalogChangeClause('cancel', null, undefined)).toBe('cancel: request');
   });
 
   it('names a cutoff only when the action is still allowed', () => {

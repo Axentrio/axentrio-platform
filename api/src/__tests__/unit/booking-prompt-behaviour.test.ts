@@ -249,8 +249,14 @@ describe('aiSummary — the ask the model needs', () => {
  */
 
 describe('customer change policy — catalog line and rules', () => {
-  it('prints reschedule/cancel policy on every service line, including the auto default', () => {
+  it('prints reschedule/cancel policy on every service line, including the request default', () => {
     const p = buildServicesSection([svc()])!;
+    expect(line(p)).toContain('reschedule: request');
+    expect(line(p)).toContain('cancel: request');
+  });
+
+  it('names an explicit auto, which is no longer the default', () => {
+    const p = buildServicesSection([svc({ rescheduleMode: 'auto', cancelMode: 'auto' })])!;
     expect(line(p)).toContain('reschedule: auto');
     expect(line(p)).toContain('cancel: auto');
   });

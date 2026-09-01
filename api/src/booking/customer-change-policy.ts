@@ -16,6 +16,16 @@ export type { CustomerChangeMode };
 
 export const CUSTOMER_CHANGE_MODES = ['auto', 'request', 'not_allowed'] as const;
 
+/**
+ * What a Service means when it carries no explicit mode: ask the owner.
+ *
+ * It is the `.default()` a create payload gets, the entity/DB column default, and the
+ * fallback every reader uses for a row (or a partial `select`) that has no value. The
+ * fail-safe direction is deliberate: an unset policy must never let the Agent move or
+ * cancel a confirmed appointment by itself.
+ */
+export const DEFAULT_CUSTOMER_CHANGE_MODE: CustomerChangeMode = 'request';
+
 export type BookingRequestKind = 'new' | 'reschedule' | 'cancel';
 export type BookingRequestResolution = 'accepted' | 'declined';
 
@@ -76,7 +86,7 @@ export function catalogChangeClause(
   mode: CustomerChangeMode | null | undefined,
   untilMin: number | null | undefined,
 ): string {
-  const resolved = mode ?? 'auto';
+  const resolved = mode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
   const cutoff = resolved === 'not_allowed' ? null : formatChangeCutoff(untilMin);
   return cutoff ? `${label}: ${resolved} ${cutoff}` : `${label}: ${resolved}`;
 }

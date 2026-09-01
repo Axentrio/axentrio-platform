@@ -1173,3 +1173,35 @@ describe('scheduler.controller · service discount', () => {
     expect(saved.discountValue).toBe(15);
   });
 });
+
+/**
+ * SV — "Request approval" is the standard, so a Service nobody configured never lets the
+ * Agent move or cancel a confirmed appointment by itself.
+ *
+ * The partial-PUT case is the other half of the contract and the reason this is safe to
+ * ship: zod's `.partial()` suppresses a `.default()`, so the new default applies to a
+ * CREATE only and can never rewrite a stored `auto` that an owner chose on purpose. The
+ * controller half ("only what was SENT changes") is already covered by the clearing-fields
+ * suite above.
+ */
+describe('scheduler.controller · customer change policy default', () => {
+  const base = { name: 'Repair', durationMin: 30 };
+
+  it('defaults both modes to request on create', () => {
+    const r = serviceCreateSchema.parse(base);
+    expect(r.rescheduleMode).toBe('request');
+    expect(r.cancelMode).toBe('request');
+  });
+
+  it('still accepts an explicit auto or not_allowed', () => {
+    const r = serviceCreateSchema.parse({ ...base, rescheduleMode: 'auto', cancelMode: 'not_allowed' });
+    expect(r.rescheduleMode).toBe('auto');
+    expect(r.cancelMode).toBe('not_allowed');
+  });
+
+  it('stamps no mode on a partial PUT, so an existing service keeps its own', () => {
+    const r = serviceUpdateSchema.parse({ description: 'text only' });
+    expect(r.rescheduleMode).toBeUndefined();
+    expect(r.cancelMode).toBeUndefined();
+  });
+});

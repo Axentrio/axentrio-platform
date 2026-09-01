@@ -119,12 +119,14 @@ export class ServiceType {
 
   /**
    * Whether a Booking Customer may reschedule an existing appointment for this Service.
-   * Default `auto` preserves today's behaviour. Not implied by `bookingMode`.
+   * Default `request`: the Agent captures the ask and the owner approves it, so a Service
+   * nobody configured never moves a confirmed appointment on its own. Not implied by
+   * `bookingMode`.
    */
-  @Column({ type: 'varchar', length: 16, name: 'reschedule_mode', default: 'auto' })
+  @Column({ type: 'varchar', length: 16, name: 'reschedule_mode', default: 'request' })
   rescheduleMode!: CustomerChangeMode;
 
-  @Column({ type: 'varchar', length: 16, name: 'cancel_mode', default: 'auto' })
+  @Column({ type: 'varchar', length: 16, name: 'cancel_mode', default: 'request' })
   cancelMode!: CustomerChangeMode;
 
   /**

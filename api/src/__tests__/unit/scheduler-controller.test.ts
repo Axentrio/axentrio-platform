@@ -574,6 +574,42 @@ describe('locationType side effects', () => {
   });
 });
 
+describe('customerEmailRequired round-trip', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
+    etFindOne.mockResolvedValue(null);
+  });
+
+  it('defaults to true when a create omits the key', async () => {
+    await createService(
+      { tenantId: 'ten-1', body: { name: 'Cut', durationMin: 30 } } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0].customerEmailRequired).toBe(true);
+  });
+
+  it('persists false when the owner unticks it on update', async () => {
+    etFindOne.mockResolvedValue({ id: 's1', botId: 'bot-1', locationType: 'custom', customerEmailRequired: true });
+    await updateService(
+      { tenantId: 'ten-1', params: { id: 's1' }, body: { customerEmailRequired: false } } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0].customerEmailRequired).toBe(false);
+  });
+
+  it('leaves the stored flag alone on a name-only update', async () => {
+    // `serviceUpdateSchema` is `.partial()`, so the default-true must NOT resurrect
+    // a flag the owner already switched off.
+    etFindOne.mockResolvedValue({ id: 's1', botId: 'bot-1', name: 'Old', locationType: 'custom', customerEmailRequired: false });
+    await updateService(
+      { tenantId: 'ten-1', params: { id: 's1' }, body: { name: 'New' } } as any,
+      res,
+    );
+    expect(etSave.mock.calls[0][0].customerEmailRequired).toBe(false);
+  });
+});
+
 describe('presets endpoints (P4a)', () => {
   const res: any = {};
   beforeEach(() => {

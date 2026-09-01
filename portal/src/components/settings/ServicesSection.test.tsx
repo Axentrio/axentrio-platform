@@ -392,6 +392,71 @@ describe('ServicesSection — online bookable', () => {
 });
 
 /**
+ * `customerEmailRequired` defaults to true on the server, so the portal must send it and
+ * hydrate it as ON whenever the API leaves it out. `!!s.customerEmailRequired` would show
+ * the box unticked on every service saved before the column existed, and the first Save
+ * would then write that accidental `false` back.
+ */
+describe('ServicesSection — required customer email', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const openNew = async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    return await screen.findByLabelText(/required email address for the calendar invite/i);
+  };
+
+  const submit = async () => {
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Consultation' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    return apiPost.mock.calls[0][1] as Record<string, unknown>;
+  };
+
+  const openEditOf = async (over: Record<string, unknown>) => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: [{
+              id: 's1', name: 'Quote first', bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'none', isActive: true, sortOrder: 0, onlineBookable: true,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom', ...over,
+            }],
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /edit quote first/i }));
+    return await screen.findByLabelText(/required email address for the calendar invite/i);
+  };
+
+  it('defaults a new service to requiring the email', async () => {
+    const box = await openNew();
+    expect(box).toBeChecked();
+    expect(await submit()).toMatchObject({ customerEmailRequired: true });
+  });
+
+  it('sends false once the owner turns it off', async () => {
+    const box = await openNew();
+    fireEvent.click(box);
+    expect(await submit()).toMatchObject({ customerEmailRequired: false });
+  });
+
+  it('hydrates an existing service that does not require the email as off', async () => {
+    expect(await openEditOf({ customerEmailRequired: false })).not.toBeChecked();
+  });
+
+  it('hydrates as on when the API payload omits the field', async () => {
+    expect(await openEditOf({})).toBeChecked();
+  });
+});
+
+/**
  * Intake question authoring.
  *
  * Owners had label/type/required/options and nothing else, so they smuggled instructions

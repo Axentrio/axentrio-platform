@@ -94,6 +94,7 @@ interface FormState {
   customerChoosesLocation: boolean;
   customerLocationRequired: boolean;
   fileUploadRequired: boolean;
+  customerEmailRequired: boolean;
   maxBookingsPerDay: string;
   intakeQuestions: IntakeQuestion[];
 }
@@ -144,6 +145,7 @@ const BLANK: FormState = {
   customerChoosesLocation: false,
   customerLocationRequired: false,
   fileUploadRequired: false,
+  customerEmailRequired: true,
   maxBookingsPerDay: '',
   intakeQuestions: [],
 };
@@ -231,6 +233,8 @@ function formFromService(s: Service): FormState {
     customerLocationRequired: !!s.customerLocationRequired,
     ...locationTypeSideEffects(s.locationType),
     fileUploadRequired: !!s.fileUploadRequired,
+    // `!== false`, not `!!`: an API payload that omits the field must hydrate ON.
+    customerEmailRequired: s.customerEmailRequired !== false,
     maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)
@@ -295,6 +299,7 @@ function toInput(f: FormState): ServiceInput {
     customerLocationRequired: f.customerLocationRequired,
     ...locationTypeSideEffects(f.locationType),
     fileUploadRequired: f.fileUploadRequired,
+    customerEmailRequired: f.customerEmailRequired,
     maxBookingsPerDay: num(f.maxBookingsPerDay),
     // Always send the array (even []) so the server replaces/clears; echo each id.
     intakeQuestions: f.intakeQuestions.map((q) => ({
@@ -1147,6 +1152,20 @@ const LocationFields: React.FC<{
         <span className="text-sm text-text-secondary">Required file upload (e.g. a photo of the job)</span>
       </label>
       )}
+      <label htmlFor="svc-email-required" className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          id="svc-email-required"
+          checked={form.customerEmailRequired}
+          onCheckedChange={(c) => set('customerEmailRequired', c === true)}
+        />
+        <span className="text-sm text-text-secondary">
+          Required email address for the calendar invite
+          <span className="block text-xs text-text-muted">
+            Off: the assistant can book without an email, and that customer gets no calendar
+            invite.
+          </span>
+        </span>
+      </label>
       <div>
         <Label htmlFor="svc-max-per-day" className="text-text-secondary mb-1 block">Max bookings per day</Label>
         <Input

@@ -243,6 +243,7 @@ export const serviceInputSchema = z.object({
   customerAddressRequired: z.boolean().default(false),
   customerChoosesLocation: z.boolean().default(false),
   fileUploadRequired: z.boolean().default(false),
+  customerEmailRequired: z.boolean().default(true),
   preparationInstructions: z.string().max(2000).nullable().optional(),
   locationType: writableLocationType.default('custom'),
   sortOrder: z.number().int().min(0).default(0),

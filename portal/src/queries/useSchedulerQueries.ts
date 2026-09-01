@@ -112,6 +112,7 @@ export interface Service {
   customerChoosesLocation?: boolean;
   customerLocationRequired?: boolean;
   fileUploadRequired?: boolean;
+  customerEmailRequired?: boolean;
   intakeQuestions?: IntakeQuestion[] | null;
   sortOrder: number;
   isActive: boolean;

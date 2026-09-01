@@ -7,6 +7,23 @@
 > `FILE_UPLOAD_NOT_ALLOWED` path, the "Allow file upload" checkbox, and the "permission, not
 > obligation" rule below no longer describe the code. See `docs/widget-file-upload-status.md`.
 
+> **Added on 2026-09-01, customer email:** `ServiceType.customerEmailRequired` (`boolean`,
+> default **true**) joins the required-contact family. The ICS calendar invite is addressed to
+> `Booking.attendeeEmail`, so a Service requires an email address until the owner unticks
+> "Required email address for the calendar invite". The single helper is `resolveCustomerEmail`
+> (`api/src/booking/booking-providers/contact.ts`). It raises a recoverable `EMAIL_REQUIRED`
+> from `createBooking` (auto path) and `createRequest` for a missing, malformed, or
+> over-320-character address, and it RETURNS the sanitized address (lowercased, trimmed) that
+> the INSERT, the ICS `ATTENDEE` line and the Resend `to` all use, because `sanitizeEmail`
+> accepts `" Ada@Example.com "` and that raw string breaks a `mailto:`. With the flag off an
+> unusable address persists as null, which `booking-email.ts` already reads as "no invite
+> sent". Because writes store the sanitized shape, `listBookings` sanitizes its own argument
+> through `normalizeCustomerEmail` and matches `LOWER(TRIM(attendee_email))`, so a capitalised
+> retype and a row written before this gate both still resolve. Migration
+> `1794300000000-AddCustomerEmailRequired` switches the flag on for services that already
+> exist. The prompt token is `needs email` and the rule is `EMAIL_REQUIRED_RULE`
+> (`api/src/modules/booking.module.ts`).
+
 The keystone added the *columns* for five capabilities and left their *behavior* to a
 later slice. P5 wires that behavior: the agent collects address/phone/files, capacity is
 enforced, duration can vary, and price can be quoted on a request. Almost every column

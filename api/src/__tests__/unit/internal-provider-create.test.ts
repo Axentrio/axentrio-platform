@@ -28,6 +28,7 @@ function repoFor(entity: any) {
   if (name === 'BookingLog') return { create: logCreate, save: logSave };
   if (name === 'BookingReference') return { create: (d: any) => d, save: refSave, findOne: vi.fn() };
   if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
+  if (name === 'ChatSession') return { find: vi.fn(async () => []) };
   return {};
 }
 

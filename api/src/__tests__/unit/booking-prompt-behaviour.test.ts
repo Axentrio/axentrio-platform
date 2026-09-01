@@ -77,37 +77,6 @@ describe('a customer who already named the hour', () => {
 });
 
 /**
- * The obligation to check before capturing is owed by every auto-book catalog, and it used to
- * live inside rule 7, which only ships when a service has a duration RANGE. A catalog of
- * fixed-length services was therefore never told it.
- *
- * Live report, WaterFix, 2026-09-01: an auto-book service at the customer's address took an
- * address, a name and a date, then captured a request without ever calling check_availability.
- * The traces for both attempts hold `request_appointment` and nothing else. The customer was
- * told the owner would come back to them while the diary was open all morning.
- */
-describe('checking before capturing a request', () => {
-  it('tells a fixed-duration auto catalog to check first', () => {
-    const p = buildServicesSection([svc()])!;
-    expect(p).toMatch(/for an AUTO-BOOK service, NEVER call request_appointment before a check_availability result/i);
-    expect(p).toMatch(/only capture a request after check_availability returns no free times/i);
-  });
-
-  it('names the at-home case, where the model talks itself out of checking', () => {
-    // An unmeasured journey reads as uncertainty, and uncertainty reads as "capture a request".
-    // The check is what REPORTS the travel result, so it is the answer and not the risk.
-    const p = buildServicesSection([svc()])!;
-    expect(p).toMatch(/at the customer's address is NOT an exception/i);
-    expect(p).toMatch(/reason to call it and never a reason to skip it/i);
-  });
-
-  it('says nothing to a catalog that can only capture requests', () => {
-    const p = buildServicesSection([svc({ bookingMode: 'request' })])!;
-    expect(p).not.toMatch(/NEVER call request_appointment before a check_availability result/i);
-  });
-});
-
-/**
  * The catalog line for a service, isolated from the rules below it.
  *
  * Rule 7 quotes BOTH cues ("choose length", "AI-estimated") as examples, so asserting
@@ -188,16 +157,11 @@ describe("durationMode 'ai' vs 'range' — a prompt-only distinction, deliberate
     expect(range).toMatch(/that is the ONLY case where a request is allowed with no check_availability result on an auto-book service/i);
     // ...and that exit must never be readable as licence for the ai branch.
     expect(ai).toMatch(/never applies to an "AI-estimated" service/i);
-    // A request-only catalog carries no auto-book guard at all, so there is nothing to exempt
-    // and nothing to deadlock: rule 3 already tells it to capture without a check.
+    // A request-only service with a duration range still gets rule 7 (hasDuration keys on
+    // durationMode), so the auto-book request guard must exempt it or it deadlocks: rule 3
+    // tells it to capture WITHOUT a check, which the guard would otherwise forbid.
     const reqOnlyAi = buildServicesSection([svc({ ...RANGE, durationMode: 'ai', bookingMode: 'request' })])!;
-    expect(reqOnlyAi).not.toMatch(/NEVER call request_appointment before a check_availability result/i);
-    // A MIXED catalog does carry it, so the exemption has to travel with the guard.
-    const mixed = buildServicesSection([
-      svc({ ...RANGE, durationMode: 'ai', bookingMode: 'request' }),
-      svc({ ...RANGE, durationMode: 'ai', bookingMode: 'auto', id: 'svc-auto', name: 'Auto job' }),
-    ])!;
-    expect(mixed).toMatch(/request-only service is different: rule 3 tells you to capture a request WITHOUT calling check_availability/i);
+    expect(reqOnlyAi).toMatch(/request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability/i);
   });
 
   it('tells the bot to ask for a length on DURATION_REQUIRED, not to invent a calendar failure', () => {

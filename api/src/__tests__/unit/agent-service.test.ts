@@ -528,12 +528,17 @@ describe('AgentService', () => {
 
     expect(result.type).toBe('response');
     if (result.type === 'response') {
+      expect(result.content).toMatch(/^You already hold that time/);
       expect(result.content).not.toMatch(/^I cannot see the diary at the moment/);
-      expect(result.content).toMatch(/ik kijk even/i);
+      expect(result.content).not.toMatch(/ik kijk even|controleer|checking|let me check/i);
+      expect(result.content).not.toMatch(/closed|fully booked|volgeboekt|gesloten/i);
+      expect(result.content).toMatch(/\?/);
       expect(result.quickReplies).toBeUndefined();
     }
     expect(vi.mocked(mockProvider.chat)).toHaveBeenCalledTimes(2);
+    expect(checkAvailability.execute).toHaveBeenCalledTimes(1);
   });
+
 
 
   it('records availability_unchecked_claim after a failed check still claims a date is closed', async () => {

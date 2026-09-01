@@ -497,6 +497,17 @@ const CHECK_FAILED_FALLBACK =
 const NO_CONFIRMABLE_TIMES_FALLBACK =
   'I have no times I can confirm for that period. Which day and time would suit you? I will pass your preference to the business.';
 
+/**
+ * Safe reply when the diary WAS read, the customer already holds that time,
+ * and the model promised to look.
+ *
+ * Says only that fact. It must never say the diary could not be read, and
+ * must never say "closed" or "fully booked". It asks, then names what the
+ * answer is for, like the two sentences above.
+ */
+const ALREADY_HELD_FALLBACK =
+  'You already hold that time. Which day and time would suit you if you want a different one? I will pass your preference to the business.';
+
 /** Safe reply when the model keeps claiming a booking that wasn't recorded (after
  *  one correction, or out of iteration budget) — anything but a false confirmation. */
 const BOOKING_SAFE_FALLBACK =
@@ -1620,7 +1631,7 @@ export class AgentService {
     content: string,
   ): Promise<GuardVerdict> {
     const pass: GuardVerdict = { kind: 'content', content };
-    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded || state.heldBooking) return pass;
+    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded) return pass;
     if (!promisesAvailabilityCheck(content, ctx.message)) return pass;
     if (!state.availabilityChecked) return this.promisedCheckNothingRan(i, ctx, state, content);
     // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the
@@ -1634,14 +1645,17 @@ export class AgentService {
     ctx.trace.finishReason = 'completed';
     ctx.trace.terminal = { result: 'completed' };
     void this.traceLogger.save(ctx.trace);
-    // TWO DIFFERENT FACTS, so two sentences. A call that THREW means the diary could not
+    // THREE DIFFERENT FACTS, so three sentences. A call that THREW means the diary could not
     // be read; a call that succeeded with nothing confirmable means it was read and had
-    // nothing to offer. Saying "I cannot see the diary" about a diary we just read would
-    // be a fresh lie, and neither sentence may say "closed" or "fully booked" - the
-    // tool's own guidance forbids exactly that.
-    const promiseReplacement = state.pendingAvailability
-      ? NO_CONFIRMABLE_TIMES_FALLBACK
-      : CHECK_FAILED_FALLBACK;
+    // nothing to offer; a confirm_existing result means they already hold that time.
+    // Saying "I cannot see the diary" about a diary we just read would be a fresh lie,
+    // and no sentence may say "closed" or "fully booked" - the tool's own guidance
+    // forbids exactly that.
+    const promiseReplacement = state.heldBooking
+      ? ALREADY_HELD_FALLBACK
+      : state.pendingAvailability
+        ? NO_CONFIRMABLE_TIMES_FALLBACK
+        : CHECK_FAILED_FALLBACK;
     logger.warn('[agent] reply promised a check with nothing to offer; replacing it', {
       sessionId: ctx.session.id,
       checked: true,

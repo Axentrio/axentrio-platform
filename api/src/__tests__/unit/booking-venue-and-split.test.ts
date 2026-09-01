@@ -406,6 +406,9 @@ describe('booking email — owner and customer get separate messages', () => {
     expect(toOwner()!.to).toEqual(['owner@valyro.be']);
     expect(toCustomer()!.retainPayload).toBe(true);
     expect(toOwner()!.retainPayload).toBe(false);
+    expect(toCustomer()!.relatedId).toBe(BASE.bookingId);
+    expect(toOwner()!.relatedId).toBe(BASE.bookingId);
+    expect(String(toCustomer()!.relatedId)).not.toContain('@');
   });
 
   it('keeps the owner’s address off the customer’s message', async () => {

@@ -48,6 +48,14 @@ async function sendOrReport(
   const { retainPayload, ...sendOptions } = options;
   try {
     if (params.tenantId && sendOptions.idempotencyKey) {
+      if (!params.bookingId) {
+        logger.warn(`[Booking] ${what} failed (non-fatal)`, {
+          ...(params.uid ? { uid: params.uid } : {}),
+          ...context,
+          error: 'bookingId is required for a durable booking email',
+        });
+        return false;
+      }
       const to = sendOptions.to;
       const recipientEmail = Array.isArray(to) ? to[0] : to;
       const result = await emailDeliveryService.sendDurable({
@@ -60,7 +68,7 @@ async function sendOrReport(
         idempotencyKey: sendOptions.idempotencyKey,
         kind: 'booking_email',
         tenantId: params.tenantId,
-        relatedId: params.bookingId ?? params.uid ?? params.tenantId,
+        relatedId: params.bookingId,
         retainPayload: retainPayload === true,
       });
       if (result.status === 'failed') {
@@ -110,7 +118,7 @@ export interface BookingEmailParams {
    *  confirmed in-channel and the owner sees it on their calendar). */
   attendeeEmail?: string;
   tenantId: string;
-  bookingId?: string;
+  bookingId: string;
   /** The business's own address. Gets its OWN message now, not a seat on the customer's. */
   ownerEmail?: string;
   /**

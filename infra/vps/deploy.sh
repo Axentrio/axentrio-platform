@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Health-gated deploy. Rollback: deploy.sh "$(cat /opt/axentrio/<env>-previous-sha)" <file> <service>
+#
+# One lock for the whole compose project. Staging and dev share Caddy, Postgres,
+# and compose.nonprod.yml; CI must not run two deploys at once, and this flock
+# also serializes a manual SSH deploy against Actions.
 set -euo pipefail
 
 usage() {
@@ -27,6 +31,12 @@ if [[ ! -f "$HOST_ENV" ]]; then
   exit 1
 fi
 
+exec 9>"${ROOT}/deploy.lock"
+if ! flock -w 600 9; then
+  echo "timed out waiting for ${ROOT}/deploy.lock" >&2
+  exit 1
+fi
+
 if [[ -f "$SYS_ENV" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -34,6 +44,9 @@ if [[ -f "$SYS_ENV" ]]; then
   set +a
 fi
 
+# Nonprod Caddy is shared. Only staging-api reloads it (CI rsyncs Caddyfile
+# from the staging job). A dev-api deploy must not recreate Caddy.
+APPLY_CADDY=0
 case "$SERVICE" in
   "" | api)
     SERVICE=api
@@ -46,13 +59,14 @@ case "$SERVICE" in
     ENV_NAME=staging
     STAGING_TAG=$ARG_TAG
     DEPS=(postgres staging-redis)
-    AFTER=(postgres staging-redis caddy)
+    AFTER=(postgres staging-redis)
+    APPLY_CADDY=1
     ;;
   dev-api)
     ENV_NAME=dev
     DEV_TAG=$ARG_TAG
     DEPS=(postgres dev-redis)
-    AFTER=(postgres dev-redis caddy)
+    AFTER=(postgres dev-redis)
     ;;
   *)
     echo "unknown service: $SERVICE" >&2
@@ -85,7 +99,11 @@ COMPOSE=(docker compose --env-file "$HOST_ENV" -f "$FILE")
 expected="${ARG_TAG#sha-}"
 expected="${expected#dev-}"
 
-"${COMPOSE[@]}" pull "$SERVICE" "${DEPS[@]}" "${AFTER[@]}"
+pull_services=("$SERVICE" "${DEPS[@]}" "${AFTER[@]}")
+if [[ "$APPLY_CADDY" == 1 ]]; then
+  pull_services+=(caddy)
+fi
+"${COMPOSE[@]}" pull "${pull_services[@]}"
 "${COMPOSE[@]}" up -d --wait "${DEPS[@]}"
 "${COMPOSE[@]}" up -d --no-deps --wait "$SERVICE"
 
@@ -110,6 +128,16 @@ fi
 for s in "${AFTER[@]}"; do
   "${COMPOSE[@]}" up -d --no-deps "$s"
 done
+
+if [[ "$APPLY_CADDY" == 1 ]]; then
+  # Bind-mount content is visible without recreate. Reload first; recreate
+  # only if this container still has a stale config (or is not running).
+  "${COMPOSE[@]}" up -d --no-deps caddy
+  if ! "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
+    echo "caddy reload failed; recreating container" >&2
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy
+  fi
+fi
 
 if ! systemctl is-enabled axentrio.service >/dev/null 2>&1; then
   sudo systemctl enable axentrio.service

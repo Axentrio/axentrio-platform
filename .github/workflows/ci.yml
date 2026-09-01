@@ -12,6 +12,8 @@ on:
         required: false
         type: string
 
+# Cancels duplicate runs on the same branch. Does not serialize staging vs
+# dev: those jobs share group ${{ github.repository }}-nonprod-vps below.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -317,6 +319,11 @@ jobs:
     if: >
       github.ref == 'refs/heads/staging' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # Authoritative writer of shared /opt/axentrio files (Caddyfile, compose,
+    # deploy.sh). Queues behind deploy-dev; do not cancel an in-flight VPS deploy.
+    concurrency:
+      group: ${{ github.repository }}-nonprod-vps
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: staging
@@ -348,7 +355,7 @@ jobs:
           npm run build
           printf '%s\n' "${GITHUB_SHA}" > dist/commit.txt
 
-      - name: Sync infra, portal, and deploy staging-api
+      - name: Sync shared infra, portal, and deploy staging-api
         env:
           HOST: ${{ secrets.NONPROD_HOST }}
           SSH_KEY: ${{ secrets.NONPROD_SSH_KEY }}
@@ -358,13 +365,19 @@ jobs:
         run: |
           # shellcheck source=../scripts/vps-ssh-setup.sh
           source .github/scripts/vps-ssh-setup.sh
+          # flock the remote rsync so it cannot rewrite compose/Caddyfile while
+          # deploy.sh (or a manual SSH) holds the same lock.
           rsync -az -e "$AXENTRIO_SSH" \
+            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
             --exclude 'cloud-init.yml' \
             --exclude 'env.*.example' \
             --exclude 'render-user-data.sh' \
+            --exclude 'compose.prod.yml' \
+            --exclude 'Caddyfile.prod' \
             infra/vps/ "deploy@${HOST}:/opt/axentrio/"
           $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-staging /opt/axentrio/portal-dev"
           rsync -az --delete -e "$AXENTRIO_SSH" \
+            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
             portal/dist/ "deploy@${HOST}:/opt/axentrio/portal-staging/"
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
             "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh sha-${GITHUB_SHA} compose.nonprod.yml staging-api"
@@ -374,6 +387,10 @@ jobs:
     if: >
       github.ref == 'refs/heads/dev' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # Portal + dev-api only. Shared Caddy/compose stay on the staging job.
+    concurrency:
+      group: ${{ github.repository }}-nonprod-vps
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: dev
@@ -405,7 +422,7 @@ jobs:
           npm run build
           printf '%s\n' "${GITHUB_SHA}" > dist/commit.txt
 
-      - name: Sync infra, portal, and deploy dev-api
+      - name: Sync portal and deploy dev-api
         env:
           HOST: ${{ secrets.NONPROD_HOST }}
           SSH_KEY: ${{ secrets.NONPROD_SSH_KEY }}
@@ -415,13 +432,9 @@ jobs:
         run: |
           # shellcheck source=../scripts/vps-ssh-setup.sh
           source .github/scripts/vps-ssh-setup.sh
-          rsync -az -e "$AXENTRIO_SSH" \
-            --exclude 'cloud-init.yml' \
-            --exclude 'env.*.example' \
-            --exclude 'render-user-data.sh' \
-            infra/vps/ "deploy@${HOST}:/opt/axentrio/"
-          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-staging /opt/axentrio/portal-dev"
+          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-dev"
           rsync -az --delete -e "$AXENTRIO_SSH" \
+            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
             portal/dist/ "deploy@${HOST}:/opt/axentrio/portal-dev/"
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
             "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh dev-${GITHUB_SHA} compose.nonprod.yml dev-api"

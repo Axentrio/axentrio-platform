@@ -65,6 +65,14 @@ export class CalendarCredential {
   @Column({ type: 'varchar', length: 320, name: 'calendar_id', default: 'primary' })
   calendarId!: string;
 
+  /**
+   * Can this account host provider online meetings (Teams / Meet)? False for a PERSONAL
+   * Microsoft account, which cannot host Teams for Business, so a video booking on it gets
+   * no join link. Default true (Google, and work/school Microsoft accounts).
+   */
+  @Column({ type: 'boolean', name: 'supports_online_meetings', default: true })
+  supportsOnlineMeetings!: boolean;
+
   /** Opaque provider cursor: Google `nextSyncToken`, Graph `@odata.deltaLink`. Not a credential. */
   @Column({ type: 'text', name: 'inbound_sync_cursor', nullable: true })
   inboundSyncCursor?: string | null;

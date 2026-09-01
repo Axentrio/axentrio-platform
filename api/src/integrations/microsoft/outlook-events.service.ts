@@ -63,6 +63,15 @@ function isOnlineMeetingUnsupported(err: unknown): boolean {
   return msg.includes('online meeting');
 }
 
+/** Compact Graph error shape for logs: HTTP status, Graph error code, and message. Turns a
+ *  swallowed online-meeting failure into something diagnosable instead of a bare log line. */
+function graphErrorInfo(err: unknown): { status?: number; code?: string; message?: string } {
+  const resp = (err as {
+    response?: { status?: number; data?: { error?: { code?: string; message?: string } } };
+  })?.response;
+  return { status: resp?.status, code: resp?.data?.error?.code, message: resp?.data?.error?.message };
+}
+
 /**
  * Busy intervals from the bot's connected Outlook calendar for [startISO,endISO).
  * Returns null when there's no active Microsoft connection. Throws on API/token
@@ -185,7 +194,15 @@ export async function createOutlookEvent(
     resp = await post(wantTeams);
   } catch (err) {
     if (!isOnlineMeetingUnsupported(err)) throw err;
-    logger.info('[Outlook] account cannot host Teams; creating event without online meeting', { botId });
+    // The account rejected the Teams meeting. This is commonly a PERSONAL Microsoft account
+    // (which cannot host Teams for Business), or a work account with no Teams licence or a
+    // policy that blocks it. The event is still saved so the booking stands, but WITHOUT a
+    // join link. Log the real Graph reason at warn so the cause is visible, rather than
+    // dropping the meeting silently.
+    logger.warn('[Outlook] Teams meeting not created; event saved without a join link', {
+      botId,
+      ...graphErrorInfo(err),
+    });
     postedWithTeams = false;
     resp = await post(false);
   }
@@ -252,7 +269,10 @@ export async function updateOutlookEvent(
         data = resp.data as GraphEvent;
       } catch (err) {
         if (!isOnlineMeetingUnsupported(err)) throw err;
-        logger.info('[Outlook] account cannot host Teams; updating event without online meeting', { botId });
+        logger.warn('[Outlook] Teams meeting not added on update; event saved without a join link', {
+          botId,
+          ...graphErrorInfo(err),
+        });
         const resp = await patch(base);
         data = resp.data as GraphEvent;
         return { status: 'ok', meetUrl: null };

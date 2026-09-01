@@ -723,7 +723,7 @@ export class CreateBookingTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          "Email address of the person being booked. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
+          'Email address of the person being booked. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
       },
       notes: {
         type: 'string',
@@ -929,7 +929,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          "Email address of the person requesting the appointment. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
+          'Email address of the person requesting the appointment. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
       },
       notes: {
         type: 'string',

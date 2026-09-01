@@ -319,8 +319,8 @@ jobs:
     if: >
       github.ref == 'refs/heads/staging' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    # Authoritative writer of shared /opt/axentrio files (Caddyfile, compose,
-    # deploy.sh). Queues behind deploy-dev; do not cancel an in-flight VPS deploy.
+    # Authoritative writer of shared /opt/axentrio files, installed by
+    # apply-nonprod.sh under deploy.lock.
     concurrency:
       group: ${{ github.repository }}-nonprod-vps
       cancel-in-progress: false
@@ -365,22 +365,22 @@ jobs:
         run: |
           # shellcheck source=../scripts/vps-ssh-setup.sh
           source .github/scripts/vps-ssh-setup.sh
-          # flock the remote rsync so it cannot rewrite compose/Caddyfile while
-          # deploy.sh (or a manual SSH) holds the same lock.
-          rsync -az -e "$AXENTRIO_SSH" \
-            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
-            --exclude 'cloud-init.yml' \
-            --exclude 'env.*.example' \
-            --exclude 'render-user-data.sh' \
-            --exclude 'compose.prod.yml' \
-            --exclude 'Caddyfile.prod' \
-            infra/vps/ "deploy@${HOST}:/opt/axentrio/"
-          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-staging /opt/axentrio/portal-dev"
+          # Stage everything into a per-env incoming dir (no shared-path
+          # writes), then apply-nonprod.sh installs it under deploy.lock.
+          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/incoming/staging"
           rsync -az --delete -e "$AXENTRIO_SSH" \
-            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
-            portal/dist/ "deploy@${HOST}:/opt/axentrio/portal-staging/"
+            infra/vps/Caddyfile.nonprod \
+            infra/vps/compose.nonprod.yml \
+            infra/vps/postgres-init.sql \
+            infra/vps/deploy.sh \
+            infra/vps/apply-nonprod.sh \
+            "deploy@${HOST}:/opt/axentrio/incoming/staging/"
+          rsync -az --delete -e "$AXENTRIO_SSH" \
+            portal/dist/ "deploy@${HOST}:/opt/axentrio/incoming/staging/portal/"
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
-            "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh sha-${GITHUB_SHA} compose.nonprod.yml staging-api"
+            "docker login ghcr.io -u ${GHCR_USER} --password-stdin"
+          $AXENTRIO_SSH "deploy@${HOST}" \
+            "/opt/axentrio/incoming/staging/apply-nonprod.sh staging sha-${GITHUB_SHA}"
 
   deploy-dev:
     needs: [build-images]
@@ -432,12 +432,16 @@ jobs:
         run: |
           # shellcheck source=../scripts/vps-ssh-setup.sh
           source .github/scripts/vps-ssh-setup.sh
-          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-dev"
+          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/incoming/dev"
           rsync -az --delete -e "$AXENTRIO_SSH" \
-            --rsync-path='flock -w 600 /opt/axentrio/deploy.lock rsync' \
-            portal/dist/ "deploy@${HOST}:/opt/axentrio/portal-dev/"
+            infra/vps/apply-nonprod.sh \
+            "deploy@${HOST}:/opt/axentrio/incoming/dev/"
+          rsync -az --delete -e "$AXENTRIO_SSH" \
+            portal/dist/ "deploy@${HOST}:/opt/axentrio/incoming/dev/portal/"
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
-            "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh dev-${GITHUB_SHA} compose.nonprod.yml dev-api"
+            "docker login ghcr.io -u ${GHCR_USER} --password-stdin"
+          $AXENTRIO_SSH "deploy@${HOST}" \
+            "/opt/axentrio/incoming/dev/apply-nonprod.sh dev dev-${GITHUB_SHA}"
 
   deploy-prod:
     if: >

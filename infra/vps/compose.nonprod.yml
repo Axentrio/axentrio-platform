@@ -128,8 +128,8 @@ services:
     networks:
       - axentrio
 
-  # Shared by staging and dev. CI rsyncs Caddyfile.nonprod and reloads this
-  # service from the staging deploy job only. Do not recreate from deploy-dev.
+  # Shared by staging and dev. Config is applied by apply-nonprod.sh plus
+  # the deploy.sh hash gate from the staging deploy only.
   caddy:
     image: caddy:2
     restart: unless-stopped

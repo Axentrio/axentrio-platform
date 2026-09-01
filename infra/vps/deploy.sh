@@ -52,12 +52,14 @@ case "$SERVICE" in
     SERVICE=api
     ENV_NAME=prod
     TAG=$ARG_TAG
+    TAG_PREFIX=sha-
     DEPS=(redis)
     AFTER=(redis n8n-db n8n caddy)
     ;;
   staging-api)
     ENV_NAME=staging
     STAGING_TAG=$ARG_TAG
+    TAG_PREFIX=sha-
     DEPS=(postgres staging-redis)
     AFTER=(postgres staging-redis)
     APPLY_CADDY=1
@@ -65,6 +67,7 @@ case "$SERVICE" in
   dev-api)
     ENV_NAME=dev
     DEV_TAG=$ARG_TAG
+    TAG_PREFIX=dev-
     DEPS=(postgres dev-redis)
     AFTER=(postgres dev-redis)
     ;;
@@ -130,12 +133,21 @@ for s in "${AFTER[@]}"; do
 done
 
 if [[ "$APPLY_CADDY" == 1 ]]; then
-  # Bind-mount content is visible without recreate. Reload first; recreate
-  # only if this container still has a stale config (or is not running).
+  # Reload only when the Caddyfile differs from the last APPLIED config.
+  # Comparing host file vs in-container file is useless: the bind mount makes
+  # them always equal even while the caddy process still runs an old config.
+  applied_hash_path="${ROOT}/.caddyfile.applied.sha256"
+  want_hash=$(sha256sum "${ROOT}/Caddyfile.nonprod" | awk '{print $1}')
+  have_hash=$(cat "$applied_hash_path" 2>/dev/null || true)
   "${COMPOSE[@]}" up -d --no-deps caddy
-  if ! "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
-    echo "caddy reload failed; recreating container" >&2
-    "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy
+  if [[ "$want_hash" == "$have_hash" ]]; then
+    echo "caddy config unchanged; skip reload"
+  else
+    if ! "${COMPOSE[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile; then
+      echo "caddy reload failed; recreating container" >&2
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy
+    fi
+    printf '%s\n' "$want_hash" > "$applied_hash_path"
   fi
 fi
 
@@ -154,7 +166,8 @@ mapfile -t tags < <(docker images ghcr.io/axentrio/axentrio-api --format '{{.Cre
 keep=5
 count=0
 for t in "${tags[@]}"; do
-  [[ -z "$t" || "$t" == "<none>" ]] && continue
+  [[ -z "$t" || "$t" == "<none>" || "$t" == "latest" ]] && continue
+  [[ "$t" == ${TAG_PREFIX}* ]] || continue
   count=$((count + 1))
   if (( count > keep )); then
     docker rmi "ghcr.io/axentrio/axentrio-api:${t}" || true

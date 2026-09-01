@@ -1318,6 +1318,31 @@ describe('InternalProvider customer change policy', () => {
     expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
   });
 
+  it('writes a later address onto the open reschedule Request', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'request' });
+    const open = {
+      ...confirmedBooking(),
+      id: 'req-existing',
+      status: 'request_created',
+      requestKind: 'reschedule',
+      relatedBookingId: 'bk-1',
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+    };
+    bookingFindOne.mockImplementation(async (opts: any) => {
+      if (opts?.where?.relatedBookingId === 'bk-1' && opts?.where?.status === 'request_created') return open;
+      return { ...confirmedBooking(), customerAddress: 'Kerkstraat 12, 9310 Herdersem' };
+    });
+    await provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START, {
+      customerAddress: 'Nieuwstraat 5, 1000 Brussel',
+    });
+    const update = bookingQuery.mock.calls.find(
+      (c) => String(c[0]).includes('UPDATE chatbot_bookings') && String(c[0]).includes('customer_address'),
+    );
+    expect(update).toBeTruthy();
+    expect(update?.[1]).toContain('Nieuwstraat 5, 1000 Brussel');
+    expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
+  });
+
   it('a different-kind open request is 409, not a silent swap', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, cancelMode: 'request' });
     const open = {

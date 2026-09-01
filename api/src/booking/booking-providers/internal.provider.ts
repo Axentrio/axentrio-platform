@@ -3194,14 +3194,23 @@ export class InternalProvider implements BookingProvider {
     start: Date,
     end: Date,
     timezone: string,
+    customerAddress?: string | null,
   ): Promise<RescheduleResult & CancelResult> {
     if ((existing.requestKind ?? 'new') !== kind) throw this.changeRequestOpenError(existing);
     if (kind === 'reschedule') {
+      const addressPatch = customerAddress !== undefined && customerAddress !== null;
       await AppDataSource.getRepository(Booking).query(
         `UPDATE chatbot_bookings
             SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($1,$2,'[)'), updated_at=now()
+                ${addressPatch ? ', customer_address=$5' : ''}
           WHERE id=$3 AND tenant_id=$4 AND status='request_created'`,
-        [start.toISOString(), end.toISOString(), existing.id, ctx.tenant.id],
+        [
+          start.toISOString(),
+          end.toISOString(),
+          existing.id,
+          ctx.tenant.id,
+          ...(addressPatch ? [customerAddress] : []),
+        ],
       );
     }
     this.notifyRequestCreated(ctx, service, {
@@ -3282,7 +3291,7 @@ export class InternalProvider implements BookingProvider {
       where: { relatedBookingId: original.id, status: 'request_created' },
     });
     if (existing?.status === 'request_created') {
-      return this.reuseOpenChangeRequest(ctx, original, service, existing, kind, start, end, timezone);
+      return this.reuseOpenChangeRequest(ctx, original, service, existing, kind, start, end, timezone, customerAddress);
     }
     try {
       return await this.insertChangeRequest(ctx, original, service, kind, start, end, timezone, customerAddress);

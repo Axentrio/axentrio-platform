@@ -35,15 +35,19 @@ import { ServicesSection } from './ServicesSection';
 const STORED: Service = {
   id: 'svc-1',
   name: 'Boiler repair',
-  slug: 'boiler-repair',
-  durationMin: 60,
   bookingMode: 'auto',
-  isActive: true,
   onlineBookable: true,
-  sortOrder: 0,
+  durationMode: 'fixed',
+  durationMin: 60,
+  bufferBeforeMin: null,
+  bufferAfterMin: null,
+  minNoticeMin: null,
+  maxHorizonDays: null,
   priceDisplayType: 'none',
   locationType: 'custom',
-} as Service;
+  sortOrder: 0,
+  isActive: true,
+};
 
 /** The two policy selects, in dialog order: rescheduling then cancellation. */
 function policySelects(): HTMLElement[] {

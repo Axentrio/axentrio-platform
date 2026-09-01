@@ -299,7 +299,7 @@ describe('Booking Flow — Full Agent Loop', () => {
         id: 'bk_abc123',
         startTime: '2026-04-07T10:00:00',
         endTime: '2026-04-07T10:30:00',
-        attendee: { name: 'Sarah Connor', email: 'sarah@example.com' },
+        attendee: { name: 'Sarah Connor', email: 'sarah@valyro.be' },
       },
     });
 
@@ -320,7 +320,7 @@ describe('Booking Flow — Full Agent Loop', () => {
           arguments: {
             startTime: '2026-04-07T10:00:00',
             attendeeName: 'Sarah Connor',
-            attendeeEmail: 'sarah@example.com',
+            attendeeEmail: 'sarah@valyro.be',
           },
         },
       ]))
@@ -330,7 +330,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       ));
 
     const turn3 = await agent.run(
-      "10am works. I'm Sarah Connor, sarah@example.com",
+      "10am works. I'm Sarah Connor, sarah@valyro.be",
       session as ChatSession,
       tenant as Tenant,
       [
@@ -349,7 +349,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       'session-booking-test',
       expect.stringContaining('create_booking'), // idempotency key
       '2026-04-07T10:00:00',
-      { name: 'Sarah Connor', email: 'sarah@example.com' },
+      { name: 'Sarah Connor', email: 'sarah@valyro.be' },
       undefined,
       undefined,
       undefined,

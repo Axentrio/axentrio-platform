@@ -71,6 +71,21 @@ async function addressPickerAffordance(
   };
 }
 
+/** RFC 2606 / RFC 6761 reserved names never receive real mail. An LLM that
+ *  "helpfully" invents jan.test@example.com must be told to ask instead. */
+const RESERVED_EMAIL_DOMAINS: Record<string, true> = {
+  'example.com': true,
+  'example.org': true,
+  'example.net': true,
+};
+const RESERVED_EMAIL_TLDS = ['.test', '.invalid', '.example', '.localhost'] as const;
+function isPlaceholderEmail(sanitized: string): boolean {
+  const domain = sanitized.slice(sanitized.lastIndexOf('@') + 1);
+  if (RESERVED_EMAIL_DOMAINS[domain]) return true;
+  if (domain === 'localhost') return true;
+  return RESERVED_EMAIL_TLDS.some((tld) => domain.endsWith(tld));
+}
+
 /**
  * An address the confirmation can actually reach, or an error the model can fix.
  *
@@ -84,13 +99,24 @@ async function addressPickerAffordance(
  */
 function rejectBadEmail(email: unknown): ToolResult | null {
   if (typeof email !== 'string' || !email.trim()) return null;
-  if (emails.sanitizeEmail(email)) return null;
-  return {
-    success: false,
-    error:
-      'That email address is not valid, so the confirmation could not reach the customer. Ask them to check it and repeat it back, then try again. Do not book with it as given.',
-    errorSafeForModel: true,
-  };
+  const sanitized = emails.sanitizeEmail(email);
+  if (!sanitized) {
+    return {
+      success: false,
+      error:
+        'That email address is not valid, so the confirmation could not reach the customer. Ask them to check it and repeat it back, then try again. Do not book with it as given.',
+      errorSafeForModel: true,
+    };
+  }
+  if (isPlaceholderEmail(sanitized)) {
+    return {
+      success: false,
+      error:
+        'That email address is a placeholder, not a real one. Never invent an email address. Ask the customer for their address, or leave it out if they did not give one.',
+      errorSafeForModel: true,
+    };
+  }
+  return null;
 }
 
 /**
@@ -314,7 +340,7 @@ function alreadyHeldNote(
     suggestedAction: 'confirm_existing',
     ...(otherSlots ? {} : { noSlotsInRange: true }),
     guidance: otherSlots
-      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they wanted a different time, offer other slots from this result.'
+      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. Do not offer other times from this result. If they wanted a different day, call check_availability for that day.'
       : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. If they wanted a different day, call check_availability for that day.',
   };
 }
@@ -520,11 +546,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
       });
       if (heldNote.guidance) {
-        // `data` is what the model reads, and it is truncated at 4000 characters.
-        // Spreading the slot list first cut alreadyHeld off a live diary. The hold
-        // note is the payload. Other slots, if any, come after so a cut still
-        // leaves "they already hold it". Do not run namedTimeGuidance here: that
-        // flag says the time cannot be done, which contradicts the hold note.
+        // Live WaterFix 2026-09-01: alreadyHeld and confirm_existing were in the
+        // model copy (1321 chars, not truncated) and the model still said the
+        // time was unavailable because slots was in the same payload. The hold
+        // note is the whole payload. Do not run namedTimeGuidance here.
         return {
           success: true,
           ...measurement,
@@ -536,7 +561,6 @@ export class CheckAvailabilityTool implements ToolAdapter {
             timezone: zone,
             serviceId: result.serviceId,
             serviceName: result.serviceName,
-            ...(utcSlots.length > 0 ? { slots: wallClockSlots(utcSlots, zone) } : {}),
             ...groupedNote,
             ...addressEcho(chosen.address),
           },

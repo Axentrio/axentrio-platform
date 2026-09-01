@@ -280,7 +280,7 @@ describe('offering to verify the address', () => {
       {
         startTime: '2026-09-01T09:00:00Z',
         attendeeName: 'A Customer',
-        attendeeEmail: 'customer@example.com',
+        attendeeEmail: 'customer@valyro.be',
         customerAddress: TYPED,
       },
       ctx()

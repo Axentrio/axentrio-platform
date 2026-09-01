@@ -1188,9 +1188,11 @@ describe('check_availability — a time the caller already holds is not unavaila
     expect(res.success).toBe(true);
     const data = res.data as Record<string, unknown>;
     expect(data.suggestedAction).toBe('confirm_existing');
+    expect(data.slots).toBeUndefined();
     expect(data.guidance).toMatch(/already hold/i);
     expect(data.guidance).toMatch(/Do not say that time is unavailable/);
     expect(data.guidance).toMatch(/Do not create a second booking/);
+    expect(data.guidance).toMatch(/Do not offer other times from this result/);
     expect(data.alreadyHeld).toEqual([
       { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
     ]);
@@ -1268,6 +1270,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     const json = JSON.stringify(data);
     const modelCopy = json.length > 4000 ? json.slice(0, 4000) : json;
     expect(data.requestedTimeUnavailable).toBeUndefined();
+    expect(data.slots).toBeUndefined();
     expect(modelCopy).toContain('alreadyHeld');
     expect(modelCopy).toMatch(/already hold/i);
     expect(modelCopy).not.toMatch(/cannot be done/);

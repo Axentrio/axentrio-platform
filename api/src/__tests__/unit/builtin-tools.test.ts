@@ -258,6 +258,39 @@ describe('an email the confirmation cannot reach', () => {
       expect(mockCreateBooking).toHaveBeenCalled();
     }
   });
+
+  it('refuses a reserved example.com address the model invented', async () => {
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/placeholder/i);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('refuses a reserved .test TLD the same way', async () => {
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Jan Test', attendeeEmail: 'jan@company.test' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/placeholder/i);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('still succeeds when attendeeEmail is omitted', async () => {
+    mockCreateBooking.mockResolvedValue({ success: true, bookingId: 'b1' });
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'No Email' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCreateBooking).toHaveBeenCalled();
+  });
 });
 
 describe('CheckAvailabilityTool', () => {
@@ -917,7 +950,7 @@ describe('CreateBookingTool', () => {
     mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-z' } });
 
     await tool.execute(
-      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({ sessionId: 'sess-z' }),
     );
 
@@ -925,14 +958,14 @@ describe('CreateBookingTool', () => {
 
     mockCreateBooking.mockClear();
     await tool.execute(
-      { startTime: '2026-10-05T10:00:00+02:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T10:00:00+02:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({ sessionId: 'sess-z2' }),
     );
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
 
     mockCreateBooking.mockClear();
     await tool.execute(
-      { startTime: '2026-10-05T10:00:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T10:00:00', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({ sessionId: 'sess-z3' }),
     );
     expect(mockCreateBooking.mock.calls[0][3]).toBe('2026-10-05T10:00:00');
@@ -950,7 +983,7 @@ describe('CreateBookingTool', () => {
     }));
     await executeAfterConfirm(
       tool,
-      { startTime: '2026-10-05T09:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T09:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({
         sessionId: 'sess-verbatim',
         conversationHistory: [{ role: 'user', content: 'Kan ik maandag 5 oktober om 11:00 langskomen?' }],
@@ -972,7 +1005,7 @@ describe('CreateBookingTool', () => {
     }));
     await executeAfterConfirm(
       tool,
-      { startTime: '2026-10-05T13:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T13:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({
         sessionId: 'sess-contradict',
         conversationHistory: [{ role: 'user', content: 'Kan ik maandag 5 oktober om 13:00 langskomen?' }],
@@ -992,7 +1025,7 @@ describe('CreateBookingTool', () => {
     }));
     await executeAfterConfirm(
       tool,
-      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@example.com' },
+      { startTime: '2026-10-05T10:00:00.000Z', attendeeName: 'Jan Test', attendeeEmail: 'jan.test@valyro.be' },
       makeCtx({
         sessionId: 'sess-constructed',
         conversationHistory: [{ role: 'user', content: 'Kan ik om 10:00 langskomen?' }],
@@ -1162,7 +1195,7 @@ describe('UpdateBookingTool', () => {
     mockUpdateBooking.mockResolvedValue({ success: true, emailSent: true, booking: { id: 'bk-5' } });
 
     const result = await tool.execute(
-      { attendeeEmail: 'ada@example.com', notes: 'Gate code 12' },
+      { attendeeEmail: 'ada@valyro.be', notes: 'Gate code 12' },
       ctx,
     );
 
@@ -1170,7 +1203,7 @@ describe('UpdateBookingTool', () => {
     expect(mockUpdateBooking).toHaveBeenCalledWith('agent', 'sess-6', {
       bookingId: undefined,
       attendeeName: undefined,
-      attendeeEmail: 'ada@example.com',
+      attendeeEmail: 'ada@valyro.be',
       customerPhone: undefined,
       notes: 'Gate code 12',
     });
@@ -1180,6 +1213,14 @@ describe('UpdateBookingTool', () => {
     const tool = new UpdateBookingTool();
     const result = await tool.execute({ attendeeEmail: 'not-an-email' }, makeCtx());
     expect(result.success).toBe(false);
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+
+  it('refuses a reserved example.org address before calling the service', async () => {
+    const tool = new UpdateBookingTool();
+    const result = await tool.execute({ attendeeEmail: 'x@example.org' }, makeCtx());
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/placeholder/i);
     expect(mockUpdateBooking).not.toHaveBeenCalled();
   });
 });

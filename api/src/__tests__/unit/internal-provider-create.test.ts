@@ -2498,6 +2498,25 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     expect(res.slots.length).toBeGreaterThan(0);
   });
 
+  it('returns BOTH kinds from one call when routing answers for some legs only', async () => {
+    // THE MIXED RESULT, which until now only ever existed in a hand-written fixture. The picker
+    // gate in `booking.tool.ts` drops the address picker whenever a result holds a confirmable
+    // time, and the reason given was that requestable times come from an unmeasured drive rather
+    // than a doubtful address, so verifying the door would not upgrade them. That argument
+    // assumed this shape is reachable. It is: the same 47 km pair measured for one leg and
+    // unanswered for the rest splits the day into times the gate cleared and times nobody could
+    // measure.
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
+      neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+    ] });
+    driveAnswer.mockResolvedValueOnce({ minutes: 50 }).mockResolvedValue({ minutes: null });
+
+    const res = await check(ADDRESS);
+
+    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.travel?.requestableSlots.length).toBeGreaterThan(0);
+  });
+
   it('hands a no-route answer to the OWNER rather than refusing on Google’s data quality', async () => {
     // `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with TODAY's data,
     // which a geocode into a canal or a closed road produces as readily as an island does.

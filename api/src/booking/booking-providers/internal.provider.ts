@@ -3419,6 +3419,11 @@ export class InternalProvider implements BookingProvider {
         return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone, newAddress);
       }
     }
+    let areaMatch: 'inside' | 'outside' | 'unknown' | null = null;
+    if (newAddress !== undefined) {
+      await assertInServiceArea(ctx, service, newAddress);
+      areaMatch = (await evaluateServiceArea(ctx, service, newAddress)).match;
+    }
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
@@ -3547,7 +3552,7 @@ export class InternalProvider implements BookingProvider {
                   booked_duration_min = COALESCE($9, booked_duration_min),
                   sequence=sequence+1, updated_at=now()
                   ${addressPatch ? `, customer_address=$10, customer_place_id=$11, customer_lat=$12, customer_lng=$13,
-                  customer_coords_at=$14, customer_address_verified=$15, geocode_precision=$16, location_source=$17` : ''}
+                  customer_coords_at=$14, customer_address_verified=$15, geocode_precision=$16, location_source=$17, service_area_match=$18` : ''}
             WHERE id=$6 AND tenant_id=$7 AND status='confirmed'
             RETURNING sequence`,
           [
@@ -3570,6 +3575,7 @@ export class InternalProvider implements BookingProvider {
                   addressPatch.columns.addressVerified,
                   addressPatch.columns.precision,
                   addressPatch.columns.locationSource,
+                  areaMatch,
                 ]
               : []),
           ]
@@ -3675,6 +3681,7 @@ export class InternalProvider implements BookingProvider {
       booking.customerCoordsAt = addressPatch.columns.coordsAt;
       booking.geocodePrecision = addressPatch.columns.precision;
       booking.locationSource = addressPatch.columns.locationSource;
+      booking.serviceAreaMatch = areaMatch;
     }
 
     await this.writeLog(ctx, 'rescheduled', booking, start, end);

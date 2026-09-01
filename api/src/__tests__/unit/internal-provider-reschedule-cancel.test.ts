@@ -499,6 +499,51 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(mail.location).not.toBe('Kerkstraat 12, 9310 Herdersem');
   });
 
+  it('refuses an address-change reschedule outside the service area', async () => {
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+      serviceAreaMatch: 'inside',
+    });
+    bookingSettingsFindOne.mockResolvedValue({
+      serviceArea: [{ kind: 'province', id: '40000', label: 'Oost-Vlaanderen' }],
+    } as any);
+    await expect(
+      provider.rescheduleBooking(ctx, 'bk-1', NEW_START, {
+        customerAddress: 'Rue des Guillemins 12, 4000 Liège',
+      }),
+    ).rejects.toMatchObject({ code: 'OUT_OF_SERVICE_AREA' });
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('stamps the new service-area verdict when the moved address stays inside', async () => {
+    resolveTravelEligibility.mockResolvedValue({ active: false as const, reason: 'no_api_key' as const });
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE,
+      locationType: 'customer_location',
+      customerAddressRequired: true,
+    });
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+      serviceAreaMatch: 'inside',
+    });
+    bookingSettingsFindOne.mockResolvedValue({
+      serviceArea: [{ kind: 'province', id: '40000', label: 'Oost-Vlaanderen' }],
+    } as any);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START, {
+      customerAddress: 'Grote Baan 220, 9310 Herdersem',
+    });
+    const update = managerQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'));
+    expect(String(update?.[0])).toContain('service_area_match=$18');
+    expect(update?.[1]).toContain('inside');
+  });
+
 
 
   it('does not keep a leftover Meet link after the service becomes a business-location job', async () => {

@@ -520,18 +520,26 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
       });
       if (heldNote.guidance) {
+        // `data` is what the model reads, and it is truncated at 4000 characters.
+        // Spreading the slot list first cut alreadyHeld off a live diary. The hold
+        // note is the payload. Other slots, if any, come after so a cut still
+        // leaves "they already hold it". Do not run namedTimeGuidance here: that
+        // flag says the time cannot be done, which contradicts the hold note.
         return {
           success: true,
           ...measurement,
           ...availability,
           ...affordance,
           ...replyFact,
-          data: withNamedTime({
-            ...modelResult,
+          data: {
+            ...heldNote,
+            timezone: zone,
+            serviceId: result.serviceId,
+            serviceName: result.serviceName,
+            ...(utcSlots.length > 0 ? { slots: wallClockSlots(utcSlots, zone) } : {}),
             ...groupedNote,
             ...addressEcho(chosen.address),
-            ...heldNote,
-          }),
+          },
         };
       }
       // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time

@@ -137,7 +137,7 @@ function attributeToOffer(
     .catch(() => undefined);
 }
 
-export async function listBookings(caller: BookingCaller, sessionId: string, attendeeEmail: string) {
+export async function listBookings(caller: BookingCaller, sessionId: string, attendeeEmail?: string) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   return internalProvider.listBookings(ctx, attendeeEmail);

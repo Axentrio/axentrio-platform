@@ -174,6 +174,25 @@ export function resolveCustomerEmail(
 }
 
 /**
+ * Update-path email merge: undefined or whitespace-only means "no change"; anything
+ * else must normalise or the update is refused. The tool's rejectBadEmail already
+ * blocks junk on the agent path; this holds for every caller.
+ */
+export function resolveUpdatedCustomerEmail(
+  patchValue: string | undefined,
+  stored: string | null | undefined,
+): string | null {
+  if (patchValue === undefined || patchValue.trim() === '') return stored ?? null;
+  const clean = normalizeCustomerEmail(patchValue);
+  if (clean) return clean;
+  throw new BookingError(
+    'That email address is not valid, so the calendar invite cannot reach the customer. Ask them to repeat it and call again with attendeeEmail. Do not tell the customer the service is unavailable, and do not capture a request or a lead.',
+    'EMAIL_REQUIRED',
+    400,
+  );
+}
+
+/**
  * P5a — resolve the address/phone to persist, enforcing the service's required-field
  * gates (recoverable errors the agent re-asks on). Whitespace-only counts as absent.
  * A city name is not an appointment address.

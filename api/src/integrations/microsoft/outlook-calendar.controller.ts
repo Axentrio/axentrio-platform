@@ -63,13 +63,15 @@ export async function outlookCallback(req: Request, res: Response): Promise<void
     // the entitlement and that the bot still belongs to the tenant before storing.
     await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
-    await exchangeAndStore(tenantId, botId, code);
+    const { supportsOnlineMeetings } = await exchangeAndStore(tenantId, botId, code);
     // CARRY THE AGENT BACK. The connect flow leaves the page and returns here, and the
     // settings editor reads the Agent from the URL — without it an owner who connected a
     // calendar for a non-default Agent lands on the DEFAULT one's editor and is toasted
     // about a connection they cannot see. The id is the signed state's, not the caller's,
     // so it is as trustworthy as the exchange itself.
-    return void res.redirect(`${portal}/bookings?outlook=connected&botId=${botId}`);
+    // Flag a personal Microsoft account so the portal warns that video bookings get no Teams link.
+    const teamsParam = supportsOnlineMeetings ? '' : '&teams=unavailable';
+    return void res.redirect(`${portal}/bookings?outlook=connected${teamsParam}&botId=${botId}`);
   } catch (err) {
     logger.error('[Outlook] OAuth callback failed', {
       error: err instanceof Error ? err.message : String(err),

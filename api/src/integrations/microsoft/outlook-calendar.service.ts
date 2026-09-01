@@ -50,6 +50,26 @@ interface MsTokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
+  /** Present because we request `openid`; carries the `tid` we read to spot a personal account. */
+  id_token?: string;
+}
+
+/** The well-known tenant id every PERSONAL (consumer) Microsoft account belongs to. Such an
+ *  account cannot host a Teams for Business meeting, so a video booking on it gets no join link. */
+const MSA_CONSUMER_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
+
+/** True when the connected account is a personal Microsoft account, read from the id_token's
+ *  `tid` claim. Decode-only (the token came straight from Microsoft over TLS in our own
+ *  request); an absent token or claim is treated as work/school so we never warn a business
+ *  account by mistake. */
+function isPersonalMicrosoftAccount(idToken?: string): boolean {
+  if (!idToken) return false;
+  try {
+    const claims = jwt.decode(idToken) as { tid?: string } | null;
+    return claims?.tid === MSA_CONSUMER_TENANT;
+  } catch {
+    return false;
+  }
 }
 
 /** POST the Microsoft token endpoint (form-encoded). */
@@ -117,10 +137,16 @@ export async function getActiveCredential(botId: string): Promise<CalendarCreden
 /** Exchange the auth code for tokens, read the Graph identity, and store the
  *  credential — revoking ANY currently-active credential for the bot (any
  *  provider) in the same transaction so the single-active invariant holds. */
-export async function exchangeAndStore(tenantId: string, botId: string, code: string): Promise<void> {
+export async function exchangeAndStore(
+  tenantId: string,
+  botId: string,
+  code: string
+): Promise<{ supportsOnlineMeetings: boolean }> {
   ensureConfigured();
   const tokens = await msTokenRequest({ grant_type: 'authorization_code', code });
   if (!tokens.access_token) throw new Error('Microsoft did not return an access token');
+  // Personal Microsoft accounts cannot host Teams; remember so we can warn + skip the ask.
+  const supportsOnlineMeetings = !isPersonalMicrosoftAccount(tokens.id_token);
 
   // Graph identity: stable object id + best-effort email.
   const me = await axios.get(GRAPH_ME_URL, {
@@ -149,6 +175,7 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
         accountId,
         accountEmail,
         reauthRequired: false,
+        supportsOnlineMeetings,
         accessTokenEnc: encrypt(tokens.access_token),
         refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
         tokenExpiry: new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000),
@@ -160,8 +187,16 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
   logger.info('[Outlook] calendar connected', {
     botId,
     hasRefresh: !!tokens.refresh_token,
+    supportsOnlineMeetings,
     switchedFrom: prior && prior.provider !== 'microsoft' ? prior.provider : undefined,
   });
+  if (!supportsOnlineMeetings) {
+    // Owner-actionable: a personal account silently breaks video bookings (no Teams link).
+    logger.warn('[Outlook] connected a personal Microsoft account; Teams meeting links are unavailable for video bookings', {
+      botId,
+      accountEmail,
+    });
+  }
 
   // If we switched away from another provider, best-effort revoke its token at
   // the source (Microsoft refresh tokens are revoked via reconnect/consent, so we
@@ -189,6 +224,8 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
       error: err instanceof Error ? err.message : String(err),
     })
   );
+
+  return { supportsOnlineMeetings };
 }
 
 /**
@@ -256,16 +293,21 @@ export interface OutlookStatus {
   accountEmail: string | null;
   calendarId: string | null;
   needsReauth: boolean;
+  /** False for a personal Microsoft account: video bookings get no Teams link. */
+  supportsOnlineMeetings: boolean;
 }
 
 export async function getStatus(botId: string): Promise<OutlookStatus> {
   const cred = await getActiveCredential(botId);
-  if (!cred) return { connected: false, accountEmail: null, calendarId: null, needsReauth: false };
+  if (!cred) {
+    return { connected: false, accountEmail: null, calendarId: null, needsReauth: false, supportsOnlineMeetings: true };
+  }
   return {
     connected: true,
     accountEmail: cred.accountEmail ?? null,
     calendarId: cred.calendarId,
     needsReauth: cred.reauthRequired,
+    supportsOnlineMeetings: cred.supportsOnlineMeetings,
   };
 }
 

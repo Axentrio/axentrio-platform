@@ -120,10 +120,34 @@ describe('exchangeAndStore', () => {
       accountId: 'ms-oid-1',
       accountEmail: 'owner@acme.com',
       reauthRequired: false,
+      supportsOnlineMeetings: true,
       accessTokenEnc: 'enc(at)',
       refreshTokenEnc: 'enc(rt)',
     });
     expect(rekeyBotBookings).toHaveBeenCalledWith('b1', 'mscal:ms-oid-1');
+  });
+
+  it('flags a personal Microsoft account: supportsOnlineMeetings=false and warns', async () => {
+    // A personal account carries the well-known consumer tenant id in the id_token's tid claim.
+    const idToken = jwt.sign({ tid: '9188040d-6c67-4c5b-b112-36a304b66dad' }, 'x');
+    (axios.post as any).mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('login.microsoftonline.com')) {
+        return { data: { access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: idToken } };
+      }
+      return { data: {} };
+    });
+    (axios.get as any).mockResolvedValue({ data: { id: 'ms-oid-2', mail: 'me@outlook.com' } });
+    repoFindOne.mockResolvedValue(null);
+
+    const result = await exchangeAndStore('t1', 'b1', 'auth-code');
+
+    expect(result).toEqual({ supportsOnlineMeetings: false });
+    expect(mgrSave.mock.calls[0][0]).toMatchObject({ supportsOnlineMeetings: false });
+    const { logger } = await import('../../utils/logger');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('personal Microsoft account'),
+      expect.objectContaining({ botId: 'b1' }),
+    );
   });
 
   it('throws when Graph /me returns no id', async () => {

@@ -16,6 +16,11 @@ export interface OutlookCalendarStatus {
    * request-only. Google has had a reconnect banner all along.
    */
   needsReauth?: boolean;
+  /**
+   * False for a PERSONAL Microsoft account, which cannot host Teams for Business — so a video
+   * booking on it gets no join link. The portal warns when this is false.
+   */
+  supportsOnlineMeetings?: boolean;
 }
 
 /**

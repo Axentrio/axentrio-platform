@@ -175,6 +175,14 @@ export const SchedulerSettings: React.FC = () => {
       params.delete('botId');
       changed = true;
     }
+    // A personal Microsoft account connected: Teams links can't be generated for video bookings.
+    if (params.get('teams') === 'unavailable') {
+      toast.warning(
+        "Connected a personal Microsoft account — video bookings won't get a Teams meeting link. Reconnect a work or school account to enable video links.",
+      );
+      params.delete('teams');
+      changed = true;
+    }
     if (!changed) return;
     const qs = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
@@ -610,7 +618,7 @@ export const SchedulerSettings: React.FC = () => {
  *  Both providers report the same three facts; only the copy around them differs,
  *  which is why the two rows stay separate. */
 interface CalendarSectionProps {
-  status: { data?: { connected: boolean; accountEmail: string | null; needsReauth?: boolean } };
+  status: { data?: { connected: boolean; accountEmail: string | null; needsReauth?: boolean; supportsOnlineMeetings?: boolean } };
   connect: { mutate: () => void; isPending: boolean };
   disconnect: { mutate: () => void; isPending: boolean };
 }
@@ -697,20 +705,28 @@ const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connec
         </Button>
       </div>
     ) : status.data?.connected ? (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm text-text-secondary flex items-center gap-2">
-          <Check className="w-4 h-4 text-status-online" />
-          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => disconnect.mutate()}
-          disabled={disconnect.isPending}
-        >
-          Disconnect
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-sm text-text-secondary flex items-center gap-2">
+            <Check className="w-4 h-4 text-status-online" />
+            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => disconnect.mutate()}
+            disabled={disconnect.isPending}
+          >
+            Disconnect
+          </Button>
+        </div>
+        {status.data?.supportsOnlineMeetings === false ? (
+          <span className="text-sm text-status-busy flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            This is a personal Microsoft account, which can't host Teams meetings — video bookings won't get a join link. Reconnect a work or school account to enable video links.
+          </span>
+        ) : null}
+      </>
     ) : (
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-text-muted">

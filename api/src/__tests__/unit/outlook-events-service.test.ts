@@ -20,6 +20,7 @@ vi.mock('../../integrations/microsoft/outlook-calendar.service', () => ({
   getValidAccessTokenMicrosoft,
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+import { logger } from '../../utils/logger';
 
 import {
   getOutlookBusyForBot,
@@ -153,6 +154,11 @@ describe('createOutlookEvent', () => {
     expect(res).toMatchObject({ eventId: 'ID2', meetUrl: null });
     expect((axios.post as any).mock.calls[1][1].isOnlineMeeting).toBeUndefined();
     expect((axios.post as any).mock.calls[1][1].transactionId).toBe('bk'); // same tag → dedupe
+    // The downgrade must be diagnosable: warn with the real Graph reason, not a bare line.
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[Outlook] Teams meeting not created; event saved without a join link',
+      expect.objectContaining({ botId: 'b1', status: 400, message: 'Cannot create online meeting for this account' }),
+    );
   });
 
   it('does NOT retry (rethrows) on an unrelated bad-request error', async () => {

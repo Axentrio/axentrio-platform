@@ -291,7 +291,13 @@ describe('admin observability — agent traces', () => {
     const res = await request(app).get(`${LIST}/${t.id}`);
 
     expect(res.body.data.trace.iterations[0].toolCalls).toEqual([
-      { name: 'capture_lead', ok: true, latencyMs: 40 },
+      {
+        name: 'capture_lead',
+        ok: true,
+        latencyMs: 40,
+        dataChars: JSON.stringify({ transcript: 'RESULT-SHOULD-NOT-LEAK' }).length,
+        dataKeys: ['transcript'],
+      },
     ]);
   });
 
@@ -343,6 +349,52 @@ describe('admin observability — agent traces', () => {
       expect(body).not.toContain('RESULT-SHOULD-NOT-LEAK');
       expect(body).not.toContain('CUSTOMER-SECRET@example.com');
     }
+  });
+
+  it('measures alreadyHeld and requestedTimeUnavailable without leaking an address', async () => {
+    const repo = AppDataSource.getRepository(AgentTrace);
+    const t = await repo.save(
+      repo.create({
+        tenantId,
+        finishReason: 'completed',
+        trace: {
+          iterations: [
+            {
+              llmCall: { model: 'gpt-4.1-mini', latencyMs: 10, promptTokens: 1, completionTokens: 1 },
+              toolCalls: [
+                {
+                  name: 'check_availability',
+                  latencyMs: 5,
+                  args: { startDate: '2026-09-03', endDate: '2026-09-03' },
+                  result: {
+                    success: true,
+                    data: {
+                      alreadyHeld: [
+                        { bookingId: 'bk-1', start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T10:00:00.000Z' },
+                      ],
+                      suggestedAction: 'confirm_existing',
+                      requestedTimeUnavailable: '11:00',
+                      noSlotsInRange: false,
+                      address: 'LEAK-ADDRESS 1',
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const res = await request(app).get(`${LIST}/${t.id}`);
+    expect(res.body.data.trace.iterations[0].toolCalls[0]).toMatchObject({
+      name: 'check_availability',
+      ok: true,
+      suggestedAction: 'confirm_existing',
+      requestedTimeUnavailable: '11:00',
+      alreadyHeld: [{ bookingId: 'bk-1', start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T10:00:00.000Z' }],
+      dataKeys: ['alreadyHeld', 'suggestedAction', 'requestedTimeUnavailable', 'noSlotsInRange', 'address'],
+    });
+    expect(JSON.stringify(res.body)).not.toContain('LEAK-ADDRESS');
   });
 
   it('404s on an unknown trace', async () => {

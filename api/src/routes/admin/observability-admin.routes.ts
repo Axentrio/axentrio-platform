@@ -34,9 +34,7 @@ import { PLATFORM_TENANT_SENTINEL } from '../../database/entities/LlmUsageDaily'
 import { AgentTrace } from '../../database/entities/AgentTrace';
 import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
 
-/** The parts of the persisted `trace` jsonb this endpoint reads. Deliberately
- *  narrow: anything not named here (notably toolCalls args/results) is never
- *  projected onto the response. */
+/** The parts of the persisted `trace` jsonb this endpoint reads. */
 interface TraceShape {
   prompt?: Record<string, unknown>;
   terminal?: { result?: string; error?: { kind?: string; message?: string } };
@@ -44,7 +42,11 @@ interface TraceShape {
   corrections?: string[];
   iterations?: Array<{
     llmCall?: { model?: string; latencyMs?: number; promptTokens?: number; completionTokens?: number };
-    toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean; error?: string } }>;
+    toolCalls?: Array<{
+      name: string;
+      latencyMs?: number;
+      result?: { success?: boolean; error?: string; data?: unknown };
+    }>;
   }>;
 }
 import { sendSuccess } from '../../utils/response';
@@ -415,6 +417,37 @@ function toolErrorCode(error: unknown): string {
   return m ? m[1] : 'error';
 }
 
+/** Non-PII slice of a successful tool result, for diagnosing a live miss. */
+function toolResultMeasure(data: unknown): Record<string, unknown> | undefined {
+  if (data === undefined) return undefined;
+  const dataChars = JSON.stringify(data).length;
+  const rec = data !== null && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : null;
+  const dataKeys = rec ? Object.keys(rec) : [];
+  const held = Array.isArray(rec?.alreadyHeld)
+    ? rec.alreadyHeld.map((row) => {
+        const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
+        return {
+          bookingId: typeof r.bookingId === 'string' ? r.bookingId : '',
+          start: typeof r.start === 'string' ? r.start : '',
+          end: typeof r.end === 'string' ? r.end : '',
+        };
+      })
+    : undefined;
+  return {
+    dataChars,
+    dataKeys,
+    ...(typeof rec?.requestedTimeUnavailable === 'string'
+      ? { requestedTimeUnavailable: rec.requestedTimeUnavailable }
+      : {}),
+    ...(rec?.noSlotsInRange === true ? { noSlotsInRange: true } : {}),
+    ...(typeof rec?.suggestedAction === 'string' ? { suggestedAction: rec.suggestedAction } : {}),
+    ...(held && held.length ? { alreadyHeld: held } : {}),
+  };
+}
+
+
 router.get(
   '/observability/traces/:id',
   asyncHandler(async (req: Request, res: Response) => {
@@ -446,13 +479,15 @@ router.get(
           latencyMs: it.llmCall?.latencyMs ?? null,
           promptTokens: it.llmCall?.promptTokens ?? null,
           completionTokens: it.llmCall?.completionTokens ?? null,
-          // Names + outcomes only, plus a DOMAIN error CODE on failure (never args, results, or
-          // the error's free-text message — see toolErrorCode).
+          // Names + outcomes. A successful result also gets a non-PII measure:
+          // size, key order, alreadyHeld times, requestedTimeUnavailable.
+          // Raw data, args, and error text stay off.
           toolCalls: (it.toolCalls ?? []).map((tc) => ({
             name: tc.name,
             ok: tc.result?.success !== false,
             ...(tc.result?.success === false ? { errorCode: toolErrorCode(tc.result?.error) } : {}),
             latencyMs: tc.latencyMs ?? null,
+            ...(tc.result?.success !== false ? toolResultMeasure(tc.result?.data) ?? {} : {}),
           })),
         })),
       },

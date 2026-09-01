@@ -104,6 +104,32 @@ describe('emailDeliveryService.sendDurable', () => {
     });
     expect(send).toHaveBeenCalledTimes(1);
   });
+
+  it('stores a 266-character subject and a 300-character recipient', async () => {
+    // `Confirmed: ${service.name}` with ServiceType.name at its own 255 cap is 266 characters,
+    // and normalizeCustomerEmail accepts 320. Both overflowed varchar(255), and sendOrReport
+    // swallows the throw, so the customer silently received no invite.
+    const tenant = await createTestTenant();
+    const key = `booking:wide:${Date.now()}:REQUEST:invite`;
+    const subject = `Confirmed: ${'s'.repeat(255)}`;
+    const recipient = `${'a'.repeat(288)}@example.com`;
+    expect(subject).toHaveLength(266);
+    expect(recipient).toHaveLength(300);
+
+    const result = await emailDeliveryService.sendDurable({
+      ...input(tenant.id, key),
+      recipientEmail: recipient,
+      subject,
+      kind: 'booking_email',
+    });
+
+    expect(result.status).toBe('sent');
+    const row = await AppDataSource.getRepository(EmailDelivery).findOneByOrFail({
+      idempotencyKey: key,
+    });
+    expect(row.subject).toHaveLength(266);
+    expect(row.recipientEmail).toHaveLength(300);
+  });
 });
 
 describe('sweepFailedEmailDeliveries', () => {
@@ -177,6 +203,58 @@ describe('sweepFailedEmailDeliveries', () => {
     const row = await repo.findOneByOrFail({ idempotencyKey: key });
     expect(row.status).toBe('failed');
     expect(row.attemptCount).toBe(6);
+  });
+
+  it('keeps sweeping after a row throws, so one poison row cannot starve the batch', async () => {
+    // sendDurable turns a provider failure into a `failed` RESULT rather than a throw, so a
+    // malformed payload proves nothing here. The throw this guards against is anything else on
+    // the row path: forced by rejecting the first call, then delegating to the real one.
+    const tenant = await createTestTenant();
+    const stamp = Date.now();
+    const poisonKey = `booking:poison:${stamp}:REQUEST:invite`;
+    const goodKey = `booking:good:${stamp}:REQUEST:invite`;
+    const repo = AppDataSource.getRepository(EmailDelivery);
+
+    const failedRow = (key: string, email: string) =>
+      repo.create({
+        tenantId: tenant.id,
+        recipientUserId: null,
+        recipientEmail: email,
+        subject: 'Confirmed: klantenafspraak',
+        kind: 'booking_email',
+        relatedId: '00000000-0000-0000-0000-000000000002',
+        status: 'failed' as const,
+        attemptCount: 1,
+        idempotencyKey: key,
+        providerMessageId: null,
+        error: 'outage',
+        payload: { subject: 'Confirmed: klantenafspraak', body: '<p>x</p>' },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      });
+    await repo.insert(failedRow(poisonKey, 'poison@example.com'));
+    await repo.insert(failedRow(goodKey, 'good@example.com'));
+    // created_at ASC decides the claim order, so the thrower has to be first.
+    await AppDataSource.query(
+      `UPDATE email_deliveries SET created_at = now() - interval '1 hour' WHERE idempotency_key = $1`,
+      [poisonKey],
+    );
+
+    const real = emailDeliveryService.sendDurable;
+    const spy = vi
+      .spyOn(emailDeliveryService, 'sendDurable')
+      .mockRejectedValueOnce(new Error('poison row'))
+      .mockImplementation((sendInput) => real.call(emailDeliveryService, sendInput));
+
+    send.mockReset();
+    send.mockResolvedValue({ success: true, messageId: 'after-poison' });
+
+    await sweepFailedEmailDeliveries();
+
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // The batch carried on: the row after the thrower still went out.
+    expect((await repo.findOneByOrFail({ idempotencyKey: goodKey })).status).toBe('sent');
+    expect((await repo.findOneByOrFail({ idempotencyKey: poisonKey })).status).toBe('failed');
+    spy.mockRestore();
   });
 });
 

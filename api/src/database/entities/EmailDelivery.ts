@@ -40,10 +40,11 @@ export class EmailDelivery {
   @Column({ type: 'uuid', nullable: true, name: 'recipient_user_id' })
   recipientUserId!: string | null;
 
-  @Column({ type: 'varchar', length: 255, name: 'recipient_email' })
+  @Column({ type: 'varchar', length: 320, name: 'recipient_email' })
   recipientEmail!: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  /** `Confirmed: ${service.name}` and ServiceType.name allows 255, so 266 is reachable. */
+  @Column({ type: 'varchar', length: 320 })
   subject!: string;
 
   @Column({ type: 'varchar', length: 64 })

@@ -449,6 +449,19 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Boot sequence
+async function startEmailRetryIfEnabled(): Promise<void> {
+  // Retry failed customer calendar invites. Kill switch: EMAIL_RETRY_ENABLED=false.
+  if (process.env.EMAIL_RETRY_ENABLED !== "false") {
+    const { startEmailRetryWorker } = await import(
+      "./notifications/email-retry.worker"
+    );
+    startEmailRetryWorker();
+    logger.info("[EmailRetry] worker started");
+  } else {
+    logger.info("[EmailRetry] disabled via EMAIL_RETRY_ENABLED");
+  }
+}
+
 async function startServer(): Promise<void> {
   try {
     logger.info("Starting Chatbot Platform API...");
@@ -1081,16 +1094,8 @@ async function startServer(): Promise<void> {
       ); // Every 5 minutes
     }
 
-    // Retry failed customer calendar invites. Kill switch: EMAIL_RETRY_ENABLED=false.
-    if (process.env.EMAIL_RETRY_ENABLED !== "false") {
-      const { startEmailRetryWorker } = await import(
-        "./notifications/email-retry.worker"
-      );
-      startEmailRetryWorker();
-      logger.info("[EmailRetry] worker started");
-    } else {
-      logger.info("[EmailRetry] disabled via EMAIL_RETRY_ENABLED");
-    }
+    await startEmailRetryIfEnabled();
+
 
     // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
     // silently-broken one (expired token, revoked permission, page disconnect)

@@ -12,8 +12,8 @@ import cors from "cors";
 import { resolveCorsDecision } from "./security/cors";
 import helmet from "helmet";
 
-import { clerkMiddleware } from "@clerk/express";
 import { config } from "./config/environment";
+import { mountClerkMiddleware } from "./config/clerk-authorized-parties";
 import { logger } from "./utils/logger";
 import { returningRows } from "./utils/raw-sql";
 import { BUILD_COMMIT } from "./utils/build-info";
@@ -373,12 +373,7 @@ app.use("/api/v1/bookings", bookingPublicRouter);
 app.use("/api/v1/unsubscribe", digestUnsubscribeRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
-const clerkAuthorizedParties = config.clerk.authorizedParties;
-app.use(
-  clerkAuthorizedParties.length > 0
-    ? clerkMiddleware({ authorizedParties: clerkAuthorizedParties })
-    : clerkMiddleware(),
-);
+app.use(mountClerkMiddleware(config.clerk.authorizedParties));
 
 // API routes under /api/v1
 const apiRouter = express.Router();

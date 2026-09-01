@@ -1,84 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import express from 'express';
-import request from 'supertest';
-import {
-  parseClerkAuthorizedParties,
-  clerkMiddlewareOptions,
-  isClerkAzpAllowed,
-} from '../../config/clerk-authorized-parties';
+import { generateKeyPairSync } from 'node:crypto';
+import jwt from 'jsonwebtoken';
+import { verifyJwt } from '@clerk/backend/jwt';
+import { clerkMiddlewareOptions } from '../../config/clerk-authorized-parties';
 
-/**
- * HTTP stand-in for clerkMiddleware({ authorizedParties }) azp checks.
- * Unauthenticated (no azp) passes. A presented azp must be in the list.
- */
-function azpGuard(parties: string[]) {
-  const opts = clerkMiddlewareOptions(parties);
-  const allowed = opts?.authorizedParties ?? [];
-  return (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction,
-  ) => {
-    const azp = req.header('x-azp');
-    if (!isClerkAzpAllowed(azp, allowed)) {
-      res.status(401).json({ error: 'unauthorized_party' });
-      return;
-    }
-    next();
-  };
+const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+function signAzp(azp: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign(
+    { azp, sub: 'user_test', iat: now, exp: now + 120 },
+    privatePem,
+    { algorithm: 'RS256', header: { typ: 'JWT', alg: 'RS256' } },
+  );
 }
 
-function appFor(raw: string | undefined) {
-  const parties = parseClerkAuthorizedParties(raw);
-  const app = express();
-  app.use(azpGuard(parties));
-  app.get('/ok', (_req, res) => {
-    res.status(200).json({ ok: true });
-  });
-  return app;
-}
-
-describe('clerk authorizedParties HTTP (staging list)', () => {
-  const app = appFor('https://staging.axentrio.com');
+describe('Clerk verifyJwt authorizedParties', () => {
+  const parties = clerkMiddlewareOptions(['https://staging.axentrio.com'])!.authorizedParties;
+  const opts = { key: publicPem, authorizedParties: parties };
 
   it('allows azp https://staging.axentrio.com', async () => {
-    const res = await request(app)
-      .get('/ok')
-      .set('x-azp', 'https://staging.axentrio.com');
-    expect(res.status).toBe(200);
+    const payload = await verifyJwt(signAzp('https://staging.axentrio.com'), opts);
+    expect(payload.azp).toBe('https://staging.axentrio.com');
   });
 
   it('rejects azp https://app.axentrio.com', async () => {
-    const res = await request(app)
-      .get('/ok')
-      .set('x-azp', 'https://app.axentrio.com');
-    expect(res.status).toBe(401);
+    await expect(
+      verifyJwt(signAzp('https://app.axentrio.com'), opts),
+    ).rejects.toMatchObject({
+      reason: 'token-invalid-authorized-parties',
+    });
   });
 
   it('rejects azp https://dev.axentrio.com', async () => {
-    const res = await request(app)
-      .get('/ok')
-      .set('x-azp', 'https://dev.axentrio.com');
-    expect(res.status).toBe(401);
-  });
-
-  it('passes through when no azp is presented', async () => {
-    const res = await request(app).get('/ok');
-    expect(res.status).toBe(200);
-  });
-});
-
-describe('clerk authorizedParties HTTP (unset, like dev/prod)', () => {
-  const app = appFor(undefined);
-
-  it('does not reject prod or dev azp when the list is empty', async () => {
-    const prod = await request(app)
-      .get('/ok')
-      .set('x-azp', 'https://app.axentrio.com');
-    const dev = await request(app)
-      .get('/ok')
-      .set('x-azp', 'https://dev.axentrio.com');
-    expect(prod.status).toBe(200);
-    expect(dev.status).toBe(200);
+    await expect(
+      verifyJwt(signAzp('https://dev.axentrio.com'), opts),
+    ).rejects.toMatchObject({
+      reason: 'token-invalid-authorized-parties',
+    });
   });
 });

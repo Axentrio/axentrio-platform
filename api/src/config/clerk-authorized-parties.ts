@@ -2,6 +2,8 @@
  * Parse CLERK_AUTHORIZED_PARTIES and the options object for clerkMiddleware.
  * An empty list means do not pass authorizedParties (dev/prod today).
  */
+import { clerkMiddleware } from '@clerk/express';
+
 export function parseClerkAuthorizedParties(raw: string | undefined): string[] {
   if (!raw) {
     return [];
@@ -21,19 +23,10 @@ export function clerkMiddlewareOptions(
   return { authorizedParties: parties };
 }
 
-/**
- * Clerk rejects a presented session whose azp is outside authorizedParties.
- * Unauthenticated requests (no azp) still pass, matching clerkMiddleware.
- */
-export function isClerkAzpAllowed(
-  azp: string | undefined,
+export function mountClerkMiddleware(
   parties: string[],
-): boolean {
-  if (parties.length === 0) {
-    return true;
-  }
-  if (!azp) {
-    return true;
-  }
-  return parties.includes(azp);
+  middleware: typeof clerkMiddleware = clerkMiddleware,
+) {
+  const opts = clerkMiddlewareOptions(parties);
+  return opts ? middleware(opts) : middleware();
 }

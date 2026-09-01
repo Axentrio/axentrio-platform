@@ -85,8 +85,12 @@ The platform-side AI that answers tenant-admin questions inside the portal — e
 _Avoid_: assistant, bot, helper, AI Platform Assistant (use Copilot — the marketing label is an alias, not a domain term).
 
 **Service**:
-One bookable thing a Tenant offers (e.g. "Boiler repair"), with a duration, a `bookingMode` (`auto` — the Agent may confirm it outright, or `request` — it may only capture the ask), and its own optional timing. A Tenant has a catalog of them. The entity is `ServiceType` and the API still exposes a singular `eventType` for the pre-catalog UI; both are back-compat spellings of this one concept.
+One bookable thing a Tenant offers (e.g. "Boiler repair"), with a duration, a `bookingMode` (`auto` — the Agent may confirm it outright, or `request` — it may only capture the ask), optional timing, and a customer change policy (`rescheduleMode` / `cancelMode`: `auto`, `request`, or `not_allowed`, each with an optional cutoff). A Tenant has a catalog of them. The entity is `ServiceType` and the API still exposes a singular `eventType` for the pre-catalog UI; both are back-compat spellings of this one concept.
 _Avoid_: event type, appointment type, offering, product, treatment.
+
+**Customer change policy**:
+Per-Service rules for what a Booking Customer may do to an existing appointment: reschedule and cancel, each `auto` (execute after confirmation), `request` (capture a change Request, original stays put), or `not_allowed` (refuse; never claim a request was submitted). A new Service starts at `request` on both, and `request` is also the fallback for any row or read that carries no mode, so an unconfigured Service never lets the Agent move or cancel by itself; existing Services keep the mode they already hold. Optional cutoff in minutes before start; `null` means no extra cutoff, `0` means until the start instant. Cutoff only tightens. Auto-book of the original is not a change grant. Binds the Agent, signed manage link, and internal-n8n; does not bind the owner's portal or inbound calendar sync.
+_Avoid_: cancellation policy, booking mode (that is new bookings only).
 
 **Booking Customer**:
 The person talking to an Agent and asking for an appointment. Distinct from the **Tenant**, who is the business owner configuring the platform, and from a **Lead**, who is a captured contact rather than a party to a Booking - the same person may be all three at different moments, which is exactly why the word needs pinning down. Named positively because the glossary previously only said what NOT to call things: `customer` is listed under `_Avoid_` for both **Tenant** and **Lead**, so the term was half-anticipated and never defined. The location-planning spec was malformed on precisely this collision, using "customer" for the business owner in every Work Location paragraph while also using it for the person booking.
@@ -97,7 +101,7 @@ One row in a Tenant's diary. Status is `pending` (held, not yet confirmed), `con
 _Avoid_: appointment, reservation, event (an event is the calendar mirror, not the booking), slot (a Slot is an offer, a Booking is a commitment).
 
 **Request**:
-A booking the Agent captured but did not confirm — stored as a Booking with status `request_created`. Raised whenever the Agent may not decide alone: a `request` Service, no healthy calendar connection, an address outside the Service Area, or a length it could not resolve. A Request consumes no capacity and blocks no time; only the Tenant accepting it does. Accepting is what turns it into a real Booking.
+A booking the Agent captured but did not confirm — stored as a Booking with status `request_created`. Raised whenever the Agent may not decide alone: a `request` Service, no healthy calendar connection, an address outside the Service Area, a length it could not resolve, or a Booking Customer asking to reschedule or cancel under a `request` change policy. A Request consumes no capacity and blocks no time. For a new-job Request (`request_kind = new`), accepting confirms that row into a real Booking. For a change Request (`reschedule` / `cancel`), accepting mutates the original Booking and closes the Request row — it does not confirm the Request row itself.
 _Avoid_: enquiry, lead (a Lead is a contact, a Request is a proposed booking), pending booking (that is the `pending` status, a different state), tentative.
 
 **Slot**:
@@ -197,7 +201,7 @@ _Avoid_: sync, calendar event (ambiguous with the Tenant's own events), Google e
 - An **Insight** is scoped to a **Tenant** (and may reference specific **ChatSessions** as evidence)
 - An **Agent** has one **Availability Rule** and a catalog of **Services**
 - A **Booking** is made against exactly one **Service**, and originates in a **ChatSession** on some **Channel**
-- Accepting a **Request** produces a **Booking**; until then it holds no time
+- Accepting a new-job **Request** produces a **Booking**; until then it holds no time. Accepting a change Request mutates the original Booking and closes the Request.
 
 ## Flagged ambiguities
 

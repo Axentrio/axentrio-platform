@@ -21,6 +21,11 @@
  * `customerAddressRequired` is set (`booking-place.ts:80`), so its presence IS the server saying
  * this job happens at the customer's address. Paired with "no verified place is bound yet", that
  * is precisely the moment a picker helps and the only moment it is worth paying for.
+ *
+ * And it is offered only when the result holds nothing confirmable. The picker is not extra
+ * furniture beside the answer: on Meta channels it TAKES the reply's quick replies
+ * (`channels/address-controls.ts:43`), so offering it next to a bookable time costs the customer
+ * the very chips that time was announced with.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -71,8 +76,18 @@ const check = (args: Record<string, unknown> = {}) =>
     ctx()
   );
 
-/** A result for a service that travels: `travel` present is what says so. */
+/**
+ * A travelling service with nothing confirmable in it. `travel` present is what says the job
+ * happens at the customer's door; the empty `slots` is what leaves the picker free to ship,
+ * because a reply with no time to lose has no chips for the picker to take.
+ */
 const TRAVELS = {
+  slots: [] as { start: string }[],
+  timezone: 'Europe/Brussels',
+  travel: { requestableSlots: [], addressTooVague: false },
+};
+/** The same travelling service, with a bookable time in it - the case the picker must leave alone. */
+const TRAVELS_WITH_SLOTS = {
   slots: [{ start: '2026-09-01T09:00:00Z' }],
   timezone: 'Europe/Brussels',
   travel: { requestableSlots: [], addressTooVague: false },
@@ -138,6 +153,25 @@ describe('offering to verify the address', () => {
       });
     },
   );
+
+  it('leaves a confirmable time its own quick replies', async () => {
+    // The live failure this gate exists for (Passtraat 248B, 9100 Sint-Niklaas, 2026-09-01). The
+    // customer gave a complete address, the drive was measured against it, and the check came
+    // back with a bookable time - and the reply then showed ONE numbered address option and asked
+    // which day and time they wanted. `renderChannelAddressControls` replaces the slot quick
+    // replies with the picker's own, so an offer to tidy the record took the answer away. A slot
+    // that survived the travel gate was measured against this address already; whether the record
+    // names the exact door is `create_booking`'s question, and it still asks it.
+    mockCheckAvailability.mockResolvedValue(TRAVELS_WITH_SLOTS);
+
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: TYPED },
+      { ...ctx(), channel: 'whatsapp' },
+    );
+
+    expect(res.affordance).toBeUndefined();
+    expect(mockAutocompleteAddress).not.toHaveBeenCalled();
+  });
 
   it('says nothing for a service the customer comes to', async () => {
     // No travel, no address needed. Asking a customer to verify their home address for a job that

@@ -265,12 +265,25 @@ function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined 
  * A city name is not that moment. Autocomplete of "Antwerp" returns the city and the
  * station, which then ship as booking location options. The picker verifies a door the
  * customer already gave; it must not invent a place for them.
+ *
+ * NEITHER IS A CONFIRMABLE TIME, which is why the count gates every other test. The picker
+ * does not sit beside the answer, it TAKES the answer's controls: on Meta channels
+ * `renderChannelAddressControls` (`channels/address-controls.ts:43`) replaces the reply's
+ * slot quick replies with the numbered address options. A customer who had been given a
+ * bookable time was shown one address option and asked which day and time they wanted
+ * (live report: Passtraat, Sint-Niklaas, 2026-09-01). A slot that survived the travel gate
+ * was measured against this address already, so verifying it is record-tidying and must
+ * never cost the customer their chips; the wrong-door risk stays covered at booking time by
+ * `rejectUnsettledAddress` below. `addressTooVague` still reaches the picker because a
+ * coarse placement yields no confirmable slots (`internal.provider.ts:580`).
  */
 async function availabilityAffordance(
   ctx: ToolContext,
   travel: TravelFilterSummary | undefined,
   chosen: TurnAddress,
+  confirmableSlotCount: number,
 ) {
+  if (confirmableSlotCount > 0) return {};
   if (!travel || chosen.placeId) return {};
   if (!isCompleteCustomerAddress(chosen.address)) return {};
   return addressPickerAffordance(ctx, travel.addressTooVague ? 'too_vague' : 'unverified', chosen.address);
@@ -467,7 +480,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // retry RANGE derived from it is safe to say out loud.
       const { grouping, emptyRange, ...result } = full;
       const measurement = grouping ? { measurement: { grouping } } : {};
-      const affordance = await availabilityAffordance(ctx, result.travel, chosen);
+      // Read before the affordance because the affordance is gated on it: a confirmable slot
+      // keeps its quick replies. Only `result.slots` is needed, and that exists above.
+      const utcSlots = Array.isArray(result.slots) ? result.slots : [];
+      const affordance = await availabilityAffordance(ctx, result.travel, chosen, utcSlots.length);
       const replyFact = addressReplyFact(
         chosen.address,
         'availability',
@@ -476,7 +492,6 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      const utcSlots = Array.isArray(result.slots) ? result.slots : [];
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
@@ -708,7 +723,7 @@ export class CreateBookingTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          'Email address of the person being booked. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
+          "Email address of the person being booked. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
       },
       notes: {
         type: 'string',
@@ -914,7 +929,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       attendeeEmail: {
         type: 'string',
         description:
-          'Email address of the person requesting the appointment. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
+          "Email address of the person requesting the appointment. The calendar invite is sent to it. Required if the SERVICES entry flags 'needs email': calling without it returns EMAIL_REQUIRED, so ask for the address and call again. Do not treat that as the service being unavailable. Never invent one.",
       },
       notes: {
         type: 'string',

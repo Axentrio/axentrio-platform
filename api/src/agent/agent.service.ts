@@ -1919,7 +1919,16 @@ export class AgentService {
     // reading it inside the `check_availability` branch below - would make the next tool
     // that wants an affordance work perfectly and ship nothing, which is the failure this
     // whole area keeps producing.
-    if (result.affordance) state.pendingAffordance = result.affordance;
+    if (result.affordance) {
+      state.pendingAffordance = result.affordance;
+    } else if (tool.name === 'check_availability' && state.pendingAffordance?.kind === 'address_picker') {
+      // The LATEST availability call owns the picker decision, so an older one may not outlive
+      // it. Within one run a check can come back empty (picker pending) and the retry come back
+      // with times, and the stale picker would then take the chips off the answer - the same
+      // displacement the gate in `availabilityAffordance` exists to prevent. `address_confirm`
+      // is `create_booking`'s control and is deliberately left alone here.
+      state.pendingAffordance = null;
+    }
     // Whatever it returned, the call happened: see `availabilityChecked`.
     if (tool.name === 'check_availability') state.availabilityChecked = true;
     // Track offered slots for the chip UI; a booking mutation clears them.

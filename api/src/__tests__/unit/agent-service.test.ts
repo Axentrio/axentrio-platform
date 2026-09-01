@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentService } from '../../agent/agent.service';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
+import type { ChatSession } from '../../database/entities/ChatSession';
+import type { Tenant } from '../../database/entities/Tenant';
 import { createBlockLedger } from '../../llm/block-ledger';
 
 const tokenBudget = vi.hoisted(() => ({
@@ -1646,6 +1648,108 @@ describe('AgentService', () => {
     expect(savedTrace).not.toContain('Turnhoutsebaan'); // Google suggestion text (ADR-0014)
     expect(savedTrace).not.toContain('Kerkstraat');     // the customer's typed address (query)
     expect(savedTrace).not.toContain('ChIJ_one');       // the offered option's placeId
+  });
+
+  /**
+   * Only the fields the run loop reads. The entities carry columns no unit test needs, and the
+   * two shapes are hand-written rather than loaded, so the compiler cannot check them for us.
+   */
+  const pickerSession = { id: 's1', tenantId: 't1', status: 'bot' } as unknown as ChatSession;
+  const pickerTenant = { id: 't1', settings: { ai: { enabled: true } } } as unknown as Tenant;
+
+  it('drops a pending picker when a later availability call offers none', async () => {
+    // One run, two checks: the first found nothing and raised the picker, the retry came back
+    // with bookable times. The LATEST availability call owns that decision. Left standing, the
+    // stale picker takes the slot quick replies off the reply that finally has an answer in it -
+    // the displacement the gate in `booking.tool.ts` availabilityAffordance exists to prevent.
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: true,
+        data: { slots: [], timezone: 'Europe/Brussels' },
+        affordance: { kind: 'address_picker' as const, reason: 'unverified' as const },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { slots: [{ start: '2026-09-01T09:00:00.000Z' }], timezone: 'Europe/Brussels' },
+      });
+    const check: ToolAdapter = {
+      name: 'check_availability',
+      description: 'check',
+      parameters: {},
+      hasSideEffects: false,
+      execute,
+    };
+    mockGetToolsForTenant.mockResolvedValue([check]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_2', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Here are some available times.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run('when can you come out', pickerSession, pickerTenant, []);
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result).not.toHaveProperty('affordance');
+  });
+
+  it('keeps a pending picker when the next tool is not an availability check', async () => {
+    // Only `check_availability` decides about the picker. Any other tool returns no affordance
+    // because it never had one to give, which is not the same as the offer becoming untrue.
+    const check: ToolAdapter = {
+      name: 'check_availability',
+      description: 'check',
+      parameters: {},
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [], timezone: 'Europe/Brussels' },
+        affordance: { kind: 'address_picker' as const, reason: 'unverified' as const },
+      }),
+    };
+    const knowledge: ToolAdapter = {
+      name: 'search_knowledge',
+      description: 'search',
+      parameters: {},
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { answer: 'We open at 09:00.' } }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([check, knowledge]);
+    vi.mocked(mockProvider.chat)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_2', name: 'search_knowledge', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'We open at 09:00.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run('when can you come out', pickerSession, pickerTenant, []);
+
+    expect(result).toMatchObject({ affordance: { kind: 'address_picker', reason: 'unverified' } });
   });
 
   it('accepts a reply that states the authoritative address', async () => {

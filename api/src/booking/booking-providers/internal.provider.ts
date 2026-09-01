@@ -498,6 +498,7 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId,
     });
     const held = (await this.liveBookingsForCaller(ctx)).filter((b) => {
+      if (b.status !== 'confirmed' && b.status !== 'pending') return false;
       if (b.eventTypeId !== service.id) return false;
       const start = b.startUtc.getTime();
       return start >= new Date(rangeStart).getTime() && start < new Date(rangeEnd).getTime();
@@ -507,6 +508,9 @@ export class InternalProvider implements BookingProvider {
       timezone: rule.timezone,
       serviceId: service.id,
       serviceName: service.name,
+      // #80 (LP3): WHO TRAVELS for this service, as it stood when the slots were offered.
+      // Resolved here rather than joined later, because a Service's mode can change and the
+      // baseline is about what was true at the moment of the offer.
       locationMode: resolveServiceLocationMode(service),
       travel: travel.summary,
       ...(emptyRange ? { emptyRange } : {}),

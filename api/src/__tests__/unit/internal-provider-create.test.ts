@@ -374,6 +374,20 @@ describe('InternalProvider.createBooking', () => {
     ]);
   });
 
+  it('does not treat an unaccepted request as alreadyHeld', async () => {
+    bookingFind.mockResolvedValue([
+      {
+        id: 'bk-req',
+        eventTypeId: 'et-1',
+        status: 'request_created',
+        startUtc: new Date('2026-06-10T07:00:00Z'),
+        endUtc: new Date('2026-06-10T07:30:00Z'),
+      },
+    ]);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.alreadyHeld).toBeUndefined();
+  });
+
   it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {
     const waCtx = { ...ctx, session: { id: 'sess-1', channel: 'whatsapp', visitorId: '31470123456' } };
     const res = await provider.createBooking(waCtx, 'idem-wa', OFFERED_START, {

@@ -242,9 +242,9 @@ export interface AvailabilityResult {
    */
   emptyRange?: EmptyRangeDiagnosis;
   /**
-   * Confirmed (or pending) appointments this caller already holds in the asked range.
-   * A later check_availability must not teach the model that those times are free
-   * for someone else, and must not let it tell the customer they are unavailable.
+   * Confirmed or pending appointments this caller already holds in the asked range.
+   * Unaccepted requests are omitted: they do not block the calendar.
+   * A later check_availability must not let the model tell the customer those times are unavailable.
    */
   alreadyHeld?: Array<{ bookingId: string; start: string; end: string }>;
   /**

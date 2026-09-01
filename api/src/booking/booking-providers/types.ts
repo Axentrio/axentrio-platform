@@ -242,6 +242,12 @@ export interface AvailabilityResult {
    */
   emptyRange?: EmptyRangeDiagnosis;
   /**
+   * Confirmed (or pending) appointments this caller already holds in the asked range.
+   * A later check_availability must not teach the model that those times are free
+   * for someone else, and must not let it tell the customer they are unavailable.
+   */
+  alreadyHeld?: Array<{ bookingId: string; start: string; end: string }>;
+  /**
    * What the grouping scorer thought of these slots (#81, LP4).
    *
    * SHADOW. Nothing reads it to decide anything: the list above is already in its final order and

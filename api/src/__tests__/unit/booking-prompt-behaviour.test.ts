@@ -1119,6 +1119,40 @@ describe('check_availability — a service at its daily cap is not a request', (
   });
 });
 
+describe('check_availability — a time the caller already holds is not unavailable', () => {
+  it('tells the model they already hold it, and not to create a second booking', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-08T07:30:00.000Z', end: '2026-09-08T08:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+      ],
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08' },
+      { sessionId: 'cs-1' } as never,
+    );
+    expect(res.success).toBe(true);
+    const data = res.data as Record<string, unknown>;
+    expect(data.suggestedAction).toBe('confirm_existing');
+    expect(data.guidance).toMatch(/already hold/i);
+    expect(data.guidance).toMatch(/Do not say that time is unavailable/);
+    expect(data.guidance).toMatch(/Do not create a second booking/);
+    expect(data.alreadyHeld).toEqual([
+      { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+    ]);
+  });
+});
+
+
 describe('a service daily cap stays in the auto-book flow', () => {
   it('forbids turning CAPACITY_REACHED into a request', () => {
     const p = buildServicesSection([svc({ maxBookingsPerDay: 2 })])!;

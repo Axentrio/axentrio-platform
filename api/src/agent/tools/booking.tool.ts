@@ -302,6 +302,16 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
   };
 }
 
+function alreadyHeldNote(held: AvailabilityResult['alreadyHeld']): Record<string, unknown> {
+  if (!held?.length) return {};
+  return {
+    alreadyHeld: held,
+    suggestedAction: 'confirm_existing',
+    guidance:
+      'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they wanted a different time, offer other slots from this result.',
+  };
+}
+
 /**
  * ONE list, said two ways: the model is given the business's wall clock, the server keeps
  * the instants. Both come out of the same call, so the sentence the model writes and the
@@ -492,6 +502,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.proposedAddress
       );
       const groupedNote = groupingNote(result.travel);
+      const heldNote = alreadyHeldNote(result.alreadyHeld);
       const zone = result.timezone ?? 'UTC';
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
@@ -500,6 +511,21 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ...data,
         ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined),
       });
+      if (heldNote.guidance) {
+        return {
+          success: true,
+          ...measurement,
+          ...availability,
+          ...affordance,
+          ...replyFact,
+          data: withNamedTime({
+            ...modelResult,
+            ...groupedNote,
+            ...addressEcho(chosen.address),
+            ...heldNote,
+          }),
+        };
+      }
       // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time
       // the model constructed from the customer's words (strip the Z). That judgement needs the
       // exact strings this call returned, which may be turns behind the booking.

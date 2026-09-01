@@ -7,6 +7,7 @@ const eventTypeFindOne = vi.fn();
 const serviceTypeFind = vi.fn();
 const ruleFindOne = vi.fn();
 const bookingFindOne = vi.fn();
+const bookingFind = vi.fn(async () => [] as Array<{ id: string }>);
 const bookingQuery = vi.fn();
 const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();
@@ -23,7 +24,7 @@ function repoFor(entity: any) {
   const name = entity?.name || entity;
   if (name === 'ServiceType') return { findOne: eventTypeFindOne, find: serviceTypeFind };
   if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
-  if (name === 'Booking') return { findOne: bookingFindOne, query: bookingQuery };
+  if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
   if (name === 'BookingLog') return { create: logCreate, save: logSave };
   if (name === 'BookingReference') return { create: (d: any) => d, save: refSave, findOne: vi.fn() };
   if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
@@ -354,6 +355,22 @@ describe('InternalProvider.createBooking', () => {
     await expect(
       provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', 'svc-req'),
     ).rejects.toMatchObject({ code: 'REQUEST_ONLY_SERVICE' });
+  });
+
+  it('names the caller own booking in the range so the model cannot call it unavailable', async () => {
+    bookingFind.mockResolvedValue([
+      {
+        id: 'bk-mine',
+        eventTypeId: 'et-1',
+        status: 'confirmed',
+        startUtc: new Date('2026-06-10T07:00:00Z'),
+        endUtc: new Date('2026-06-10T07:30:00Z'),
+      },
+    ]);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.alreadyHeld).toEqual([
+      { bookingId: 'bk-mine', start: '2026-06-10T07:00:00.000Z', end: '2026-06-10T07:30:00.000Z' },
+    ]);
   });
 
   it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {

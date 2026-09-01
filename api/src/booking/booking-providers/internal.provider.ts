@@ -115,7 +115,7 @@ import {
   requestTooFar,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
-import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
+import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
 import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
 import {
   resolveDuration,
@@ -212,9 +212,7 @@ function mergedContactFields(patch: UpdateBookingPatch, booking: Booking): Updat
     name: patch.attendeeName !== undefined
       ? (cleanContact(patch.attendeeName, 255) ?? booking.attendeeName ?? null)
       : booking.attendeeName ?? null,
-    email: patch.attendeeEmail !== undefined
-      ? (cleanContact(patch.attendeeEmail, 320) ?? booking.attendeeEmail ?? null)
-      : booking.attendeeEmail ?? null,
+    email: resolveUpdatedCustomerEmail(patch.attendeeEmail, booking.attendeeEmail),
     phone: patch.customerPhone !== undefined
       ? (cleanContact(patch.customerPhone, 64) ?? booking.customerPhone ?? null)
       : booking.customerPhone ?? null,
@@ -2809,7 +2807,7 @@ export class InternalProvider implements BookingProvider {
     return { success: true, cancelled: true };
   }
 
-  async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
+  async listBookings(ctx: BookingContext, attendeeEmail?: string): Promise<ListBookingsResult> {
     // Customer/widget path only (admin uses adminListBookings). Scope to the caller's
     // STABLE visitor identity on this bot (channel PSID / persisted widget visitorId)
     // so a returning customer sees the bookings they made in earlier sessions too —
@@ -2820,7 +2818,17 @@ export class InternalProvider implements BookingProvider {
     // compares LOWER(TRIM(...)) as well, because rows written before that gate existed still
     // hold whatever the agent typed. A malformed argument keeps its own trimmed shape: this is
     // a read path, so it may find nothing, but it must never throw at the customer.
-    const email = normalizeCustomerEmail(attendeeEmail) ?? attendeeEmail.trim().toLowerCase();
+    const email = normalizeCustomerEmail(attendeeEmail) ?? attendeeEmail?.trim().toLowerCase();
+    // Identity (visitor/session) is the authorization, same as loadOwned. The email is a
+    // narrowing filter that a NULL-email row can never satisfy, so NULL rows always ride
+    // along for the same identity.
+    const filterByEmail = Boolean(email);
+    const visitorEmailClause = filterByEmail
+      ? 'AND (LOWER(TRIM(b.attendee_email)) = $4 OR b.attendee_email IS NULL)'
+      : '';
+    const sessionEmailClause = filterByEmail
+      ? 'AND (LOWER(TRIM(attendee_email)) = $4 OR attendee_email IS NULL)'
+      : '';
     const rows: Array<{
       id: string;
       start_utc: Date;
@@ -2834,17 +2842,21 @@ export class InternalProvider implements BookingProvider {
              FROM chatbot_bookings b
              JOIN chat_sessions s ON s.id = b.session_id
             WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
-              AND s.visitor_id = $3 AND LOWER(TRIM(b.attendee_email)) = $4
+              AND s.visitor_id = $3 ${visitorEmailClause}
             ORDER BY b.start_utc ASC`,
-          [ctx.tenant.id, ctx.bot.id, visitor, email]
+          filterByEmail
+            ? [ctx.tenant.id, ctx.bot.id, visitor, email]
+            : [ctx.tenant.id, ctx.bot.id, visitor],
         )
       : await AppDataSource.getRepository(Booking).query(
           `SELECT id, start_utc, end_utc, attendee_name, attendee_email, status
              FROM chatbot_bookings
             WHERE tenant_id = $1 AND bot_id = $2 AND status = 'confirmed'
-              AND session_id = $3 AND LOWER(TRIM(attendee_email)) = $4
+              AND session_id = $3 ${sessionEmailClause}
             ORDER BY start_utc ASC`,
-          [ctx.tenant.id, ctx.bot.id, ctx.session.id, email]
+          filterByEmail
+            ? [ctx.tenant.id, ctx.bot.id, ctx.session.id, email]
+            : [ctx.tenant.id, ctx.bot.id, ctx.session.id],
         );
     return {
       bookings: rows.map((b) => ({
@@ -3279,17 +3291,20 @@ export class InternalProvider implements BookingProvider {
     if ((existing.requestKind ?? 'new') !== kind) throw this.changeRequestOpenError(existing);
     if (kind === 'reschedule') {
       const addressPatch = customerAddress !== undefined && customerAddress !== null;
+      const areaMatch = addressPatch
+        ? (await evaluateServiceArea(ctx, service, customerAddress)).match
+        : undefined;
       await AppDataSource.getRepository(Booking).query(
         `UPDATE chatbot_bookings
             SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($1,$2,'[)'), updated_at=now()
-                ${addressPatch ? ', customer_address=$5' : ''}
+                ${addressPatch ? ', customer_address=$5, service_area_match=$6' : ''}
           WHERE id=$3 AND tenant_id=$4 AND status='request_created'`,
         [
           start.toISOString(),
           end.toISOString(),
           existing.id,
           ctx.tenant.id,
-          ...(addressPatch ? [customerAddress] : []),
+          ...(addressPatch ? [customerAddress, areaMatch] : []),
         ],
       );
     }
@@ -3316,15 +3331,17 @@ export class InternalProvider implements BookingProvider {
     const icsUid = `${uuidv4()}@axentrio`;
     const note =
       kind === 'reschedule' ? 'Customer requested to reschedule' : 'Customer requested cancellation';
+    const address = customerAddress ?? original.customerAddress ?? null;
+    const areaMatch = (await evaluateServiceArea(ctx, service, address)).match;
     const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
       `INSERT INTO chatbot_bookings
          (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
           start_utc, end_utc, blocked_range, calendar_key,
           attendee_name, attendee_email, notes, ics_uid,
           source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
-          organizer_email, related_booking_id, request_kind)
+          organizer_email, related_booking_id, request_kind, service_area_match)
        VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
-               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING id`,
       [
         ctx.tenant.id,
@@ -3340,12 +3357,13 @@ export class InternalProvider implements BookingProvider {
         icsUid,
         original.sourceChannel ?? ctx.session?.channel ?? null,
         original.aiSummary ?? null,
-        customerAddress ?? original.customerAddress ?? null,
+        address,
         original.customerPhone ?? null,
         original.bookedDurationMin ?? null,
         original.organizerEmail ?? null,
         original.id,
         kind,
+        areaMatch,
       ],
     ));
     this.notifyRequestCreated(ctx, service, {

@@ -1159,6 +1159,36 @@ describe('check_availability — a time the caller already holds is not unavaila
       { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
     ]);
   });
+
+  it('does not tell the model to offer other slots when this range has none', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+      ],
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08' },
+      { sessionId: 'cs-1' } as never,
+    );
+    const data = res.data as Record<string, unknown>;
+    expect(data.suggestedAction).toBe('confirm_existing');
+    expect(data.noSlotsInRange).toBe(true);
+    expect(data.guidance).toMatch(/already hold/i);
+    expect(data.guidance).toMatch(/Do not say the business is fully booked or closed/);
+    expect(data.guidance).toMatch(/Do not offer other slots from this result/);
+    expect(data.guidance).not.toMatch(/If they wanted a different time, offer other slots/);
+    expect(data.guidance).not.toMatch(/request_appointment/);
+  });
 });
 
 

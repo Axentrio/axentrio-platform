@@ -1340,6 +1340,7 @@ describe('InternalProvider customer change policy', () => {
     );
     expect(update).toBeTruthy();
     expect(update?.[1]).toContain('Nieuwstraat 5, 1000 Brussel');
+    expect(String(update?.[0])).toContain('service_area_match');
     expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
   });
 
@@ -1417,6 +1418,7 @@ describe('InternalProvider customer change policy', () => {
     });
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insert?.[1]).toContain('Nieuwstraat 5, 1000 Brussel');
+    expect(String(insert?.[0])).toContain('service_area_match');
   });
 
   it('acceptRequest applies a same-time address change instead of closing as already moved', async () => {

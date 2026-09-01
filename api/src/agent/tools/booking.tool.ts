@@ -302,13 +302,19 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
   };
 }
 
-function alreadyHeldNote(held: AvailabilityResult['alreadyHeld']): Record<string, unknown> {
+function alreadyHeldNote(
+  held: AvailabilityResult['alreadyHeld'],
+  otherSlotCount: number,
+): Record<string, unknown> {
   if (!held?.length) return {};
+  const otherSlots = otherSlotCount > 0;
   return {
     alreadyHeld: held,
     suggestedAction: 'confirm_existing',
-    guidance:
-      'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they wanted a different time, offer other slots from this result.',
+    ...(otherSlots ? {} : { noSlotsInRange: true }),
+    guidance: otherSlots
+      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they wanted a different time, offer other slots from this result.'
+      : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. If they wanted a different day, call check_availability for that day.',
   };
 }
 
@@ -502,7 +508,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.proposedAddress
       );
       const groupedNote = groupingNote(result.travel);
-      const heldNote = alreadyHeldNote(result.alreadyHeld);
+      const heldNote = alreadyHeldNote(result.alreadyHeld, utcSlots.length);
       const zone = result.timezone ?? 'UTC';
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
@@ -1066,22 +1072,26 @@ export class RequestAppointmentTool implements ToolAdapter {
 
 export class ListBookingsTool implements ToolAdapter {
   name = 'list_bookings';
-  description = 'List existing bookings for a customer by email address.';
+  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case.';
   parameters = {
     type: 'object',
     properties: {
       attendeeEmail: {
         type: 'string',
-        description: 'Email address of the customer whose bookings to retrieve.',
+        description: 'Email address the customer booked with. Omit it only when the customer says they booked without an email address.',
       },
     },
-    required: ['attendeeEmail'],
+    required: [],
   };
   hasSideEffects = false;
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const result = await listBookings('agent', ctx.sessionId, args.attendeeEmail as string);
+      const result = await listBookings(
+        'agent',
+        ctx.sessionId,
+        typeof args.attendeeEmail === 'string' ? args.attendeeEmail : undefined,
+      );
       return { success: true, data: result };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to list bookings') };

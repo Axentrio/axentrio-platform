@@ -7,7 +7,10 @@ const eventTypeFindOne = vi.fn();
 const serviceTypeFind = vi.fn();
 const ruleFindOne = vi.fn();
 const bookingFindOne = vi.fn();
-const bookingFind = vi.fn(async () => [] as Array<{ id: string }>);
+// Rows are shaped like real Booking rows (id, eventTypeId, status, startUtc, endUtc, ...), so
+// the element type stays open. A narrower `{ id: string }` fails the excess-property check on
+// every realistic fixture.
+const bookingFind = vi.fn(async () => [] as Array<Record<string, unknown>>);
 const bookingQuery = vi.fn();
 const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();

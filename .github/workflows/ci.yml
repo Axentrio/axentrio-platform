@@ -344,11 +344,11 @@ jobs:
         env:
           VITE_API_URL: https://api.staging.axentrio.com/api/v1
           VITE_WS_URL: https://api.staging.axentrio.com
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.NONPROD_CLERK_PUBLISHABLE_KEY }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.STAGING_CLERK_PUBLISHABLE_KEY }}
           VITE_FEATURE_COMPOSABLE_TEMPLATES: "true"
         run: |
           if [ -z "${VITE_CLERK_PUBLISHABLE_KEY}" ]; then
-            echo "NONPROD_CLERK_PUBLISHABLE_KEY is empty" >&2
+            echo "STAGING_CLERK_PUBLISHABLE_KEY is empty" >&2
             exit 1
           fi
           npm ci

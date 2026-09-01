@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 import path from 'path';
 import { parse as parsePgConnectionString } from 'pg-connection-string';
+import { parseClerkAuthorizedParties } from './clerk-authorized-parties';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -145,6 +146,7 @@ const envSchema = z.object({
   // Clerk
   CLERK_SECRET_KEY: z.string().min(1).default('clerk-dev-key-set-in-production'),
   CLERK_WEBHOOK_SECRET: z.string().optional(),
+  CLERK_AUTHORIZED_PARTIES: z.string().optional(),
 
   // ClamAV (optional)
   // Sentry
@@ -508,6 +510,7 @@ export const config = {
   clerk: {
     secretKey: env.CLERK_SECRET_KEY,
     webhookSecret: env.CLERK_WEBHOOK_SECRET,
+    authorizedParties: parseClerkAuthorizedParties(env.CLERK_AUTHORIZED_PARTIES),
   },
 
   widget: {

@@ -373,7 +373,12 @@ app.use("/api/v1/bookings", bookingPublicRouter);
 app.use("/api/v1/unsubscribe", digestUnsubscribeRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
-app.use(clerkMiddleware());
+const clerkAuthorizedParties = config.clerk.authorizedParties;
+app.use(
+  clerkAuthorizedParties.length > 0
+    ? clerkMiddleware({ authorizedParties: clerkAuthorizedParties })
+    : clerkMiddleware(),
+);
 
 // API routes under /api/v1
 const apiRouter = express.Router();

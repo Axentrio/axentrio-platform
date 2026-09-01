@@ -685,6 +685,13 @@ interface RunLoopState {
    * to call again would be an instruction to repeat work that already failed.
    */
   availabilityChecked: boolean;
+  /**
+   * A confirm_existing result: the customer already holds a booking at the
+   * named time, so leftover diary chips were dropped. Distinct from
+   * `pendingAvailability` (an offer on screen) and from `availabilityChecked`
+   * (the call happened, success or fail).
+   */
+  heldBooking: boolean;
   pendingAddressFact: BookingAddressReplyFact | null;
   addressFactConflict: boolean;
   addressCorrectionAttempted: boolean;
@@ -708,6 +715,7 @@ function newRunLoopState(): RunLoopState {
     availabilityCorrectionAttempted: false,
     promisedCheckCorrectionAttempted: false,
     availabilityChecked: false,
+    heldBooking: false,
     pendingAddressFact: null,
     addressFactConflict: false,
     addressCorrectionAttempted: false,
@@ -1577,7 +1585,7 @@ export class AgentService {
     state: RunLoopState,
     content: string,
   ): boolean {
-    if (!ctx.availabilityClaimGuardArmed || state.availabilityChecked || state.bookingRecorded) return false;
+    if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.heldBooking || state.bookingRecorded) return false;
     if (!claimsDatedUnavailability(content)) return false;
     if (state.availabilityCorrectionAttempted || i >= MAX_ITERATIONS - 1) return false;
     state.availabilityCorrectionAttempted = true;
@@ -1943,6 +1951,7 @@ export class AgentService {
       // time was unavailable. Record the call first (#80), then drop chips.
       if ((result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'confirm_existing') {
         state.pendingAvailability = null;
+        state.heldBooking = true;
       }
     } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
       state.pendingAvailability = null;

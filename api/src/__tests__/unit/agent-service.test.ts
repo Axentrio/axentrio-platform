@@ -5,6 +5,7 @@ import type { LLMProvider } from '../../llm/llm.types';
 import type { ChatSession } from '../../database/entities/ChatSession';
 import type { Tenant } from '../../database/entities/Tenant';
 import { createBlockLedger } from '../../llm/block-ledger';
+import * as offerRecordService from '../../booking/offer-record.service';
 
 const tokenBudget = vi.hoisted(() => ({
   isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
@@ -400,6 +401,128 @@ describe('AgentService', () => {
       expect(result.quickReplies![0].value).not.toMatch(/\([A-Za-z]+\/[A-Za-z_]+\)/);
     }
   });
+
+  it('records a confirm_existing availability call and sends no chips', async () => {
+    const recordSpy = vi.spyOn(offerRecordService, 'recordAvailabilityCall').mockResolvedValue('call-1');
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          suggestedAction: 'confirm_existing',
+          alreadyHeld: [
+            { bookingId: 'bk-1', start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T10:00:00.000Z' },
+          ],
+          slots: [
+            { start: '2026-09-03T08:00:00.000Z', end: '2026-09-03T08:30:00.000Z' },
+            { start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T09:30:00.000Z' },
+          ],
+        },
+        availability: {
+          slots: [
+            { start: '2026-09-03T08:00:00.000Z', end: '2026-09-03T08:30:00.000Z' },
+            { start: '2026-09-03T09:00:00.000Z', end: '2026-09-03T09:30:00.000Z' },
+          ],
+          timezone: 'Europe/Brussels',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{
+          id: 'tc_1',
+          name: 'check_availability',
+          arguments: { startDate: '2026-09-03', endDate: '2026-09-03' },
+        }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Je hebt die afspraak al.',
+        usage: { promptTokens: 80, completionTokens: 8 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Is donderdag 3 september om 11:00 nog vrij?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeUndefined();
+    }
+    await vi.waitFor(() => {
+      expect(recordSpy).toHaveBeenCalled();
+    });
+    expect(recordSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 's1',
+        startDate: '2026-09-03',
+        endDate: '2026-09-03',
+        slotCount: 2,
+      }),
+    );
+    recordSpy.mockRestore();
+  });
+
+  it('records availability_unchecked_claim after a failed check still claims a date is closed', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: false,
+        error: 'CALENDAR_NOT_CONNECTED: connect a calendar first',
+        errorSafeForModel: true,
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{
+          id: 'tc_1',
+          name: 'check_availability',
+          arguments: { startDate: '2026-09-16', endDate: '2026-09-16' },
+        }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Woensdag 16 september valt op een sluitingsdag; wil je toch een aanvraag indienen voor 10:00?',
+        usage: { promptTokens: 80, completionTokens: 20 },
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        content: 'Even kijken wanneer het wel kan.',
+        usage: { promptTokens: 90, completionTokens: 8 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Kan ik woensdag 16 september om 10:00?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    expect(mockTraceSave).toHaveBeenCalled();
+    const saved = mockTraceSave.mock.calls[0][0];
+    expect(saved.corrections ?? []).toContain('availability_unchecked_claim');
+  });
+
 
   it('does not attach slot chips when the reply confirms the one time the customer named', async () => {
     // WhatsApp production: customer asked for Monday 10:00, the bot confirmed 10:00 is free,

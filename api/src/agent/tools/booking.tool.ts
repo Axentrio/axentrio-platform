@@ -218,8 +218,9 @@ function namedTimeGuidance(
   ctx: ToolContext,
   offered: { confirmable: string[]; requestable: string[] },
   guidance?: string,
+  heldClocks: string[] = [],
 ): Record<string, unknown> {
-  const known = [...offered.confirmable, ...offered.requestable];
+  const known = [...offered.confirmable, ...offered.requestable, ...heldClocks];
   if (known.length === 0) return {};
   const said = lastCustomerText(ctx);
   const append = (line: string) => (guidance ? `${guidance} ${line}` : line);
@@ -513,9 +514,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
+      const heldClocks = localClockTimes(result.alreadyHeld ?? [], zone) ?? [];
       const withNamedTime = (data: Record<string, unknown>) => ({
         ...data,
-        ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined),
+        ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
       });
       if (heldNote.guidance) {
         return {

@@ -1160,6 +1160,40 @@ describe('check_availability — a time the caller already holds is not unavaila
     ]);
   });
 
+  it('does not flag requestedTimeUnavailable when the named time is one the caller holds', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-09T07:30:00.000Z', end: '2026-09-09T08:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-09T07:00:00.000Z', end: '2026-09-09T08:00:00.000Z' },
+      ],
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-09', endDate: '2026-09-09' },
+      {
+        sessionId: 'cs-1',
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil ook woensdag 9 september om 09:00. Boek die tijd nog eens.' },
+        ],
+      } as never,
+    );
+    const data = res.data as {
+      requestedTimeUnavailable?: string;
+      guidance?: string;
+    };
+    expect(data.requestedTimeUnavailable).toBeUndefined();
+    expect(data.guidance).toMatch(/already hold/i);
+    expect(data.guidance).not.toMatch(/cannot be done/);
+  });
+
   it('does not tell the model to offer other slots when this range has none', async () => {
     vi.resetModules();
     const checkAvailability = vi.fn(async () => ({

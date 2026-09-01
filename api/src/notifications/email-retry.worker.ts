@@ -42,9 +42,9 @@ export async function sweepFailedEmailDeliveries(): Promise<{ resent: number; ga
  *
  * `incrementAttempt` is the whole difference between the two failure shapes. A `failed` RESULT
  * means `sendDurable` already committed its own `attempt_count + 1`, so counting it again here
- * would double-count. A THROW means that transaction rolled back, so the row has to advance
- * HERE or it stays permanently due: it would re-fill the oldest claim slot every tick, and
- * CLAIM_LIMIT poison rows would starve every newer invite for good.
+ * would double-count. A throw FROM `sendDurable` means that transaction rolled back, so the row
+ * has to advance HERE or it stays permanently due: it would re-fill the oldest claim slot every
+ * tick, and CLAIM_LIMIT poison rows would starve every newer invite for good.
  *
  * Clearing `next_attempt_at` at the cap drops the row out of the claim filter for good.
  */
@@ -114,8 +114,17 @@ async function runSweep(): Promise<{ resent: number; gaveUp: number }> {
         kind: row.kind,
         errorName: error instanceof Error ? error.name : 'unknown',
       });
-      // The send transaction rolled back, so this row's attempt has to be counted here.
-      attempts = await advanceAfterFailure(row.id, true).catch(() => null);
+      // The send transaction rolled back, so this row's attempt has to be counted here. If the
+      // advance itself fails the row stays un-advanced and due, which is worth its own line.
+      attempts = await advanceAfterFailure(row.id, true).catch((advanceError: unknown) => {
+        logger.warn('[EmailRetry] advance after a thrown send failed, row stays due', {
+          deliveryId: row.id,
+          tenantId: row.tenant_id,
+          kind: row.kind,
+          errorName: advanceError instanceof Error ? advanceError.name : 'unknown',
+        });
+        return null;
+      });
     }
     if (result) {
       if (result.status === 'sent' || result.status === 'already_sent') {
@@ -123,8 +132,17 @@ async function runSweep(): Promise<{ resent: number; gaveUp: number }> {
         continue;
       }
       // A failed RESULT means sendDurable already committed its own attempt_count + 1, so this
-      // only moves the clock. Its own failure is swallowed: the row stays due and is retried.
-      attempts = await advanceAfterFailure(row.id, false).catch(() => null);
+      // only moves the clock and must never increment again.
+      attempts = await advanceAfterFailure(row.id, false).catch((advanceError: unknown) => {
+        // Ids only, same contract as the send log. The row keeps its old due time and retries.
+        logger.warn('[EmailRetry] backoff update failed, leaving the row due', {
+          deliveryId: row.id,
+          tenantId: row.tenant_id,
+          kind: row.kind,
+          errorName: advanceError instanceof Error ? advanceError.name : 'unknown',
+        });
+        return null;
+      });
     }
     if (attempts !== null && attempts >= MAX_ATTEMPTS) {
       gaveUp += 1;

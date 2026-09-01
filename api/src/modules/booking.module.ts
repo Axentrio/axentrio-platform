@@ -427,6 +427,17 @@ const ADDRESS_FIRST_RULE = `- Where the job is: for a service flagged "needs add
  * times, and only when travel time is actually running for the Agent.
  */
 const TRAVEL_ADDRESS_FIRST_RULE = `- Travel times: the times this business can offer depend on where the job is - it travels to customers, so a time is only bookable if the owner can get there from the jobs either side of it. Some results also carry travel.requestableSlots: those times cannot be auto-confirmed, so if the customer wants one, capture it with request_appointment and say plainly that the business will confirm it.`;
+/**
+ * CHECK BEFORE YOU CAPTURE, and it must ship for every auto-book catalog rather than only for
+ * one with a duration range. This obligation used to live inside rule 7c, which is gated on
+ * `hasDuration`, so a catalog of fixed-length services was never told it. A live at-home
+ * service then took an address, a name and a date and captured a request without ever calling
+ * check_availability (2026-09-01, WaterFix): the customer was told the owner would come back
+ * to them while the diary had free times all morning. The travel sentence is here for the same
+ * report - a job at the customer's door is exactly where a model talks itself out of checking.
+ */
+const CHECK_BEFORE_REQUEST_RULE = `- Check before you capture: ALWAYS call check_availability for the date the customer named before you tell the customer whether a time works, before you refuse one, and before you capture a request. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date. Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. A job at the customer's address is NOT an exception: check_availability is what reports the travel result, so an unmeasured journey is a reason to call it and never a reason to skip it. NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. (A request-only service is different: rule 3 tells you to capture a request WITHOUT calling check_availability.)`;
+
 
 /**
  * Phone-call Auto-book must stay in the booking flow when the number is missing.
@@ -502,6 +513,7 @@ function catalogServiceFlags(services: ServiceType[], businessCapacity: boolean)
     hasOnRequestPrice: services.some((s) => s.priceDisplayType === 'on_request'),
     hasRequiredFile: services.some((s) => s.fileUploadRequired),
     hasRequiredEmail: services.some((s) => serviceRequiresCustomerEmail(s)),
+    hasAutoBook: services.some((s) => s.bookingMode === 'auto'),
   };
 }
 
@@ -539,7 +551,7 @@ function catalogNumberedRules(flags: CatalogServiceFlags): string {
 7. A service can show a duration RANGE (e.g. "30-90 min") with one of two labels; the label decides WHO picks the length. Apply the matching sub-rule, then 7c for both.
   7a. "choose length" (the CUSTOMER decides): ask the customer how long they need (a number of minutes within the shown range) and use THEIR answer. NEVER assume, guess, or pick a length yourself, and NEVER default to the middle of the range. Do not offer to book, and do not call check_availability or create_booking, until they have given you a number. On DURATION_REQUIRED or DURATION_OUT_OF_RANGE, ask the customer for a number within the range. On SLOT_UNAVAILABLE you may offer a different start, but you must ask the customer before changing their length.
   7b. "AI-estimated" (YOU decide): estimate it from what they have described (a number within the shown range), without asking the customer for minutes; your own estimate IS the number, so do not ask and do not wait - call check_availability with your estimate as durationMin straight away. Estimating is never a reason to skip the check, and never a reason to capture a request. On DURATION_REQUIRED estimate one; on DURATION_OUT_OF_RANGE re-estimate within the range. On SLOT_UNAVAILABLE you may offer a different start or pick a shorter length within range yourself.
-  7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
+  7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. The "check before you capture" rule applies here WITH the length: check with the customer's number for "choose length", and with your own estimate for "AI-estimated". EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
   }`;
 }
@@ -550,8 +562,8 @@ function catalogNumberedRules(flags: CatalogServiceFlags): string {
  * service that travels.
  */
 function catalogRuleLines(flags: CatalogServiceFlags, travelTimeActive: boolean): string {
-  const { hasPhone, hasRequiredFile, hasRequiredEmail, hasCustomerLocation, hasTravelJob } = flags;
-  return `${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasRequiredFile ? `${FILE_REQUIRED_RULE}\n` : ''}${hasRequiredEmail ? `${EMAIL_REQUIRED_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}`;
+  const { hasPhone, hasRequiredFile, hasRequiredEmail, hasCustomerLocation, hasTravelJob, hasAutoBook } = flags;
+  return `${hasAutoBook ? `${CHECK_BEFORE_REQUEST_RULE}\n` : ''}${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasRequiredFile ? `${FILE_REQUIRED_RULE}\n` : ''}${hasRequiredEmail ? `${EMAIL_REQUIRED_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}`;
 }
 
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */

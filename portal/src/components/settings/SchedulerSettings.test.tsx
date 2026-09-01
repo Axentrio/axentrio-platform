@@ -51,6 +51,7 @@ vi.mock('../../services/apiClient', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
 import { SchedulerSettings } from './SchedulerSettings';
+import { toast } from 'sonner';
 
 const RULES = {
   maxBookingsPerDay: 4,
@@ -660,5 +661,53 @@ describe('SchedulerSettings — refuses to save what the API will reject', { tim
       },
     });
     expect(save.disabled).toBe(false);
+  });
+});
+
+describe('SchedulerSettings — one calendar per Agent', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function mockApis(over: { google?: object; outlook?: object } = {}) {
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
+      if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
+      if (url.includes('/integrations/outlook/status')) {
+        return Promise.resolve({ connected: false, accountEmail: null, needsReauth: false, ...over.outlook });
+      }
+      if (url.includes('/integrations/google/status')) {
+        return Promise.resolve({ connected: false, accountEmail: null, needsReauth: false, ...over.google });
+      }
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      if (url.includes('/availability')) return Promise.resolve({ slots: [], timezone: 'Europe/Brussels' });
+      return Promise.resolve({});
+    });
+  }
+
+  it('disables Google connect when Outlook is already connected', async () => {
+    mockApis({ outlook: { connected: true, accountEmail: 'owner@outlook.com' } });
+    renderUI();
+    expect(
+      await screen.findByText('One calendar per Agent. Connect Google or Outlook, not both.'),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /connect google calendar/i })).toBeDisabled();
+    expect(
+      screen.getByText('This Agent already uses Outlook. Disconnect Outlook first. One calendar per Agent.'),
+    ).toBeInTheDocument();
+  });
+
+  it('explains google=error when Outlook is already connected', async () => {
+    const original = window.location.search;
+    window.history.replaceState({}, '', '/bookings?google=error');
+    try {
+      mockApis({ outlook: { connected: true, accountEmail: 'owner@outlook.com' } });
+      renderUI();
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          'This Agent already uses Outlook Calendar. Disconnect Outlook first.',
+        );
+      });
+    } finally {
+      window.history.replaceState({}, '', `/bookings${original}`);
+    }
   });
 });

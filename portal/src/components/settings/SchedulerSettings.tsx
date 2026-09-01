@@ -151,6 +151,10 @@ export const SchedulerSettings: React.FC = () => {
   // Toast + refresh after a calendar OAuth callback redirects back with
   // ?google=connected|error or ?outlook=connected|error.
   useEffect(() => {
+    // Do not consume ?google=error until both status queries have settled.
+    // Otherwise Outlook still looks disconnected, the generic toast fires, and
+    // the param is gone before the real reason can show.
+    if (!googleStatus.isFetched || !outlookStatus.isFetched) return;
     const params = new URLSearchParams(window.location.search);
     const providers: Array<{ key: 'google' | 'outlook'; label: string }> = [
       { key: 'google', label: 'Google Calendar' },
@@ -162,20 +166,21 @@ export const SchedulerSettings: React.FC = () => {
       if (!v) continue;
       if (v === 'connected') {
         toast.success(`${label} connected`);
-        // The Agent segment matters: invalidating the tenant-global prefix would refresh
-        // every Agent's cached status, and miss none — but naming the prefix keeps that
-        // explicit rather than accidental.
         queryClient.invalidateQueries({ queryKey: [key, 'status'] });
       } else if (v === 'error') {
-        toast.error(`${label} connection failed`);
+        const otherConnected =
+          key === 'google' ? outlookStatus.data?.connected : googleStatus.data?.connected;
+        const otherLabel = key === 'google' ? 'Outlook' : 'Google';
+        toast.error(
+          otherConnected
+            ? `This Agent already uses ${otherLabel} Calendar. Disconnect ${otherLabel} first.`
+            : `${label} connection failed`,
+        );
       }
       params.delete(key);
-      // The Agent came in on the same redirect and has been read into state above; leaving it
-      // in the address bar would survive a later navigation and silently reselect it.
       params.delete('botId');
       changed = true;
     }
-    // A personal Microsoft account connected: Teams links can't be generated for video bookings.
     if (params.get('teams') === 'unavailable') {
       toast.warning(
         "Connected a personal Microsoft account — video bookings won't get a Teams meeting link. Reconnect a work or school account to enable video links.",
@@ -186,7 +191,13 @@ export const SchedulerSettings: React.FC = () => {
     if (!changed) return;
     const qs = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
-  }, [queryClient]);
+  }, [
+    queryClient,
+    googleStatus.isFetched,
+    outlookStatus.isFetched,
+    googleStatus.data?.connected,
+    outlookStatus.data?.connected,
+  ]);
 
   // One reducer for the whole scheduler form (react-doctor prefer-useReducer).
   // Field state + hydration live in `form`; the `setX` wrappers below keep the
@@ -435,19 +446,23 @@ export const SchedulerSettings: React.FC = () => {
           <div className="py-6 text-sm text-text-muted">Loading…</div>
         ) : (
           <div className="space-y-5">
-                {/* Google Calendar connection (Phase 1) */}
-                <GoogleCalendarSection
-                  status={googleStatus}
-                  connect={connectGoogle}
-                  disconnect={disconnectGoogle}
-                />
-
-                {/* Outlook Calendar connection (Phase 6b) */}
-                <OutlookCalendarSection
-                  status={outlookStatus}
-                  connect={connectOutlook}
-                  disconnect={disconnectOutlook}
-                />
+                <div className="space-y-4 border-t border-edge pt-4">
+                  <p className="text-xs text-text-secondary">
+                    One calendar per Agent. Connect Google or Outlook, not both.
+                  </p>
+                  <GoogleCalendarSection
+                    status={googleStatus}
+                    connect={connectGoogle}
+                    disconnect={disconnectGoogle}
+                    blockedBy={outlookStatus.data?.connected ? 'Outlook' : null}
+                  />
+                  <OutlookCalendarSection
+                    status={outlookStatus}
+                    connect={connectOutlook}
+                    disconnect={disconnectOutlook}
+                    blockedBy={googleStatus.data?.connected ? 'Google' : null}
+                  />
+                </div>
 
                 {/* Services catalog (multi-service) */}
                 <ServicesSection
@@ -621,12 +636,48 @@ interface CalendarSectionProps {
   status: { data?: { connected: boolean; accountEmail: string | null; needsReauth?: boolean; supportsOnlineMeetings?: boolean } };
   connect: { mutate: () => void; isPending: boolean };
   disconnect: { mutate: () => void; isPending: boolean };
+  /** Other provider already active. Connect is off until they disconnect that one. */
+  blockedBy: string | null;
+}
+
+function CalendarIdleConnect({
+  hint,
+  blockedBy,
+  buttonLabel,
+  connect,
+}: {
+  hint: string;
+  blockedBy: string | null;
+  buttonLabel: string;
+  connect: { mutate: () => void; isPending: boolean };
+}) {
+  const blocked = Boolean(blockedBy);
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <span className="text-sm text-text-muted">
+        {blocked
+          ? `This Agent already uses ${blockedBy}. Disconnect ${blockedBy} first. One calendar per Agent.`
+          : hint}
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => connect.mutate()}
+        disabled={blocked || connect.isPending}
+      >
+        {connect.isPending && !blocked ? (
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+        ) : null}
+        {buttonLabel}
+      </Button>
+    </div>
+  );
 }
 
 /** Google Calendar connect / reconnect / disconnect row. Verbatim JSX, lifted out
  *  of SchedulerSettings so each section stays readable. */
-const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect }) => (
-  <div className="space-y-2 border-t border-edge pt-4">
+const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect, blockedBy }) => (
+  <div className="space-y-2">
     <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
     {status.data?.connected && status.data?.needsReauth ? (
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -662,28 +713,18 @@ const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect
         </Button>
       </div>
     ) : (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm text-text-muted">
-          Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events.
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => connect.mutate()}
-          disabled={connect.isPending}
-        >
-          {connect.isPending ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-          ) : null}
-          Connect Google Calendar
-        </Button>
-      </div>
+      <CalendarIdleConnect
+        hint="Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events."
+        blockedBy={blockedBy}
+        buttonLabel="Connect Google Calendar"
+        connect={connect}
+      />
     )}
   </div>
 );
 
 /** Outlook Calendar connect / reconnect / disconnect row. */
-const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect }) => (
+const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect, blockedBy }) => (
   <div className="space-y-2 border-t border-edge pt-4">
     <h3 className="text-sm font-medium text-text-primary">Outlook Calendar</h3>
     {status.data?.connected && status.data?.needsReauth ? (
@@ -728,22 +769,12 @@ const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connec
         ) : null}
       </>
     ) : (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm text-text-muted">
-          Optional: connect Outlook so bookings land on your calendar and respect your existing events.
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => connect.mutate()}
-          disabled={connect.isPending}
-        >
-          {connect.isPending ? (
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
-          ) : null}
-          Connect Outlook Calendar
-        </Button>
-      </div>
+      <CalendarIdleConnect
+        hint="Optional: connect Outlook so bookings land on your calendar and respect your existing events."
+        blockedBy={blockedBy}
+        buttonLabel="Connect Outlook Calendar"
+        connect={connect}
+      />
     )}
   </div>
 );

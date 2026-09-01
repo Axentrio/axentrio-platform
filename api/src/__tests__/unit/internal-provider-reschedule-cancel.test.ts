@@ -1535,5 +1535,37 @@ describe('InternalProvider.updateBooking', () => {
       code: 'BOOKING_AMBIGUOUS',
     });
   });
+
+  it('appends a note to the one already stored', async () => {
+    bookingFind.mockResolvedValue([{ ...noEmailBooking(), notes: 'ring the bell' }]);
+    const res = await provider.updateBooking(ctx, { notes: 'gate code 1234' });
+    expect(res.booking.notes).toBe('ring the bell\ngate code 1234');
+  });
+
+  it('does not repeat a note the appointment already carries', async () => {
+    // The customer says the same thing twice, or the model calls twice on one turn. An append
+    // that duplicates itself grows the owner's note every time somebody repeats themselves.
+    bookingFind.mockResolvedValue([{ ...noEmailBooking(), notes: 'ring the bell\ngate code 1234' }]);
+    await expect(provider.updateBooking(ctx, { notes: 'gate code 1234' })).rejects.toMatchObject({
+      code: 'NOTHING_TO_UPDATE',
+    });
+  });
+
+  it('keeps the stored value when the new one cleans away to nothing', async () => {
+    // A blank is not a correction. Wiping the name off a confirmed appointment because the
+    // model passed an empty string would lose the only thing the owner can greet them by.
+    bookingFind.mockResolvedValue([{ ...noEmailBooking(), attendeeName: 'Ada Lovelace' }]);
+    await expect(provider.updateBooking(ctx, { attendeeName: '   ' })).rejects.toMatchObject({
+      code: 'NOTHING_TO_UPDATE',
+    });
+  });
+
+  it('writes a phone number and a name together, without mailing anyone', async () => {
+    bookingFind.mockResolvedValue([{ ...noEmailBooking(), attendeeName: null }]);
+    const res = await provider.updateBooking(ctx, { attendeeName: 'Ada', customerPhone: '+32470123456' });
+    expect(res.booking).toMatchObject({ attendeeName: 'Ada', customerPhone: '+32470123456' });
+    expect(res.emailSent).toBe(false);
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
 });
 

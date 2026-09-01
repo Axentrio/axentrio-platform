@@ -40,9 +40,26 @@ const SYNC_SCAN_TIMEOUT_MS = 25_000;
 const inFlightScans = new Map<string, Promise<ScanResult>>();
 
 /**
+ * Key the session will read after a clean scan. The client's presigned PUT
+ * still targets the original key, so a later overwrite cannot change what we
+ * serve. A key that is already a scanned copy is returned unchanged so a retry
+ * after a partial write does not copy a copy.
+ */
+export function scannedCopyKey(fileKey: string): string {
+  const slash = fileKey.lastIndexOf('/');
+  const base = slash >= 0 ? fileKey.slice(slash + 1) : fileKey;
+  const prefix = slash >= 0 ? fileKey.slice(0, slash + 1) : '';
+  const dot = base.lastIndexOf('.');
+  const name = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : '';
+  if (name.endsWith('.scanned')) return fileKey;
+  return `${prefix}${name}.scanned${ext}`;
+}
+
+/**
  * Scan an uploaded file. Updates session status, emits audit logs, and
- * (on clean scan) generates a thumbnail; (on infected scan) deletes the
- * file from S3.
+ * (on clean scan) copies the object off the writable upload key, then
+ * generates a thumbnail; (on infected scan) deletes the file from S3.
  *
  * Wraps the scan in a {@link SYNC_SCAN_TIMEOUT_MS} timeout so the
  * client-facing /upload-complete handler can't hang past the global API
@@ -56,13 +73,9 @@ const inFlightScans = new Map<string, Promise<ScanResult>>();
  * Returns the canonical ScanResult so callers can surface threats / scan
  * method / duration to the client.
  *
- * **Known limitation — TOCTOU on presigned URL re-upload** (codex round
- * PR1 #1): the S3 presigned PUT URL is valid until its expiry window. A
- * malicious client could upload a clean file, pass the scan, then re-upload
- * a malicious payload to the same key while the session is marked `ready`.
- * v1 mitigation: rely on short presigned-URL TTLs (set in upload.service).
- * Real fix needs ETag/version pinning at scan time + ETag verification when
- * preview/download URLs are minted — tracked as a separate security ticket.
+ * After a clean scan the session `file_key` is a copy the client cannot PUT.
+ * The original upload key is then deleted. A later overwrite of that PUT URL
+ * cannot reach preview, download, or the owner booking email.
  */
 export async function performScan(
   sessionId: string,
@@ -106,7 +119,6 @@ async function doScan(
 ): Promise<ScanResult> {
   const uploadService = getUploadService();
   const virusScanService = getVirusScanService();
-  const thumbnailService = getThumbnailService();
 
   const session = await uploadService.getSession(sessionId);
   if (!session) {
@@ -128,77 +140,124 @@ async function doScan(
   }
 
   if (scanResult.clean) {
-    await uploadService.updateSessionStatus(sessionId, 'ready', scanResult);
-    logAudit(
-      session.userId,
-      'FILE_SCAN_COMPLETED',
-      'upload',
-      sessionId,
-      session.tenantId,
-      {
-        fileKey,
-        clean: true,
-        scanMethod: scanResult.scanMethod,
-        durationMs: scanResult.scanDurationMs,
-      },
-    );
-
-    // Thumbnail is best-effort and slow (Sharp + S3), so generate it OFF the
-    // scan-response path: the client gets its 'ready' result as soon as the
-    // scan clears, and the thumbnail lands shortly after. Failure is logged,
-    // never fatal, and never downgrades the scan result.
-    if (thumbnailService.shouldGenerateThumbnail(session.mimeType)) {
-      void (async () => {
-        try {
-          const thumbnailUrl = await thumbnailService.generateThumbnail(
-            fileKey,
-            session.mimeType,
-          );
-          // generateThumbnail returns '' when the source was smaller than every
-          // configured size (nothing generated) — only persist a real URL.
-          if (thumbnailUrl) {
-            await uploadService.setThumbnailUrl(sessionId, thumbnailUrl);
-          }
-        } catch (error) {
-          logger.error('Thumbnail generation error', {
-            error,
-            fileKey,
-            sessionId,
-            mimeType: session.mimeType,
-          });
-        }
-      })();
-    }
+    await promoteCleanScan(sessionId, fileKey, scanResult, session);
   } else {
-    await uploadService.updateSessionStatus(sessionId, 'quarantined', scanResult);
-    logAudit(
-      session.userId,
-      'FILE_QUARANTINED',
-      'upload',
-      sessionId,
-      session.tenantId,
-      {
-        fileKey,
-        threats: scanResult.threats ?? [],
-        severity: 'HIGH',
-      },
-    );
+    await quarantineInfected(sessionId, fileKey, scanResult, session);
+  }
 
-    // Delete the infected file from S3. If the delete fails (e.g. transient
-    // S3 error), we log and continue — the session is already marked
-    // 'quarantined' so the file won't be served to users.
+  return scanResult;
+}
+
+async function promoteCleanScan(
+  sessionId: string,
+  fileKey: string,
+  scanResult: ScanResult,
+  session: { userId: string; tenantId: string; mimeType: string },
+): Promise<void> {
+  const uploadService = getUploadService();
+  const destKey = scannedCopyKey(fileKey);
+  if (destKey !== fileKey) {
+    try {
+      await uploadService.copyObject(fileKey, destKey);
+    } catch (error) {
+      await uploadService.updateSessionStatus(sessionId, 'failed');
+      logger.error('Failed to copy scanned file off the writable upload key', {
+        sessionId,
+        fileKey,
+        destKey,
+        error,
+      });
+      throw error;
+    }
+  }
+  await uploadService.updateSessionStatus(
+    sessionId,
+    'ready',
+    scanResult,
+    destKey !== fileKey ? destKey : undefined,
+  );
+  logAudit(
+    session.userId,
+    'FILE_SCAN_COMPLETED',
+    'upload',
+    sessionId,
+    session.tenantId,
+    {
+      fileKey: destKey,
+      clean: true,
+      scanMethod: scanResult.scanMethod,
+      durationMs: scanResult.scanDurationMs,
+    },
+  );
+
+  if (destKey !== fileKey) {
     try {
       await uploadService.deleteFile(fileKey);
     } catch (error) {
-      logger.error('Failed to delete quarantined file from S3', {
+      logger.warn('Failed to delete writable upload key after scan copy (non-fatal)', {
         sessionId,
         fileKey,
-        error,
+        destKey,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  return scanResult;
+  const thumbnailService = getThumbnailService();
+  if (!thumbnailService.shouldGenerateThumbnail(session.mimeType)) return;
+  // Thumbnail is best-effort and slow (Sharp + S3), so generate it OFF the
+  // scan-response path from the scanned key. The original key may already
+  // be deleted.
+  void (async () => {
+    try {
+      const thumbnailUrl = await thumbnailService.generateThumbnail(
+        destKey,
+        session.mimeType,
+      );
+      if (thumbnailUrl) {
+        await uploadService.setThumbnailUrl(sessionId, thumbnailUrl);
+      }
+    } catch (error) {
+      logger.error('Thumbnail generation error', {
+        error,
+        fileKey: destKey,
+        sessionId,
+        mimeType: session.mimeType,
+      });
+    }
+  })();
+}
+
+async function quarantineInfected(
+  sessionId: string,
+  fileKey: string,
+  scanResult: ScanResult,
+  session: { userId: string; tenantId: string },
+): Promise<void> {
+  const uploadService = getUploadService();
+  await uploadService.updateSessionStatus(sessionId, 'quarantined', scanResult);
+  logAudit(
+    session.userId,
+    'FILE_QUARANTINED',
+    'upload',
+    sessionId,
+    session.tenantId,
+    {
+      fileKey,
+      threats: scanResult.threats ?? [],
+      severity: 'HIGH',
+    },
+  );
+
+  try {
+    await uploadService.deleteFile(fileKey);
+  } catch (error) {
+    logger.error('Failed to delete quarantined file from S3', {
+      sessionId,
+      fileKey,
+      error,
+    });
+  }
 }
 
 /**

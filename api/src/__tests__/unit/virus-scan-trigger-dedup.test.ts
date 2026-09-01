@@ -19,6 +19,7 @@ const {
   getSessionMock,
   updateSessionStatusMock,
   deleteFileMock,
+  copyObjectMock,
   scanFileMock,
   shouldGenerateThumbnailMock,
   logAuditMock,
@@ -26,6 +27,7 @@ const {
   getSessionMock: vi.fn(),
   updateSessionStatusMock: vi.fn(),
   deleteFileMock: vi.fn().mockResolvedValue(undefined),
+  copyObjectMock: vi.fn().mockResolvedValue(undefined),
   scanFileMock: vi.fn(),
   shouldGenerateThumbnailMock: vi.fn().mockReturnValue(false),
   logAuditMock: vi.fn().mockResolvedValue(undefined),
@@ -36,6 +38,7 @@ vi.mock('../../file-handling/upload.service', () => ({
     getSession: getSessionMock,
     updateSessionStatus: updateSessionStatusMock,
     deleteFile: deleteFileMock,
+    copyObject: copyObjectMock,
   }),
 }));
 
@@ -75,6 +78,7 @@ beforeEach(() => {
   getSessionMock.mockReset();
   updateSessionStatusMock.mockReset();
   deleteFileMock.mockClear();
+  copyObjectMock.mockClear();
   scanFileMock.mockReset();
   logAuditMock.mockClear();
 });

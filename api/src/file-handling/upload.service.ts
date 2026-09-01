@@ -16,6 +16,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createS3Client } from '../config/s3.config';
@@ -161,6 +162,11 @@ export const DEFAULT_UPLOAD_CONFIG: UploadConfig = {
   enableThumbnail: true,
   retentionDays: 30, // GDPR: 30 days auto-delete
 };
+
+/** CopySource for S3/R2: encode each key segment so spaces or `%` do not 404. */
+export function s3CopySource(bucket: string, key: string): string {
+  return `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
+}
 
 // ============================================================================
 // Upload Service Class
@@ -518,6 +524,20 @@ export class UploadService {
       Key: fileKey,
     });
 
+    await this.s3Client.send(command);
+  }
+
+  /**
+   * Copy an object to a new key in the same bucket. Used after a clean virus
+   * scan so the session points at a key the client's presigned PUT cannot write.
+   */
+  async copyObject(sourceKey: string, destKey: string): Promise<void> {
+    const command = new CopyObjectCommand({
+      Bucket: this.config.bucketName,
+      CopySource: s3CopySource(this.config.bucketName, sourceKey),
+      Key: destKey,
+      MetadataDirective: 'COPY',
+    });
     await this.s3Client.send(command);
   }
 
@@ -1051,6 +1071,7 @@ export class UploadService {
     sessionId: string,
     status: UploadSession['status'],
     scanResult?: UploadSession['scanResult'],
+    fileKey?: string,
   ): Promise<UploadSession | undefined> {
     const repo = this.getUploadSessionRepo();
     const patch: Record<string, unknown> = { status };
@@ -1064,6 +1085,7 @@ export class UploadService {
             : scanResult.scannedAt,
       };
     }
+    if (fileKey) patch.fileKey = fileKey;
     const result = await repo
       .createQueryBuilder()
       .update()

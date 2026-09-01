@@ -26,6 +26,7 @@ const {
   updateSessionStatusMock,
   fileExistsMock,
   deleteFileMock,
+  copyObjectMock,
   scanFileMock,
   shouldGenerateThumbnailMock,
   generateThumbnailMock,
@@ -35,6 +36,7 @@ const {
   updateSessionStatusMock: vi.fn(),
   fileExistsMock: vi.fn(),
   deleteFileMock: vi.fn().mockResolvedValue(undefined),
+  copyObjectMock: vi.fn().mockResolvedValue(undefined),
   scanFileMock: vi.fn(),
   shouldGenerateThumbnailMock: vi.fn().mockReturnValue(false),
   generateThumbnailMock: vi.fn().mockResolvedValue('thumb-url'),
@@ -50,6 +52,7 @@ vi.mock('../../file-handling/upload.service', () => ({
     updateSessionStatus: updateSessionStatusMock,
     fileExists: fileExistsMock,
     deleteFile: deleteFileMock,
+    copyObject: copyObjectMock,
     generateUploadUrl: vi.fn(),
     generatePublicUrl: vi.fn(),
     generateDownloadUrl: vi.fn(),
@@ -133,6 +136,7 @@ beforeEach(() => {
   updateSessionStatusMock.mockReset();
   fileExistsMock.mockReset();
   deleteFileMock.mockClear();
+  copyObjectMock.mockClear();
   scanFileMock.mockReset();
   shouldGenerateThumbnailMock.mockClear();
   generateThumbnailMock.mockClear();
@@ -280,9 +284,15 @@ describe('POST /files/:sessionId/upload-complete — clean scan', () => {
     expect(res.body.data.scanResult.clean).toBe(true);
     expect(res.body.data.scanResult.scanMethod).toBe('buffer');
 
-    // updateSessionStatus called twice: 'scanning' then 'ready'.
+    // updateSessionStatus called twice: 'scanning' then 'ready' at the scanned copy key.
     expect(updateSessionStatusMock).toHaveBeenCalledWith(FILE_SESSION_ID, 'scanning');
-    expect(updateSessionStatusMock).toHaveBeenCalledWith(FILE_SESSION_ID, 'ready', cleanScanResult);
+    expect(updateSessionStatusMock).toHaveBeenCalledWith(
+      FILE_SESSION_ID,
+      'ready',
+      cleanScanResult,
+      'uploads/ccccc/2026/05/20/hash.scanned.pdf',
+    );
+    expect(copyObjectMock).toHaveBeenCalledWith(FILE_KEY, 'uploads/ccccc/2026/05/20/hash.scanned.pdf');
 
     // Audit fired with the correct shape.
     expect(logAuditMock).toHaveBeenCalledTimes(1);
@@ -293,14 +303,14 @@ describe('POST /files/:sessionId/upload-complete — clean scan', () => {
     expect(entityId).toBe(FILE_SESSION_ID);
     expect(tenantId).toBe(CALLER_TENANT);
     expect(meta).toMatchObject({
-      fileKey: FILE_KEY,
+      fileKey: 'uploads/ccccc/2026/05/20/hash.scanned.pdf',
       clean: true,
       scanMethod: 'buffer',
       durationMs: 42,
     });
 
-    // File NOT deleted.
-    expect(deleteFileMock).not.toHaveBeenCalled();
+    // Original writable key is deleted after the copy.
+    expect(deleteFileMock).toHaveBeenCalledWith(FILE_KEY);
   });
 });
 

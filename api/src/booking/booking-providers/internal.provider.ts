@@ -191,6 +191,90 @@ type TravelSnapshot = {
 };
 
 
+/** The four contact fields an update may touch, already resolved against the stored row. */
+type UpdatedContactFields = {
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+};
+
+/**
+ * WHAT THE ROW WOULD HOLD AFTER THIS PATCH, decided in one place because the four fields
+ * share one rule: a field the patch never mentions keeps its stored value, and so does a
+ * field whose new value cleans away to nothing, since a blank is not a correction. Notes are
+ * the exception that proves it - they append rather than replace, and an append the row
+ * already contains is not repeated.
+ */
+function mergedContactFields(patch: UpdateBookingPatch, booking: Booking): UpdatedContactFields {
+  const extraNotes = patch.notes !== undefined ? cleanContact(patch.notes, 4000) : null;
+  return {
+    name: patch.attendeeName !== undefined
+      ? (cleanContact(patch.attendeeName, 255) ?? booking.attendeeName ?? null)
+      : booking.attendeeName ?? null,
+    email: patch.attendeeEmail !== undefined
+      ? (cleanContact(patch.attendeeEmail, 320) ?? booking.attendeeEmail ?? null)
+      : booking.attendeeEmail ?? null,
+    phone: patch.customerPhone !== undefined
+      ? (cleanContact(patch.customerPhone, 64) ?? booking.customerPhone ?? null)
+      : booking.customerPhone ?? null,
+    notes: extraNotes
+      ? (booking.notes && booking.notes.includes(extraNotes)
+          ? booking.notes
+          : `${booking.notes ? `${booking.notes}\n` : ''}${extraNotes}`.slice(0, 4000))
+      : booking.notes ?? null,
+  };
+}
+
+/** An update that changes nothing is refused, so the caller needs one answer, not five. */
+function contactFieldsChanged(
+  booking: Booking,
+  next: UpdatedContactFields,
+  filesChanged: boolean,
+): boolean {
+  return (
+    next.name !== (booking.attendeeName ?? null) ||
+    next.email !== (booking.attendeeEmail ?? null) ||
+    next.phone !== (booking.customerPhone ?? null) ||
+    next.notes !== (booking.notes ?? null) ||
+    filesChanged
+  );
+}
+
+/**
+ * The appointment address a reschedule carries, or `undefined` when the caller named none.
+ * A caller who names one owes a complete address: the job moves to a door, and a town is not
+ * a door. The refusal is the tool's instruction to ask again, never a different time.
+ */
+function rescheduleAddress(customerAddress: string | undefined): string | null | undefined {
+  if (customerAddress === undefined) return undefined;
+  const cleaned = cleanContact(customerAddress, 512);
+  if (!isCompleteCustomerAddress(cleaned)) {
+    throw new BookingError(
+      "This service is carried out at the customer's address. Ask for the full appointment address (street, house number, postal code, and city) and call reschedule_booking again with customerAddress. Do not invent a different time.",
+      'ADDRESS_REQUIRED',
+      400,
+    );
+  }
+  return cleaned;
+}
+
+/**
+ * The snapshot the in-lock replay reads, and only when the pre-lock verdict actually cleared.
+ * A verdict that did not clear has nothing worth carrying: the write either refuses or, for an
+ * annotating owner, proceeds without claiming a routing answer it never had.
+ */
+function clearedTravelSnapshot(checked: TravelSnapshot | null, verdict: TravelVerdict): TravelSnapshot | null {
+  if (!checked || verdict !== 'clear') return null;
+  return {
+    candidate: checked.candidate,
+    venue: checked.venue,
+    drives: checked.drives,
+    base: checked.base,
+    dayStart: checked.dayStart,
+  };
+}
+
 export class InternalProvider implements BookingProvider {
   /**
    * Business availability for the bot (shared by all services).
@@ -2760,28 +2844,9 @@ export class InternalProvider implements BookingProvider {
 
   async updateBooking(ctx: BookingContext, patch: UpdateBookingPatch): Promise<UpdateBookingResult> {
     const booking = await this.resolveUpdatableBooking(ctx, patch.bookingId);
-    const nextName = patch.attendeeName !== undefined
-      ? (cleanContact(patch.attendeeName, 255) ?? booking.attendeeName ?? null)
-      : booking.attendeeName ?? null;
-    const nextEmail = patch.attendeeEmail !== undefined
-      ? (cleanContact(patch.attendeeEmail, 320) ?? booking.attendeeEmail ?? null)
-      : booking.attendeeEmail ?? null;
-    const nextPhone = patch.customerPhone !== undefined
-      ? (cleanContact(patch.customerPhone, 64) ?? booking.customerPhone ?? null)
-      : booking.customerPhone ?? null;
-    const extraNotes = patch.notes !== undefined ? cleanContact(patch.notes, 4000) : null;
-    const nextNotes = extraNotes
-      ? (booking.notes && booking.notes.includes(extraNotes)
-          ? booking.notes
-          : `${booking.notes ? `${booking.notes}\n` : ''}${extraNotes}`.slice(0, 4000))
-      : booking.notes ?? null;
+    const next = mergedContactFields(patch, booking);
     const merged = await this.mergeChatFiles(ctx, booking.uploadedFiles);
-    const changed =
-      (nextName ?? null) !== (booking.attendeeName ?? null) ||
-      (nextEmail ?? null) !== (booking.attendeeEmail ?? null) ||
-      (nextPhone ?? null) !== (booking.customerPhone ?? null) ||
-      (nextNotes ?? null) !== (booking.notes ?? null) ||
-      merged.changed;
+    const changed = contactFieldsChanged(booking, next, merged.changed);
     if (!changed) {
       throw new BookingError(
         'Nothing new to add to this appointment. If they named a new time or address, that is a reschedule — call reschedule_booking. Do not escalate to a human just to add details.',
@@ -2789,7 +2854,7 @@ export class InternalProvider implements BookingProvider {
         400,
       );
     }
-    const sendInvite = booking.status === 'confirmed' && (nextEmail ?? null) !== (booking.attendeeEmail ?? null) && !!nextEmail;
+    const sendInvite = booking.status === 'confirmed' && next.email !== (booking.attendeeEmail ?? null) && !!next.email;
     const rows = returningRows<{ sequence: number }>(await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
           SET attendee_name=$1, attendee_email=$2, customer_phone=$3, notes=$4,
@@ -2797,10 +2862,10 @@ export class InternalProvider implements BookingProvider {
         WHERE id=$7 AND tenant_id=$8 AND status = ANY($9::text[])
         RETURNING sequence`,
       [
-        nextName,
-        nextEmail,
-        nextPhone,
-        nextNotes,
+        next.name,
+        next.email,
+        next.phone,
+        next.notes,
         merged.files ? JSON.stringify(merged.files) : null,
         sendInvite,
         booking.id,
@@ -2814,22 +2879,22 @@ export class InternalProvider implements BookingProvider {
     await this.writeLog(
       ctx,
       'updated',
-      { ...booking, attendeeName: nextName, attendeeEmail: nextEmail },
+      { ...booking, attendeeName: next.name, attendeeEmail: next.email },
       booking.startUtc,
       booking.endUtc,
     ).catch(() => undefined);
     if (sendInvite) {
-      await this.sendInviteAfterContactUpdate(ctx, booking, nextName ?? '', nextEmail!, rows[0].sequence);
+      await this.sendInviteAfterContactUpdate(ctx, booking, next.name ?? '', next.email!, rows[0].sequence);
     }
     return {
       success: true,
       emailSent: sendInvite,
       booking: {
         id: booking.id,
-        attendeeName: nextName ?? undefined,
-        attendeeEmail: nextEmail ?? undefined,
-        customerPhone: nextPhone ?? undefined,
-        notes: nextNotes ?? undefined,
+        attendeeName: next.name ?? undefined,
+        attendeeEmail: next.email ?? undefined,
+        customerPhone: next.phone ?? undefined,
+        notes: next.notes ?? undefined,
         uploadedFileCount: Array.isArray(merged.files) ? merged.files.length : 0,
       },
     };
@@ -3413,32 +3478,18 @@ export class InternalProvider implements BookingProvider {
     // against the service's current bounds). Legacy rows fall back to service.durationMin.
     const effectiveDuration = opts?.durationMin ?? booking.bookedDurationMin ?? service.durationMin;
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
-    const newAddress = opts?.customerAddress !== undefined
-      ? cleanContact(opts.customerAddress, 512)
-      : undefined;
-    if (opts?.customerAddress !== undefined && !isCompleteCustomerAddress(newAddress)) {
-      throw new BookingError(
-        "This service is carried out at the customer's address. Ask for the full appointment address (street, house number, postal code, and city) and call reschedule_booking again with customerAddress. Do not invent a different time.",
-        'ADDRESS_REQUIRED',
-        400,
-      );
-    }
-    if (ctx.subjectToCustomerChangePolicy) {
-      const decision = resolveCustomerChange(
-        service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
-        booking.startUtc,
-        service.rescheduleUntilMin,
-      );
-      if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule');
-      if (decision === 'request') {
-        return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone, newAddress);
-      }
-    }
-    let areaMatch: 'inside' | 'outside' | 'unknown' | null = null;
-    if (newAddress !== undefined) {
-      if (!ctx.isAdmin) await assertInServiceArea(ctx, service, newAddress);
-      areaMatch = (await evaluateServiceArea(ctx, service, newAddress)).match;
-    }
+    const newAddress = rescheduleAddress(opts?.customerAddress);
+    const changeRequest = await this.rescheduleAsChangeRequest(
+      ctx,
+      booking,
+      service,
+      start,
+      end,
+      rule.timezone,
+      newAddress,
+    );
+    if (changeRequest) return changeRequest;
+    const areaMatch = await this.rescheduleAreaMatch(ctx, service, newAddress);
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
@@ -3732,6 +3783,46 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
+   * The customer-change policy answer for a move: `null` when it may go ahead here, a captured
+   * Request when the service says the owner decides, and a refusal when it says nobody may move
+   * it. An owner acting in their own diary is not subject to the policy and never reaches this.
+   */
+  private async rescheduleAsChangeRequest(
+    ctx: BookingContext,
+    booking: Booking,
+    service: ResolvedService,
+    start: Date,
+    end: Date,
+    timezone: string,
+    newAddress: string | null | undefined,
+  ): Promise<RescheduleResult | null> {
+    if (!ctx.subjectToCustomerChangePolicy) return null;
+    const decision = resolveCustomerChange(
+      service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
+      booking.startUtc,
+      service.rescheduleUntilMin,
+    );
+    if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule');
+    if (decision !== 'request') return null;
+    return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, timezone, newAddress);
+  }
+
+  /**
+   * Where the moved job now sits against the service area. `null` when the move keeps the
+   * stored address, because nothing was re-judged. An admin is told the verdict but never
+   * refused by it.
+   */
+  private async rescheduleAreaMatch(
+    ctx: BookingContext,
+    service: ResolvedService,
+    newAddress: string | null | undefined,
+  ): Promise<'inside' | 'outside' | 'unknown' | null> {
+    if (newAddress === undefined) return null;
+    if (!ctx.isAdmin) await assertInServiceArea(ctx, service, newAddress);
+    return (await evaluateServiceArea(ctx, service, newAddress)).match;
+  }
+
+  /**
    * CAN THE OWNER STILL GET THERE, at the new time? A reschedule is a booking being made
    * again — the same job, against a different set of neighbours — so it earns the same check.
    * Without it the gate is a front door with the side door left open: a customer who books a
@@ -3767,16 +3858,7 @@ export class InternalProvider implements BookingProvider {
     addressPatch?: { address: string; columns: BookingPlaceColumns };
   }> {
     const { booking, bookingId, service, rule, start, end } = input;
-    const addressForJob = input.newAddress ?? booking.customerAddress;
-    const travelEligibility: TravelEligibility = serviceNeedsCustomerAddress(service, {
-      customerAddress: addressForJob,
-    })
-      ? await resolveTravelEligibility({
-          tenantId: ctx.tenant.id,
-          botId: ctx.bot.id,
-          itineraryKey: input.itineraryKey,
-        })
-      : { active: false as const, reason: 'bot_disabled' as const };
+    const { addressForJob, travelEligibility } = await this.rescheduleTravelEligibility(ctx, input);
     const addressPatch = input.newAddress
       ? { address: input.newAddress, columns: bookingPlaceColumns({ applies: false }) }
       : undefined;
@@ -3818,18 +3900,37 @@ export class InternalProvider implements BookingProvider {
     if (verdict !== 'clear' && enforcing) this.refuseUnreachableReschedule(ctx, { bookingId, verdict });
     return {
       travelEligibility,
-      travelSnapshot:
-        checked && verdict === 'clear'
-          ? {
-              candidate: checked.candidate,
-              venue: checked.venue,
-              drives: checked.drives,
-              base: checked.base,
-              dayStart: checked.dayStart,
-            }
-          : null,
+      travelSnapshot: clearedTravelSnapshot(checked, verdict),
       travelCheck: this.rescheduleTravelCheck(verdict, checked),
       addressPatch,
+    };
+  }
+
+  /**
+   * Does travel apply to this move? Only when the job has a customer door AND the bot is
+   * entitled, enabled and on its own diary. The address that decides it is returned with the
+   * answer, because the placement below reads the same one and the two may never disagree.
+   */
+  private async rescheduleTravelEligibility(
+    ctx: BookingContext,
+    input: {
+      booking: Booking;
+      service: ResolvedService;
+      itineraryKey: ItineraryKey;
+      newAddress?: string | null;
+    }
+  ): Promise<{ addressForJob: string | null | undefined; travelEligibility: TravelEligibility }> {
+    const addressForJob = input.newAddress ?? input.booking.customerAddress;
+    if (!serviceNeedsCustomerAddress(input.service, { customerAddress: addressForJob })) {
+      return { addressForJob, travelEligibility: { active: false as const, reason: 'bot_disabled' as const } };
+    }
+    return {
+      addressForJob,
+      travelEligibility: await resolveTravelEligibility({
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        itineraryKey: input.itineraryKey,
+      }),
     };
   }
 

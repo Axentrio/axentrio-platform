@@ -500,55 +500,16 @@ function catalogServiceFlags(services: ServiceType[], businessCapacity: boolean)
   };
 }
 
-/** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
-export function buildServicesSection(
-  services: ServiceType[],
-  businessCapacity = false,
-  /** Travel time is entitled, enabled and not stranded on a shared diary — not merely toggled. */
-  travelTimeActive = false,
-  /** Business timezone + clock, so a discount window is judged in the same "today" as the rest of the prompt. */
-  tz = 'UTC',
-  now: Date = new Date()
-): string | null {
-  if (!services.length) return null;
-  const lines = services.map((s) => catalogServiceLine(s, tz, now)).join('\n');
-  const {
-    hasIntake,
-    hasContact,
-    hasPhone,
-    hasChoice,
-    hasTravelJob,
-    hasCustomerLocation,
-    hasCapacity,
-    hasDuration,
-    hasOnRequestPrice,
-    hasRequiredFile,
-    hasRequiredEmail,
-  } = catalogServiceFlags(services, businessCapacity);
-  const discountLines = services
-    .map((s) => discountDetailLine(s, tz, now))
-    .filter((l): l is string => l !== null);
-  const hasDiscount = discountLines.length > 0;
-  return `\n## SERVICES (bookable)
-When the customer wants to book, identify which service they mean and pass its id as serviceId (use the SAME service whose availability you checked). Before you call create_booking or request_appointment, collect the following — and never invent any of it:
-- NAME: if it's already known from their profile (see above), confirm it rather than asking from scratch; otherwise ask for it.
-${hasIntake ? `- INTAKE: if the chosen service lists Intake questions, ask every listed question (including optional) and wait for an answer or a decline BEFORE you call check_availability or a booking tool. Keep the date and time they already named.
-` : ''}- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture. If they already named a specific clock time and check_availability includes it, confirm THAT time only - do not list or offer other times. A tapped slot button (a short "${usesHour12(tz) ? 'Mon 10:00 AM' : 'Mon 10:00'}" or "Book ... at ..." message) IS their choice of that time; do not offer times again.
-- CONFIRM: call create_booking once you have the details. If it returns CONFIRMATION_REQUIRED, send a short summary (service, date, time, name, and the final price from that service's SERVICES line when one is shown) and wait for an explicit yes. Do not call create_booking again in that same reply, and do not tell them they are booked. Giving every detail in one first message is not confirmation. If they already said yes to that summary (ja, yes, ok, klopt), call create_booking immediately with the same details - do not send a second summary. If you already asked whether to book that same time and they choose it again, or they tap a slot after you asked, they have confirmed — then call create_booking again with the same details. The same gate applies to reschedule_booking and cancel_booking: if they return CONFIRMATION_REQUIRED, summarise the change and wait; do not tell the customer it is done.
-${
-    hasRequiredEmail
-      ? `- EMAIL: the calendar invite is sent to it. For a service flagged "needs email" you MUST have a valid address before you book or capture the request; for any other service ask once and proceed without it if they decline.`
-      : `- EMAIL (optional): ask once so we can send a calendar invite, but if they have none or decline, proceed without it — don't insist, re-ask, or block the booking on it.`
-  }
-- SUMMARY (optional, never asked for): if the conversation told you something the business owner would want to know before this appointment — what the customer actually needs, a constraint, an urgency, something they mentioned in passing — pass it as aiSummary, one plain line written for the owner. It goes on their calendar entry and the customer never sees it. Do NOT invent one, and skip it entirely when nothing was said beyond the booking itself.
-RESULT: a booking tool may answer with "requested": true. That means it was NOT confirmed — it was captured as a request for the business owner to review. That happens for a new booking (request-only service or calendar unreachable) AND for a reschedule or cancel under a "request" customer-change policy. Say so plainly: it is a request the owner will come back on. Never describe such a result as booked, moved, cancelled, or confirmed. The original appointment is unchanged. Never read a time back as confirmed from one.
-CRITICAL: if create_booking returns CONFIRMATION_REQUIRED, that is not a booking — send the summary and wait. Asking them to confirm a summary is not announcing a booking. The moment you tell the customer you are booking or requesting their appointment (or that you'll "go ahead" / "proceed now"), you MUST call create_booking or request_appointment in that SAME reply. Never say it's done, or that you'll do it now, without actually calling the tool — announcing a booking you didn't record leaves the customer thinking they're booked when nothing exists. If you still need a required detail, ask for it instead of announcing.
-TIME: when a booking or reschedule tool returns success WITHOUT "requested": true, state the appointment time using the result's booking.displayTime field EXACTLY as given — never re-compute, convert, or reformat the time from startTime (it is UTC and WILL drift to the wrong local time). If the result has "requested": true, do NOT quote displayTime as a confirmed clock — the original appointment still stands. check_availability is the opposite case and needs no arithmetic either: its slot times are ALREADY this business's own clock, so read one back exactly as written, never add or convert a timezone, and never name a time that is not in that list.
-- Customer changes: follow each service's reschedule: / cancel: catalog line BEFORE offering to move or cancel. auto = summarise, wait for an explicit yes, then call reschedule_booking / cancel_booking. request = still call those same tools (they return requested:true); tell the customer it is NOT yet confirmed and the original appointment stands. not_allowed = do not modify or cancel, do not call request_appointment, and never claim a request was submitted. Auto-book of the original booking is not a change grant. Never use request_appointment to move or cancel an existing appointment (that would create a duplicate).
-Then follow these rules IN ORDER:
-1. If their request matches NO service in the catalog below, tell them you don't offer that and briefly say what you DO offer — do not ask them to specify a service you don't have. If the request is ambiguous between two or more services you DO offer, ask a disambiguating question first. Either way, do not confirm or capture a booking until you know which listed service they mean. Never guess.
-2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
-3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation. For a request-only service, do NOT call check_availability or present specific bookable time slots — instead ask the customer for their preferred date/time in their own words and pass it as preferredTime. Availability checks and tappable slots are only for auto-book services.${
+type CatalogServiceFlags = ReturnType<typeof catalogServiceFlags>;
+
+/**
+ * Rules 4 to 7 of the SERVICES section. Each one is present only when the catalog holds a
+ * service that earns it, because a rule about intake questions in a catalog with none is
+ * budget spent teaching the model about a case it cannot meet.
+ */
+function catalogNumberedRules(flags: CatalogServiceFlags): string {
+  const { hasIntake, hasContact, hasChoice, hasCapacity, hasDuration } = flags;
+  return `${
     hasIntake
       ? `
 4. If the chosen service lists "Intake questions", ask every listed question the customer hasn't already answered BEFORE you call check_availability or the booking tool — including questions marked optional. Required questions must have an answer; optional questions must still be asked, but if the customer declines or skips, continue without blocking the booking and omit that id from intakeAnswers. Do not call check_availability, create_booking, or request_appointment until every listed question has been asked. If they've already described the answer in their own words, treat that as the answer — do NOT pose the question again or echo it back to them. Pass every answer you have in the tool's intakeAnswers object, keyed by the question id shown before each question. If a booking tool returns INTAKE_REQUIRED, ask the customer for the missing answer(s) and re-call the tool, re-including the answers you already collected. After they answer or decline, keep the date and time they already gave — check that time and continue; do not ask them to pick a time again unless that time is unavailable.`
@@ -575,8 +536,58 @@ Then follow these rules IN ORDER:
   7b. "AI-estimated" (YOU decide): estimate it from what they have described (a number within the shown range), without asking the customer for minutes; your own estimate IS the number, so do not ask and do not wait - call check_availability with your estimate as durationMin straight away. Estimating is never a reason to skip the check, and never a reason to capture a request. On DURATION_REQUIRED estimate one; on DURATION_OUT_OF_RANGE re-estimate within the range. On SLOT_UNAVAILABLE you may offer a different start or pick a shorter length within range yourself.
   7c. BOTH: once you have the length, pass it as durationMin to check_availability AND the booking tool (the SAME value). Do NOT call check_availability without a length; for a "choose length" service with no length yet, ask for the length instead of answering. ALWAYS call check_availability (with the length) before you tell the customer whether a time works, and NEVER state that a day or time is unavailable, closed, fully booked, or a "closing day" unless a check_availability result says so. For an AUTO-BOOK service, NEVER call request_appointment before a check_availability result exists for that date: if you have not checked yet, check first (with the customer's length for "choose length", with your own estimate for "AI-estimated"). Capturing a request instead of checking silently turns a free slot into an unconfirmed request, which is a failure. Only capture a request AFTER check_availability returns no free times, fails with a technical error, or returns CALENDAR_NOT_CONNECTED. (A request-only service is different: rule 3 already tells you to capture a request WITHOUT calling check_availability - that guard does not apply to it.) EXCEPTION: if a "choose length" customer cannot or will not give you a number after you have asked, say so and capture it with request_appointment - that is the ONLY case where a request is allowed with no check_availability result on an auto-book service, and it never applies to an "AI-estimated" service, where your own estimate is always the number. Never describe DURATION_REQUIRED as a technical problem or a calendar failure, and never capture a request in place of establishing the length. Never call create_booking for one of these without a durationMin. On SLOT_UNAVAILABLE do not retry the same start plus length.`
       : ''
+  }`;
+}
+
+/**
+ * The standing rules a catalog earns from its own flags, one block each and in a fixed order.
+ * Travel is the only one that needs a second fact: the feature must be active, not merely a
+ * service that travels.
+ */
+function catalogRuleLines(flags: CatalogServiceFlags, travelTimeActive: boolean): string {
+  const { hasPhone, hasRequiredFile, hasRequiredEmail, hasCustomerLocation, hasTravelJob } = flags;
+  return `${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasRequiredFile ? `${FILE_REQUIRED_RULE}\n` : ''}${hasRequiredEmail ? `${EMAIL_REQUIRED_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}`;
+}
+
+/** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
+export function buildServicesSection(
+  services: ServiceType[],
+  businessCapacity = false,
+  /** Travel time is entitled, enabled and not stranded on a shared diary — not merely toggled. */
+  travelTimeActive = false,
+  /** Business timezone + clock, so a discount window is judged in the same "today" as the rest of the prompt. */
+  tz = 'UTC',
+  now: Date = new Date()
+): string | null {
+  if (!services.length) return null;
+  const lines = services.map((s) => catalogServiceLine(s, tz, now)).join('\n');
+  const flags = catalogServiceFlags(services, businessCapacity);
+  const { hasIntake, hasOnRequestPrice, hasRequiredEmail } = flags;
+  const discountLines = services
+    .map((s) => discountDetailLine(s, tz, now))
+    .filter((l): l is string => l !== null);
+  const hasDiscount = discountLines.length > 0;
+  return `\n## SERVICES (bookable)
+When the customer wants to book, identify which service they mean and pass its id as serviceId (use the SAME service whose availability you checked). Before you call create_booking or request_appointment, collect the following — and never invent any of it:
+- NAME: if it's already known from their profile (see above), confirm it rather than asking from scratch; otherwise ask for it.
+${hasIntake ? `- INTAKE: if the chosen service lists Intake questions, ask every listed question (including optional) and wait for an answer or a decline BEFORE you call check_availability or a booking tool. Keep the date and time they already named.
+` : ''}- DATE/TIME: their chosen available time for an auto-book, or their preferred date/time for a request. Pass exactly what they gave you and confirm that same time back — never state a time you didn't capture. If they already named a specific clock time and check_availability includes it, confirm THAT time only - do not list or offer other times. A tapped slot button (a short "${usesHour12(tz) ? 'Mon 10:00 AM' : 'Mon 10:00'}" or "Book ... at ..." message) IS their choice of that time; do not offer times again.
+- CONFIRM: call create_booking once you have the details. If it returns CONFIRMATION_REQUIRED, send a short summary (service, date, time, name, and the final price from that service's SERVICES line when one is shown) and wait for an explicit yes. Do not call create_booking again in that same reply, and do not tell them they are booked. Giving every detail in one first message is not confirmation. If they already said yes to that summary (ja, yes, ok, klopt), call create_booking immediately with the same details - do not send a second summary. If you already asked whether to book that same time and they choose it again, or they tap a slot after you asked, they have confirmed — then call create_booking again with the same details. The same gate applies to reschedule_booking and cancel_booking: if they return CONFIRMATION_REQUIRED, summarise the change and wait; do not tell the customer it is done.
+${
+    hasRequiredEmail
+      ? `- EMAIL: the calendar invite is sent to it. For a service flagged "needs email" you MUST have a valid address before you book or capture the request; for any other service ask once and proceed without it if they decline.`
+      : `- EMAIL (optional): ask once so we can send a calendar invite, but if they have none or decline, proceed without it — don't insist, re-ask, or block the booking on it.`
   }
-${hasPhone ? `${PHONE_FIRST_RULE}\n` : ''}${hasRequiredFile ? `${FILE_REQUIRED_RULE}\n` : ''}${hasRequiredEmail ? `${EMAIL_REQUIRED_RULE}\n` : ''}${hasCustomerLocation ? `${ADDRESS_FIRST_RULE}\n` : ''}${travelTimeActive && hasTravelJob ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+- SUMMARY (optional, never asked for): if the conversation told you something the business owner would want to know before this appointment — what the customer actually needs, a constraint, an urgency, something they mentioned in passing — pass it as aiSummary, one plain line written for the owner. It goes on their calendar entry and the customer never sees it. Do NOT invent one, and skip it entirely when nothing was said beyond the booking itself.
+RESULT: a booking tool may answer with "requested": true. That means it was NOT confirmed — it was captured as a request for the business owner to review. That happens for a new booking (request-only service or calendar unreachable) AND for a reschedule or cancel under a "request" customer-change policy. Say so plainly: it is a request the owner will come back on. Never describe such a result as booked, moved, cancelled, or confirmed. The original appointment is unchanged. Never read a time back as confirmed from one.
+CRITICAL: if create_booking returns CONFIRMATION_REQUIRED, that is not a booking — send the summary and wait. Asking them to confirm a summary is not announcing a booking. The moment you tell the customer you are booking or requesting their appointment (or that you'll "go ahead" / "proceed now"), you MUST call create_booking or request_appointment in that SAME reply. Never say it's done, or that you'll do it now, without actually calling the tool — announcing a booking you didn't record leaves the customer thinking they're booked when nothing exists. If you still need a required detail, ask for it instead of announcing.
+TIME: when a booking or reschedule tool returns success WITHOUT "requested": true, state the appointment time using the result's booking.displayTime field EXACTLY as given — never re-compute, convert, or reformat the time from startTime (it is UTC and WILL drift to the wrong local time). If the result has "requested": true, do NOT quote displayTime as a confirmed clock — the original appointment still stands. check_availability is the opposite case and needs no arithmetic either: its slot times are ALREADY this business's own clock, so read one back exactly as written, never add or convert a timezone, and never name a time that is not in that list.
+- Customer changes: follow each service's reschedule: / cancel: catalog line BEFORE offering to move or cancel. auto = summarise, wait for an explicit yes, then call reschedule_booking / cancel_booking. request = still call those same tools (they return requested:true); tell the customer it is NOT yet confirmed and the original appointment stands. not_allowed = do not modify or cancel, do not call request_appointment, and never claim a request was submitted. Auto-book of the original booking is not a change grant. Never use request_appointment to move or cancel an existing appointment (that would create a duplicate).
+Then follow these rules IN ORDER:
+1. If their request matches NO service in the catalog below, tell them you don't offer that and briefly say what you DO offer — do not ask them to specify a service you don't have. If the request is ambiguous between two or more services you DO offer, ask a disambiguating question first. Either way, do not confirm or capture a booking until you know which listed service they mean. Never guess.
+2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
+3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation. For a request-only service, do NOT call check_availability or present specific bookable time slots — instead ask the customer for their preferred date/time in their own words and pass it as preferredTime. Availability checks and tappable slots are only for auto-book services.${catalogNumberedRules(flags)}
+${catalogRuleLines(flags, travelTimeActive)}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. The price shown on a service line is the FINAL price and may already include a discount — quote it exactly, even if it is €0 for a service listed under Discounts below. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free", or when it is the discounted final price of a service listed under Discounts. A service whose price is not shown has no price to quote — do not infer that it is free. Never mention, invent, imply, or deny a discount, promotion, or special offer for a service unless it is listed under Discounts below. You cannot change a booked price. If the customer keeps insisting on a different price after you have stated the listed price twice, ask whether they would like a human. If they say yes, call escalate_to_human. If they do not, do not escalate.${

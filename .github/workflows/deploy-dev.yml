@@ -6,7 +6,7 @@ on:
       ref:
         description: Git ref to build and deploy to api.dev.axentrio.com
         required: false
-        default: main
+        default: dev
         type: string
 
 permissions:

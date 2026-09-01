@@ -1094,6 +1094,17 @@ describe('ListBookingsTool', () => {
     expect(result.success).toBe(true);
     expect(mockListBookings).toHaveBeenCalledWith('agent', 'sess-3', 'user@test.com');
   });
+
+  it('execute calls listBookings with undefined when attendeeEmail is omitted', async () => {
+    const tool = new ListBookingsTool();
+    const ctx = makeCtx({ sessionId: 'sess-3' });
+    mockListBookings.mockResolvedValue({ bookings: [] });
+
+    const result = await tool.execute({}, ctx);
+
+    expect(result.success).toBe(true);
+    expect(mockListBookings).toHaveBeenCalledWith('agent', 'sess-3', undefined);
+  });
 });
 
 describe('RescheduleBookingTool', () => {

@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assertRequiredAddress,
   resolveCustomerEmail,
+  resolveUpdatedCustomerEmail,
   assertRequiredPhone,
   hasStreetAndHouseNumber,
   isCompleteCustomerAddress,
@@ -258,5 +259,32 @@ describe('resolveCustomerEmail', () => {
     // An existing row read before the column existed, or a partial fixture: undefined must
     // mean required, or the migration default silently stops applying.
     expect(() => resolveCustomerEmail({} as ServiceType)).toThrow(BookingError);
+  });
+});
+
+describe('resolveUpdatedCustomerEmail', () => {
+  it('returns the stored address when the patch is omitted', () => {
+    expect(resolveUpdatedCustomerEmail(undefined, 'ada@example.com')).toBe('ada@example.com');
+  });
+
+  it('returns the stored address when the patch is whitespace', () => {
+    expect(resolveUpdatedCustomerEmail('   ', 'ada@example.com')).toBe('ada@example.com');
+  });
+
+  it('returns the SANITIZED address for a mixed-case patch', () => {
+    expect(resolveUpdatedCustomerEmail('  Ada@Example.COM ', 'old@example.com')).toBe('ada@example.com');
+  });
+
+  it('throws EMAIL_REQUIRED for a malformed address', () => {
+    expect(() => resolveUpdatedCustomerEmail('not-an-email', 'ada@example.com')).toThrow(BookingError);
+    try {
+      resolveUpdatedCustomerEmail('not-an-email', 'ada@example.com');
+    } catch (err) {
+      expect(err).toMatchObject({ code: 'EMAIL_REQUIRED' });
+    }
+  });
+
+  it('returns null when both the patch and the stored address are absent', () => {
+    expect(resolveUpdatedCustomerEmail(undefined, undefined)).toBeNull();
   });
 });

@@ -837,6 +837,22 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(String(call[0])).toMatch(/LOWER\(TRIM\(b\.attendee_email\)\) = \$4/);
   });
 
+  it('lists by chat identity when no email is given', async () => {
+    bookingQuery.mockResolvedValueOnce([]);
+    await provider.listBookings(ctx);
+    const call = bookingQuery.mock.calls.at(-1)!;
+    expect(String(call[0])).not.toMatch(/LOWER\(TRIM/);
+    expect(call[1]).toHaveLength(3);
+  });
+
+  it('includes NULL-email rows when an email filter is present', async () => {
+    bookingQuery.mockResolvedValueOnce([]);
+    await provider.listBookings(ctx, 'ada@example.com');
+    expect(String(bookingQuery.mock.calls.at(-1)![0])).toMatch(
+      /LOWER\(TRIM\(b\.attendee_email\)\) = \$4 OR b\.attendee_email IS NULL/,
+    );
+  });
+
   // ── accept / decline request ──────────────────────────────────────────────
   // requestBooking start 07:00Z = 09:00 Brussels (an offered Wed slot), future.
   const requestBooking = (over: Record<string, unknown> = {}) => ({
@@ -1568,6 +1584,30 @@ describe('InternalProvider.updateBooking', () => {
     expect(res.booking).toMatchObject({ attendeeName: 'Ada', customerPhone: '+32470123456' });
     expect(res.emailSent).toBe(false);
     expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('stores a mixed-case email as the sanitized address and sends the invite', async () => {
+    const res = await provider.updateBooking(ctx, { attendeeEmail: '  Ada@Example.COM ' });
+    expect(res.success).toBe(true);
+    expect(res.emailSent).toBe(true);
+    const update = bookingQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'));
+    expect(update?.[1]).toContain('ada@example.com');
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a malformed email without writing', async () => {
+    await expect(provider.updateBooking(ctx, { attendeeEmail: 'not-an-email' })).rejects.toMatchObject({
+      code: 'EMAIL_REQUIRED',
+    });
+    expect(bookingQuery.mock.calls.filter((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'))).toHaveLength(0);
+  });
+
+  it('leaves the stored email untouched when the patch is whitespace', async () => {
+    bookingFind.mockResolvedValue([{ ...confirmedBooking(), notes: null }]);
+    const res = await provider.updateBooking(ctx, { attendeeEmail: '   ', notes: 'gate code' });
+    const update = bookingQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'));
+    expect(update?.[1]).toContain('ada@example.com');
+    expect(res.booking.attendeeEmail).toBe('ada@example.com');
   });
 });
 

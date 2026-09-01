@@ -1937,6 +1937,8 @@ export class InternalProvider implements BookingProvider {
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
       priceDisplay,
+      tenantId: ctx.tenant.id,
+      bookingId,
     });
   }
 
@@ -2762,6 +2764,8 @@ export class InternalProvider implements BookingProvider {
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
       priceDisplay,
+      tenantId: ctx.tenant.id,
+      bookingId,
     });
   }
 
@@ -3055,6 +3059,8 @@ export class InternalProvider implements BookingProvider {
           attendeeEmail: oldEmail,
           organizerEmail: booking.organizerEmail,
           organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          tenantId: ctx.tenant.id,
+          bookingId: booking.id,
         });
       }
       const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
@@ -3090,6 +3096,8 @@ export class InternalProvider implements BookingProvider {
         durationMin: booking.bookedDurationMin ?? service.durationMin,
         preparationInstructions: service.preparationInstructions,
         priceDisplay,
+        tenantId: ctx.tenant.id,
+        bookingId: booking.id,
       });
     } catch (error) {
       logger.warn('[Booking] contact-update invite failed (non-fatal)', { bookingId: booking.id, error });
@@ -4228,6 +4236,8 @@ export class InternalProvider implements BookingProvider {
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
       priceDisplay,
+      tenantId: ctx.tenant.id,
+      bookingId: booking.id,
     });
 
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
@@ -4300,6 +4310,8 @@ export class InternalProvider implements BookingProvider {
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       organizerEmail: booking.organizerEmail,
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+      tenantId: ctx.tenant.id,
+      bookingId,
     });
 
     // Drop pending reminders (they'd no-op via sequence/status anyway).

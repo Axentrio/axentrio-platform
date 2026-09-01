@@ -408,7 +408,7 @@ export interface BookingExtras {
 }
 
 export interface BookingProvider {
-  listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult>;
+  listBookings(ctx: BookingContext, attendeeEmail?: string): Promise<ListBookingsResult>;
   /** `serviceId` selects the service; when omitted the provider falls back to the
    *  bot's sole active service (or errors `SERVICE_REQUIRED` if ≥2 exist). */
   checkAvailability(

@@ -145,7 +145,7 @@ const BLANK: FormState = {
   customerChoosesLocation: false,
   customerLocationRequired: false,
   fileUploadRequired: false,
-  customerEmailRequired: true,
+  customerEmailRequired: false,
   maxBookingsPerDay: '',
   intakeQuestions: [],
 };
@@ -234,7 +234,7 @@ function formFromService(s: Service): FormState {
     ...locationTypeSideEffects(s.locationType),
     fileUploadRequired: !!s.fileUploadRequired,
     // `!== false`, not `!!`: an API payload that omits the field must hydrate ON.
-    customerEmailRequired: s.customerEmailRequired !== false,
+    customerEmailRequired: s.customerEmailRequired === true,
     maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)

@@ -245,7 +245,7 @@ export class ServiceType {
    * The customer email is what the ICS calendar invite is addressed to, so it
    * defaults to required; false lets a service book without one.
    */
-  @Column({ type: 'boolean', name: 'customer_email_required', default: true })
+  @Column({ type: 'boolean', name: 'customer_email_required', default: false })
   customerEmailRequired!: boolean;
 
   @Column({ type: 'text', name: 'preparation_instructions', nullable: true })

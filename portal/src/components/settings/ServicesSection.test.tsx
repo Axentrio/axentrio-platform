@@ -392,10 +392,11 @@ describe('ServicesSection — online bookable', () => {
 });
 
 /**
- * `customerEmailRequired` defaults to true on the server, so the portal must send it and
- * hydrate it as ON whenever the API leaves it out. `!!s.customerEmailRequired` would show
- * the box unticked on every service saved before the column existed, and the first Save
- * would then write that accidental `false` back.
+ * `customerEmailRequired` starts OFF, here and on the server. The flag first shipped with a
+ * `DEFAULT true` migration, which turned every existing service of every tenant into an
+ * email-required service in one deploy and left bots refusing to book for customers nobody had
+ * asked for an email. The owner now ticks it for the services whose calendar invite has to
+ * reach someone, so a payload without the field is a service that never chose it.
  */
 describe('ServicesSection — required customer email', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -435,24 +436,28 @@ describe('ServicesSection — required customer email', () => {
     return await screen.findByLabelText(/required email address for the calendar invite/i);
   };
 
-  it('defaults a new service to requiring the email', async () => {
+  it('defaults a new service to not requiring the email', async () => {
     const box = await openNew();
-    expect(box).toBeChecked();
+    expect(box).not.toBeChecked();
+    expect(await submit()).toMatchObject({ customerEmailRequired: false });
+  });
+
+  it('sends true once the owner turns it on', async () => {
+    const box = await openNew();
+    fireEvent.click(box);
     expect(await submit()).toMatchObject({ customerEmailRequired: true });
   });
 
-  it('sends false once the owner turns it off', async () => {
-    const box = await openNew();
-    fireEvent.click(box);
-    expect(await submit()).toMatchObject({ customerEmailRequired: false });
+  it('hydrates an existing service that requires the email as on', async () => {
+    expect(await openEditOf({ customerEmailRequired: true })).toBeChecked();
   });
 
   it('hydrates an existing service that does not require the email as off', async () => {
     expect(await openEditOf({ customerEmailRequired: false })).not.toBeChecked();
   });
 
-  it('hydrates as on when the API payload omits the field', async () => {
-    expect(await openEditOf({})).toBeChecked();
+  it('hydrates as off when the API payload omits the field', async () => {
+    expect(await openEditOf({})).not.toBeChecked();
   });
 });
 

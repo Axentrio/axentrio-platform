@@ -12,8 +12,6 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: staging
     steps:
       - uses: actions/checkout@v5
 
@@ -31,17 +29,17 @@ jobs:
           dump_one() {
             local db="$1"
             local filename="backup_${db}_${TIMESTAMP}.sql.gz"
-            echo "Dumping ${db}"
+            echo "Dumping ${db}" >&2
             $AXENTRIO_SSH "deploy@${HOST}" \
               "docker exec axentrio-postgres-1 pg_dump -U postgres --no-owner --no-privileges --clean --if-exists ${db}" \
               | gzip -9 > "$filename"
             local size
             size=$(stat -c%s "$filename")
             if [ "$size" -lt 1024 ]; then
-              echo "::error::${filename} is suspiciously small ($size bytes)"
+              echo "::error::${filename} is suspiciously small ($size bytes)" >&2
               exit 1
             fi
-            echo "Created ${filename} ($(du -h "$filename" | cut -f1))"
+            echo "Created ${filename} ($(du -h "$filename" | cut -f1))" >&2
             printf '%s\n' "$filename"
           }
 

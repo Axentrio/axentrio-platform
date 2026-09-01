@@ -139,5 +139,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
       - ./Caddyfile.nonprod:/etc/caddy/Caddyfile:ro
+      # Populated by CI rsync of portal/dist. Not in git.
+      - ./portal-staging:/srv/portal-staging:ro
+      - ./portal-dev:/srv/portal-dev:ro
     networks:
       - axentrio

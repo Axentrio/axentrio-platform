@@ -15,3 +15,21 @@ api.dev.axentrio.com {
 		health_timeout 2s
 	}
 }
+
+app.staging.axentrio.com {
+	root * /srv/portal-staging
+	encode gzip
+	try_files {path} /index.html
+	file_server
+	header /index.html Cache-Control "no-cache"
+	header /meta-oauth-complete.html Cache-Control "no-cache"
+}
+
+app.dev.axentrio.com {
+	root * /srv/portal-dev
+	encode gzip
+	try_files {path} /index.html
+	file_server
+	header /index.html Cache-Control "no-cache"
+	header /meta-oauth-complete.html Cache-Control "no-cache"
+}

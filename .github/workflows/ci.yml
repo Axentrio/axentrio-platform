@@ -290,7 +290,29 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v5
-      - name: Sync infra and deploy staging-api
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+
+      - name: Build staging portal
+        working-directory: portal
+        env:
+          VITE_API_URL: https://api.staging.axentrio.com/api/v1
+          VITE_WS_URL: https://api.staging.axentrio.com
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.NONPROD_CLERK_PUBLISHABLE_KEY }}
+          VITE_FEATURE_COMPOSABLE_TEMPLATES: "true"
+        run: |
+          if [ -z "${VITE_CLERK_PUBLISHABLE_KEY}" ]; then
+            echo "NONPROD_CLERK_PUBLISHABLE_KEY is empty" >&2
+            exit 1
+          fi
+          npm ci
+          npm run build
+          printf '%s\n' "${GITHUB_SHA}" > dist/commit.txt
+
+      - name: Sync infra, portal, and deploy staging-api
         env:
           HOST: ${{ secrets.NONPROD_HOST }}
           SSH_KEY: ${{ secrets.NONPROD_SSH_KEY }}
@@ -305,6 +327,9 @@ jobs:
             --exclude 'env.*.example' \
             --exclude 'render-user-data.sh' \
             infra/vps/ "deploy@${HOST}:/opt/axentrio/"
+          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/portal-staging /opt/axentrio/portal-dev"
+          rsync -az --delete -e "$AXENTRIO_SSH" \
+            portal/dist/ "deploy@${HOST}:/opt/axentrio/portal-staging/"
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
             "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh sha-${GITHUB_SHA} compose.nonprod.yml staging-api"
 

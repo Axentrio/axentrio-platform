@@ -1938,7 +1938,14 @@ export class AgentService {
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
     if (tool.name === 'check_availability' && result.success && result.availability) {
-      this.absorbAvailability(toolCall, result, result.availability, ctx, state);
+      // Live WaterFix 2026-09-01: data already said confirm_existing (no slots,
+      // alreadyHeld present, 635 chars) and the model still said the time was
+      // unavailable because absorbAvailability fed the leftover diary into chips.
+      if ((result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'confirm_existing') {
+        state.pendingAvailability = null;
+      } else {
+        this.absorbAvailability(toolCall, result, result.availability, ctx, state);
+      }
     } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
       state.pendingAvailability = null;
       // The booking consumed the address binding in its own transaction, so an offer to

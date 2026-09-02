@@ -1203,7 +1203,15 @@ describe('check_availability — a time the caller already holds is not unavaila
     expect(data.guidance).toMatch(/already hold/i);
     expect(data.guidance).toMatch(/Do not say that time is unavailable/);
     expect(data.guidance).toMatch(/Do not create a second booking/);
-    expect(data.guidance).toMatch(/Do not offer other times from this result/);
+    // A move must stay possible: the free times ride along under their own key, bound by
+    // guidance to reschedule_booking. Session d4291852: with no times at all, every "een uur
+    // later" dead-ended into a handoff while the target slot was free.
+    expect(data.guidance).toMatch(/moveTargets/);
+    expect(data.guidance).toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+    expect(data.guidance).toMatch(/Never offer moveTargets as extra appointments/);
+    expect(data.moveTargets).toEqual([
+      { start: '2026-09-08T09:30:00', end: '2026-09-08T10:30:00' },
+    ]);
     expect(data.alreadyHeld).toEqual([
       { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
     ]);

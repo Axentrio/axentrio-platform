@@ -361,17 +361,22 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
 
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
-  otherSlotCount: number,
+  moveTargets: Array<{ start: string; end: string }>,
 ): Record<string, unknown> {
   if (!held?.length) return {};
-  const otherSlots = otherSlotCount > 0;
+  const otherSlots = moveTargets.length > 0;
   return {
     alreadyHeld: held,
     suggestedAction: 'confirm_existing',
-    ...(otherSlots ? {} : { noSlotsInRange: true }),
+    // Free times travel under their OWN key with guidance that binds them to
+    // reschedule_booking. A bare `slots` list beside the hold note made the model call the
+    // held time unavailable (live, 2026-09-01); NO times at all dead-ended every move into
+    // a handoff, with the requested target sitting free (live, 2026-09-02, session
+    // d4291852: "kan ik niet bevestigen vanuit het beschikbaarheidsresultaat").
+    ...(otherSlots ? { moveTargets } : { noSlotsInRange: true }),
     guidance: otherSlots
-      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. Do not offer other times from this result. If they wanted a different day, call check_availability for that day.'
-      : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. If they wanted a different day, call check_availability for that day.',
+      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they are asking to MOVE that appointment, the free times for the move are in moveTargets: pick the time they asked for and call reschedule_booking with the alreadyHeld bookingId and that newStartTime. A time missing from moveTargets is not free. Never offer moveTargets as extra appointments. If they wanted a different day, call check_availability for that day.'
+      : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. That includes a move: there is no free time in this range to move it to, so offer to check another day. If they wanted a different day, call check_availability for that day.',
   };
 }
 
@@ -565,8 +570,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.proposedAddress
       );
       const groupedNote = groupingNote(result.travel);
-      const heldNote = alreadyHeldNote(result.alreadyHeld, utcSlots.length);
       const zone = result.timezone ?? 'UTC';
+      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(utcSlots, zone));
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
@@ -579,7 +584,17 @@ export class CheckAvailabilityTool implements ToolAdapter {
         // Live WaterFix 2026-09-01: alreadyHeld and confirm_existing were in the
         // model copy (1321 chars, not truncated) and the model still said the
         // time was unavailable because slots was in the same payload. The hold
-        // note is the whole payload. Do not run namedTimeGuidance here.
+        // note is the whole payload - free times only ride along as moveTargets,
+        // named by guidance for reschedule_booking. Do not run namedTimeGuidance here.
+        // moveTargets are offers the reschedule gate later measures a chip or a named
+        // instant against, so they are recorded like every other offered slot.
+        if (utcSlots.length > 0) {
+          void rememberOfferedSlots(
+            ctx.sessionId,
+            utcSlots.map((s) => s.start),
+            zone,
+          );
+        }
         return {
           success: true,
           ...measurement,

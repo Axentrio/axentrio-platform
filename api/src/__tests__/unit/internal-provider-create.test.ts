@@ -2058,8 +2058,9 @@ describe('InternalProvider.createBooking - travel placement', () => {
     active: true as const,
     tenantId: 'ten-1',
     itineraryKey: 'bot:bot-1',
-    slackMin: 0,
+    minGapMin: 0,
     startFromBase: false,
+    maxTravelMin: null,
   };
 
   beforeEach(() => {
@@ -2238,6 +2239,15 @@ describe('InternalProvider.createBooking - travel placement', () => {
       expect(managerQuery).not.toHaveBeenCalled();
     });
 
+    it('refuses a recorded drive over the maximum travel time', async () => {
+      resolveTravelEligibility.mockResolvedValue({ ...ACTIVE, maxTravelMin: 45 } as any);
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
+        neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+      ] });
+      driveAnswer.mockResolvedValueOnce({ minutes: 70 });
+      await expect(single('idem-gate-max-travel')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
+    });
+
     it('captures the undecided middle instead of confirming or refusing it', async () => {
       // ~47 km with an hour to cover it: possible at motorway speed, not proven at a crawl.
       // Without a routing answer that is an opinion, and an opinion is the owner's to hold.
@@ -2381,8 +2391,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     active: true as const,
     tenantId: 'ten-1',
     itineraryKey: 'bot:bot-1',
-    slackMin: 0,
+    minGapMin: 0,
     startFromBase: false,
+    maxTravelMin: null,
   };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
     blockedStart: new Date(start),

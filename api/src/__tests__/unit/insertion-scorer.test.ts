@@ -68,13 +68,11 @@ describe('the formula', () => {
       anchors: [anchor('07:00', '07:30', 1), anchor('09:00', '09:30', 3)],
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
     // 30 + 30 - 50 = 10 added minutes, not 60.
     expect(scored.costMinutes).toBe(10);
-    expect(scored.preferred).toBe(true);
   });
 
   it('drops the missing term at each edge rather than inventing one', async () => {
@@ -84,7 +82,6 @@ describe('the formula', () => {
       anchors: [anchor('09:00', '09:30', 3)],
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -101,7 +98,6 @@ describe('the formula', () => {
       anchors: [anchor('07:00', '07:30', 1), anchor('09:00', '09:30', 3)],
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -124,7 +120,6 @@ describe('the Home Base is a start, never a return', () => {
       anchors: [anchor('09:00', '09:30', 3)],
       periods,
       base,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -138,7 +133,6 @@ describe('the Home Base is a start, never a return', () => {
       anchors: [anchor('07:00', '07:30', 1)],
       periods,
       base,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -158,7 +152,6 @@ describe('the Home Base is a start, never a return', () => {
       anchors: [anchor('07:00', '07:30', 1)], // morning only
       periods,
       base,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -177,7 +170,6 @@ describe('the Home Base is a start, never a return', () => {
       anchors: [anchor('07:00', '07:30', 1)],
       periods,
       base,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -197,11 +189,10 @@ describe('when the scorer must say nothing at all', () => {
       anchors: [anchor('07:00', '07:30', 1)],
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
-    expect(scored).toMatchObject({ costMinutes: null, preferred: null, neutralReason: 'unanchored' });
+    expect(scored).toMatchObject({ costMinutes: null, neutralReason: 'unanchored' });
   });
 
   it('a candidate straddling the boundary belongs to NEITHER period', async () => {
@@ -213,7 +204,6 @@ describe('when the scorer must say nothing at all', () => {
       anchors,
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -230,7 +220,6 @@ describe('when the scorer must say nothing at all', () => {
       anchors,
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -244,7 +233,6 @@ describe('when the scorer must say nothing at all', () => {
       anchors,
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -260,7 +248,6 @@ describe('when the scorer must say nothing at all', () => {
       anchors,
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       legBudget: 3, // exactly one candidate's worth
       deadline: Date.now() + 60_000,
@@ -278,7 +265,6 @@ describe('when the scorer must say nothing at all', () => {
       anchors,
       periods: null,
       base: null,
-      maxDetourMin: null,
       lookup: fn,
       ...big,
     });
@@ -286,30 +272,6 @@ describe('when the scorer must say nothing at all', () => {
   });
 });
 
-describe('the threshold only withholds a preference', () => {
-  const anchors = [anchor('07:00', '07:30', 1), anchor('09:00', '09:30', 3)];
-  const table = { '51.01->51.02': 30, '51.02->51.03': 30, '51.01->51.03': 50 }; // cost 10
-
-  it('prefers a candidate exactly AT the threshold', async () => {
-    const { fn } = lookupOf(table);
-    const [scored] = await scoreCandidates({
-      candidates: [candidate('08:00', '08:30', 2)],
-      anchors, periods, base: null, maxDetourMin: 10, lookup: fn, ...big,
-    });
-    expect(scored.preferred).toBe(true);
-  });
-
-  it('over the threshold is UNPREFERRED, still scored, still offered', async () => {
-    // Not neutral and not removed: the Slot keeps its feasibility class and stays confirmable. The
-    // only thing withheld is the preference.
-    const { fn } = lookupOf(table);
-    const [scored] = await scoreCandidates({
-      candidates: [candidate('08:00', '08:30', 2)],
-      anchors, periods, base: null, maxDetourMin: 9, lookup: fn, ...big,
-    });
-    expect(scored).toMatchObject({ costMinutes: 10, preferred: false, neutralReason: null });
-  });
-});
 
 describe('determinism', () => {
   it('scores the same diary identically however the anchors arrive', async () => {
@@ -320,7 +282,7 @@ describe('determinism', () => {
     const run = (anchors: RouteNode[]) =>
       scoreCandidates({
         candidates: [candidate('08:00', '08:30', 2)],
-        anchors, periods, base: null, maxDetourMin: null, lookup: lookupOf(table).fn, ...big,
+        anchors, periods, base: null, lookup: lookupOf(table).fn, ...big,
       });
     const a = await run(forward);
     const b = await run([...forward].reverse());
@@ -390,7 +352,6 @@ describe('full-day grouping widens what a candidate is compared against', () => 
       anchors,
       periods,
       base: null,
-      maxDetourMin: null,
       lookup: async () => 20,
       legBudget: 99,
       deadline: Date.now() + 60_000,
@@ -445,7 +406,6 @@ describe('an always-open diary has no halves, which only stops HALF-day grouping
       // What an always-open business produces.
       periods: null,
       base: null,
-      maxDetourMin: null,
       lookup: async () => 20,
       legBudget: 99,
       deadline: Date.now() + 60_000,

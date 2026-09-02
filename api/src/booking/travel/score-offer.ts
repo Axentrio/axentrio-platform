@@ -19,7 +19,7 @@ import { localDayBounds, type DayRule } from './travel-day';
 import { windowsForDay } from '../booking-providers/slot-engine';
 import { resolveDayPeriods } from './half-day';
 import { scoreCandidates, type LegLookup, type RouteNode, type ScoredCandidate } from './insertion-scorer';
-import { hasCheaperAlternative, orderSlotsByRoutePriority, SCORER_VERSION } from './slot-ordering';
+import { hasCheaperAlternative, counterfactualOrder, SCORER_VERSION } from './slot-ordering';
 import { GROUPING_DEADLINE_MS, GROUPING_LEG_BUDGET, GROUPING_PAID_LEG_BUDGET } from './grouping-budget';
 import { driveLookupFor } from './routes.service';
 import { estimateDrive } from './travel-gate';
@@ -81,7 +81,6 @@ export interface OfferScoring {
 
 export interface SlotScore {
   costMinutes: number | null;
-  preferred: boolean | null;
   neutralReason: string | null;
   period: 'morning' | 'afternoon' | null;
 }
@@ -278,7 +277,6 @@ export async function scoreOfferedSlots(input: {
           anchors,
           periods,
           base: base && basePoint ? { point: basePoint, departAt: base.at } : null,
-          maxDetourMin: input.eligibility.maxDetourMin,
           groupWholeDay: input.eligibility.groupingPeriod === 'full_day',
           lookup: metered,
           // Spent legs come off the budget, so a fortnight of days cannot each start with a full
@@ -363,7 +361,6 @@ export async function scoreOfferedSlots(input: {
     for (const [start, c] of byStart) {
       scores[start] = {
         costMinutes: c.costMinutes,
-        preferred: c.preferred,
         neutralReason: c.neutralReason,
         period: c.period,
       };
@@ -372,10 +369,9 @@ export async function scoreOfferedSlots(input: {
     return {
       scorerVersion: SCORER_VERSION,
       scores,
-      counterfactualOrder: orderSlotsByRoutePriority({
+      counterfactualOrder: counterfactualOrder({
         scored: allScored,
         requestable: input.requestable.map((s) => new Date(s.start)),
-        mode: input.eligibility.routePriority ?? 'auto',
       }),
       cheaperAlternativeExisted: hasCheaperAlternative(
         allScored,

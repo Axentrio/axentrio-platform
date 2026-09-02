@@ -29,11 +29,11 @@ const eligibility = {
   active: true as const,
   tenantId: 'tenant-1',
   itineraryKey: 'bot:1',
-  slackMin: 0,
+  minGapMin: 0,
   startFromBase: false,
-  maxDetourMin: null,
+  maxTravelMin: null,
   baseDepartOffsetMin: 0,
-  groupingPeriod: 'none' as const, routePriority: 'auto' as const,
+  groupingPeriod: 'none' as const,
 };
 
 // Antwerp to Ghent: far enough apart that an estimate is a real number rather than the overhead

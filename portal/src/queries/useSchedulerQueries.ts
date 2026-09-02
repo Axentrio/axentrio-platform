@@ -189,14 +189,11 @@ export interface SchedulerConfig {
   agent?: { id: string; name: string };
   travel?: {
     enabled: boolean;
-    slackMin: number | null;
     startFromBase: boolean;
     baseDepartOffsetMin: number;
     /** Over what stretch grouping looks for nearby work. `none` switches it off. */
     groupingPeriod: 'none' | 'half_day' | 'full_day';
-    /** Presentation-only sort of the already-scored Slot list. */
-    routePriority: 'auto' | 'nearest' | 'farthest';
-    maxDetourMin: number | null;
+    maxTravelMin: number | null;
     /**
      * Why the switch cannot be turned on, or null when it can. The API refuses each of these
      * on write too; this is what lets the screen say so BEFORE the owner tries.
@@ -216,7 +213,7 @@ export interface UpdateSchedulerPayload {
   bookingRules?: Partial<BookingRules>;
   /** `null` clears the whole venue; omitting the key leaves it untouched. */
   venueAddress?: Partial<VenueAddress> | null;
-  travel?: { enabled?: boolean; slackMin?: number | null; startFromBase?: boolean; baseDepartOffsetMin?: number; groupingPeriod?: 'none' | 'half_day' | 'full_day'; routePriority?: 'auto' | 'nearest' | 'farthest'; maxDetourMin?: number | null };
+  travel?: { enabled?: boolean; startFromBase?: boolean; baseDepartOffsetMin?: number; groupingPeriod?: 'none' | 'half_day' | 'full_day'; maxTravelMin?: number | null };
   bookingsPaused?: boolean;
 }
 

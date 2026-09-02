@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GROUPING_PERIODS, ROUTE_PRIORITIES, type GroupingPeriod, type RoutePriority } from '../contracts/travel';
+import { GROUPING_PERIODS, type GroupingPeriod } from '../contracts/travel';
 import { MAX_SERVICE_AREA_ENTRIES } from '../contracts/service-area';
 
 const hhmm = z.string().regex(/^([01]?\d|2[0-4]):[0-5]\d$/, 'Expected HH:MM');
@@ -364,9 +364,6 @@ export const availabilityInputSchema = z.object({
  */
 export const travelSettingsSchema = z.object({
   enabled: z.boolean().optional(),
-  // Slack pads the drive, so an hour is already generous and 480 would let it swallow a
-  // working day. Nullable so an owner can clear it back to "no margin".
-  slackMin: z.number().int().min(0).max(120).nullable().optional(),
   startFromBase: z.boolean().optional(),
   // #91: how early the van leaves the premises, in minutes before the day's first opening.
   // Capped at four hours because past that the owner is describing a different working day
@@ -378,22 +375,11 @@ export const travelSettingsSchema = z.object({
   // portal type, in the portal state, in two `as` casts and in a CHECK constraint - six copies of
   // one fact, and the artefact built to stop them drifting was the only one nothing used.
   groupingPeriod: z.enum(GROUPING_PERIODS as unknown as [GroupingPeriod, ...GroupingPeriod[]]).optional(),
-  /** Presentation-only sort of the already-scored Slot list. See `RoutePriority`. */
-  routePriority: z.enum(ROUTE_PRIORITIES as unknown as [RoutePriority, ...RoutePriority[]]).optional(),
   /**
-   * The most extra driving one appointment may ADD before it stops being preferred.
-   *
-   * The reader has existed since #81 (`travel-eligibility` -> `insertion-scorer`) with nothing
-   * able to write it, so every business has run on "no threshold" whether or not that suited them.
-   *
-   * It bounds the MARGINAL minutes a candidate adds - not the length of the drive - so a plumber
-   * whose customers are all forty minutes away is not left with an empty calendar. Two hours is
-   * the ceiling because beyond that an owner is describing a different business rather than a
-   * detour. Nullable and zero both mean "no threshold": a value that silently marked every slot
-   * unpreferred would be indistinguishable from the feature being off, and the second is
-   * overwhelmingly what an owner who typed 0 meant.
+   * The longest drive one appointment may need to or from its neighbours. Over
+   * it the Agent does not offer the time; the owner still can.
    */
-  maxDetourMin: z.number().int().min(0).max(120).nullable().optional(),
+  maxTravelMin: z.number().int().min(0).max(120).nullable().optional(),
 });
 
 export const updateSchedulerSchema = z

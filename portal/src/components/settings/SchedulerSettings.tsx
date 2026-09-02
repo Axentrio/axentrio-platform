@@ -74,15 +74,13 @@ function venueFromConfig(data: SchedulerConfig): VenueAddress {
 function travelFieldsFromConfig(data: SchedulerConfig) {
   return {
     enabled: data.travel?.enabled === true,
-    slackMin: data.travel?.slackMin ?? null,
     startFromBase: data.travel?.startFromBase === true,
     baseDepartOffsetMin: data.travel?.baseDepartOffsetMin ?? 0,
     groupingPeriod: data.travel?.groupingPeriod ?? 'none',
-    routePriority: data.travel?.routePriority ?? 'auto',
-    maxDetourMin:
-      data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
+    maxTravelMin:
+      data.travel?.maxTravelMin === null || data.travel?.maxTravelMin === undefined
         ? ''
-        : String(data.travel.maxDetourMin),
+        : String(data.travel.maxTravelMin),
   };
 }
 
@@ -212,12 +210,10 @@ export const SchedulerSettings: React.FC = () => {
     venue,
     reviewingVenue,
     travelEnabled,
-    travelSlack,
     travelStartFromBase,
     travelBaseDepart,
     travelGroupingPeriod,
-    travelRoutePriority,
-    travelMaxDetourMin,
+    travelMaxTravelMin,
     bookingsPaused,
     rules,
     showPreview,
@@ -232,12 +228,10 @@ export const SchedulerSettings: React.FC = () => {
     setVenue,
     setReviewingVenue,
     setTravelEnabled,
-    setTravelSlack,
     setTravelStartFromBase,
     setTravelBaseDepart,
     setTravelGroupingPeriod,
-    setTravelRoutePriority,
-    setTravelMaxDetourMin,
+    setTravelMaxTravelMin,
     setBookingsPaused,
     setRules,
     setShowPreview,
@@ -252,12 +246,10 @@ export const SchedulerSettings: React.FC = () => {
       setVenue: makeFieldSetter(dispatch, 'venue'),
       setReviewingVenue: makeFieldSetter(dispatch, 'reviewingVenue'),
       setTravelEnabled: makeFieldSetter(dispatch, 'travelEnabled'),
-      setTravelSlack: makeFieldSetter(dispatch, 'travelSlack'),
       setTravelStartFromBase: makeFieldSetter(dispatch, 'travelStartFromBase'),
       setTravelBaseDepart: makeFieldSetter(dispatch, 'travelBaseDepart'),
       setTravelGroupingPeriod: makeFieldSetter(dispatch, 'travelGroupingPeriod'),
-      setTravelRoutePriority: makeFieldSetter(dispatch, 'travelRoutePriority'),
-      setTravelMaxDetourMin: makeFieldSetter(dispatch, 'travelMaxDetourMin'),
+      setTravelMaxTravelMin: makeFieldSetter(dispatch, 'travelMaxTravelMin'),
       setBookingsPaused: makeFieldSetter(dispatch, 'bookingsPaused'),
       setRules: makeFieldSetter(dispatch, 'rules'),
       setShowPreview: makeFieldSetter(dispatch, 'showPreview'),
@@ -283,12 +275,10 @@ export const SchedulerSettings: React.FC = () => {
     // mapping is what the hydration test pins.
     const travel = travelFieldsFromConfig(data);
     setTravelEnabled(travel.enabled);
-    setTravelSlack(travel.slackMin);
     setTravelStartFromBase(travel.startFromBase);
     setTravelBaseDepart(travel.baseDepartOffsetMin);
     setTravelGroupingPeriod(travel.groupingPeriod);
-    setTravelRoutePriority(travel.routePriority);
-    setTravelMaxDetourMin(travel.maxDetourMin);
+    setTravelMaxTravelMin(travel.maxTravelMin);
     setRules(rulesFromConfig(data));
     setHydrated(true);
   }, [data, hydrated]);
@@ -370,14 +360,14 @@ export const SchedulerSettings: React.FC = () => {
     if (!Number.isInteger(travelBaseDepart) || travelBaseDepart < 0 || travelBaseDepart > 240) {
       e.push('Travel time: leaving early must be a whole number of minutes between 0 and 240.');
     }
-    // Mirrors `travelSettingsSchema`: an integer 0-120. Slack PADS every drive, so an hour is
-    // already generous and a fat-fingered 500 would swallow the working day — the API refuses
-    // it, and this is the difference between being told before the Save and after it.
-    if (travelSlack !== null && (!Number.isInteger(travelSlack) || travelSlack < 0 || travelSlack > 120)) {
-      e.push('Travel time: extra minutes must be a whole number between 0 and 120.');
+    if (travelMaxTravelMin.trim() !== '') {
+      const n = Number(travelMaxTravelMin);
+      if (!Number.isInteger(n) || n < 0 || n > 120) {
+        e.push('Travel time: maximum travel time must be a whole number between 0 and 120.');
+      }
     }
     return [...new Set(e)];
-  }, [days, overrides, availabilityMode, venue, travelSlack, travelBaseDepart]);
+  }, [days, overrides, availabilityMode, venue, travelMaxTravelMin, travelBaseDepart]);
 
   /**
    * The payload this form would send right now.
@@ -415,14 +405,12 @@ export const SchedulerSettings: React.FC = () => {
       // so a partial travel object would silently keep a stale switch on.
       travel: {
         enabled: travelEnabled,
-        slackMin: travelSlack,
         startFromBase: travelStartFromBase,
         baseDepartOffsetMin: travelBaseDepart,
         groupingPeriod: travelGroupingPeriod,
-        routePriority: travelRoutePriority,
-        // Empty means "no threshold", which the API takes as null rather than 0 - zero is a value
+        // Empty means "no limit", which the API takes as null rather than 0 - zero is a value
         // an owner can type and it means the same thing, but blank is absence, not a number.
-        maxDetourMin: travelMaxDetourMin.trim() === '' ? null : Number(travelMaxDetourMin),
+        maxTravelMin: travelMaxTravelMin.trim() === '' ? null : Number(travelMaxTravelMin),
       },
       bookingsPaused,
     };
@@ -574,18 +562,14 @@ export const SchedulerSettings: React.FC = () => {
                   workLocation={workLocation}
                   travelEnabled={travelEnabled}
                   setTravelEnabled={setTravelEnabled}
-                  travelSlack={travelSlack}
-                  setTravelSlack={setTravelSlack}
                   travelStartFromBase={travelStartFromBase}
                   setTravelStartFromBase={setTravelStartFromBase}
                   travelBaseDepart={travelBaseDepart}
                   setTravelBaseDepart={setTravelBaseDepart}
                   travelGroupingPeriod={travelGroupingPeriod}
                   setTravelGroupingPeriod={setTravelGroupingPeriod}
-                  travelRoutePriority={travelRoutePriority}
-                  setTravelRoutePriority={setTravelRoutePriority}
-                  travelMaxDetourMin={travelMaxDetourMin}
-                  setTravelMaxDetourMin={setTravelMaxDetourMin}
+                  travelMaxTravelMin={travelMaxTravelMin}
+                  setTravelMaxTravelMin={setTravelMaxTravelMin}
                 />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
@@ -912,7 +896,7 @@ const BookingRulesSection: React.FC<{
       />
       <OptionalNumberField
         label="Minimum gap (min)"
-        hint="Free time around each appointment"
+        hint="Free time around each appointment. With travel time on, it is added on top of every drive."
         value={rules.minGapMin}
         min={0}
         max={480}
@@ -1242,35 +1226,27 @@ const TravelSection: React.FC<{
   workLocation: WorkLocation;
   travelEnabled: boolean;
   setTravelEnabled: FormSetter<'travelEnabled'>;
-  travelSlack: number | null;
-  setTravelSlack: FormSetter<'travelSlack'>;
   travelStartFromBase: boolean;
   setTravelStartFromBase: FormSetter<'travelStartFromBase'>;
   travelBaseDepart: number;
   setTravelBaseDepart: FormSetter<'travelBaseDepart'>;
   travelGroupingPeriod: SchedulerFormState['travelGroupingPeriod'];
   setTravelGroupingPeriod: FormSetter<'travelGroupingPeriod'>;
-  travelRoutePriority: SchedulerFormState['travelRoutePriority'];
-  setTravelRoutePriority: FormSetter<'travelRoutePriority'>;
-  travelMaxDetourMin: string;
-  setTravelMaxDetourMin: FormSetter<'travelMaxDetourMin'>;
+  travelMaxTravelMin: string;
+  setTravelMaxTravelMin: FormSetter<'travelMaxTravelMin'>;
 }> = ({
   config,
   workLocation,
   travelEnabled,
   setTravelEnabled,
-  travelSlack,
-  setTravelSlack,
   travelStartFromBase,
   setTravelStartFromBase,
   travelBaseDepart,
   setTravelBaseDepart,
   travelGroupingPeriod,
   setTravelGroupingPeriod,
-  travelRoutePriority,
-  setTravelRoutePriority,
-  travelMaxDetourMin,
-  setTravelMaxDetourMin,
+  travelMaxTravelMin,
+  setTravelMaxTravelMin,
 }) => {
   if (workLocation === 'no_location') return null;
   /** Does this business go TO its customers? The only shape geographic grouping applies to. */
@@ -1326,27 +1302,6 @@ const TravelSection: React.FC<{
         </span>
       </label>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <Label htmlFor="travel-slack">Extra minutes per journey</Label>
-          <Input
-            id="travel-slack"
-            type="number"
-            min={0}
-            max={120}
-            value={travelSlack ?? ''}
-            placeholder="0"
-            disabled={!travelEnabled}
-            onChange={(e) =>
-              setTravelSlack(e.target.value === '' ? null : Number(e.target.value))
-            }
-          />
-          <p className="text-xs text-text-muted mt-1">
-            Parking, the doorstep, a job that runs over. Added to every drive.
-          </p>
-        </div>
-      </div>
-
       <label htmlFor="travel-start-from-base" className="flex items-start gap-2 cursor-pointer">
         <Checkbox
           id="travel-start-from-base"
@@ -1380,7 +1335,7 @@ const TravelSection: React.FC<{
         </select>
         <p className="text-xs text-text-muted mt-1">
           Customers still see every time they could have had, in the same list. Only the
-          order changes, so the one that saves you the most driving is offered first.
+          order changes. The time that adds the least driving to the jobs already around it is offered first.
           Nothing about your other customers is ever mentioned.
           {!travelsToCustomers && travelGroupingPeriod !== 'none' && (
             <>
@@ -1393,49 +1348,22 @@ const TravelSection: React.FC<{
       </div>
 
       <div>
-        <Label htmlFor="travel-route-priority">Route priority</Label>
-        <select
-          id="travel-route-priority"
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
-          value={travelRoutePriority}
-          disabled={!travelEnabled || !travelsToCustomers || travelGroupingPeriod === 'none'}
-          onChange={(e) =>
-            setTravelRoutePriority(e.target.value as 'auto' | 'nearest' | 'farthest')
-          }
-        >
-          <option value="auto">Auto</option>
-          <option value="nearest">Nearest first</option>
-          <option value="farthest">Farthest first</option>
-        </select>
-        <p className="text-xs text-text-muted mt-1">
-          Only the order of times already offered. Auto keeps the grouping preference;
-          nearest and farthest sort the same already-measured detours the other way.
-          Times grouping could not score stay where they were.
-        </p>
-      </div>
-
-      <div>
-        <Label htmlFor="travel-max-detour">Maximum extra travel per appointment (min)</Label>
+        <Label htmlFor="travel-max-travel">Maximum travel time between appointments (min)</Label>
         <Input
-          id="travel-max-detour"
+          id="travel-max-travel"
           type="number"
           min={0}
           max={120}
-          value={travelMaxDetourMin}
-          // Gated on GROUPING, not merely on travel. The threshold decides which times
-          // are suggested FIRST, and that ordering only reaches a customer when
-          // grouping is on - so offering the field beside "No grouping" would take a
-          // number and quietly consume nothing.
-          disabled={!travelEnabled || travelGroupingPeriod === 'none'}
+          value={travelMaxTravelMin}
+          disabled={!travelEnabled}
           placeholder="No limit"
-          onChange={(e) => setTravelMaxDetourMin(e.target.value)}
+          onChange={(e) => setTravelMaxTravelMin(e.target.value)}
         />
         <p className="text-xs text-text-muted mt-1">
-          How much EXTRA driving one appointment may add to your day — not how far away
-          it is, so a customer an hour away is still offered if you are already going
-          past. Over this, the time is still bookable; it simply stops being the one
-          suggested first, so it needs grouping switched on to have any effect. Leave
-          it empty for no limit.
+          The longest drive you accept between one appointment and the next, or from your
+          address to the first one. Times that need a longer drive are not offered to
+          customers. You can still pick them yourself from the calendar. Leave it empty
+          for no limit.
         </p>
       </div>
 

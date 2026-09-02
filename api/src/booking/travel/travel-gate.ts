@@ -143,18 +143,18 @@ function minutesBetween(from: Date, to: Date): number {
 /**
  * One side of the candidate, judged.
  *
- * THE FLAT GAP IS NOT READ HERE, and that is not an omission. Clearance between two jobs is
- * `max(minGapMin, drive + slack)`, and the `max` is realised by the two halves running
- * independently: everything closer than `minGapMin` was already removed before this function
- * saw it — by the busy-interval inflation on the offer path and by `enforceBusinessCapacity`
- * on the write path — so a candidate arriving here already satisfies the floor, and all this
- * adds is `drive + slack <= gap`. Applying the floor again here would compare a number against
- * a bound it has already cleared.
+ * budget = min(gap - Minimum Gap, Maximum Travel Time).
+ *
+ * The slot generator already keeps `gap >= minGap`. This gate adds
+ * `drive + minGap <= gap`, so both mechanisms together give drive plus Minimum Gap.
+ * The Buffers inside the Blocked Range add once. Maximum Travel Time then caps
+ * the remaining budget so one drive cannot exceed the owner's ceiling.
  */
 function assessSide(
   candidate: TravelCandidate,
   neighbour: TravelNeighbour | null,
-  slackMin: number,
+  minGapMin: number,
+  maxTravelMin: number | null,
   /** 'before' measures neighbour.blockedEnd → candidate.blockedStart; 'after' is the mirror. */
   side: 'before' | 'after'
 ): SideOutcome {
@@ -173,7 +173,9 @@ function assessSide(
   // What is left for the drive itself once the owner's own margin is taken out. Negative is
   // normal rather than an error: it means the margin alone does not fit, and `couldReachWithin`
   // answers that correctly — only two jobs at literally the same coordinates survive it.
-  const budgetMin = gapMin - Math.max(0, slackMin);
+  const budgetMin = gapMin - Math.max(0, minGapMin);
+  const cappedBudgetMin =
+    maxTravelMin == null || maxTravelMin <= 0 ? budgetMin : Math.min(budgetMin, maxTravelMin);
 
   // DIRECTION DOES NOT MATTER to either bound. Both are symmetric functions of a great-circle
   // distance, so `from`/`to` are written in travel order purely for the reader.
@@ -183,12 +185,12 @@ function assessSide(
   // Certain, and certain in the direction that costs a customer a slot — so it is the one
   // place a coarse point is still allowed to speak. ADR-0014: coarse positions can raise an
   // alarm, they just cannot clear one.
-  if (!couldReachWithin(from, to, budgetMin)) return { verdict: 'unreachable', constraining: true };
+  if (!couldReachWithin(from, to, cappedBudgetMin)) return { verdict: 'unreachable', constraining: true };
 
   // Certain the other way, and this requires BOTH ends to be properly placed. A town centre on
   // either end would be clearing a drive between two dots rather than between two doors.
   const bothPlaced = !candidate.coarse && neighbour.location.kind === 'known';
-  if (bothPlaced && certainlyReachableWithin(from, to, budgetMin)) {
+  if (bothPlaced && certainlyReachableWithin(from, to, cappedBudgetMin)) {
     return { verdict: 'clear', constraining: true };
   }
 
@@ -203,7 +205,7 @@ function assessSide(
       ? {
           from,
           to,
-          budgetMin,
+          budgetMin: cappedBudgetMin,
           // The drive starts when the earlier job's blocked range ends.
           departAt: side === 'before' ? neighbour.blockedEnd : candidate.blockedEnd,
         }
@@ -635,7 +637,8 @@ export interface RoutedAssessment {
 export async function assessSlotRouted(input: {
   candidate: TravelCandidate;
   neighbours: TravelNeighbour[];
-  slackMin: number;
+  minGapMin: number;
+  maxTravelMin: number | null;
   lookup: DriveLookup;
   /**
    * Shared across every slot of one availability check — see `routeBudget`. Omitted means
@@ -644,8 +647,8 @@ export async function assessSlotRouted(input: {
   budget?: RouteBudget;
 }): Promise<RoutedAssessment> {
   const outcomes = [
-    assessSide(input.candidate, precedingNeighbour(input.neighbours, input.candidate), input.slackMin, 'before'),
-    assessSide(input.candidate, followingNeighbour(input.neighbours, input.candidate), input.slackMin, 'after'),
+    assessSide(input.candidate, precedingNeighbour(input.neighbours, input.candidate), input.minGapMin, input.maxTravelMin, 'before'),
+    assessSide(input.candidate, followingNeighbour(input.neighbours, input.candidate), input.minGapMin, input.maxTravelMin, 'after'),
   ];
 
   const resolved: SideOutcome[] = [];

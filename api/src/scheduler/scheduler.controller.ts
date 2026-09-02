@@ -250,12 +250,10 @@ function readVenueAddress(s: BookingSettings | null) {
 function readTravelSettings(s: BookingSettings | null) {
   return {
     enabled: s?.travelTimeEnabled === true,
-    slackMin: s?.travelSlackMin ?? null,
     startFromBase: s?.travelStartFromBase === true,
     baseDepartOffsetMin: s?.travelBaseDepartOffsetMin ?? 0,
     groupingPeriod: s?.travelGroupingPeriod ?? 'none',
-    routePriority: s?.travelRoutePriority ?? 'auto',
-    maxDetourMin: s?.travelMaxDetourMin ?? null,
+    maxTravelMin: s?.travelMaxTravelMin ?? null,
   };
 }
 
@@ -559,20 +557,13 @@ function buildSettingsUpsert(
     add(column, submitted === true, submitted !== undefined);
   }
 
-  // Nullable int, so it follows the RULE_COLUMNS contract — undefined leaves the stored
-  // value alone, an explicit null clears it.
-  add('travel_slack_min', t.slackMin ?? null, t.slackMin !== undefined);
-
   // TEXT with a NOT NULL default, so it follows the boolean contract rather than the nullable-int
   // one: undefined leaves the stored value alone, and there is no "clear it" - `none` is off.
   add('travel_grouping_period', t.groupingPeriod ?? 'none', t.groupingPeriod !== undefined);
 
-  // Same NOT NULL TEXT contract as groupingPeriod. Default `auto` is today's existing order.
-  add('travel_route_priority', t.routePriority ?? 'auto', t.routePriority !== undefined);
-
-  // Same nullable-int contract as slack: undefined leaves the stored value alone, an explicit
-  // null clears it back to "no threshold".
-  add('travel_max_detour_min', t.maxDetourMin ?? null, t.maxDetourMin !== undefined);
+  // Same nullable-int contract as the other optional travel numbers: undefined leaves the
+  // stored value alone, an explicit null clears it back to "no limit".
+  add('travel_max_travel_min', t.maxTravelMin ?? null, t.maxTravelMin !== undefined);
 
   // NOT NULL with a default, so the INSERT arm must bind a real integer — it cannot ride the
   // nullable-int contract above, which would write null on a first save and violate the column.

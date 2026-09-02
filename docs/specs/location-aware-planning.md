@@ -35,16 +35,8 @@ Week supplied no different invariant, no different scoring horizon and no differ
 not deferred pending build capacity; it is removed pending a definition. If a distinct meaning
 exists (a weekly territory rota, for instance) it needs writing down before it is a requirement.
 
-**3. Route Priority becomes "Prefer".** The raw spec promised "farthest from Home Base earlier,
-gradually working back". The system cannot produce that. Confirmed appointments are never moved by
-the optimiser (AC9), and bookings arrive one at a time, so a day is never sequenced, only inserted
-into. The options are renamed to say what they can honestly do:
-
-| Was | Is |
-|---|---|
-| Auto Optimize | **Auto** - lowest marginal insertion cost |
-| Nearest First | **Prefer Nearer Earlier** |
-| Farthest First | **Prefer Farther Earlier** |
+**3. Route Priority is removed.** Route Priority was removed on 2026-09-02.
+Auto Optimize is the only order (ADR-0019).
 
 ---
 
@@ -160,10 +152,8 @@ cost(candidate) = t(prev → candidate) + t(candidate → next) − t(prev → n
 **Anchors** are every `confirmed` Booking in the period with a known position, whether that position
 is the booking customer's address or the venue. At-premises jobs are real route nodes.
 
-**The threshold.** `travel_max_detour_min` bounds the marginal minutes **one candidate** adds. Null
-means no threshold and everything scored is eligible to be preferred. The comparison is `<=`, so a
-candidate exactly at the threshold is preferred. Over it means **not preferred** and nothing else:
-the slot keeps its feasibility class, stays confirmable, and is still offered.
+**The threshold.** `travel_max_travel_min` bounds ONE drive. Under `enforce` a drive over it is `unreachable`;
+under `annotate` it is shown and pickable. Null or 0 means no limit. See ADR-0019.
 
 **Boundary-crossing.** A candidate's buffer-expanded **Blocked Range** must fit wholly inside one
 period to be scored. A straddling candidate is neutral. It is never scored against both periods and
@@ -342,7 +332,7 @@ are the point: the ranking work is the last thing built, not the first.
 |---|---|---|
 | **LP6a** | Structured customer flexibility | LP3's records show a real share of availability calls span more than one day *and* convert |
 | **LP6b** | Full Day | LP6a and LP4 both show cross-day value beyond Half Day |
-| **LP7** | Prefer Nearer / Farther Earlier | Owners want them and they beat Auto for a recognisable segment |
+| **LP7** | Removed 2026-09-02. Prefer Nearer / Farther Earlier is gone. Auto Optimize is the only order (ADR-0019). | - |
 
 ## The gates, as numbers (#85 Decision 2)
 

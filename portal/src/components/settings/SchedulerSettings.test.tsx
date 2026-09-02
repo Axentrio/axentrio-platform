@@ -91,7 +91,6 @@ const VENUE = { placeId: null, street: 'Grote Markt 1', postalCode: '9300', city
 
 const TRAVEL = {
   enabled: true,
-  slackMin: 10,
   startFromBase: true,
   // NON-ZERO deliberately (#91). Zero is the field's default, so a fixture carrying zero would
   // pass the round-trip below even if the editor never hydrated the value at all.
@@ -99,10 +98,8 @@ const TRAVEL = {
   // Non-default for the same reason as the offset above: 'none' is what an unhydrated selector
   // reads as, so a 'none' fixture could not tell "round-tripped" from "never read".
   groupingPeriod: 'half_day' as const,
-  // Non-default so an unhydrated selector cannot pass as a round-trip.
-  routePriority: 'nearest' as const,
   // Same again - null is the unhydrated value, so a null fixture would prove nothing.
-  maxDetourMin: 45,
+  maxTravelMin: 45,
   blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
 };
 
@@ -423,13 +420,12 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
     const payload = await saveUntouched(CONFIG);
     expect(payload.travel).toEqual({
       enabled: true,
-      slackMin: 10,
       startFromBase: true,
       baseDepartOffsetMin: 30,
       groupingPeriod: 'half_day',
-      routePriority: 'nearest',
-      maxDetourMin: 45,
+      maxTravelMin: 45,
     });
+    expect(screen.queryByLabelText(/route priority/i)).toBeNull();
   });
 
   it('does not send blockedReason back — that is the server answer, not an owner setting', async () => {
@@ -476,17 +472,17 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
     expect(box).not.toBeDisabled();
   });
 
-  it('refuses a slack value the API would reject, before the Save', async () => {
+  it('refuses a maximum travel time the API would reject', async () => {
     apiGet.mockImplementation((url: string) => {
       if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) {
-        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, slackMin: 500 } });
+        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, maxTravelMin: 500 } });
       }
       if (url.includes('/services')) return Promise.resolve({ services: [] });
       return Promise.resolve({});
     });
     renderUI();
-    expect(await screen.findByText(/whole number between 0 and 120/i)).toBeInTheDocument();
+    expect(await screen.findByText(/maximum travel time must be a whole number between 0 and 120/i)).toBeInTheDocument();
   });
 
   it('states the single-driver assumption', async () => {

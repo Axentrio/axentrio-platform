@@ -22,7 +22,7 @@ import {
   Index,
 } from 'typeorm';
 import type { ServiceAreaEntry } from '../../contracts/service-area';
-import type { GroupingPeriod, RoutePriority } from '../../contracts/travel';
+import type { GroupingPeriod } from '../../contracts/travel';
 import { Tenant } from './Tenant';
 import { Bot } from './Bot';
 
@@ -183,13 +183,6 @@ export class BookingSettings {
   @Column({ type: 'boolean', name: 'travel_time_enabled', default: true })
   travelTimeEnabled!: boolean;
 
-  /**
-   * The owner's margin on top of the drive itself: parking, finding the door, the job
-   * before running five minutes late. Added only when there IS a drive to pad — adding it
-   * to the no-answer case would quietly tighten every business that never uses this.
-   */
-  @Column({ type: 'int', name: 'travel_slack_min', nullable: true })
-  travelSlackMin?: number | null;
 
   /**
    * Gate the FIRST job of the day against the venue, as though the owner starts from
@@ -229,14 +222,12 @@ export class BookingSettings {
   venueLng?: number | null;
 
   /**
-   * Day-scoring settings, carried by the same migration and read by nothing.
-   *
-   * Efficiency is deliberately out of v1: whether a job further out is worth doing is the
-   * owner's decision, and a soft preference must never refuse a booking a hard constraint
-   * would have allowed. These exist so that work is a feature, not a second migration.
+   * The longest single drive the owner allows between two consecutive Bookings,
+   * or from the Base. Null or 0 means no limit. The Agent may not offer or
+   * confirm a Slot over it; the owner still can (ADR-0019).
    */
-  @Column({ type: 'int', name: 'travel_max_detour_min', nullable: true })
-  travelMaxDetourMin?: number | null;
+  @Column({ type: 'int', name: 'travel_max_travel_min', nullable: true })
+  travelMaxTravelMin?: number | null;
 
   /**
    * Over what stretch of the diary grouping looks for nearby work.
@@ -253,14 +244,7 @@ export class BookingSettings {
   @Column({ type: 'text', name: 'travel_grouping_period', default: 'none' })
   travelGroupingPeriod!: GroupingPeriod;
 
-  /**
-   * Presentation-only sort of the already-scored Slot list (ADR-0017).
-   *
-   * Default `auto` is the grouping scorer's existing preference. `nearest` / `farthest` invert
-   * the same already-computed detour figures. Inert when `travelGroupingPeriod` is `none`.
-   */
-  @Column({ type: 'text', name: 'travel_route_priority', default: 'auto' })
-  travelRoutePriority!: RoutePriority;
+
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

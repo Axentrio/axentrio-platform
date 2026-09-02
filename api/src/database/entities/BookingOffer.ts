@@ -59,7 +59,6 @@ export interface OfferedSlot {
    * means it ran and declined to have an opinion, which is a different and useful fact.
    */
   costMinutes?: number | null;
-  preferred?: boolean | null;
   neutralReason?: string | null;
   period?: 'morning' | 'afternoon' | null;
 }

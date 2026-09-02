@@ -205,7 +205,7 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
+  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', minGapMin: 0, startFromBase: false, maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
     blockedStart: new Date(start), blockedEnd: new Date(end), location: { kind: 'known', point },
   });
@@ -948,11 +948,11 @@ describe('InternalProvider reschedule / cancel / list', () => {
       active: true,
       tenantId: 'ten-1',
       itineraryKey: 'bot:1',
-      slackMin: 0,
+      minGapMin: 0,
       startFromBase: false,
       baseDepartOffsetMin: 0,
-      maxDetourMin: null,
-      groupingPeriod: 'none', routePriority: 'auto',
+      maxTravelMin: null,
+      groupingPeriod: 'none',
     } as any);
     answerAccept(requestBooking());
 
@@ -1036,7 +1036,7 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
+  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', minGapMin: 0, startFromBase: true, maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const };
   const GENT = { lat: 51.05, lng: 3.72 };
   const LIEGE = { lat: 50.6326, lng: 5.5797 };
   const VENUE = { kind: 'known' as const, point: GENT };

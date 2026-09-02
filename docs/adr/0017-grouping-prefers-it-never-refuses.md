@@ -155,3 +155,6 @@ Genuine route optimisation — the selector influencing which Slots are offered 
 alternative and is rejected, not deferred vaguely: it reverses "efficiency must never become a hard
 block", which is a founder-level rule, and nothing yet shows reorder-only is insufficient. If that
 evidence arrives, the reversal needs a new ADR superseding this one, written before the code.
+
+2026-09-02: Route Priority removed and Maximum Travel Time became a
+feasibility ceiling for the Agent; see ADR-0019.

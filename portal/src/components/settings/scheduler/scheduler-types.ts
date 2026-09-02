@@ -69,12 +69,10 @@ export type SchedulerFormState = {
   venue: VenueAddress;
   reviewingVenue: boolean;
   travelEnabled: boolean;
-  travelSlack: number | null;
   travelStartFromBase: boolean;
   travelBaseDepart: number;
   travelGroupingPeriod: 'none' | 'half_day' | 'full_day';
-  travelRoutePriority: 'auto' | 'nearest' | 'farthest';
-  travelMaxDetourMin: string;
+  travelMaxTravelMin: string;
   bookingsPaused: boolean;
   rules: BookingRules;
   showPreview: boolean;
@@ -91,12 +89,10 @@ export function createSchedulerForm(): SchedulerFormState {
     venue: { street: null, postalCode: null, city: null, country: null, placeId: null },
     reviewingVenue: false,
     travelEnabled: false,
-    travelSlack: null,
     travelStartFromBase: false,
     travelBaseDepart: 0,
     travelGroupingPeriod: 'none',
-    travelRoutePriority: 'auto',
-    travelMaxDetourMin: '',
+    travelMaxTravelMin: '',
     bookingsPaused: false,
     rules: {
       maxBookingsPerDay: null,

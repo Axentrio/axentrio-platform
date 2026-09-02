@@ -40,7 +40,7 @@ describe('resolveTravelEligibility', () => {
     vi.clearAllMocks();
     travelConfig.googleMapsApiKey = 'key-1';
     getEntitlements.mockResolvedValue({ features: { travelTime: true } });
-    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelStartFromBase: true });
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, minGapMin: 10, travelStartFromBase: true });
     itineraryKeyIsShared.mockResolvedValue(false);
   });
 
@@ -52,30 +52,26 @@ describe('resolveTravelEligibility', () => {
       // Tenant on an enabled Agent" a rule the compiler enforces.
       tenantId: 'ten-1',
       itineraryKey: 'gcal:owner@acme.com',
-      slackMin: 10,
+      minGapMin: 10,
       startFromBase: true,
-      maxDetourMin: null,
-      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const,
+      maxTravelMin: null,
+      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
     });
   });
 
-  it('carries a stored Route Priority rather than inventing auto', async () => {
-    bsFindOne.mockResolvedValue({
-      travelTimeEnabled: true,
-      travelSlackMin: 10,
-      travelRoutePriority: 'nearest',
-    });
-    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, routePriority: 'nearest' });
+  it('defaults a missing Minimum Gap to zero and never lets a negative one tighten the gap', async () => {
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, minGapMin: -30 });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ minGapMin: 0, startFromBase: false });
   });
 
   it('reads a zero detour threshold as no threshold, not as "nothing qualifies"', async () => {
     // A preference that silently marks every slot unpreferred is indistinguishable from one that
     // is switched off, and the second is overwhelmingly what an owner who typed 0 meant.
-    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelMaxDetourMin: 0 });
-    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxDetourMin: null });
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, minGapMin: 10, travelMaxTravelMin: 0 });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxTravelMin: null });
 
-    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelMaxDetourMin: 25 });
-    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxDetourMin: 25 });
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, minGapMin: 10, travelMaxTravelMin: 25 });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxTravelMin: 25 });
   });
 
   it('stops at the missing API key WITHOUT consulting the entitlement resolver', async () => {
@@ -118,10 +114,6 @@ describe('resolveTravelEligibility', () => {
     expect(itineraryKeyIsShared).toHaveBeenCalledWith('ten-1', 'bot-1', 'gcal:owner@acme.com');
   });
 
-  it('defaults slack to zero and never lets a negative one tighten the gap', async () => {
-    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: -30 });
-    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ slackMin: 0, startFromBase: false });
-  });
 });
 
 /**

@@ -46,8 +46,6 @@ export interface ScoredCandidate {
   start: Date;
   /** Marginal minutes this candidate adds, or null when it carries no preference. */
   costMinutes: number | null;
-  /** Null when `costMinutes` is null. `false` means scored but over the owner's threshold. */
-  preferred: boolean | null;
   neutralReason: NeutralReason | null;
   period: HalfDayPeriod | null;
 }
@@ -94,8 +92,6 @@ export interface ScoreInput {
   groupWholeDay?: boolean;
   /** The premises, when start-from-base is on. Only ever a `prev`, and only for the day's first. */
   base: { point: { lat: number; lng: number }; departAt: Date } | null;
-  /** Minutes one candidate may add. Null means no threshold. */
-  maxDetourMin: number | null;
   lookup: LegLookup;
   /** Stop scoring once this many legs have been measured. Overflow is neutral, never a Request. */
   legBudget: number;
@@ -113,7 +109,7 @@ function neutralAt(
   neutralReason: NeutralReason,
   period: HalfDayPeriod | null = null
 ): ScoredCandidate {
-  return { start, costMinutes: null, preferred: null, neutralReason, period };
+  return { start, costMinutes: null, neutralReason, period };
 }
 
 /**
@@ -218,11 +214,7 @@ async function measureCandidate(
     }
 
     const costMinutes = toCandidate + fromCandidate - baseline;
-    // The threshold bounds the marginal minutes ONE candidate adds. Over it means NOT PREFERRED
-    // and nothing else: the Slot keeps its feasibility class, stays confirmable, is still
-    // offered. `<=` so a candidate exactly at the threshold is preferred.
-    const preferred = input.maxDetourMin === null ? true : costMinutes <= input.maxDetourMin;
-    return { start: candidate.blockedStart, costMinutes, preferred, neutralReason: null, period };
+    return { start: candidate.blockedStart, costMinutes, neutralReason: null, period };
   } catch (error) {
     // A scorer that can break a booking is worse than one that says nothing.
     logger.warn('[grouping] scoring a candidate failed; leaving it neutral', { error });

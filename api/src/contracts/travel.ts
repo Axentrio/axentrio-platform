@@ -272,30 +272,18 @@ export interface TravelGapInput {
    * degrade-to-flat-gap signal and is a NORMAL outcome, not an error.
    */
   driveMin: number | null;
-  /** The owner's safety margin on top of the drive: parking, the doorstep, overrunning. */
-  slackMin: number;
-  /** The business's existing flat gap. Stays the floor — travel raises it, never lowers it. */
+  /** The owner's Minimum Gap, added on top of every drive. */
   minGapMin: number;
 }
 
 /**
  * How many free minutes must sit between two consecutive jobs.
  *
- * THE FLAT GAP IS A FLOOR, NOT A TERM IN A SUM. `minGapMin` is the owner's stated
- * breathing room — they set it for reasons that have nothing to do with distance
- * (a coffee, notes, a phone call), and a two-minute drive must not silently cancel it.
- * So the answer is the LARGER of the flat gap and the drive-plus-slack, which means:
+ * Required free time is the drive plus the Minimum Gap. Buffers already sit inside
+ * the Blocked Range, so they add once and are not part of this sum.
  *
- * (Do not read "additive" here. The Minimum Gap is additive with a Service's BUFFERS —
- * those sit inside `blocked_range` and this gap is measured between blocked ranges, so
- * the two compose by addition. Drive time composes with the flat gap by `max`.)
- *
- *   - no routing answer  → exactly today's behaviour, `minGapMin`
- *   - a short drive      → still `minGapMin`, unchanged
- *   - a long drive       → the drive, plus the owner's slack
- *
- * Slack is added only when there IS a drive to pad. Adding it to the null case would
- * quietly tighten every business that never uses this feature.
+ *   - no routing answer  → exactly the Minimum Gap
+ *   - a known drive      → drive + Minimum Gap
  *
  * ## NOTHING CALLS THIS, AND THAT IS CORRECT
  *
@@ -305,20 +293,20 @@ export interface TravelGapInput {
  *   - `min_gap_min` is a Capacity Ceiling, applied when SLOTS ARE GENERATED, so a slot list
  *     already has the owner's flat gap between its entries before travel sees it.
  *   - the drive is applied by the FEASIBILITY GATE, which asks whether the drive fits in the
- *     free time that is actually there: `budgetMin = gapMin - slackMin` (`travel-gate.ts:158`),
- *     i.e. `drive + slack <= gap`.
+ *     free time that is actually there: `budgetMin = min(gap - minGap, maxTravel)`
+ *     (`travel-gate.ts`), i.e. `drive + minGap <= gap`, then capped by Maximum Travel Time.
  *
- * Compose those and a slot survives exactly when `gap >= max(minGap, drive + slack)`, which is
- * this function. So it is a SPECIFICATION, kept and tested because the rule is easy to get wrong
- * and hard to read off two files - and it must stay uncalled, because calling it in either place
- * would charge the owner twice for one cushion.
+ * Compose those and a slot survives when `gap >= drive + minGap` (and the drive itself is
+ * under the ceiling). So it is a SPECIFICATION, kept and tested because the rule is easy to
+ * get wrong and hard to read off two files - and it must stay uncalled, because calling it
+ * in either place would charge the owner twice for one cushion.
  *
  * If you are here because you want to use it: you almost certainly want `travel-gate.ts` instead.
  */
 export function travelGapMinutes(input: TravelGapInput): number {
   const floor = Math.max(0, input.minGapMin);
   if (input.driveMin === null || !Number.isFinite(input.driveMin) || input.driveMin < 0) return floor;
-  return Math.max(floor, input.driveMin + Math.max(0, input.slackMin));
+  return floor + input.driveMin;
 }
 
 /**
@@ -350,14 +338,4 @@ export type GroupingPeriod = 'none' | 'half_day' | 'full_day';
 /** Every value the column accepts, for validation that cannot drift from the type. */
 export const GROUPING_PERIODS: readonly GroupingPeriod[] = ['none', 'half_day', 'full_day'] as const;
 
-/**
- * How the already-scored Slot list is sorted for presentation (ADR-0017, 2026-08-17).
- *
- * Feasibility alone decides membership. These modes choose only the sort key: `auto` is the
- * grouping scorer's existing preference; `nearest` / `farthest` invert the same already-computed
- * detour figures. A Slot the scorer left unscored keeps its chronological position.
- */
-export type RoutePriority = 'auto' | 'nearest' | 'farthest';
 
-/** Every value the column accepts, for validation that cannot drift from the type. */
-export const ROUTE_PRIORITIES: readonly RoutePriority[] = ['auto', 'nearest', 'farthest'] as const;

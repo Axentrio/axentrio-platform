@@ -447,7 +447,11 @@ export const ServicesSection: React.FC<{
     !services.some((x) => x.id !== pendingDelete.id && x.isActive && x.onlineBookable);
 
   const openNew = () => {
-    setForm(BLANK);
+    const locationType =
+      workLocation === 'at_one_location' ? 'business_location'
+      : workLocation === 'on_the_road' ? 'customer_location'
+      : BLANK.locationType;
+    setForm({ ...BLANK, locationType, ...locationTypeSideEffects(locationType) });
     setEditing('new');
   };
   const openEdit = (s: Service) => {

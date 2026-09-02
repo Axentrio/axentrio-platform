@@ -742,7 +742,8 @@ export class InternalProvider implements BookingProvider {
       const { verdict, degradedCauses } = await assessSlotRouted({
         candidate: slotCandidate,
         neighbours: withBaseNeighbour(input.neighbours, slotCandidate, base, dayStart),
-        slackMin: input.eligibility.slackMin,
+        minGapMin: input.eligibility.minGapMin,
+        maxTravelMin: input.eligibility.maxTravelMin,
         lookup: input.lookup,
         budget: input.budget,
       });
@@ -1072,7 +1073,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict } = await assessSlotRouted({
       candidate: selection.candidate,
       neighbours: withBaseNeighbour(selection.others, selection.candidate, { at, location: venue }, dayStart),
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: input.lookup,
     });
     return { verdict, bookingId: selection.bookingId };
@@ -1142,7 +1144,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: input.candidate.point, coarse: input.candidate.coarse },
       neighbours,
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: replayLookup(input.drives ?? {}),
     });
     if (verdict === 'clear') return;
@@ -1211,7 +1214,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict, fullyRouted, hadConstrainingLeg, degradedCauses } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
       neighbours,
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: recordingLookup(driveLookupFor(input.eligibility, ctx.session?.id ?? null), drives),
     });
     // The only place a degradation CAUSE exists — the column records that a booking degraded,

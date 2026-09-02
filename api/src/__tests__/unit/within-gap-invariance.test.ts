@@ -46,7 +46,6 @@ const score = (lookup: LegLookup) =>
     anchors,
     periods,
     base: null,
-    maxDetourMin: null,
     lookup,
     legBudget: 99,
     deadline: Date.now() + 60_000,

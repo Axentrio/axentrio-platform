@@ -423,13 +423,27 @@ export class InternalProvider implements BookingProvider {
     // availability is being computed for is a fact about the request, not something each
     // helper should re-derive. Travel filtering will scope to this same key (ADR-0016).
     const itineraryKey = await resolveItineraryKey(ctx.bot.id);
+    // The excluded booking's own MIRRORED calendar event sits at its current interval, and
+    // excludeBookingId only covers the internal row. Left in, every target overlapping the
+    // appointment being moved reads busy against nobody but itself - the admin reschedule
+    // picker and the agent's moveTargets both ride this method (live: Lena Five, a 09:30
+    // target refused on her own 09:00-10:00 hold). Same exclusion the reschedule write
+    // path has always applied: rescheduleBooking defaults excludeExternalInterval to the
+    // row's own interval. Tenant-guarded lookup; a foreign or unknown id excludes nothing.
+    const excludedRow = excludeBookingId
+      ? await AppDataSource.getRepository(Booking).findOne({
+          where: { id: excludeBookingId, tenantId: ctx.tenant.id },
+          select: ['id', 'startUtc', 'endUtc'],
+        })
+      : null;
     const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       rangeStart,
       rangeEnd,
       rule.timezone,
-      excludeBookingId
+      excludeBookingId,
+      excludedRow ? { start: excludedRow.startUtc, end: excludedRow.endUtc } : undefined
     );
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.

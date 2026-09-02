@@ -391,6 +391,30 @@ describe('InternalProvider.createBooking', () => {
     expect(res.alreadyHeld).toBeUndefined();
   });
 
+  it('drops the excluded booking\'s own mirrored calendar event from busy', async () => {
+    // The mirror sits in Google at the booking's exact interval, and excludeBookingId only
+    // covers the internal row. Without this exclusion every target overlapping the
+    // appointment being moved reads busy against nobody but itself - the admin reschedule
+    // picker and the agent's moveTargets both ride this method (live: Lena Five, a 09:30
+    // target refused on her own 09:00-10:00 hold).
+    const mirror = [{ start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T08:00:00Z') }];
+    getGoogleBusyForBot.mockResolvedValue(mirror);
+    const plain = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(plain.slots.some((s: { start: string }) => s.start === '2026-06-10T07:30:00.000Z')).toBe(false);
+
+    bookingFindOne.mockResolvedValueOnce({
+      id: 'bk-mine',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      endUtc: new Date('2026-06-10T08:00:00Z'),
+    });
+    const excluded = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', undefined, undefined, 'bk-mine');
+    expect(bookingFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'bk-mine', tenantId: 'ten-1' }) })
+    );
+    expect(excluded.slots.some((s: { start: string }) => s.start === '2026-06-10T07:30:00.000Z')).toBe(true);
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
   it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {
     const waCtx = { ...ctx, session: { id: 'sess-1', channel: 'whatsapp', visitorId: '31470123456' } };
     const res = await provider.createBooking(waCtx, 'idem-wa', OFFERED_START, {

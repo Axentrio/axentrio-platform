@@ -42,7 +42,7 @@ describe('Meta transports — outbound send URL', () => {
         pageId: '1161984810327648',
         igBusinessId: '17841434799597402',
       },
-    } as ChannelConnection;
+    } as unknown as ChannelConnection;
 
     const request = buildRequest(transport, connection);
     expect('error' in request).toBe(false);

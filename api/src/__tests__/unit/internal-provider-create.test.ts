@@ -2498,23 +2498,31 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     expect(res.slots.length).toBeGreaterThan(0);
   });
 
-  it('returns BOTH kinds from one call when routing answers for some legs only', async () => {
+  it('returns BOTH kinds from one call, decided per leg rather than per call', async () => {
     // THE MIXED RESULT, which until now only ever existed in a hand-written fixture. The picker
     // gate in `booking.tool.ts` drops the address picker whenever a result holds a confirmable
     // time, and the reason given was that requestable times come from an unmeasured drive rather
     // than a doubtful address, so verifying the door would not upgrade them. That argument
-    // assumed this shape is reachable. It is: the same 47 km pair measured for one leg and
-    // unanswered for the rest splits the day into times the gate cleared and times nobody could
-    // measure.
+    // assumed this shape is reachable, and nothing had shown it.
+    //
+    // The lookup answers by LEG, never by call index. The neighbour finishes at 06:00, so each
+    // start asks about its own budget - 60 minutes for the 07:00 start, 90 for the next, and so
+    // on. Measuring the 60-minute leg and leaving the rest unanswered therefore splits the day
+    // the same way however the calls are ordered, batched or memoised.
     loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
     ] });
-    driveAnswer.mockResolvedValueOnce({ minutes: 50 }).mockResolvedValue({ minutes: null });
+    driveAnswer.mockImplementation(async (leg: unknown) => {
+      const measured = !!leg && typeof leg === 'object' && 'budgetMin' in leg && leg.budgetMin === 60;
+      return measured ? { minutes: 50 } : { minutes: null };
+    });
 
     const res = await check(ADDRESS);
 
-    expect(res.slots.length).toBeGreaterThan(0);
+    expect(res.slots.map((s) => s.start)).toEqual(['2026-06-10T07:00:00.000Z']);
     expect(res.travel?.requestableSlots.length).toBeGreaterThan(0);
+    // One day, cut into parts: nothing is lost and nothing is counted twice.
+    expect(res.slots.length + res.travel!.requestableSlots.length + res.travel!.unreachableSlots.length).toBe(4);
   });
 
   it('hands a no-route answer to the OWNER rather than refusing on Google’s data quality', async () => {

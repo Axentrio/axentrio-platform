@@ -204,6 +204,7 @@ export async function applySocketTenantContext(
   const tenant = await loadTenant(target);
   if (!tenant) throw new Error('Authentication error: Tenant not found');
   if (tenant.status === 'suspended') throw new Error('Authentication error: Tenant is suspended');
+  if (tenant.status === 'cancelled') throw new Error('Authentication error: Tenant is cancelled');
   user.tenantId = tenant.id;
   socket.data.tenantId = tenant.id;
   logger.info('Super admin socket context switch', { userId: user.userId, targetTenantId: tenant.id });

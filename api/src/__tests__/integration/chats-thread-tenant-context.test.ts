@@ -155,4 +155,29 @@ describe('chat thread and detail — X-Tenant-Context', () => {
     expect(home.status).toBe(200);
     expect(home.body.data.sessionId).toBe(homeSessionId);
   });
+
+  it('a SUPER ADMIN with a non-UUID header gets 400, not 500', async () => {
+    const user = await createTestUser(homeTenantId, { role: 'super_admin' });
+    Object.assign(auth, { userId: user.id, tenantId: homeTenantId, role: 'super_admin' });
+
+    const res = await request(app)
+      .get(`/api/v1/chats/${targetSessionId}/thread`)
+      .set('x-tenant-context', 'not-a-uuid');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error?.message).toBe('Invalid tenant context');
+  });
+
+  it('a SUPER ADMIN cannot view a cancelled tenant', async () => {
+    const cancelled = await createTestTenant({ status: 'cancelled' });
+    const user = await createTestUser(homeTenantId, { role: 'super_admin' });
+    Object.assign(auth, { userId: user.id, tenantId: homeTenantId, role: 'super_admin' });
+
+    const res = await request(app)
+      .get(`/api/v1/chats/${targetSessionId}/thread`)
+      .set('x-tenant-context', cancelled.id);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.message).toBe('Tenant is cancelled');
+  });
 });

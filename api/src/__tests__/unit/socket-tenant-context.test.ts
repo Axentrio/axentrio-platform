@@ -57,6 +57,13 @@ describe('applySocketTenantContext', () => {
     ).rejects.toThrow('Authentication error: Tenant is suspended');
   });
 
+  it('super admin + cancelled -> Tenant is cancelled', async () => {
+    const socket = mockSocket({ role: 'super_admin', tenantContext: TARGET });
+    await expect(
+      applySocketTenantContext(socket, async () => ({ id: TARGET, status: 'cancelled' }) as Tenant),
+    ).rejects.toThrow('Authentication error: Tenant is cancelled');
+  });
+
   it('super admin + non-UUID -> Invalid tenant context', async () => {
     const socket = mockSocket({ role: 'super_admin', tenantContext: 'not-a-uuid' });
     const loadTenant = vi.fn();

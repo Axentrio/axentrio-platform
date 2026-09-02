@@ -98,6 +98,24 @@ describe('resolveTenantContext', () => {
     expect(calls[0]).toMatchObject({ message: 'Tenant is suspended' });
   });
 
+  it('super admin + non-UUID header does not query and calls next with bad request', async () => {
+    const req = mockReq({ role: 'super_admin', header: 'not-a-uuid' });
+    const { next, calls } = nextRecorder();
+    await resolveTenantContext(req, {} as Response, next);
+    expect(req.user?.tenantId).toBe(HOME);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(calls[0]).toMatchObject({ message: 'Invalid tenant context' });
+  });
+
+  it('super admin + cancelled tenant calls next with forbidden', async () => {
+    findOne.mockResolvedValue({ id: TARGET, name: 'Viewed', status: 'cancelled' });
+    const req = mockReq({ role: 'super_admin', header: TARGET });
+    const { next, calls } = nextRecorder();
+    await resolveTenantContext(req, {} as Response, next);
+    expect(req.user?.tenantId).toBe(HOME);
+    expect(calls[0]).toMatchObject({ message: 'Tenant is cancelled' });
+  });
+
   it('empty header leaves tenantId unchanged', async () => {
     const req = mockReq({ role: 'super_admin', header: '' });
     const { next, calls } = nextRecorder();

@@ -97,4 +97,45 @@ describe('resolveTenantContext', () => {
     expect(req.user?.tenantId).toBe(HOME);
     expect(calls[0]).toMatchObject({ message: 'Tenant is suspended' });
   });
+
+  it('empty header leaves tenantId unchanged', async () => {
+    const req = mockReq({ role: 'super_admin', header: '' });
+    const { next, calls } = nextRecorder();
+    await resolveTenantContext(req, {} as Response, next);
+    expect(req.tenantId).toBe(HOME);
+    expect(req.user?.tenantId).toBe(HOME);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(calls).toEqual([undefined]);
+  });
+
+  it('missing user leaves tenantId unchanged', async () => {
+    const req = mockReq({ header: TARGET });
+    const { next, calls } = nextRecorder();
+    await resolveTenantContext(req, {} as Response, next);
+    expect(req.tenantId).toBe(HOME);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(calls).toEqual([undefined]);
+  });
+
+  it('supervisor + header leaves tenantId unchanged', async () => {
+    const req = mockReq({ role: 'supervisor', header: TARGET });
+    const { next, calls } = nextRecorder();
+    await resolveTenantContext(req, {} as Response, next);
+    expect(req.tenantId).toBe(HOME);
+    expect(req.user?.tenantId).toBe(HOME);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(calls).toEqual([undefined]);
+  });
+
+  it('does not leak the viewed tenant onto a later request object', async () => {
+    findOne.mockResolvedValue({ id: TARGET, name: 'Viewed', status: 'active' });
+    const viewed = mockReq({ role: 'super_admin', header: TARGET });
+    const later = mockReq({ role: 'super_admin' });
+    const { next } = nextRecorder();
+    await resolveTenantContext(viewed, {} as Response, next);
+    await resolveTenantContext(later, {} as Response, next);
+    expect(viewed.user?.tenantId).toBe(TARGET);
+    expect(later.user?.tenantId).toBe(HOME);
+    expect(later.tenantId).toBe(HOME);
+  });
 });

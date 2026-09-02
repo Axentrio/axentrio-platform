@@ -82,4 +82,37 @@ describe('applySocketTenantContext', () => {
     expect(socket.data.tenantId).toBe(HOME);
     expect(loadTenant).not.toHaveBeenCalled();
   });
+
+  it('widget principal + super_admin role does not switch', async () => {
+    const socket = mockSocket({ role: 'super_admin', type: 'widget', tenantContext: TARGET });
+    const loadTenant = vi.fn();
+    await applySocketTenantContext(socket, loadTenant);
+    expect(socket.data.tenantId).toBe(HOME);
+    expect(socket.data.user?.tenantId).toBe(HOME);
+    expect(loadTenant).not.toHaveBeenCalled();
+  });
+
+  it('empty tenantContext does not switch', async () => {
+    const socket = mockSocket({ role: 'super_admin', tenantContext: '' });
+    const loadTenant = vi.fn();
+    await applySocketTenantContext(socket, loadTenant);
+    expect(socket.data.tenantId).toBe(HOME);
+    expect(loadTenant).not.toHaveBeenCalled();
+  });
+
+  it('missing user does not throw', async () => {
+    const socket = mockSocket({ tenantContext: TARGET });
+    const loadTenant = vi.fn();
+    await applySocketTenantContext(socket, loadTenant);
+    expect(socket.data.tenantId).toBe(HOME);
+    expect(loadTenant).not.toHaveBeenCalled();
+  });
+
+  it('supervisor + valid target does not switch', async () => {
+    const socket = mockSocket({ role: 'supervisor', tenantContext: TARGET });
+    const loadTenant = vi.fn();
+    await applySocketTenantContext(socket, loadTenant);
+    expect(socket.data.tenantId).toBe(HOME);
+    expect(loadTenant).not.toHaveBeenCalled();
+  });
 });

@@ -20,6 +20,7 @@ import {
   formatWhen,
   getBookingCopy,
   __resetBookingCopyCache,
+  warmBookingCopyCache,
 } from '../../booking/booking-copy';
 
 describe('fill', () => {
@@ -185,5 +186,27 @@ describe('getBookingCopy', () => {
     const copy = await getBookingCopy('fr');
     expect(copy['manage.cancel_requested_body']).toContain('<strong>');
     expect(copy['manage.cancel_requested_body']).toContain('</strong>');
+  });
+});
+
+describe('warmBookingCopyCache', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetBookingCopyCache();
+  });
+
+  it('translates each non-English locale once', async () => {
+    chat.mockImplementation(async () => ({
+      content: JSON.stringify({
+        ...BOOKING_COPY_EN,
+        'customer.lead_confirmed': 'Vertaald.',
+      }),
+    }));
+
+    const results = await warmBookingCopyCache(['nl', 'fr']);
+
+    expect(results).toHaveLength(2);
+    expect(chat).toHaveBeenCalledTimes(2);
+    await expect(getBookingCopy('nl')).resolves.toMatchObject({ 'customer.lead_confirmed': 'Vertaald.' });
   });
 });

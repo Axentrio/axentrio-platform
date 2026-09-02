@@ -47,7 +47,7 @@ import {
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
-import { getBookingCopy } from '../booking-copy';
+import { getBookingCopy, prefetchAudienceBookingCopy } from '../booking-copy';
 import {
   customerLanguageFor,
   normalizeLanguageCode,
@@ -1331,6 +1331,13 @@ export class InternalProvider implements BookingProvider {
     assertDurationChosen(service, extras?.durationMin);
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
+
+    // While slot/travel/INSERT work runs, warm the phrase catalog for both audiences.
+    // mirrorCreatedBooking awaits getBookingCopy; a cold miss is a multi-second LLM call
+    // the customer would otherwise wait on inside the booking tool response.
+    prefetchAudienceBookingCopy(ctx.tenant.id, ctx.botSettings, {
+      customerLanguage: normalizeLanguageCode(extras?.language),
+    });
 
     // Idempotency on the PARSED instant (codex): the model may pass the same time
     // as a `Z` slot one turn and a zoneless local string the next → different

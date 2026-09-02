@@ -502,6 +502,17 @@ async function startServer(): Promise<void> {
       );
     }
 
+    // Pre-translate booking email copy for portal locales so the first post-deploy
+    // confirmation does not block chat on a cold LLM catalog translation.
+    if (process.env.BOOKING_COPY_WARM !== "0") {
+      const { warmBookingCopyCache } = await import("./booking/booking-copy");
+      void warmBookingCopyCache().catch((err) => {
+        logger.warn("[booking-copy] startup warm failed — first booking may be slow", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)
     try {
       const { initializeQueues } = await import("./queue/message-queue");

@@ -5,7 +5,9 @@ import { getProvider } from '../llm/provider-factory';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { luxonEmailWhenFormat } from '../contracts/clock-format';
 import { logger } from '../utils/logger';
-import { normalizeLanguageCode } from './booking-language';
+import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from './booking-language';
+import type { BotSettings } from '../database/entities/Bot';
+import { SUPPORTED_LOCALES } from '../schemas/user.schema';
 
 export const BOOKING_COPY_EN = {
   'customer.subject_confirmed': 'Confirmed: {summary}',
@@ -159,7 +161,11 @@ export type RejectReasonKey =
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"')]+/gi;
 
-const CATALOG_HASH = createHash('sha256').update(JSON.stringify(BOOKING_COPY_EN)).digest('hex').slice(0, 12);
+export const BOOKING_COPY_CATALOG_HASH = createHash('sha256')
+  .update(JSON.stringify(BOOKING_COPY_EN))
+  .digest('hex')
+  .slice(0, 12);
+const CATALOG_HASH = BOOKING_COPY_CATALOG_HASH;
 const inProcess = new Map<string, BookingCopy>();
 
 export function fill(template: string, vars: Record<string, string | number>): string {
@@ -233,6 +239,7 @@ export async function getBookingCopy(language: string, tenantId?: string): Promi
   }
 
   try {
+    const t0 = Date.now();
     const llm = getProvider({ path: 'booking_copy', tenantId, enforceDailyCap: false });
     const resp = await llm.chat(
       [
@@ -280,6 +287,12 @@ export async function getBookingCopy(language: string, tenantId?: string): Promi
         // fail-open
       }
     }
+    logger.info('[booking-copy] cold translation completed', {
+      lang,
+      ms: Date.now() - t0,
+      catalogHash: CATALOG_HASH,
+      partialKeys: failedKeys.length,
+    });
     return copy;
   } catch (err) {
     logger.warn('[booking-copy] translation failed - using English', {
@@ -304,6 +317,53 @@ export function formatWhen(start: Date, timezone: string, language: string): str
     const dt = DateTime.fromJSDate(start).setZone(timezone);
     return `${dt.setLocale('en').toFormat(luxonEmailWhenFormat(timezone))} (${timezone})`;
   }
+}
+
+
+/**
+ * Fire-and-forget: load customer + owner copy while slot/travel checks run so
+ * `mirrorCreatedBooking` usually hits a warm cache instead of a cold LLM call.
+ */
+export function prefetchAudienceBookingCopy(
+  tenantId: string,
+  botSettings: Pick<BotSettings, 'ai'>,
+  row: { customerLanguage?: string | null },
+): void {
+  void (async () => {
+    const customerLanguage = customerLanguageFor(row, botSettings);
+    const ownerLanguage = await resolveOwnerLanguage(tenantId, botSettings.ai?.supportEmail);
+    await Promise.all([
+      getBookingCopy(customerLanguage, tenantId),
+      getBookingCopy(ownerLanguage, tenantId),
+    ]);
+  })().catch((err) => {
+    logger.warn('[booking-copy] prefetch failed — mirror will retry on cache miss', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
+/** Pre-translate portal locales after deploy or catalog change. Non-English only. */
+export async function warmBookingCopyCache(
+  languages: readonly string[] = SUPPORTED_LOCALES.filter((l) => l !== 'en'),
+): Promise<Array<{ lang: string; ms: number }>> {
+  const started = Date.now();
+  const timings = await Promise.all(
+    languages.map(async (raw) => {
+      const lang = normalizeLanguageCode(raw);
+      if (!lang || lang === 'en') return null;
+      const t0 = Date.now();
+      await getBookingCopy(lang);
+      return { lang, ms: Date.now() - t0 };
+    }),
+  );
+  const results = timings.filter((t): t is { lang: string; ms: number } => t != null);
+  logger.info('[booking-copy] startup warm finished', {
+    catalogHash: CATALOG_HASH,
+    totalMs: Date.now() - started,
+    results,
+  });
+  return results;
 }
 
 /** Test seam — reset in-process cache between cases. */

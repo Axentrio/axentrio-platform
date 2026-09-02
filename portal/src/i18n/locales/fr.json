@@ -2970,6 +2970,18 @@
       "action": "Ouvrir mon espace"
     },
     "steps": {
+      "workspace": {
+        "title": "Votre espace de travail",
+        "body": "Tout ce que vous configurez ensuite appartient à un seul espace de travail. Acceptez une invitation, ouvrez un espace dont vous faites déjà partie, ou créez-en un nouveau.",
+        "invitations": "Invitations",
+        "accept": "Accepter",
+        "memberships": "Vos espaces de travail",
+        "open": "Ouvrir",
+        "createTitle": "Créer un espace de travail",
+        "namePlaceholder": "Nom de l'entreprise ou de l'équipe",
+        "create": "Créer l'espace de travail",
+        "error": "Cela n'a pas fonctionné. Veuillez réessayer."
+      },
       "language": {
         "title": "Choisissez votre langue",
         "body": "C'est la langue de la plateforme. Votre assistant répond toujours aux clients dans la langue qu'ils utilisent."

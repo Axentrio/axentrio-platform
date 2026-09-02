@@ -35,7 +35,17 @@ vi.mock("@/services/apiClient", async (importOriginal) => ({
 }));
 
 vi.mock("@clerk/clerk-react", () => ({
-  useOrganization: () => ({ organization: null }),
+  useOrganization: () => ({
+    organization: { id: "org_1", name: "Test Org" },
+    isLoaded: true,
+  }),
+  useOrganizationList: () => ({
+    isLoaded: true,
+    userMemberships: { data: [] },
+    userInvitations: { data: [] },
+    createOrganization: vi.fn(),
+    setActive: vi.fn(),
+  }),
 }));
 vi.mock("@/pages/knowledge/AddDocumentModal", () => ({ default: () => null }));
 // Wizard social step renders real connect CTAs — treat the tenant as Essential+.

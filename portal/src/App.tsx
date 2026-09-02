@@ -139,8 +139,8 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
   const { openTenantPalette } = useUiStore();
   const { user } = useAppAuth();
   const isSuperAdmin = user?.role === 'super_admin';
-  const { data: setupStatus } = useSetupStatus();
-  const inSetup = !isSuperAdmin && setupStatus != null && !setupStatus.complete;
+  const { data: setupStatus } = useSetupStatus({ enabled: Boolean(organization) });
+  const inSetup = !organization || (!isSuperAdmin && setupStatus != null && !setupStatus.complete);
   const [navOpen, setNavOpen] = React.useState(false);
 
   // Global keyboard shortcut: Cmd+K / Ctrl+K

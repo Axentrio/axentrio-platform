@@ -2971,6 +2971,18 @@
       "action": "Open mijn werkruimte"
     },
     "steps": {
+      "workspace": {
+        "title": "Je werkruimte",
+        "body": "Alles wat je hierna instelt hoort bij één werkruimte. Accepteer een uitnodiging, open er een waar je al bij hoort, of maak een nieuwe.",
+        "invitations": "Uitnodigingen",
+        "accept": "Accepteren",
+        "memberships": "Je werkruimtes",
+        "open": "Openen",
+        "createTitle": "Een werkruimte maken",
+        "namePlaceholder": "Bedrijfs- of teamnaam",
+        "create": "Werkruimte maken",
+        "error": "Dat is niet gelukt. Probeer het opnieuw."
+      },
       "language": {
         "title": "Kies je taal",
         "body": "Dit is de taal die je in het platform ziet. Je assistent antwoordt klanten nog steeds in de taal waarin zij schrijven."

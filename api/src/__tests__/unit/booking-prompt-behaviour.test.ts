@@ -266,13 +266,15 @@ describe('a service that requires an email for the calendar invite', () => {
     expect(p).not.toMatch(/EMAIL \(optional\)/);
   });
 
-  it('forbids offering to book without the address, found by a live production test', () => {
+  it('forbids offering to book without the address, found by a live production test', async () => {
     // The agent asked "shall I book this without an email address?", called the tool on the
     // customer's yes, and only then hit EMAIL_REQUIRED. Refused correctly, promised wrongly.
     const p = buildServicesSection([svc({ customerEmailRequired: true })])!;
     expect(p).toMatch(/NEVER offer to book without the address/i);
     expect(p).toMatch(/never ask whether to book without it/i);
     expect(p).toMatch(/If the customer declines to give one/i);
+    expect(p).toMatch(/Never put example\.com/i);
+    expect(p).toMatch(/Do not send a booking summary until create_booking returns CONFIRMATION_REQUIRED/i);
   });
 
   it('keeps the optional EMAIL wording when every service has the flag off', () => {
@@ -281,6 +283,7 @@ describe('a service that requires an email for the calendar invite', () => {
     expect(p).not.toMatch(/EMAIL_REQUIRED/);
     expect(p).toMatch(/EMAIL \(optional\)/);
     expect(p).toMatch(/proceed without it/i);
+    expect(p).toMatch(/placeholder/i);
   });
 
   it('treats an unset flag as required, so existing services gain the gate', () => {

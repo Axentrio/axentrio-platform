@@ -4,10 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
+const mockRequestBooking = vi.fn();
 const mockListBookings = vi.fn();
 const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 const mockUpdateBooking = vi.fn();
+const mockPeekCustomerEmailRequired = vi.fn(async () => false);
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
@@ -23,10 +25,12 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
 vi.mock('../../booking/booking.service', () => ({
   checkAvailability: (...args: unknown[]) => mockCheckAvailability(...args),
   createBooking: (...args: unknown[]) => mockCreateBooking(...args),
+  requestBooking: (...args: unknown[]) => mockRequestBooking(...args),
   listBookings: (...args: unknown[]) => mockListBookings(...args),
   rescheduleBooking: (...args: unknown[]) => mockRescheduleBooking(...args),
   cancelBooking: (...args: unknown[]) => mockCancelBooking(...args),
   updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
+  peekCustomerEmailRequired: (...args: unknown[]) => mockPeekCustomerEmailRequired(...args),
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;
@@ -290,6 +294,33 @@ describe('an email the confirmation cannot reach', () => {
     );
     expect(result.success).toBe(true);
     expect(mockCreateBooking).toHaveBeenCalled();
+  });
+
+  it('returns EMAIL_REQUIRED before CONFIRMATION_REQUIRED when the service needs email', async () => {
+    mockPeekCustomerEmailRequired.mockResolvedValue(true);
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/EMAIL_REQUIRED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('still captures a request when email is missing, so there is no dead end', async () => {
+    mockPeekCustomerEmailRequired.mockResolvedValue(true);
+    mockRequestBooking.mockResolvedValue({ success: true, requested: true, bookingId: 'r1' });
+    const tool = new RequestAppointmentTool();
+    const result = await tool.execute(
+      { preferredTime: 'next Tuesday', attendeeName: 'Ada', aiSummary: 'x' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    expect(mockRequestBooking).toHaveBeenCalled();
   });
 });
 

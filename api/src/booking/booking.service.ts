@@ -26,6 +26,7 @@ import {
   getOwnedBotConfig,
 } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch } from './booking-providers/types';
+import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
@@ -185,6 +186,33 @@ export async function createBooking(
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
   attributeToOffer(ctx, result.booking?.id, startTime, serviceId, 'booking');
   return result;
+}
+
+/**
+ * Does this call's service require an email before create_booking may ask
+ * for confirmation? EMAIL_REQUIRED must beat CONFIRMATION_REQUIRED: otherwise
+ * the model summarises "book without email", the customer says yes, the write
+ * gate refuses, and a second summary is asked.
+ */
+export async function peekCustomerEmailRequired(
+  sessionId: string,
+  serviceId?: string,
+): Promise<boolean> {
+  const ctx = await resolveContext(sessionId);
+  const repo = AppDataSource.getRepository(ServiceType);
+  if (typeof serviceId === 'string' && serviceId.trim()) {
+    const svc = await repo.findOne({
+      where: { id: serviceId, botId: ctx.bot.id, isActive: true },
+    });
+    return svc ? serviceRequiresCustomerEmail(svc) : false;
+  }
+  const active = await repo.find({
+    where: { botId: ctx.bot.id, isActive: true, onlineBookable: true },
+    order: { sortOrder: 'ASC', createdAt: 'ASC' },
+    take: 2,
+  });
+  if (active.length === 1) return serviceRequiresCustomerEmail(active[0]);
+  return false;
 }
 
 /**

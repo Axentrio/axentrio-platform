@@ -9,6 +9,7 @@ import {
   rescheduleBooking,
   cancelBooking,
   updateBooking,
+  peekCustomerEmailRequired,
   BookingError,
 } from '../../booking/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
@@ -120,6 +121,35 @@ function rejectBadEmail(email: unknown): ToolResult | null {
 }
 
 /**
+ * EMAIL_REQUIRED before CONFIRMATION_REQUIRED. A missing required email used
+ * to pass the confirm gate, so the model offered "book without email", the
+ * customer said yes, then the write refused and a second summary was asked.
+ */
+async function rejectMissingRequiredEmail(
+  sessionId: string,
+  serviceId: unknown,
+  email: unknown,
+): Promise<ToolResult | null> {
+  let required = false;
+  try {
+    required = await peekCustomerEmailRequired(
+      sessionId,
+      typeof serviceId === 'string' ? serviceId : undefined,
+    );
+  } catch {
+    return null;
+  }
+  if (!required) return null;
+  if (typeof email === 'string' && email.trim() && emails.sanitizeEmail(email)) return null;
+  return {
+    success: false,
+    error:
+      'EMAIL_REQUIRED: An email address is required for this service, because the calendar invite is sent to it. Ask the customer for their email address and call again with attendeeEmail. Do not tell the customer the service is unavailable, and do not capture a request or a lead. Do not send a booking summary until you have the address.',
+    errorSafeForModel: true,
+  };
+}
+
+/**
  * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
  * …"), so the agent can branch on the codes the SERVICES prompt rules reference
  * (ADDRESS_REQUIRED / PHONE_REQUIRED / SERVICE_REQUIRED / SLOT_UNAVAILABLE / etc.).
@@ -182,9 +212,9 @@ function addressReplyFact(
 }
 
 const NAMED_TIME_GUIDANCE =
-  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
+  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name and, when the service flags needs email, a real attendeeEmail. Do not offer to book without that email, and never put example.com or another placeholder address in the summary. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
 const NAMED_TIME_AFTER_YES =
-  'The customer already confirmed this time. Call create_booking now with the same details. Do not send another summary and do not ask for confirmation again.';
+  'The customer already confirmed this time. Call create_booking now with the same details. If it returns EMAIL_REQUIRED, ask for the email and retry. Do not send another summary and do not ask for confirmation again.';
 
 /**
  * The customer named a time this call has just ruled out.
@@ -844,6 +874,12 @@ export class CreateBookingTool implements ToolAdapter {
     try {
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;
+      const missingEmail = await rejectMissingRequiredEmail(
+        ctx.sessionId,
+        args.serviceId,
+        args.attendeeEmail,
+      );
+      if (missingEmail) return missingEmail;
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same booking instead of inserting a duplicate (#35).
       // Settled BEFORE anything is written. A contested address is the one case where guessing

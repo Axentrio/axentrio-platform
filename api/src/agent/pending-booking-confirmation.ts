@@ -18,6 +18,8 @@ import { wallClockKey } from './offered-slots-store';
 import { logger } from '../utils/logger';
 
 export const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
+/** Its own code, because the model's recovery is a different tool rather than a second yes. */
+export const MOVE_PENDING = 'MOVE_PENDING';
 
 const KEY_PREFIX = 'booking:confirm:';
 const RESCHEDULE_PREFIX = 'booking:confirm-reschedule:';
@@ -413,6 +415,39 @@ export async function refuseUnlessRescheduleConfirmed(
       errorSafeForModel: true,
       data: { needsConfirmation: true, bookingId, newStartTime, customerAddress },
     },
+  };
+}
+
+/**
+ * A NEW BOOKING WHILE A MOVE IS OPEN IS ALMOST ALWAYS THE MOVE.
+ *
+ * Live on WaterFix (2026-09-01) a customer asked to move an at-home appointment, the first time
+ * they named was not offered, and the bot showed the next day's list instead. They tapped a slot,
+ * said yes, and the model called `create_booking`. The tenant then held TWO confirmed
+ * appointments for the same person: the original still standing on its slot, and a second one the
+ * customer never asked for. Nothing downstream can catch that - both writes are individually
+ * valid, and a duplicate is only wrong because of an intention recorded a few turns earlier.
+ *
+ * The pending move IS that record, so this refuses the create once and names the booking the
+ * customer was moving. Refusing forever would trap the customer who genuinely wants a second
+ * appointment, so the record is cleared as it refuses: a model that calls again gets through, one
+ * turn later, having been told what it was about to do.
+ */
+export async function refuseCreateWhileMovePending(ctx: ToolContext): Promise<ToolResult | null> {
+  const lookup = await readPending(ctx.sessionId, RESCHEDULE_PREFIX);
+  if (lookup.store === 'down') return null;
+  const pending = lookup.pending;
+  if (!pending?.bookingId) return null;
+  await clearPending(ctx.sessionId, RESCHEDULE_PREFIX);
+  return {
+    success: false,
+    error:
+      `${MOVE_PENDING}: You were moving this customer's existing appointment (bookingId "${pending.bookingId}"). ` +
+      `Creating a booking now leaves that one standing and gives them two. If they picked a new time for THAT ` +
+      `appointment, call reschedule_booking with bookingId "${pending.bookingId}" and the time they chose. Only if ` +
+      `they want a SECOND appointment as well as the one they already have, call create_booking again.`,
+    errorSafeForModel: true,
+    data: { movePending: true, bookingId: pending.bookingId, movingFrom: pending.startTime },
   };
 }
 

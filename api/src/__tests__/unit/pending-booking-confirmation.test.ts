@@ -28,8 +28,10 @@ import {
   refuseUnlessConfirmed,
   refuseUnlessRescheduleConfirmed,
   refuseUnlessCancelConfirmed,
+  refuseCreateWhileMovePending,
   putPendingBooking,
   CONFIRMATION_REQUIRED,
+  MOVE_PENDING,
 } from '../../agent/pending-booking-confirmation';
 import { slotChipQuickReply } from '../../config/bot-language';
 import type { ToolContext } from '../../agent/tool-adapter';
@@ -404,6 +406,7 @@ describe('a reschedule the customer keeps confirming', () => {
     expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
   });
 
+
   it('still refuses when the model names a DIFFERENT address than the one confirmed', async () => {
     await refuseUnlessRescheduleConfirmed(
       { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
@@ -414,6 +417,50 @@ describe('a reschedule the customer keeps confirming', () => {
       toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
     );
     expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+});
+
+/**
+ * TWO APPOINTMENTS FROM ONE MOVE (live, WaterFix, 2026-09-01).
+ *
+ * The customer asked to move an at-home appointment, the hour they named was not offered, and the
+ * bot showed the next day instead. They tapped a slot and said yes, and the model called
+ * create_booking. The tenant was left holding the original AND a second appointment nobody asked
+ * for. Both writes are individually valid, so only the move recorded a few turns earlier says the
+ * second one is wrong.
+ */
+describe('a create while a move is still open', () => {
+  beforeEach(() => {
+    store.clear();
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+  });
+
+  const openAMove = async () =>
+    refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-7', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+
+  it('says nothing when no move is open', async () => {
+    expect(await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'boek maar' }]))).toBeNull();
+  });
+
+  it('refuses the create and names the appointment being moved', async () => {
+    await openAMove();
+    const refused = await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]));
+    expect(refused?.error).toMatch(MOVE_PENDING);
+    expect(refused?.error).toContain('bk-7');
+    expect(refused?.error).toMatch(/call reschedule_booking/i);
+  });
+
+  it('lets a genuine second appointment through on the next call', async () => {
+    // The customer who really does want two. Refusing forever would strand them for a day, so the
+    // record is spent by the refusal that reported it.
+    await openAMove();
+    await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]));
+    expect(await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]))).toBeNull();
   });
 });
 

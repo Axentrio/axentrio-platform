@@ -30,7 +30,7 @@ import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
-import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
+import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, refuseCreateWhileMovePending, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
 
 /**
@@ -855,6 +855,10 @@ export class CreateBookingTool implements ToolAdapter {
       );
       const unsettledAddress = await rejectUnsettledAddress(ctx, booked);
       if (unsettledAddress) return unsettledAddress;
+      // BEFORE the confirm gate, so the model is told which appointment it was moving rather than
+      // being walked through a summary for a booking it should not be making at all.
+      const movePending = await refuseCreateWhileMovePending(ctx);
+      if (movePending) return movePending;
       // Resolve BEFORE the confirm gate. Fingerprinting the raw arg treats
       // an offered `T10:00:00.000Z` and a later zoneless `T10:00:00` as different
       // bookings, so the customer had to say yes twice.

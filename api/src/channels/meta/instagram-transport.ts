@@ -1,7 +1,7 @@
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { OutboundChannelMessage, ChannelCapabilities } from '../types';
 import { getMetaPageAccessToken } from '../credential-utils';
-import { IG_GRAPH_API } from './graph-api';
+import { FB_GRAPH_API } from './graph-api';
 import { GraphOutboundTransport, GraphSendRequest } from './graph-outbound-transport';
 
 export class InstagramOutboundTransport extends GraphOutboundTransport {
@@ -37,8 +37,10 @@ export class InstagramOutboundTransport extends GraphOutboundTransport {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const igBusinessId = (connection.credentials as any).igBusinessId || connection.platformAccountId;
+    // Facebook Login path: Page token + graph.facebook.com (same host as connect
+    // subscribed_apps). graph.instagram.com expects an Instagram User token.
     return {
-      url: `${IG_GRAPH_API}/${igBusinessId}/messages`,
+      url: `${FB_GRAPH_API}/${igBusinessId}/messages`,
       config: { params: { access_token: accessToken }, timeout: 10000 },
     };
   }
@@ -49,8 +51,7 @@ export class InstagramOutboundTransport extends GraphOutboundTransport {
   }
 
   async sendTypingIndicator(_externalThreadId: string, _connection: ChannelConnection): Promise<void> {
-    // The Instagram-Login messaging API (graph.instagram.com) only supports the
-    // react/unreact sender actions — no typing indicator. No-op by design.
+    // Instagram DMs via Facebook Login do not expose a typing sender action. No-op.
   }
 
   protected buildSendBody(

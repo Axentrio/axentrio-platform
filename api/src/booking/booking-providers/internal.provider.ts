@@ -1869,11 +1869,11 @@ export class InternalProvider implements BookingProvider {
       contact: { address: string | null; phone: string | null };
       extras?: BookingExtras;
       effectiveDuration: number;
-      eventContent: { title: string; description: string };
+      eventContent: { summary: string; description: string };
       meetUrl: string | null;
       venue: Awaited<ReturnType<typeof loadBusinessRules>>['venue'];
       videoLinkMissing: boolean;
-      ownerAttachments: EmailAttachment[];
+      ownerAttachments: EmailAttachment[] | undefined;
       customerCopy: BookingCopy;
       langs: { customerLanguage: string; ownerLanguage: string };
       priceDisplay?: string;

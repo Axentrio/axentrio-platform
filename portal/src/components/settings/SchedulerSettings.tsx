@@ -102,59 +102,16 @@ function rulesFromConfig(data: SchedulerConfig): SchedulerFormState['rules'] {
 
 
 
-export const SchedulerSettings: React.FC = () => {
-  const { data: bots } = useBots();
-  const agents = bots?.bots ?? [];
-  const multiAgent = agents.length > 1;
+function initialSchedulerBotId(): string | undefined {
+  return new URLSearchParams(window.location.search).get('botId') ?? undefined;
+}
 
-  /**
-   * Which Agent is being edited. `undefined` means the tenant's default.
-   *
-   * Undefined rather than "the anchor's id" on purpose: a single-Agent tenant then sends
-   * exactly the requests it always sent, which is what makes "no change for them" a fact
-   * about the wire rather than a claim about the UI.
-   */
-  const [botId, setBotId] = useState<string | undefined>(
-    // SEEDED FROM THE URL, because the calendar connect flow leaves the page and comes back.
-    // The OAuth callback appends the Agent it connected FOR, taken from its signed state — so
-    // without reading it here an owner who connects Agent B's calendar returns to the DEFAULT
-    // Agent's editor and is toasted "connected" over the anchor's disconnected status. An id
-    // that is not theirs simply 404s on the next read, which is the same refusal any other
-    // route takes.
-    () => new URLSearchParams(window.location.search).get('botId') ?? undefined
-  );
-  /** The serialised payload as hydration left it — `null` until the next hydration lands. */
-  const hydratedPayload = useRef<string | null>(null);
-
-  const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
-  /**
-   * Which roles this owner's address actually plays (#79, LP1).
-   *
-   * Derived server-side from the Service catalog and read here rather than re-derived: the
-   * precedence between `locationType` and `customerAddressRequired` is subtle, and two
-   * implementations of it would eventually disagree about which copy to show. Defaults to
-   * `at_one_location`, which is the wording this screen has always used - an older API that does
-   * not send the field yet changes nothing.
-   */
-  const workLocation = data?.workLocation ?? 'at_one_location';
-
-  const update = useUpdateSchedulerConfig(botId);
-  const queryClient = useQueryClient();
-  // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
-  // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
-  const googleStatus = useGoogleCalendarStatus(botId);
-  const connectGoogle = useConnectGoogleCalendar(botId);
-  const disconnectGoogle = useDisconnectGoogleCalendar(botId);
-  const outlookStatus = useOutlookCalendarStatus(botId);
-  const connectOutlook = useConnectOutlookCalendar(botId);
-  const disconnectOutlook = useDisconnectOutlookCalendar(botId);
-
-  // Toast + refresh after a calendar OAuth callback redirects back with
-  // ?google=connected|error or ?outlook=connected|error.
+function useCalendarOAuthReturnToast(
+  googleStatus: { isFetched: boolean; data?: { connected?: boolean } },
+  outlookStatus: { isFetched: boolean; data?: { connected?: boolean } },
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   useEffect(() => {
-    // Do not consume ?google=error until both status queries have settled.
-    // Otherwise Outlook still looks disconnected, the generic toast fires, and
-    // the param is gone before the real reason can show.
     if (!googleStatus.isFetched || !outlookStatus.isFetched) return;
     const params = new URLSearchParams(window.location.search);
     const providers: Array<{ key: 'google' | 'outlook'; label: string }> = [
@@ -199,6 +156,57 @@ export const SchedulerSettings: React.FC = () => {
     googleStatus.data?.connected,
     outlookStatus.data?.connected,
   ]);
+}
+
+
+export const SchedulerSettings: React.FC = () => {
+  const { data: bots } = useBots();
+  const agents = bots?.bots ?? [];
+  const multiAgent = agents.length > 1;
+
+  /**
+   * Which Agent is being edited. `undefined` means the tenant's default.
+   *
+   * Undefined rather than "the anchor's id" on purpose: a single-Agent tenant then sends
+   * exactly the requests it always sent, which is what makes "no change for them" a fact
+   * about the wire rather than a claim about the UI.
+   */
+  const [botId, setBotId] = useState<string | undefined>(
+    // SEEDED FROM THE URL, because the calendar connect flow leaves the page and comes back.
+    // The OAuth callback appends the Agent it connected FOR, taken from its signed state — so
+    // without reading it here an owner who connects Agent B's calendar returns to the DEFAULT
+    // Agent's editor and is toasted "connected" over the anchor's disconnected status. An id
+    // that is not theirs simply 404s on the next read, which is the same refusal any other
+    // route takes.
+    initialSchedulerBotId
+  );
+  /** The serialised payload as hydration left it — `null` until the next hydration lands. */
+  const hydratedPayload = useRef<string | null>(null);
+
+  const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
+  /**
+   * Which roles this owner's address actually plays (#79, LP1).
+   *
+   * Derived server-side from the Service catalog and read here rather than re-derived: the
+   * precedence between `locationType` and `customerAddressRequired` is subtle, and two
+   * implementations of it would eventually disagree about which copy to show. Defaults to
+   * `at_one_location`, which is the wording this screen has always used - an older API that does
+   * not send the field yet changes nothing.
+   */
+  const workLocation = data?.workLocation ?? 'at_one_location';
+
+  const update = useUpdateSchedulerConfig(botId);
+  const queryClient = useQueryClient();
+  // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
+  // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
+  const googleStatus = useGoogleCalendarStatus(botId);
+  const connectGoogle = useConnectGoogleCalendar(botId);
+  const disconnectGoogle = useDisconnectGoogleCalendar(botId);
+  const outlookStatus = useOutlookCalendarStatus(botId);
+  const connectOutlook = useConnectOutlookCalendar(botId);
+  const disconnectOutlook = useDisconnectOutlookCalendar(botId);
+
+  useCalendarOAuthReturnToast(googleStatus, outlookStatus, queryClient);
 
   // One reducer for the whole scheduler form (react-doctor prefer-useReducer).
   // Field state + hydration live in `form`; the `setX` wrappers below keep the

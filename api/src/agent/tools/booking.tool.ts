@@ -341,6 +341,25 @@ function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined 
 }
 
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function dayPartFromClockPhrase(value: string): ClockWindow | undefined {
+  if (!value || CLOCK.test(value) || value === '24:00') return undefined;
+  return dayPartWindow(value);
+}
+
+function invalidClockWindowResult(from: string, to: string): ToolResult | null {
+  const badFrom = from && !CLOCK.test(from);
+  const badTo = to && !CLOCK.test(to) && to !== '24:00';
+  if (badFrom || badTo || (from && to && from >= to)) {
+    return {
+      success: false,
+      error: 'INVALID_TIME_WINDOW: earliestTime and latestTime must be business-local "HH:mm" with earliestTime before latestTime. Call again with corrected values or omit them.',
+      errorSafeForModel: true,
+    };
+  }
+  return null;
+}
+
 /** Both bounds optional; an absent bound is the edge of the day. Returns undefined when neither is given. */
 function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockWindow | undefined | ToolResult {
   const from = typeof args.earliestTime === 'string' ? args.earliestTime.trim() : '';
@@ -349,21 +368,12 @@ function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockW
     const inferred = inferDayPartWindow(customerTexts(ctx));
     return inferred ?? undefined;
   }
-  if (from && !CLOCK.test(from)) {
-    const w = dayPartWindow(from);
-    if (w) return w;
-  }
-  if (to && !CLOCK.test(to) && to !== '24:00') {
-    const w = dayPartWindow(to);
-    if (w) return w;
-  }
-  if ((from && !CLOCK.test(from)) || (to && !CLOCK.test(to) && to !== '24:00') || (from && to && from >= to)) {
-    return {
-      success: false,
-      error: 'INVALID_TIME_WINDOW: earliestTime and latestTime must be business-local "HH:mm" with earliestTime before latestTime. Call again with corrected values or omit them.',
-      errorSafeForModel: true,
-    };
-  }
+  const fromDayPart = dayPartFromClockPhrase(from);
+  if (fromDayPart) return fromDayPart;
+  const toDayPart = dayPartFromClockPhrase(to);
+  if (toDayPart) return toDayPart;
+  const invalid = invalidClockWindowResult(from, to);
+  if (invalid) return invalid;
   return { from: from || '00:00', to: to || '24:00' };
 }
 

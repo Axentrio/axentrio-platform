@@ -227,6 +227,94 @@ async function buildAnchorBotPatch(
   return botPatch;
 }
 
+
+async function businessHoursWithDerivedTimezone(
+  tenantId: string,
+  bh: Record<string, unknown>,
+): Promise<BotSettings["businessHours"]> {
+  const { bot: anchor } = await getAnchorBotConfig(tenantId);
+  const derived = anchor.businessTimezone || "Europe/Brussels";
+  if (
+    typeof bh.timezone === "string" &&
+    bh.timezone &&
+    bh.timezone !== derived
+  ) {
+    logger.warn(
+      "[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored",
+      {
+        tenantId,
+        botId: anchor.id,
+        received: bh.timezone,
+        derived,
+      },
+    );
+  }
+  return { ...bh, timezone: derived } as BotSettings["businessHours"];
+}
+
+async function applyTenantMePatch(
+  tenant: Tenant,
+  tenantId: string,
+  input: {
+    name?: string;
+    settings?: TenantSettingsBody;
+    webhookUrl?: string;
+    businessHours?: Record<string, unknown>;
+    userRole: string;
+  },
+): Promise<void> {
+  const { name, settings, webhookUrl, businessHours, userRole } = input;
+
+  if (name && name !== tenant.name) {
+    await applyTenantRename(tenant, name);
+  }
+  if (webhookUrl !== undefined && userRole === "super_admin") {
+    applyWebhookUrl(tenant, webhookUrl);
+  }
+
+  rejectDelegatedSettingsSections(settings);
+
+  if (settings?.theme !== undefined) {
+    await requireFeature(
+      tenantId,
+      "customWidgetAppearance",
+      "plan_limit_custom_branding",
+    );
+  }
+
+  if (settings?.inbox !== undefined) {
+    applyInboxPrefs(tenant, settings);
+  }
+
+  if (settings?.businessLanguage !== undefined) {
+    applyBusinessLanguage(tenant, settings);
+  }
+
+  if (settings) {
+    const botPatch = await buildAnchorBotPatch(
+      settings,
+      (bh) => businessHoursWithDerivedTimezone(tenantId, bh),
+    );
+    if (Object.keys(botPatch).length > 0) {
+      await updateAnchorBotSettings(tenantId, botPatch);
+    }
+  }
+
+  if (businessHours) {
+    const { settings: currentBot } = await getAnchorBotConfig(tenantId);
+    await updateAnchorBotSettings(tenantId, {
+      businessHours: await businessHoursWithDerivedTimezone(tenantId, {
+        ...(currentBot.businessHours ?? {}),
+        ...businessHours,
+      }),
+    });
+  }
+
+  if (businessHours || settings?.businessHours !== undefined) {
+    await syncAvailabilityFromBusinessHours(tenantId);
+  }
+}
+
 const router = Router();
 
 /**
@@ -324,93 +412,13 @@ router.patch(
       throw new NotFoundError("Tenant not found");
     }
 
-    if (name && name !== tenant.name) {
-      await applyTenantRename(tenant, name);
-    }
-    // Only super_admin may set the webhook URL. A non-super_admin PATCH
-    // carrying webhookUrl is silently ignored (the portal hides the field for
-    // them too).
-    if (webhookUrl !== undefined && req.user!.role === "super_admin") {
-      applyWebhookUrl(tenant, webhookUrl);
-    }
-
-    rejectDelegatedSettingsSections(settings);
-
-    // Plan-gate. Custom widget appearance (color/title/avatar) lives under
-    // `settings.theme` (primaryColor / logoUrl / customCss). Only enforce
-    // when the request actually touches those keys — leaving the rest of
-    // the settings update path open for all tiers. M0 plan-catalog reshape
-    // split the old muddy `customBranding` flag — `customWidgetAppearance`
-    // is the closest semantic match for theme-level customization.
-    if (settings?.theme !== undefined) {
-      await requireFeature(
-        tenantId,
-        "customWidgetAppearance",
-        "plan_limit_custom_branding",
-      );
-    }
-
-    // Apply the moved per-bot keys via the writer. Section-level deep merge
-    // happens inside updateAnchorBotSettings — so e.g.
-    // `settings.theme.primaryColor` won't wipe `settings.theme.logoUrl`.
-    // Tolerant cutover (PR 1a, server-owned Business Time): any client-sent
-    // `businessHours.timezone` is ACCEPTED but IGNORED — the stored value is
-    // always the anchor bot's canonical, server-owned `businessTimezone`, so a
-    // browser clock (which is what legacy onboarding wrote here) can no longer
-    // move business time. Conflicts are logged for the cutover metric.
-    const withDerivedTimezone = async (
-      bh: Record<string, unknown>,
-    ): Promise<BotSettings["businessHours"]> => {
-      const { bot: anchor } = await getAnchorBotConfig(tenantId);
-      const derived = anchor.businessTimezone || "Europe/Brussels";
-      if (
-        typeof bh.timezone === "string" &&
-        bh.timezone &&
-        bh.timezone !== derived
-      ) {
-        logger.warn(
-          "[BusinessTimezone] client-sent businessHours.timezone conflicts with the derived value — ignored",
-          {
-            tenantId,
-            botId: anchor.id,
-            received: bh.timezone,
-            derived,
-          },
-        );
-      }
-      return { ...bh, timezone: derived } as BotSettings["businessHours"];
-    };
-
-    if (settings?.inbox !== undefined) {
-      applyInboxPrefs(tenant, settings);
-    }
-
-    if (settings?.businessLanguage !== undefined) {
-      applyBusinessLanguage(tenant, settings);
-    }
-
-    if (settings) {
-      const botPatch = await buildAnchorBotPatch(settings, withDerivedTimezone);
-      if (Object.keys(botPatch).length > 0) {
-        await updateAnchorBotSettings(tenantId, botPatch);
-      }
-    }
-
-    // Update business hours via the legacy top-level `businessHours` body key.
-    if (businessHours) {
-      // Read current to preserve unrelated keys (timezone vs schedule vs enabled).
-      const { settings: currentBot } = await getAnchorBotConfig(tenantId);
-      await updateAnchorBotSettings(tenantId, {
-        businessHours: await withDerivedTimezone({
-          ...(currentBot.businessHours ?? {}),
-          ...businessHours,
-        }),
-      });
-    }
-
-    if (businessHours || settings?.businessHours !== undefined) {
-      await syncAvailabilityFromBusinessHours(tenantId);
-    }
+    await applyTenantMePatch(tenant, tenantId, {
+      name,
+      settings,
+      webhookUrl,
+      businessHours,
+      userRole: req.user!.role,
+    });
 
     await tenantRepository.save(tenant);
 

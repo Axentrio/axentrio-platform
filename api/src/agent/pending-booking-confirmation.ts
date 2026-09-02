@@ -152,9 +152,13 @@ export async function pendingYesNeedsReschedule(
   const pending = lookup.pending;
   if (pending.kind !== 'reschedule' || !pending.bookingId) return null;
   if (!moveWasAgreed(history, pending, last)) return null;
+  // The gate stores wallClockKey's minute-precision key; the tool contract documents seconds
+  // ("2026-06-19T14:00:00"), so the nudge hands the model the documented shape. The retrying
+  // call is re-keyed by the gate, so it still matches the stored pending.
+  const withSeconds = /T\d{2}:\d{2}$/.test(pending.startTime) ? `${pending.startTime}:00` : pending.startTime;
   return {
     bookingId: pending.bookingId,
-    newStartTime: pending.startTime,
+    newStartTime: withSeconds,
     ...(pending.customerAddress ? { customerAddress: pending.customerAddress } : {}),
   };
 }

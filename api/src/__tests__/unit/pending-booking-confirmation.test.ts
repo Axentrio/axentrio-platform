@@ -451,10 +451,11 @@ describe('pendingYesNeedsReschedule', () => {
 
   it('returns the pending move after the summary and the yes', async () => {
     await openMove();
-    // The gate stores wallClockKey's minute-precision zoneless key, and the nudge repeats it.
+    // The gate stores a minute-precision key; the nudge answers the tool contract's
+    // documented seconds form, and the retrying call is re-keyed so it still matches.
     expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toEqual({
       bookingId: 'bk-9',
-      newStartTime: '2026-09-03T13:00',
+      newStartTime: '2026-09-03T13:00:00',
     });
   });
 
@@ -478,7 +479,7 @@ describe('pendingYesNeedsReschedule', () => {
     };
     expect(await pendingYesNeedsReschedule('sess-confirm', [summaryWithAddress, yes])).toEqual({
       bookingId: 'bk-9',
-      newStartTime: '2026-09-03T13:00',
+      newStartTime: '2026-09-03T13:00:00',
       customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen',
     });
   });

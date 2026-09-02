@@ -3,6 +3,7 @@ import { addressForTurn, addressToken, type TurnAddress } from '../../booking/tr
 import { getPendingCorrection } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
+  checkMoveAvailability,
   createBooking,
   requestBooking,
   listBookings,
@@ -362,24 +363,40 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
   };
 }
 
+/** Enough for a day of choices; past this the 4000-char model copy is spent on times instead
+ *  of the sentence that says what they are for. */
+const MOVE_TARGET_CAP = 12;
+
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
   moveTargets: Array<{ start: string; end: string }>,
 ): Record<string, unknown> {
   if (!held?.length) return {};
-  const otherSlots = moveTargets.length > 0;
+  const capped = moveTargets.length > MOVE_TARGET_CAP;
+  const targets = capped ? moveTargets.slice(0, MOVE_TARGET_CAP) : moveTargets;
+  const otherSlots = targets.length > 0;
+  // Free times travel under their OWN key with guidance that binds them to
+  // reschedule_booking. A bare `slots` list beside the hold note made the model call the
+  // held time unavailable (live, 2026-09-01); NO times at all dead-ended every move into
+  // a handoff, with the requested target sitting free (live, 2026-09-02, session
+  // d4291852: "kan ik niet bevestigen vanuit het beschikbaarheidsresultaat").
+  //
+  // `data` is serialised into the model message and truncated at 4000 characters, and JSON
+  // keeps insertion order: guidance sits BEFORE moveTargets so a long list can never cut off
+  // the sentence that says what the list is for, and the list itself is capped. alreadyHeld
+  // stays the first key; the truncation test pins that.
+  const missingClause = capped
+    ? 'moveTargets holds only the first free times; a time not listed may still be free - call check_availability for a narrower range around it. '
+    : 'A time missing from moveTargets is not free. ';
   return {
     alreadyHeld: held,
     suggestedAction: 'confirm_existing',
-    // Free times travel under their OWN key with guidance that binds them to
-    // reschedule_booking. A bare `slots` list beside the hold note made the model call the
-    // held time unavailable (live, 2026-09-01); NO times at all dead-ended every move into
-    // a handoff, with the requested target sitting free (live, 2026-09-02, session
-    // d4291852: "kan ik niet bevestigen vanuit het beschikbaarheidsresultaat").
-    ...(otherSlots ? { moveTargets } : { noSlotsInRange: true }),
     guidance: otherSlots
-      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they are asking to MOVE that appointment, the free times for the move are in moveTargets: pick the time they asked for and call reschedule_booking with the alreadyHeld bookingId and that newStartTime. A time missing from moveTargets is not free. Never offer moveTargets as extra appointments. If they wanted a different day, call check_availability for that day.'
+      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they are asking to MOVE that appointment, the free times for the move are in moveTargets: pick the time they asked for and call reschedule_booking with the alreadyHeld bookingId and that newStartTime. ' +
+        missingClause +
+        'Never offer moveTargets as extra appointments. If they wanted a different day, call check_availability for that day.'
       : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. That includes a move: there is no free time in this range to move it to, so offer to check another day. If they wanted a different day, call check_availability for that day.',
+    ...(otherSlots ? { moveTargets: targets } : { noSlotsInRange: true }),
   };
 }
 
@@ -574,7 +591,34 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(utcSlots, zone));
+      // Move targets read the diary WITHOUT the caller's own held row: a 09:30 target on
+      // their own 09:00-10:00 hold is busy against nobody but themselves, and guidance
+      // that says "a time missing from moveTargets is not free" must not lie about it.
+      // One extra read, only when the range holds exactly ONE of the caller's rows; the
+      // excluded id comes from this caller's own availability result, so no new authority.
+      // A failed read keeps the unexcluded slots: fewer targets, never wrong ones.
+      let moveSlots = utcSlots;
+      const heldRows = result.alreadyHeld ?? [];
+      if (heldRows.length === 1) {
+        try {
+          const move = await checkMoveAvailability(
+            'agent',
+            ctx.sessionId,
+            args.startDate as string,
+            args.endDate as string,
+            heldRows[0].bookingId,
+            args.serviceId as string | undefined,
+            args.durationMin as number | undefined,
+            chosen.address,
+            locationChoice,
+            args.customerPhone as string | undefined,
+          );
+          if (Array.isArray(move.slots)) moveSlots = move.slots;
+        } catch {
+          // Diary read for the move failed; the unexcluded list still serves.
+        }
+      }
+      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone));
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
@@ -591,10 +635,10 @@ export class CheckAvailabilityTool implements ToolAdapter {
         // named by guidance for reschedule_booking. Do not run namedTimeGuidance here.
         // moveTargets are offers the reschedule gate later measures a chip or a named
         // instant against, so they are recorded like every other offered slot.
-        if (utcSlots.length > 0) {
+        if (moveSlots.length > 0) {
           void rememberOfferedSlots(
             ctx.sessionId,
-            utcSlots.map((s) => s.start),
+            moveSlots.map((s) => s.start),
             zone,
           );
         }

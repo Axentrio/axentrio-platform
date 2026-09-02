@@ -1187,9 +1187,21 @@ describe('check_availability — a time the caller already holds is not unavaila
         { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
       ],
     }));
+    // The excluded re-read frees the caller's own 07:00 slot: moveTargets must come from
+    // THIS read, or a half-hour move onto their own hold is refused against nobody.
+    const checkMoveAvailability = vi.fn(async () => ({
+      slots: [
+        { start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+        { start: '2026-09-08T07:30:00.000Z', end: '2026-09-08T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+    }));
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      checkMoveAvailability,
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1197,6 +1209,10 @@ describe('check_availability — a time the caller already holds is not unavaila
       { sessionId: 'cs-1' } as never,
     );
     expect(res.success).toBe(true);
+    expect(checkMoveAvailability).toHaveBeenCalledWith(
+      'agent', 'cs-1', '2026-09-08', '2026-09-08', 'bk-mine',
+      undefined, undefined, undefined, undefined, undefined,
+    );
     const data = res.data as Record<string, unknown>;
     expect(data.suggestedAction).toBe('confirm_existing');
     expect(data.slots).toBeUndefined();
@@ -1208,13 +1224,52 @@ describe('check_availability — a time the caller already holds is not unavaila
     // later" dead-ended into a handoff while the target slot was free.
     expect(data.guidance).toMatch(/moveTargets/);
     expect(data.guidance).toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+    expect(data.guidance).toMatch(/A time missing from moveTargets is not free/);
     expect(data.guidance).toMatch(/Never offer moveTargets as extra appointments/);
     expect(data.moveTargets).toEqual([
+      { start: '2026-09-08T09:00:00', end: '2026-09-08T10:00:00' },
       { start: '2026-09-08T09:30:00', end: '2026-09-08T10:30:00' },
     ]);
+    // data is truncated at 4000 chars for the model: the sentence that says what
+    // moveTargets are for must serialise BEFORE the list it explains.
+    const json = JSON.stringify(data);
+    expect(json.indexOf('"guidance"')).toBeGreaterThan(-1);
+    expect(json.indexOf('"guidance"')).toBeLessThan(json.indexOf('"moveTargets"'));
     expect(data.alreadyHeld).toEqual([
       { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
     ]);
+  });
+
+  it('caps moveTargets and says the list is not exhaustive', async () => {
+    vi.resetModules();
+    const manySlots = Array.from({ length: 20 }, (_, i) => ({
+      start: `2026-09-08T${String(6 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}:00.000Z`,
+      end: `2026-09-08T${String(7 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}:00.000Z`,
+    }));
+    const checkAvailability = vi.fn(async () => ({
+      slots: manySlots,
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+      ],
+    }));
+    const checkMoveAvailability = vi.fn(async () => ({ slots: manySlots, timezone: 'Europe/Brussels', serviceId: 's1', serviceName: 'Cut' }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+      checkMoveAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08' },
+      { sessionId: 'cs-1' } as never,
+    );
+    const data = res.data as { moveTargets?: unknown[]; guidance?: string };
+    expect(data.moveTargets).toHaveLength(12);
+    expect(data.guidance).toMatch(/holds only the first free times/);
+    expect(data.guidance).not.toMatch(/A time missing from moveTargets is not free/);
   });
 
   it('does not flag requestedTimeUnavailable when the named time is one the caller holds', async () => {

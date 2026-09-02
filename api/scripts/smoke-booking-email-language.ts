@@ -40,6 +40,8 @@ import { checkAvailability, createBooking } from '../src/booking/booking.service
 import { BookingError } from '../src/booking/booking-providers/types';
 import { sendBookingEmail } from '../src/booking/booking-providers/booking-email';
 import { CalendarCredential } from '../src/database/entities/CalendarCredential';
+import { BookingReference } from '../src/database/entities/BookingReference';
+import { providerFor } from '../src/scheduler/calendar-provider';
 import { serviceNeedsCustomerAddress } from '../src/booking/service-location';
 import { signBookingToken } from '../src/scheduler/booking-token';
 import { getBotConfigForBotId } from '../src/services/bot-config.service';
@@ -230,9 +232,33 @@ async function findOfferedSlot(
   fail('No offered slot for E2E create — widen horizon or free calendar');
 }
 
-async function cleanupSmokeArtifacts(bookingId: string | null, sessionId: string | null): Promise<void> {
+
+async function cleanupCalendarEvent(botId: string, bookingId: string): Promise<void> {
+  const ref = await AppDataSource.getRepository(BookingReference).findOne({ where: { bookingId } });
+  if (!ref) return;
+  try {
+    await providerFor(ref.providerType as 'google' | 'microsoft').deleteEvent(
+      botId,
+      ref.externalEventId,
+      ref.externalCalendarId,
+    );
+    pass('deleted external calendar event', ref.externalEventId);
+  } catch (err) {
+    console.warn(
+      '⚠ calendar event cleanup failed (non-fatal)',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function cleanupSmokeArtifacts(
+  bookingId: string | null,
+  sessionId: string | null,
+  botId?: string,
+): Promise<void> {
   let leadId: string | null = null;
   if (bookingId) {
+    if (botId) await cleanupCalendarEvent(botId, bookingId);
     const rows: Array<{ lead_id: string | null }> = await AppDataSource.query(
       `SELECT lead_id FROM chatbot_bookings WHERE id = $1`,
       [bookingId],
@@ -458,7 +484,7 @@ async function assertCreateBookingE2E(template: Booking): Promise<void> {
       }
     }
   } finally {
-    await cleanupSmokeArtifacts(createdBookingId, session.id);
+    await cleanupSmokeArtifacts(createdBookingId, session.id, template.botId);
     if (createdBookingId) pass('cleaned up throwaway booking, deliveries, lead, session', createdBookingId);
   }
 }

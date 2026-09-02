@@ -10,6 +10,7 @@ import { WS_EVENTS } from '@config/constants';
 import { useAuth } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { isDesktopNotificationsEnabled } from '@utils/desktopNotificationPref';
+import { useTenantContextStore } from '../stores/tenantContextStore';
 import type {
   TypingIndicator,
   Agent,
@@ -99,13 +100,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // JWTs expire in ~60s, so a token captured once would make every
       // reconnect fail auth — the socket would then exhaust its retries and
       // never recover. Socket.IO invokes this callback on each connect.
-      auth: async (cb: (data: { token: string | null }) => void) => {
+      auth: async (cb: (data: { token: string | null; tenantContext?: string }) => void) => {
+        const tenantContext = useTenantContextStore.getState().activeTenant?.tenantId;
         try {
           const token = await getToken({ template: undefined });
           tokenRef.current = token;
-          cb({ token });
+          cb({ token, tenantContext });
         } catch {
-          cb({ token: tokenRef.current });
+          cb({ token: tokenRef.current, tenantContext });
         }
       },
     });

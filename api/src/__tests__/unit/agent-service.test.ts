@@ -7,6 +7,13 @@ import type { Tenant } from '../../database/entities/Tenant';
 import { createBlockLedger } from '../../llm/block-ledger';
 import * as offerRecordService from '../../booking/offer-record.service';
 
+
+const refusedNamed = vi.hoisted(() => ({
+  refusedNamedTimeStillApplies: vi.fn(async () => false),
+  rememberRefusedNamedTime: vi.fn(async () => undefined),
+  clearRefusedNamedTime: vi.fn(async () => undefined),
+}));
+vi.mock('../../agent/refused-named-time', () => refusedNamed);
 const tokenBudget = vi.hoisted(() => ({
   isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
   recordTokenUsage: vi.fn().mockResolvedValue(undefined),
@@ -88,6 +95,7 @@ describe('AgentService', () => {
     vi.clearAllMocks();
     tokenBudget.isTokenBudgetExhausted.mockResolvedValue(false);
     mockGetToolsForTenant.mockResolvedValue([mockKbSearch]);
+    refusedNamed.refusedNamedTimeStillApplies.mockResolvedValue(false);
   });
 
   it('returns a text response when LLM finishes with stop', async () => {
@@ -1658,6 +1666,54 @@ describe('AgentService', () => {
     if (result.type === 'response') {
       expect(result.quickReplies).toHaveLength(2);
     }
+  });
+
+  it('keeps retry chips on a later ja after a persisted horizon refusal', async () => {
+    refusedNamed.refusedNamedTimeStillApplies.mockResolvedValue(true);
+    const slots = [
+      { start: '2026-09-08T08:00:00.000Z', end: '2026-09-08T08:30:00.000Z' },
+      { start: '2026-09-08T08:30:00.000Z', end: '2026-09-08T09:00:00.000Z' },
+    ];
+    const execute = vi.fn().mockResolvedValue({
+      success: true,
+      data: { slots, timezone: 'Europe/Brussels' },
+      availability: { slots, timezone: 'Europe/Brussels' },
+    });
+    mockGetToolsForTenant.mockResolvedValueOnce([{
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute,
+    }]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-02', endDate: '2026-09-08' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Kies hieronder een moment.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const later = await agent.run(
+      'ja',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [
+        { role: 'user', content: 'Ik wil maandag 14 september 2026 om 10:00 een booking waterfix boeken.' },
+        { role: 'assistant', content: 'Ik kan 14 september om 10:00 niet controleren. Zal ik andere dagen nakijken?' },
+      ],
+    );
+
+    expect(later.type).toBe('response');
+    if (later.type === 'response') {
+      expect(later.quickReplies).toHaveLength(2);
+    }
+    expect(execute.mock.calls[0][1].namedTimeRefused).toBe(true);
   });
 
   it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {

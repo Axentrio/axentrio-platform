@@ -54,6 +54,7 @@ import {
 } from '../guardrails/output-validation';
 import { renderMemoryForPrompt } from '../memory/memory-store';
 import { pendingYesNeedsCreate, pendingYesNeedsReschedule, type PendingAgreedMove } from './pending-booking-confirmation';
+import { refusedNamedTimeStillApplies, rememberRefusedNamedTime, clearRefusedNamedTime } from './refused-named-time';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -139,23 +140,38 @@ const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'resche
  * Notice/horizon refused the named time this run. Later availability is a list of
  * alternatives, so the clock-only "already chose this hour" match must stand down.
  */
-function absorbNamedTimeRefusal(tool: { name: string }, result: ToolResult, state: RunLoopState): void {
-  if (
+function absorbNamedTimeRefusal(
+  tool: { name: string },
+  toolCall: ToolCall,
+  result: ToolResult,
+  ctx: RunLoopContext,
+  state: RunLoopState,
+): void {
+  const horizonCheck =
     tool.name === 'check_availability' &&
     result.success &&
-    (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability'
-  ) {
-    state.namedTimeRefused = true;
-    return;
-  }
-  if (
+    (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability';
+  const horizonMutation =
     BOOKING_MUTATION_TOOLS.includes(tool.name) &&
     !result.success &&
     typeof result.error === 'string' &&
-    result.error.startsWith('REQUEST_OUTSIDE_WINDOW:')
-  ) {
-    state.namedTimeRefused = true;
-  }
+    result.error.startsWith('REQUEST_OUTSIDE_WINDOW:');
+  if (!horizonCheck && !horizonMutation) return;
+  state.namedTimeRefused = true;
+  const args = toolCall.arguments ?? {};
+  const dateArg =
+    (typeof args.startDate === 'string' && args.startDate) ||
+    (typeof args.startTime === 'string' && args.startTime) ||
+    (typeof args.preferredTime === 'string' && args.preferredTime) ||
+    '';
+  const localDate = /^(\d{4}-\d{2}-\d{2})/.exec(dateArg)?.[1];
+  const customer = latestCustomerTimeText([
+    ...ctx.conversationHistory.map((m) => ({ role: m.role, text: contentToText(m.content) })),
+    { role: 'user', text: ctx.message },
+  ]);
+  const clock = parseClockTimes(customer)[0]?.key;
+  if (!localDate || !clock) return;
+  void rememberRefusedNamedTime(ctx.session.id, localDate, clock);
 }
 
 /** Broader than the hard output gate: future intent is useful for correcting the
@@ -942,6 +958,7 @@ export class AgentService {
     // error AFTER the tool succeeded still returns `handoffRequested: true` from
     // the catch below.
     const state = newRunLoopState();
+    state.namedTimeRefused = await refusedNamedTimeStillApplies(session.id, message);
     // Same gate message-forwarding uses to run the bot. Missing ownership
     // (tests / older rows) defaults to bot_owned, matching the DB default.
     const sessionBotOwned =
@@ -2020,7 +2037,7 @@ export class AgentService {
     // because a model handed a `Z` instant reads its digits out loud - so the chips, the
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
-    absorbNamedTimeRefusal(tool, result, state);
+    absorbNamedTimeRefusal(tool, toolCall, result, ctx, state);
 
     if (tool.name === 'check_availability' && result.success && result.availability) {
       this.absorbAvailability(toolCall, result, result.availability, ctx, state);
@@ -2037,6 +2054,7 @@ export class AgentService {
       // the slots, for the same reason the slots are cleared: the offer was about a
       // decision the customer has already made.
       state.pendingAffordance = null;
+      void clearRefusedNamedTime(ctx.session.id);
       state.bookingRecorded = true;
     }
   }

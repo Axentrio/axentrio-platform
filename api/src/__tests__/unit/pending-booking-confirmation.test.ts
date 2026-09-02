@@ -157,7 +157,20 @@ describe('isConfirmingChip', () => {
 describe('summaryWasAsked', () => {
   const start = '2026-10-26T10:00:00';
 
-  it('accepts a prior booking question that names the hour', () => {
+  it('accepts a prior booking question that names the date and hour', () => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'dump' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+        start,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a clock-only booking question', () => {
     expect(
       summaryWasAsked(
         [
@@ -167,7 +180,7 @@ describe('summaryWasAsked', () => {
         ],
         start,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('rejects an availability question that does not name the hour', () => {
@@ -182,7 +195,7 @@ describe('summaryWasAsked', () => {
   it('rejects a booking question for a different hour', () => {
     expect(
       summaryWasAsked(
-        [{ role: 'assistant', content: 'Zal ik boeken om 11:00?' }],
+        [{ role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 11:00?' }],
         start,
       ),
     ).toBe(false);
@@ -195,11 +208,46 @@ describe('summaryWasAsked', () => {
           { role: 'user', content: 'dump' },
           { role: 'assistant', content: 'Zal ik de beschikbaarheid checken?' },
           { role: 'user', content: 'Ja, dat klopt' },
-          { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         ],
         start,
       ),
     ).toBe(false);
+  });
+
+  it('rejects the live horizon-refusal that named 2 November 10:00 for a 26 October pending', () => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'Is maandag 2 november 2026 om 10:00 vrij?' },
+          {
+            role: 'assistant',
+            content:
+              'Ik kan maandag 2 november om 10:00 momenteel niet controleren; wil je dat ik 26 oktober tot en met 1 november nakijk?',
+          },
+          { role: 'user', content: 'ja' },
+        ],
+        start,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    'Zal ik boeken op maandag 26 oktober 2026, 10:00?',
+    'Shall I book Monday 26 October 2026 at 10:00?',
+    'Confirmer le rendez-vous le 26 octobre 2026 à 10h00 ?',
+    'Zal ik boeken op 26/10/2026 om 10:00?',
+  ])('accepts %s', (summary) => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'dump' },
+          { role: 'assistant', content: summary },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+        start,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -261,7 +309,7 @@ describe('confirmation keys do not cross kinds', () => {
     expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
 
     const history = [
-      { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+      { role: 'assistant' as const, content: 'Zal ik boeken op woensdag 10 juni 2026 om 10:00?' },
       { role: 'user' as const, content: 'Ja, dat klopt' },
     ];
     const refused = await refuseUnlessConfirmed(

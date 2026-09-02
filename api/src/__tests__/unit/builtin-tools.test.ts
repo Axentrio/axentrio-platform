@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { DateTime } from 'luxon';
 
 // ── Mocks (must come before imports) ────────────────────────────────────────
 
@@ -707,12 +708,17 @@ describe('CreateBookingTool', () => {
     const keyed = pendingTime || (await wallClockKey(ctx.sessionId, String(args.startTime ?? '')));
     const clock = keyed.match(/T(\d{2}):(\d{2})/);
     const hhmm = clock ? `${clock[1]}:${clock[2]}` : '10:00';
+    const keyedDt = DateTime.fromISO(keyed);
+    const months = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+    const dateAsk = keyedDt.isValid
+      ? `Zal ik boeken op ${keyedDt.day} ${months[keyedDt.month - 1]} ${keyedDt.year} om ${hhmm}?`
+      : `Zal ik boeken om ${hhmm}?`;
     return tool.execute(args, {
       ...ctx,
       runId: `${ctx.runId}:yes`,
       conversationHistory: [
         ...ctx.conversationHistory,
-        { role: 'assistant', content: `Zal ik boeken om ${hhmm}?` },
+        { role: 'assistant', content: dateAsk },
         { role: 'user', content: 'ja' },
       ],
     });
@@ -747,7 +753,7 @@ describe('CreateBookingTool', () => {
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user', content: 'Ja, dat klopt' },
       ]),
     ).resolves.toBe(true);
@@ -761,7 +767,7 @@ describe('CreateBookingTool', () => {
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user', content: 'What is the address?' },
       ]),
     ).resolves.toBe(false);
@@ -801,7 +807,7 @@ describe('CreateBookingTool', () => {
       runId: 'run-yes',
       conversationHistory: [
         { role: 'user' as const, content: DUMP },
-        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant' as const, content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user' as const, content: 'Ja, dat klopt' },
       ],
     };
@@ -841,7 +847,7 @@ describe('CreateBookingTool', () => {
         { role: 'user' as const, content: DUMP },
         { role: 'assistant' as const, content: 'Zal ik de beschikbaarheid checken?' },
         { role: 'user' as const, content: 'Ja, dat klopt' },
-        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant' as const, content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
       ],
     };
     await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
@@ -875,7 +881,7 @@ describe('CreateBookingTool', () => {
         runId: 'run-2',
         conversationHistory: [
           { role: 'user', content: DUMP },
-          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
           { role: 'user', content: 'Ja, dat klopt' },
         ],
       }),

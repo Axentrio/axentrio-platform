@@ -166,6 +166,7 @@ function toolError(err: unknown, fallback: string): { error: string; errorSafeFo
   return { error: err instanceof Error ? err.message : fallback, errorSafeForModel: false };
 }
 
+
 /**
  * What the tool ACTUALLY booked against, said back to the model.
  *

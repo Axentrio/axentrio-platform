@@ -11,7 +11,7 @@
  */
 import type { ToolContext, ToolResult } from './tool-adapter';
 import { contentToText } from '../llm/llm.types';
-import { namesSingleOfferedTime, parseClockTimes } from './clock-times';
+import { namesPendingDateAndClock, namesSingleOfferedTime, parseClockTimes } from './clock-times';
 import { SLOT_CHIP_CONFIRM_PREFIX } from '../config/bot-language';
 import { getRedisClient } from '../config/redis';
 import { wallClockKey } from './offered-slots-store';
@@ -85,17 +85,19 @@ export function lastCustomerUtterance(ctx: Pick<ToolContext, 'conversationHistor
 const SUMMARY_ASK = /boek|book|bevestig|confirm|afspraak|appointment|samenvatting|summary|klopt/i;
 
 /**
- * A prior assistant reply named this hour and asked a question. Only replies
- * BEFORE the last real customer line count: a same-turn "Zal ik boeken?" after
- * the yes is the model talking to itself, not a summary the customer saw.
+ * A prior assistant reply named this booking's date and clock and asked a question.
+ * Only replies BEFORE the last real customer line count: a same-turn "Zal ik boeken?"
+ * after the yes is the model talking to itself, not a summary the customer saw.
+ *
+ * Date and clock must be one phrase. A refusal that names 2 November 10:00 and a
+ * range starting 26 October must not confirm a 26 October 10:00 booking. Live
+ * WhatsApp 2026-09-02, session 3f63a9b5.
  */
 export function summaryWasAsked(
   history: ToolContext['conversationHistory'],
   startTime: string,
 ): boolean {
-  const clock = startTime.match(/T(\d{2}):(\d{2})/);
-  if (!clock || !Array.isArray(history)) return false;
-  const hhmm = `${clock[1]}:${clock[2]}`;
+  if (!Array.isArray(history)) return false;
   let lastUser = -1;
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
@@ -111,7 +113,7 @@ export function summaryWasAsked(
     if (m.role !== 'assistant') continue;
     const text = contentToText(m.content);
     if (!text.includes('?') || !SUMMARY_ASK.test(text)) continue;
-    if (parseClockTimes(text).some((t) => t.key === hhmm)) return true;
+    if (namesPendingDateAndClock(text, startTime)) return true;
   }
   return false;
 }

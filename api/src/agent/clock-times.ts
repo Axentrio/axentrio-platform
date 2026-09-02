@@ -24,7 +24,7 @@ export interface ClockTime {
 export function parseClockTimes(text: string): ClockTime[] {
   // `9:00`, `09:30`, `1:30 PM`, `13.00`, and — since 2026-08-13 — `9 AM` and `9a.m.`.
   // The meridiem alternatives are deliberately symmetric — `a.m.` / `a.m` OR `am`, never `am.`.
-  const found = [...text.matchAll(/\b(\d{1,2})(?:([:.])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
+  const found = [...text.matchAll(/\b(\d{1,2})(?:([:.uh])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
   const times: ClockTime[] = [];
   for (const m of found) {
     const suffix = (m[4] ?? '').toLowerCase().replace(/\./g, '');
@@ -193,3 +193,107 @@ export function localClockTimes(
   if (!times.every((t) => t.isValid)) return null;
   return times.map((t) => t.toFormat('HH:mm'));
 }
+
+const MONTH_NUMBER: Record<string, number> = {
+  januari: 1, january: 1, janvier: 1, jan: 1,
+  februari: 2, february: 2, fevrier: 2, février: 2, feb: 2,
+  maart: 3, march: 3, mars: 3, mrt: 3, mar: 3,
+  april: 4, avril: 4, apr: 4,
+  mei: 5, may: 5, mai: 5,
+  juni: 6, june: 6, juin: 6, jun: 6,
+  juli: 7, july: 7, juillet: 7, jul: 7,
+  augustus: 8, august: 8, aout: 8, août: 8, aug: 8,
+  september: 9, septembre: 9, sep: 9, sept: 9,
+  oktober: 10, october: 10, octobre: 10, okt: 10, oct: 10,
+  november: 11, novembre: 11, nov: 11,
+  december: 12, décembre: 12, decembre: 12, dec: 12,
+};
+
+const MONTH_ALT = Object.keys(MONTH_NUMBER)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+
+const WEEKDAY_NUMBER: Record<string, number> = {
+  maandag: 1, monday: 1, lundi: 1,
+  dinsdag: 2, tuesday: 2, mardi: 2,
+  woensdag: 3, wednesday: 3, mercredi: 3,
+  donderdag: 4, thursday: 4, jeudi: 4,
+  vrijdag: 5, friday: 5, vendredi: 5,
+  zaterdag: 6, saturday: 6, samedi: 6,
+  zondag: 7, sunday: 7, dimanche: 7,
+};
+
+const WEEKDAY_ALT = Object.keys(WEEKDAY_NUMBER)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+
+const DAY_MONTH = new RegExp(`\\b(\\d{1,2})\\s+(${MONTH_ALT})(?:\\s+(\\d{4}))?\\b`, 'gi');
+const MONTH_DAY = new RegExp(`\\b(${MONTH_ALT})\\s+(\\d{1,2})(?:\\s*,\\s*|\\s+)(\\d{4})?\\b`, 'gi');
+const NUMERIC_DATE = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/g;
+const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+const WEEKDAY = new RegExp(`\\b(${WEEKDAY_ALT})\\b`, 'gi');
+
+function pushDate(out: string[], year: number, month: number, day: number): void {
+  const dt = DateTime.fromObject({ year, month, day });
+  if (dt.isValid) out.push(dt.toFormat('yyyy-MM-dd'));
+}
+
+/**
+ * Whether `text` names this pending start by clock plus a date or weekday.
+ *
+ * Clock-only is not enough. If the text names any calendar date, every named
+ * date must be the pending day. If it names any weekday, every named weekday
+ * must be the pending weekday. That splits "2 november om 10:00" from a
+ * 26 October pending, and still accepts "donderdag om 13:00".
+ */
+export function namesPendingDateAndClock(text: string, startTime: string): boolean {
+  const pending = DateTime.fromISO(startTime);
+  if (!pending.isValid) return false;
+  const wantClock = pending.toFormat('HH:mm');
+  const wantDate = pending.toFormat('yyyy-MM-dd');
+  const wantWeekday = pending.weekday;
+  if (!parseClockTimes(text).some((t) => t.key === wantClock)) return false;
+  const dates = parseCalendarDates(text, pending.year);
+  const weekdays = parseWeekdays(text);
+  if (dates.length === 0 && weekdays.length === 0) return false;
+  if (dates.some((d) => d !== wantDate)) return false;
+  if (weekdays.some((d) => d !== wantWeekday)) return false;
+  return true;
+}
+
+/** Calendar days named in `text` as `YYYY-MM-DD`, year defaulting to `fallbackYear`. */
+export function parseCalendarDates(text: string, fallbackYear: number): string[] {
+  const out: string[] = [];
+  ISO_DATE.lastIndex = 0;
+  for (const m of text.matchAll(ISO_DATE)) {
+    pushDate(out, Number(m[1]), Number(m[2]), Number(m[3]));
+  }
+  DAY_MONTH.lastIndex = 0;
+  for (const m of text.matchAll(DAY_MONTH)) {
+    pushDate(out, m[3] ? Number(m[3]) : fallbackYear, MONTH_NUMBER[m[2].toLowerCase()], Number(m[1]));
+  }
+  MONTH_DAY.lastIndex = 0;
+  for (const m of text.matchAll(MONTH_DAY)) {
+    pushDate(out, m[3] ? Number(m[3]) : fallbackYear, MONTH_NUMBER[m[1].toLowerCase()], Number(m[2]));
+  }
+  NUMERIC_DATE.lastIndex = 0;
+  for (const m of text.matchAll(NUMERIC_DATE)) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const year = m[3] ? (m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])) : fallbackYear;
+    if (b > 12) pushDate(out, year, a, b);
+    else pushDate(out, year, b, a);
+  }
+  return out;
+}
+
+/** ISO weekdays (1=Monday) named in `text`. */
+export function parseWeekdays(text: string): number[] {
+  const out: number[] = [];
+  WEEKDAY.lastIndex = 0;
+  for (const m of text.matchAll(WEEKDAY)) {
+    out.push(WEEKDAY_NUMBER[m[1].toLowerCase()]);
+  }
+  return out;
+}
+

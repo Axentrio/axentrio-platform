@@ -20,6 +20,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Check, ChevronLeft, Loader2 } from 'lucide-react';
+import { useOrganization } from '@clerk/clerk-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -41,6 +42,7 @@ import { ChatbotStep } from './steps/ChatbotStep';
 import { ChoiceStep } from './steps/ChoiceStep';
 import { BookingsStep } from './steps/BookingsStep';
 import { SocialStep } from './steps/SocialStep';
+import { WorkspaceStep } from './steps/WorkspaceStep';
 
 /**
  * Steps with no way past them. Mirrors REQUIRED_STEPS on the server, which is the
@@ -48,9 +50,17 @@ import { SocialStep } from './steps/SocialStep';
  */
 const REQUIRED: readonly SetupStep[] = ['language', 'company', 'documents', 'plan'];
 
+/** Client-side first step: the Clerk organization the wizard runs against. Not in SETUP_STEPS
+ *  because the server cannot see a workspace that does not exist yet. */
+const WORKSPACE_STEP = 'workspace' as const;
+type RailStep = typeof WORKSPACE_STEP | SetupStep;
+const RAIL_STEPS: readonly RailStep[] = [WORKSPACE_STEP, ...SETUP_STEPS];
+
 export default function SetupWizard() {
   const { t } = useTranslation();
-  const { data: status, isLoading } = useSetupStatus();
+  const { organization, isLoaded: orgLoaded } = useOrganization();
+  const hasOrg = Boolean(organization);
+  const { data: status, isLoading } = useSetupStatus({ enabled: hasOrg });
   const submitStep = useSubmitSetupStep();
   const completeSetup = useCompleteSetup();
 
@@ -59,7 +69,9 @@ export default function SetupWizard() {
    * customer who steps back to revisit an answer overrides it until they move on.
    */
   const [revisiting, setRevisiting] = React.useState<SetupStep | null>(null);
-  const active = revisiting ?? status?.nextStep ?? null;
+  const active: RailStep | null = !hasOrg
+    ? WORKSPACE_STEP
+    : (revisiting ?? status?.nextStep ?? null);
 
   /**
    * Answering ANY step hands control back to the server's ordering, so finishing a
@@ -79,14 +91,19 @@ export default function SetupWizard() {
 
   // SetupGate decides whether this screen is shown at all, so there is no
   // "already finished" branch here — one owner for that question, not two.
-  if (isLoading || !status) return <PageSkeleton variant="list" rows={4} />;
+  if (!orgLoaded || (hasOrg && (isLoading || !status))) {
+    return <PageSkeleton variant="list" rows={4} />;
+  }
 
-  const answered = SETUP_STEPS.filter((s) => status.state.steps[s]).length;
-  const index = active ? SETUP_STEPS.indexOf(active) : 0;
-  const canSkip = active != null && !REQUIRED.includes(active);
+  const answered = hasOrg ? SETUP_STEPS.filter((s) => status!.state.steps[s]).length : 0;
+  const index = active ? RAIL_STEPS.indexOf(active) : 0;
+  const canSkip = active != null && active !== WORKSPACE_STEP && !REQUIRED.includes(active);
   const busy = submitStep.isPending || completeSetup.isPending;
 
-  const skip = () => active && submitStep.mutate({ step: active, outcome: 'skipped' });
+  const skip = () => {
+    if (active == null || active === WORKSPACE_STEP) return;
+    submitStep.mutate({ step: active, outcome: 'skipped' });
+  };
 
   /**
    * A refused submission must SAY so. Only 402s get a global toast, so without this a
@@ -99,10 +116,12 @@ export default function SetupWizard() {
 
   const stepScreen = () => {
     switch (active) {
+      case WORKSPACE_STEP:
+        return <WorkspaceStep />;
       case 'language':
-        return <LanguageStep status={status} submit={submitStep} />;
+        return <LanguageStep status={status!} submit={submitStep} />;
       case 'company':
-        return <CompanyStep status={status} submit={submitStep} />;
+        return <CompanyStep status={status!} submit={submitStep} />;
       case 'logo':
         return <LogoStep submit={submitStep} />;
       case 'documents':
@@ -110,7 +129,7 @@ export default function SetupWizard() {
       case 'plan':
         return <PlanStep submit={submitStep} />;
       case 'chatbot':
-        return <ChatbotStep status={status} submit={submitStep} />;
+        return <ChatbotStep status={status!} submit={submitStep} />;
       case 'bookings':
         return <BookingsStep submit={submitStep} />;
       case 'social':
@@ -137,20 +156,22 @@ export default function SetupWizard() {
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <header className="space-y-3">
           <p className="text-sm text-text-secondary">
-            {t('setup.progress', { current: index + 1, total: SETUP_STEPS.length })}
+            {t('setup.progress', { current: index + 1, total: RAIL_STEPS.length })}
           </p>
           {/* The rail doubles as navigation: answered steps are revisitable, the rest
               are markers. Nothing ahead is clickable — the order is the point. */}
           <ol className="flex flex-wrap gap-1.5" aria-label={t('setup.progressLabel')}>
-            {SETUP_STEPS.map((step) => {
-              const done = Boolean(status.state.steps[step]);
+            {RAIL_STEPS.map((step) => {
+              const done = step === WORKSPACE_STEP ? hasOrg : Boolean(status?.state.steps[step]);
               const isActive = step === active;
               return (
                 <li key={step} className="flex-1 min-w-[1.5rem]">
                   <button
                     type="button"
-                    disabled={!done || busy}
-                    onClick={() => setRevisiting(step)}
+                    disabled={step === WORKSPACE_STEP || !done || busy}
+                    onClick={() => {
+                      if (step !== WORKSPACE_STEP) setRevisiting(step);
+                    }}
                     aria-current={isActive ? 'step' : undefined}
                     title={t(`setup.steps.${step}.title`)}
                     className={cn(

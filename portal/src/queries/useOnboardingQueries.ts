@@ -100,13 +100,14 @@ export interface SetupStatus {
   complete: boolean;
 }
 
-export function useSetupStatus() {
+export function useSetupStatus(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.onboarding.setup(),
     queryFn: () => api.get<SetupStatus>('/onboarding/status'),
     // Read on every page load by the routing guard. It only changes when this same
     // client writes it, and every write pushes the fresh state into the cache.
     staleTime: 5 * 60 * 1000,
+    enabled: options.enabled ?? true,
   });
 }
 

@@ -3009,6 +3009,18 @@
       "action": "Open my workspace"
     },
     "steps": {
+      "workspace": {
+        "title": "Your workspace",
+        "body": "Everything you set up next lives in one workspace. Accept an invitation, open one you already belong to, or create a new one.",
+        "invitations": "Invitations",
+        "accept": "Accept",
+        "memberships": "Your workspaces",
+        "open": "Open",
+        "createTitle": "Create a workspace",
+        "namePlaceholder": "Company or team name",
+        "create": "Create workspace",
+        "error": "That didn't work. Please try again."
+      },
       "language": {
         "title": "Choose your language",
         "body": "This is the language you'll see across the platform. Your assistant still replies to customers in whatever language they write in."

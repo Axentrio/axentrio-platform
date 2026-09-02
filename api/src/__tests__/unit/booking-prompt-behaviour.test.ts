@@ -386,6 +386,14 @@ describe('after a booking exists — extra info vs reschedule vs price', () => {
     expect(p).toMatch(/keeps insisting on a different price/);
     expect(p).toMatch(/call escalate_to_human/);
   });
+
+  it('does not treat a further price demand as agreement to a human', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/Asking whether they would like a human is not a handoff/);
+    expect(p).toMatch(/do not call escalate_to_human until they explicitly agree to a human/);
+    expect(p).toMatch(/A further demand for a different price/);
+    expect(p).toMatch(/is not agreement/);
+  });
 });
 
 

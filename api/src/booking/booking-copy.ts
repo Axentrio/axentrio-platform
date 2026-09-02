@@ -5,7 +5,7 @@ import { getProvider } from '../llm/provider-factory';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { luxonEmailWhenFormat } from '../contracts/clock-format';
 import { logger } from '../utils/logger';
-import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from './booking-language';
+import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from '../i18n/audience-language';
 import type { BotSettings } from '../database/entities/Bot';
 import { SUPPORTED_LOCALES } from '../schemas/user.schema';
 
@@ -17,6 +17,7 @@ export const BOOKING_COPY_EN = {
   'customer.minutes': '{n} min',
   'customer.location': 'Location: {location}',
   'customer.before_heading': 'Before your appointment:',
+  'customer.extra_info_heading': 'Additional information:',
   'customer.invite_attached': 'A calendar invite is attached.',
   'customer.manage_link': 'Reschedule or cancel this appointment',
   'customer.reminder_subject': 'Reminder: {summary}',
@@ -48,6 +49,7 @@ export const BOOKING_COPY_EN = {
   'owner.request_from': 'From: {who}',
   'owner.request_summary': 'Summary: {text}',
   'owner.request_notes': 'Notes: {text}',
+  'owner.original_heading': 'Original message from the customer:',
   'owner.request_follow_up': 'Follow up with the customer to confirm or decline.',
   'owner.rejected_subject': 'Calendar change not applied: {service}',
   'owner.rejected_intro':
@@ -69,10 +71,9 @@ export const BOOKING_COPY_EN = {
   'event.title': 'Booking: {service}',
   'event.title_with_name': 'Booking: {service} - {who}',
   'event.service': 'Service: {text}',
-  'event.customer_name_email': 'Customer: {name} <{email}>',
-  'event.customer_email_only': 'Customer: <{email}>',
-  'event.customer_name_only': 'Customer: {name}',
-  'event.phone': 'Phone: {text}',
+  'event.customer': 'Customer: {name}',
+  'event.email': 'Email: {text}',
+    'event.phone': 'Phone: {text}',
   'event.address': 'Address: {text}',
   'event.duration': 'Duration: {n} min',
   'event.price': 'Price: {price}',
@@ -80,7 +81,7 @@ export const BOOKING_COPY_EN = {
   'event.summary': 'Summary: {text}',
   'event.notes': 'Notes: {text}',
   'event.preparation': 'Preparation: {text}',
-  'event.files': 'Files: {n} attached — open the booking in Axentrio to view',
+  'event.files': 'Files: {names} - open the booking in Axentrio to view',
   'event.intake': 'Intake:',
   'event.reference': 'Reference: {ref}',
   'event.manage': 'Manage: {url}',

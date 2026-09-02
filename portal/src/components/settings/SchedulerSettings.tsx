@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
+  useUploadConfirmationAttachment,
+  useDeleteConfirmationAttachment,
+  type ConfirmationAttachment,
   type WeeklyHours,
   type Weekday,
   type TimeWindow,
@@ -215,6 +218,7 @@ export const SchedulerSettings: React.FC = () => {
     travelGroupingPeriod,
     travelMaxTravelMin,
     bookingsPaused,
+    confirmationExtraInfo,
     rules,
     showPreview,
     hydrated,
@@ -233,6 +237,7 @@ export const SchedulerSettings: React.FC = () => {
     setTravelGroupingPeriod,
     setTravelMaxTravelMin,
     setBookingsPaused,
+    setConfirmationExtraInfo,
     setRules,
     setShowPreview,
     setHydrated,
@@ -251,6 +256,7 @@ export const SchedulerSettings: React.FC = () => {
       setTravelGroupingPeriod: makeFieldSetter(dispatch, 'travelGroupingPeriod'),
       setTravelMaxTravelMin: makeFieldSetter(dispatch, 'travelMaxTravelMin'),
       setBookingsPaused: makeFieldSetter(dispatch, 'bookingsPaused'),
+      setConfirmationExtraInfo: makeFieldSetter(dispatch, 'confirmationExtraInfo'),
       setRules: makeFieldSetter(dispatch, 'rules'),
       setShowPreview: makeFieldSetter(dispatch, 'showPreview'),
       setHydrated: makeFieldSetter(dispatch, 'hydrated'),
@@ -270,6 +276,7 @@ export const SchedulerSettings: React.FC = () => {
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
     setBookingsPaused(data.bookingsPaused === true);
+    setConfirmationExtraInfo(data.confirmationEmail?.extraInfo ?? '');
     setVenue(venueFromConfig(data));
     // Read as one object, then written field by field: the setters are per-field, and the
     // mapping is what the hydration test pins.
@@ -413,6 +420,11 @@ export const SchedulerSettings: React.FC = () => {
         maxTravelMin: travelMaxTravelMin.trim() === '' ? null : Number(travelMaxTravelMin),
       },
       bookingsPaused,
+      // Sent whole every time, matching the venue and travel contract above: an omitted key
+      // leaves the stored text alone, so clearing the box has to send an explicit null.
+      confirmationEmail: {
+        extraInfo: confirmationExtraInfo.trim() === '' ? null : confirmationExtraInfo,
+      },
     };
   };
 
@@ -478,6 +490,14 @@ export const SchedulerSettings: React.FC = () => {
 
                 {/* Booking rules — business-wide ceilings over every service */}
                 <BookingRulesSection rules={rules} setRules={setRules} />
+
+                {/* What every customer confirmation email carries, on top of the booking itself */}
+                <ConfirmationEmailSection
+                  extraInfo={confirmationExtraInfo}
+                  setExtraInfo={setConfirmationExtraInfo}
+                  attachments={data?.confirmationEmail?.attachments ?? []}
+                  botId={botId}
+                />
 
                 {/*
                   WHICH Agent this edits. Shown only when the tenant has more than one, so a
@@ -941,6 +961,111 @@ const BookingRulesSection: React.FC<{
     </div>
   </div>
 );
+
+
+/** What the file picker offers. The API re-checks the real bytes, which is the check that holds. */
+const ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx';
+
+const formatAttachmentSize = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/**
+ * Extras carried by EVERY customer confirmation email for this Agent.
+ *
+ * The text rides the normal Save, because it is a settings field. The files do not: they go
+ * straight to their own multipart endpoints and land immediately, because an owner who picks
+ * a file expects it uploaded, not queued behind a form they might never submit.
+ */
+const ConfirmationEmailSection: React.FC<{
+  extraInfo: string;
+  setExtraInfo: FormSetter<'confirmationExtraInfo'>;
+  attachments: ConfirmationAttachment[];
+  botId: string | undefined;
+}> = ({ extraInfo, setExtraInfo, attachments, botId }) => {
+  const uploadAttachment = useUploadConfirmationAttachment(botId);
+  const deleteAttachment = useDeleteConfirmationAttachment(botId);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div className="space-y-3 border-t border-edge pt-4">
+      <h3 className="text-sm font-medium text-text-primary">Booking confirmation email</h3>
+      <p className="text-xs text-text-muted">
+        Added to every confirmation email this Agent sends. The headings follow the customer's own
+        language; your own text goes exactly as you write it.
+      </p>
+
+      <div className="space-y-1">
+        <Label htmlFor="confirmation-extra-info">Extra information</Label>
+        <textarea
+          id="confirmation-extra-info"
+          className="min-h-[96px] w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
+          maxLength={2000}
+          value={extraInfo}
+          onChange={(e) => setExtraInfo(e.target.value)}
+          placeholder={
+            'Please arrive 10 minutes early.\nParking is behind the building.\nTell us at least 24 hours before if you need to change the appointment.'
+          }
+        />
+        <p className="text-xs text-text-muted">
+          Up to 2000 characters. Line breaks are kept. This text is never rewritten or translated.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Attachments</Label>
+        {attachments.length === 0 && <p className="text-xs text-text-muted">No files attached yet.</p>}
+        {attachments.map((a) => (
+          <div
+            key={a.id}
+            className="flex items-center justify-between gap-2 rounded-md bg-surface-muted px-3 py-2"
+          >
+            <span className="truncate text-sm text-text-primary">{a.fileName}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-text-muted">{formatAttachmentSize(a.fileSize)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Remove ${a.fileName}`}
+                disabled={deleteAttachment.isPending}
+                onClick={() => deleteAttachment.mutate(a.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+        <input
+          ref={fileInput}
+          type="file"
+          className="hidden"
+          accept={ATTACHMENT_ACCEPT}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // Cleared before the request so picking the SAME file twice still fires a change.
+            e.target.value = '';
+            if (file) uploadAttachment.mutate(file);
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={uploadAttachment.isPending}
+          onClick={() => fileInput.current?.click()}
+        >
+          <Plus className="mr-1 h-4 w-4" />
+          Add attachment
+        </Button>
+        <p className="text-xs text-text-muted">
+          PDF, Word or image files. Each file is uploaded straight away - you do not have to save.
+        </p>
+      </div>
+    </div>
+  );
+};
 
 /** Service area — where the business will travel. Hidden only when it is both
  *  inapplicable AND empty; a stored area always stays visible, with the field's

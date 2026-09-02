@@ -12,6 +12,14 @@ _Avoid_: customer, client, user, account.
 The configured AI bot that talks to a Tenant's customers. A Tenant may have multiple Agents.
 _Avoid_: bot, assistant.
 
+**Customer Language**:
+The language a Booking Customer writes in. Stored on `Booking.customer_language`, reported by the model, falling back to the Agent's default reply language. Drives every customer-facing email, ICS, and the manage page.
+_Avoid_: portal locale, business language, browser language (for customer copy).
+
+**Business Language**:
+`Tenant.settings.businessLanguage`. Drives internal notification emails and the translation target for customer free text. Never reaches a customer-facing surface.
+_Avoid_: customer language, Agent default reply language, admin UI locale alone.
+
 **ChatSession**:
 A single conversation between an Agent and one of the Tenant's customers, composed of Messages.
 _Avoid_: chat, conversation, thread.

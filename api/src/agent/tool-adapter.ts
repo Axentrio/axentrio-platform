@@ -90,6 +90,9 @@ export interface ToolResult {
     serviceId?: string;
     serviceName?: string;
     locationMode?: string;
+    /** Echo of the part-of-day filter. `matched: false` means `slots` is the WHOLE day, so no
+     *  chip may be drawn from it - the model has been told to ask before offering another part. */
+    clockWindow?: { from: string; to: string; matched: boolean };
     travel?: {
       groupingPilot?: boolean;
       grouped?: { savedMinutes: number };

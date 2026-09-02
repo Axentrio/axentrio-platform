@@ -20,7 +20,9 @@
     "eval:leads": "ts-node --transpile-only src/leads/enrichment/eval/run-eval.ts",
     "eval:proactive": "ts-node --transpile-only src/leads/proactive/eval/run-eval.ts",
     "lint": "oxlint src && node ../scripts/lint-budgets.mjs",
-    "smoke:booking-i18n": "bash -c 'set -a && . ./.env.local && set +a && npx ts-node --transpile-only scripts/smoke-booking-email-language.ts'"
+    "smoke:booking-i18n": "bash -c 'set -a && . ./.env.local && set +a && npx ts-node --transpile-only scripts/smoke-booking-email-language.ts'",
+    "smoke:day-part": "bash -c 'set -a && . ./.env.local && set +a && npx ts-node --transpile-only scripts/smoke-booking-day-part.ts'",
+    "smoke:confirmation-extras": "bash -c 'set -a && . ./.env.local && set +a && npx ts-node --transpile-only scripts/smoke-booking-confirmation-extras.ts'"
   },
   "keywords": [
     "chatbot",

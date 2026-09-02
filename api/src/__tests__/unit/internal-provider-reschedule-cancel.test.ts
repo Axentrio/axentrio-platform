@@ -1609,5 +1609,58 @@ describe('InternalProvider.updateBooking', () => {
     expect(update?.[1]).toContain('ada@example.com');
     expect(res.booking.attendeeEmail).toBe('ada@example.com');
   });
+
+  // The mirror is the surface the owner actually reads. Detail the customer added AFTER
+  // booking - a note, a phone number, a photo - reached the row and the portal and stopped
+  // there, so the calendar event kept describing the booking as it was made.
+  describe('calendar mirror refresh', () => {
+    const STORED_FILE = {
+      fileSessionId: 'fs-1',
+      fileName: 'boiler.jpg',
+      mimeType: 'image/jpeg',
+      fileSize: 1024,
+      fileKey: 'chat/boiler.jpg',
+    };
+
+    beforeEach(() => {
+      bookingRefFind.mockResolvedValue([
+        {
+          bookingId: 'bk-1',
+          providerType: 'google',
+          externalEventId: 'ev-1',
+          externalCalendarId: 'primary',
+          meetingUrl: null,
+        },
+      ]);
+      providerUpdateEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
+    });
+
+    it('patches the event body with the new note, the phone number and the file name', async () => {
+      bookingFind.mockResolvedValue([{ ...noEmailBooking(), uploadedFiles: [STORED_FILE] }]);
+      await provider.updateBooking(ctx, { notes: 'gate code 1234', customerPhone: '+32470123456' });
+      expect(providerUpdateEvent).toHaveBeenCalledOnce();
+      const [, eventId, patch] = providerUpdateEvent.mock.calls[0] as [string, string, Record<string, string>];
+      expect(eventId).toBe('ev-1');
+      expect(patch.description).toContain('Notes: gate code 1234');
+      expect(patch.description).toContain('Phone: +32470123456');
+      expect(patch.description).toContain('boiler.jpg');
+      expect(patch.summary).toContain('Intro call');
+      // The row's own instants: an update adds detail, it never moves the appointment.
+      expect(patch.startISO).toBe('2026-06-10T07:00:00.000Z');
+      expect(patch.endISO).toBe('2026-06-10T07:30:00.000Z');
+    });
+
+    it('leaves a request row alone, because it has no event to patch', async () => {
+      bookingFindOne.mockResolvedValue({ ...noEmailBooking(), status: 'request_created' });
+      await provider.updateBooking(ctx, { bookingId: 'bk-1', notes: 'gate code 1234' });
+      expect(providerUpdateEvent).not.toHaveBeenCalled();
+    });
+
+    it('still reports success when the mirror cannot be reached', async () => {
+      providerUpdateEvent.mockRejectedValue(new Error('google down'));
+      const res = await provider.updateBooking(ctx, { notes: 'gate code 1234' });
+      expect(res.success).toBe(true);
+    });
+  });
 });
 

@@ -16,7 +16,7 @@ import { ServiceType } from '../../database/entities/ServiceType';
 import { getBotBusinessTimezone } from '../business-timezone';
 import { logger } from '../../utils/logger';
 import { getBotConfigForBotId } from '../../services/bot-config.service';
-import { customerLanguageFor } from '../booking-language';
+import { customerLanguageFor } from '../../i18n/audience-language';
 import { sendReminderEmail } from './booking-email';
 import { buildManageUrl } from '../../scheduler/booking-token';
 

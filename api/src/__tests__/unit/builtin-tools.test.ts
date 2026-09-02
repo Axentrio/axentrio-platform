@@ -432,10 +432,24 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '24:00' });
   });
 
+  it('accepts a day-part word as a clock window', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T14:00:00.000Z', end: '2026-09-03T14:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    const result = await tool.execute(
+      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'afternoon' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '18:00' });
+  });
+
   it('refuses a malformed window', async () => {
     const tool = new CheckAvailabilityTool();
     const result = await tool.execute(
-      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'afternoon' },
+      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'soon' },
       makeCtx(),
     );
     expect(result.success).toBe(false);

@@ -35,7 +35,7 @@ import {
   getBookingCopy,
   __resetBookingCopyCache,
 } from '../src/booking/booking-copy';
-import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from '../src/booking/booking-language';
+import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from '../src/i18n/audience-language';
 import { checkAvailability, createBooking } from '../src/booking/booking.service';
 import { BookingError } from '../src/booking/booking-providers/types';
 import { sendBookingEmail } from '../src/booking/booking-providers/booking-email';
@@ -439,6 +439,7 @@ async function assertCreateBookingE2E(template: Booking): Promise<void> {
     if (mode === 'request') {
       pass('create_booking captured request (calendar unavailable locally)');
       await sendBookingEmail({
+        botId: template.botId,
         method: 'REQUEST',
         uid: row.icsUid,
         sequence: row.sequence ?? 0,

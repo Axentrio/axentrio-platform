@@ -428,6 +428,10 @@
         "indefinite": "Jusqu'à ce que je la rende — l'IA reste bloquée",
         "hours_one": "{{count}} heure",
         "hours_other": "{{count}} heures"
+      },
+      "businessLanguage": {
+        "title": "Langue de l'entreprise",
+        "description": "Les e-mails de notification internes utilisent cette langue. Les clients reçoivent toujours la leur."
       }
     },
     "appearance": {

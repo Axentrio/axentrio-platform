@@ -108,11 +108,17 @@ export async function syncCalendarCreate(
   }
 }
 
+/**
+ * Make the mirrored event match the booking row: times, placement AND body.
+ *
+ * One helper for every change to a booking that already has an event - a reschedule and
+ * a plain detail update both land here, because both leave the mirror wrong otherwise.
+ */
 // Pre-existing complexity 33 (limit 20). A split needs test cover for the
 // reschedule / recreate / Meet-URL branches, and none exists yet. Suppress
 // rather than refactor blind; do not grow this function.
 // eslint-disable-next-line complexity
-export async function syncCalendarReschedule(
+export async function syncCalendarMirror(
   ctx: BookingContext,
   bookingId: string,
   /**
@@ -130,8 +136,8 @@ export async function syncCalendarReschedule(
    * A plain update used to PATCH times alone so owner body edits survived. That
    * also left a leftover Meet conference and Meet LOCATION after a type change.
    * Current service type wins: a non-video reschedule writes the resolved place
-   * and drops conferencing. Description is still not patched. A recreate builds
-   * the event from nothing, so anything omitted here is gone for good.
+   * and drops conferencing. A recreate builds the event from nothing, so anything
+   * omitted here is gone for good.
    */
   placement?: { location?: string; conferencing?: boolean }
 ): Promise<string | null> {
@@ -143,20 +149,28 @@ export async function syncCalendarReschedule(
   const ref = await canonicalRef(ctx.bot.id, bookingId);
   let latestMeetUrl = conferencing ? (ref?.meetingUrl ?? null) : null;
   try {
-    const times = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
-    // Video with an existing join link: times only, keep the conference.
+    // Times AND body. The body used to be left alone so an owner's hand-typed description
+    // survived - which is exactly how a customer's added notes, photo names and phone
+    // number stayed invisible to the owner for the life of the booking. The row wins now:
+    // an owner edit to the description is overwritten (ADR-0021).
+    const rowState = {
+      startISO: start.toISOString(),
+      endISO: end.toISOString(),
+      timezone,
+      summary: content.summary,
+      description: content.description,
+    };
+    // Video with an existing join link: times and body only, keep the conference.
     // Video with no join link: mint one and clear any leftover street.
     // Anything else: write the resolved place and drop conferencing.
     const updateInput =
       conferencing === false
-        ? { ...times, location: location ?? '', conferencing: false as const }
+        ? { ...rowState, location: location ?? '', conferencing: false as const }
         : conferencing === true && !ref?.meetingUrl
-          ? { ...times, location: location ?? '', conferencing: true as const }
-          : times;
+          ? { ...rowState, location: location ?? '', conferencing: true as const }
+          : rowState;
     const recreateInput = {
-      ...times,
-      summary: content.summary,
-      description: content.description,
+      ...rowState,
       ...(location ? { location } : {}),
       ...(conferencing ? { conferencing } : {}),
     };

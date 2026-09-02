@@ -46,9 +46,20 @@ export function customerLanguageFor(
   return normalizeLanguageCode(row.customerLanguage) ?? resolveBotLanguage(botSettings.ai?.language);
 }
 
-/** Portal language of the person who reads the owner mailbox. */
+/**
+ * The language INTERNAL notifications are written in.
+ *
+ * An explicit `Tenant.settings.businessLanguage` wins outright: the business said what it
+ * reads. Everything below it is inference for a tenant that never chose - the locale of the
+ * person who reads the support mailbox, then the oldest admin's locale, then the onboarding
+ * language, then English.
+ */
 export async function resolveOwnerLanguage(tenantId: string, supportEmail?: string | null): Promise<string> {
   try {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    const chosen = tenant?.settings?.businessLanguage;
+    if (isSupportedLocale(chosen)) return chosen;
+
     const userRepo = AppDataSource.getRepository(User);
     const trimmed = supportEmail?.trim();
     if (trimmed) {
@@ -73,13 +84,12 @@ export async function resolveOwnerLanguage(tenantId: string, supportEmail?: stri
       .getOne();
     if (admin?.locale && isSupportedLocale(admin.locale)) return admin.locale;
 
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
     const onboardingLang = tenant?.settings?.onboarding?.language;
     if (onboardingLang && isSupportedLocale(onboardingLang)) return onboardingLang;
 
     return 'en';
   } catch (err) {
-    logger.warn('[booking-language] resolveOwnerLanguage failed — using English', {
+    logger.warn('[audience-language] resolveOwnerLanguage failed — using English', {
       tenantId,
       err: err instanceof Error ? err.message : String(err),
     });

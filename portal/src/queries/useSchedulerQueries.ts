@@ -169,6 +169,15 @@ export interface VenueAddress {
  */
 export type WorkLocation = 'no_location' | 'at_one_location' | 'on_the_road' | 'both';
 
+/** One file attached to every customer confirmation email. `fileKey` never leaves the API. */
+export interface ConfirmationAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  uploadedAt: string;
+}
+
 export interface SchedulerConfig {
   provider: 'calcom' | 'internal';
   eventType: SchedulerEventType | null;
@@ -202,6 +211,14 @@ export interface SchedulerConfig {
   };
   /** Owner has switched new online bookings off. Captures requests rather than refusing. */
   bookingsPaused?: boolean;
+  /**
+   * Extras every CUSTOMER confirmation email carries for this Agent. `attachments` is
+   * read-only here: files are added and removed through their own multipart endpoints.
+   */
+  confirmationEmail?: {
+    extraInfo: string | null;
+    attachments: ConfirmationAttachment[];
+  };
 }
 
 export interface UpdateSchedulerPayload {
@@ -215,6 +232,8 @@ export interface UpdateSchedulerPayload {
   venueAddress?: Partial<VenueAddress> | null;
   travel?: { enabled?: boolean; startFromBase?: boolean; baseDepartOffsetMin?: number; groupingPeriod?: 'none' | 'half_day' | 'full_day'; maxTravelMin?: number | null };
   bookingsPaused?: boolean;
+  /** `extraInfo: null` clears the text; omitting the key leaves it untouched. */
+  confirmationEmail?: { extraInfo: string | null };
 }
 
 /** Keyed by Agent — see `botScope`. `undefined` is the tenant's default Agent. */
@@ -245,6 +264,47 @@ export function useUpdateSchedulerConfig(botId?: string) {
         extractApiErrorMessage(err) ?? (err instanceof Error ? err.message : undefined) ?? 'Failed to save'
       );
     },
+  });
+}
+
+/**
+ * Add one file to every customer confirmation email for this Agent.
+ *
+ * Its own multipart endpoint, so it does NOT ride the settings payload — bytes are not a
+ * JSON field, and the owner adds a file at a different moment from editing the text.
+ */
+export function useUploadConfirmationAttachment(botId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<SchedulerConfig>(
+        withBot('/scheduler/config/confirmation-attachments', botId),
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: schedulerKey(botId) });
+      toast.success('Attachment added');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to add the attachment'),
+  });
+}
+
+export function useDeleteConfirmationAttachment(botId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (attachmentId: string) =>
+      api.delete<SchedulerConfig>(
+        withBot(`/scheduler/config/confirmation-attachments/${attachmentId}`, botId)
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: schedulerKey(botId) });
+      toast.success('Attachment removed');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to remove the attachment'),
   });
 }
 

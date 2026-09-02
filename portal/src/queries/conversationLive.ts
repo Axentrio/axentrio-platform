@@ -266,6 +266,64 @@ const appliedRevisions = new Map<string, number>();
 const appliedOwnershipVersions = new Map<string, number>();
 
 /**
+ * Messages this tab appended from a socket event, kept until a GET snapshot proves the
+ * server has them. A snapshot that lands after the append must not drop the row.
+ */
+const liveTail = new Map<string, Message[]>();
+const LIVE_TAIL_MAX = 50;
+
+/** Record an appended message; only the newest LIVE_TAIL_MAX per thread are kept. */
+function rememberLiveTail(sessionId: string, message: Message): void {
+  const tail = liveTail.get(sessionId);
+  if (!tail) {
+    liveTail.set(sessionId, [message]);
+    return;
+  }
+  const idx = tail.findIndex((m) => m.id === message.id);
+  if (idx >= 0) tail[idx] = message;
+  else tail.push(message);
+  if (tail.length > LIVE_TAIL_MAX) tail.splice(0, tail.length - LIVE_TAIL_MAX);
+}
+
+/**
+ * Fold the live tail into a fresh GET snapshot. Keeps rows the snapshot has not caught up
+ * with; forgets rows the snapshot already carries, and rows older than its newest message
+ * (the server is authoritative for anything it has already seen — a deletion must stick).
+ */
+export function mergeLiveTail<T extends { messages?: Message[] }>(
+  sessionId: string,
+  snapshot: T,
+): T {
+  const tail = liveTail.get(sessionId);
+  if (!tail || tail.length === 0) return snapshot;
+
+  const snapshotMessages = snapshot.messages ?? [];
+  const snapshotIds = new Set<string>();
+  const snapshotClientIds = new Set<string>();
+  let newestAt = 0;
+  for (const m of snapshotMessages) {
+    if (m.id) snapshotIds.add(m.id);
+    if (m.clientMessageId) snapshotClientIds.add(m.clientMessageId);
+    const at = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+    if (at > newestAt) newestAt = at;
+  }
+
+  const kept = tail.filter((m) => {
+    if (snapshotIds.has(m.id)) return false;
+    if (m.clientMessageId && snapshotClientIds.has(m.clientMessageId)) return false;
+    const at = m.createdAt ? new Date(m.createdAt).getTime() : 0;
+    return at > newestAt;
+  });
+
+  if (kept.length === 0) {
+    liveTail.delete(sessionId);
+    return snapshot;
+  }
+  liveTail.set(sessionId, kept);
+  return { ...snapshot, messages: [...snapshotMessages, ...kept] };
+}
+
+/**
  * The registries must not outlive the QueryClient (re-login / tenant switch
  * builds a new client with an empty cache — stale revisions would wrongly
  * drop that tenant's events). Every apply* call re-binds; a client change
@@ -277,6 +335,7 @@ function ensureRegistriesFor(client: QueryClient): void {
     boundClient = client;
     appliedRevisions.clear();
     appliedOwnershipVersions.clear();
+    liveTail.clear();
   }
 }
 
@@ -285,6 +344,7 @@ export function __resetConversationLiveState(): void {
   boundClient = null;
   appliedRevisions.clear();
   appliedOwnershipVersions.clear();
+  liveTail.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +566,7 @@ export function applyMessageCreated(
       const q = queryClient.getQueryCache().find({ queryKey: queryKeys.chats.detail(sessionId) });
       if (!q || (q.getObserversCount() === 0 && q.state.fetchStatus !== 'fetching')) return old;
       changedThread = true;
+      rememberLiveTail(sessionId, incoming);
       return seedChatDetail(sessionId, {
         messages: [incoming],
         lastMessage: incoming.content.substring(0, 80),
@@ -526,14 +587,19 @@ export function applyMessageCreated(
       const idx = messages.findIndex((m) => m.clientMessageId === incoming.clientMessageId);
       if (idx >= 0) {
         const next = [...messages];
-        next[idx] = { ...incoming, deliveryState: incoming.deliveryState ?? 'sent' };
+        const reconciled = { ...incoming, deliveryState: incoming.deliveryState ?? 'sent' };
+        next[idx] = reconciled;
         changedThread = true;
+        rememberLiveTail(sessionId, reconciled);
         return { ...old, messages: next };
       }
     }
     changedThread = true;
+    rememberLiveTail(sessionId, incoming);
     return { ...old, messages: [...messages, incoming] };
   });
+
+  if (changedThread) rememberLiveTail(sessionId, incoming);
 
   // 2. List-row preview patch (revision-gated like any summary patch).
   const appliedRev = appliedRevisions.get(sessionId);

@@ -12,7 +12,7 @@ import type { CalendarProviderType } from '../database/entities/CalendarCredenti
 import { BookingError } from '../booking/booking-providers/types';
 import { sendCalendarChangeRejectedEmail } from '../booking/booking-providers/booking-email';
 import type { RejectReasonKey } from '../booking/booking-copy';
-import { resolveOwnerLanguage } from '../booking/booking-language';
+import { resolveOwnerLanguage } from '../i18n/audience-language';
 import { externalCancelBooking, externalRescheduleBooking } from '../booking/booking.service';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { getBotConfigForBotId } from '../services/bot-config.service';

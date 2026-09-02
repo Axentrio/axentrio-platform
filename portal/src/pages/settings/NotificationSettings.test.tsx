@@ -12,11 +12,15 @@ interface AuthMock {
   setNotificationPreferences: ReturnType<typeof vi.fn>;
 }
 
-const { authRef, patch, toastSuccess, toastError, soundRef } = vi.hoisted(() => ({
+const { authRef, patch, toastSuccess, toastError, soundRef, tenantSettingsRef, updateTenant } = vi.hoisted(() => ({
   authRef: { current: undefined as AuthMock | undefined },
   patch: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  tenantSettingsRef: {
+    current: { inbox: { defaultTakeoverHours: 'indefinite' } } as Record<string, unknown>,
+  },
+  updateTenant: vi.fn(),
   soundRef: {
     current: {
       isMuted: false,
@@ -43,8 +47,8 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/queries/useTenantQueries', () => ({
-  useTenantSettings: () => ({ data: { settings: { inbox: { defaultTakeoverHours: 'indefinite' } } } }),
-  useUpdateTenant: () => ({ mutate: vi.fn(), isPending: false }),
+  useTenantSettings: () => ({ data: { settings: tenantSettingsRef.current } }),
+  useUpdateTenant: () => ({ mutate: updateTenant, isPending: false }),
 }));
 
 vi.mock('@websocket/notificationSound', () => ({
@@ -70,6 +74,8 @@ beforeEach(() => {
   soundRef.current.volume = 0.5;
   soundRef.current.setMuted.mockReset();
   soundRef.current.setVolume.mockReset();
+  tenantSettingsRef.current = { inbox: { defaultTakeoverHours: 'indefinite' } };
+  updateTenant.mockReset();
 });
 
 function renderUI() {
@@ -118,5 +124,30 @@ describe('NotificationSettings', () => {
       expect(authRef.current?.setNotificationPreferences).toHaveBeenCalledWith(savedPreferences);
     });
     expect(saveButton).toBeDisabled();
+  });
+
+  it('hydrates the business language from the tenant settings', () => {
+    tenantSettingsRef.current = {
+      inbox: { defaultTakeoverHours: 'indefinite' },
+      businessLanguage: 'fr',
+    };
+    renderUI();
+
+    expect(screen.getByLabelText('Business language')).toHaveValue('fr');
+  });
+
+  it('defaults the business language to English when the tenant never chose one', () => {
+    renderUI();
+
+    expect(screen.getByLabelText('Business language')).toHaveValue('en');
+  });
+
+  it('patches the tenant when a business language is picked', async () => {
+    const user = userEvent.setup();
+    renderUI();
+
+    await user.selectOptions(screen.getByLabelText('Business language'), 'nl');
+
+    expect(updateTenant).toHaveBeenCalledWith({ settings: { businessLanguage: 'nl' } });
   });
 });

@@ -138,6 +138,23 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
   }),
 }));
 
+vi.mock('../../booking/booking-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/booking-copy')>();
+  return {
+    ...actual,
+    getBookingCopy: vi.fn(async () => actual.BOOKING_COPY_EN),
+    prefetchAudienceBookingCopy: vi.fn(),
+  };
+});
+
+vi.mock('../../i18n/audience-language', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../i18n/audience-language')>();
+  return {
+    ...actual,
+    resolveOwnerLanguage: vi.fn(async () => 'en'),
+  };
+});
+
 // Travel time: the seam is the PLACEMENT, not Google. Which Agents may spend an element is
 // settled in travel-booking-place.test.ts; what matters here is what the provider does with
 // each verdict, so the column mapping stays real and only the verdict is injected. Default
@@ -1375,9 +1392,12 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, name: 'Consultation' }]); // sole active service
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(null);
-    managerQuery.mockImplementation(async (sql: string) =>
-      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
-    );
+    bookingQuery.mockResolvedValue([]); // no busy intervals (createBooking paths in this block)
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'req-1' }];
+      return [];
+    });
   });
 
   afterEach(() => vi.useRealTimers());

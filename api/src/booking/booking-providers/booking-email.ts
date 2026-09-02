@@ -17,6 +17,8 @@ import {
   type BookingCopy,
   type RejectReasonKey,
 } from '../booking-copy';
+import { loadConfirmationExtras } from './confirmation-extras';
+import { translateCustomerFreeText } from '../../i18n/translate-free-text';
 
 let emailService: EmailService | null = null;
 function getEmailService(): EmailService {
@@ -124,6 +126,12 @@ export interface BookingEmailParams {
   attendeeEmail?: string;
   tenantId: string;
   bookingId: string;
+  /**
+   * WHICH AGENT booked this. Required, not optional: the confirmation extras (information
+   * text and attachments) are configured per Agent, and an optional field here would let a
+   * new producer silently ship a confirmation email with the owner's extras missing.
+   */
+  botId: string;
   /** The business's own address. Gets its OWN message now, not a seat on the customer's. */
   ownerEmail?: string;
   /**
@@ -133,6 +141,13 @@ export interface BookingEmailParams {
    * does. Plain text in, escaped here.
    */
   ownerDetail?: string | null;
+  /**
+   * The customer's OWN words for the free-text fields `ownerDetail` now carries translated.
+   * Set only when a translation actually happened, and rendered verbatim under
+   * `owner.original_heading` below the detail: a translation is a convenience, the
+   * customer's actual message is the record.
+   */
+  ownerFreeText?: { notes?: string | null; aiSummary?: string | null };
   /**
    * The FROZEN ICS organizer for this booking (Booking.organizer_email). Null on rows
    * predating that column, which fall back to the old ownerEmail-then-platform resolution
@@ -228,6 +243,12 @@ async function notifyOwner(
   const detail = params.ownerDetail?.trim()
     ? `<p>${esc(params.ownerDetail.trim()).replace(/\n/g, '<br/>')}</p>`
     : '';
+  const originals = [params.ownerFreeText?.aiSummary, params.ownerFreeText?.notes]
+    .filter((v): v is string => !!v?.trim())
+    .map((v) => esc(v.trim()).replace(/\n/g, '<br/>'));
+  const original = originals.length
+    ? `<p><strong>${esc(copy['owner.original_heading'])}</strong><br/>${originals.join('<br/><br/>')}</p>`
+    : '';
   const action = esc(
     fill(cancelled ? copy['owner.cancelled'] : copy['owner.booked'], {
       who: params.attendeeName?.trim() || copy['owner.a_customer'],
@@ -241,6 +262,7 @@ async function notifyOwner(
       ? `<p><strong>${esc(copy['owner.video_link_missing'])}</strong></p>`
       : '') +
     detail +
+    original +
     (customerWasInvited ? '' : `<p>${esc(copy['owner.no_customer_email'])}</p>`);
   await sendOrReport('owner notification', params, {
     to: [params.ownerEmail as string],
@@ -262,7 +284,12 @@ async function notifyOwner(
  * address or intake answer reaches them, so the unescaped version was one service rename
  * away from injecting markup into a real customer's inbox.
  */
-function customerEmailBody(params: BookingEmailParams, cancelled: boolean, copy: BookingCopy): string {
+function customerEmailBody(
+  params: BookingEmailParams,
+  cancelled: boolean,
+  copy: BookingCopy,
+  extraInfo?: string,
+): string {
   const lead = cancelled ? copy['customer.lead_cancelled'] : copy['customer.lead_confirmed'];
   const duration =
     typeof params.durationMin === 'number' && params.durationMin > 0
@@ -278,6 +305,9 @@ function customerEmailBody(params: BookingEmailParams, cancelled: boolean, copy:
     (params.location ? `<p>${esc(fill(copy['customer.location'], { location: params.location }))}</p>` : '') +
     (!cancelled && params.preparationInstructions?.trim()
       ? `<p><strong>${esc(copy['customer.before_heading'])}</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
+      : '') +
+    (!cancelled && extraInfo?.trim()
+      ? `<p><strong>${esc(copy['customer.extra_info_heading'])}</strong><br/>${esc(extraInfo.trim()).replace(/\n/g, '<br/>')}</p>`
       : '') +
     `<p>${esc(copy['customer.invite_attached'])}</p>` +
     (!cancelled && params.manageUrl
@@ -319,7 +349,9 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     cancelled ? customerCopy['customer.subject_cancelled'] : customerCopy['customer.subject_confirmed'],
     { summary: params.summary },
   );
-  const body = customerEmailBody(params, cancelled, customerCopy);
+  const extras =
+    params.method === 'REQUEST' ? await loadConfirmationExtras(params.botId).catch(() => null) : null;
+  const body = customerEmailBody(params, cancelled, customerCopy, extras?.text);
 
   await sendOrReport(
     'invite email',
@@ -337,6 +369,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
           content: Buffer.from(ics, 'utf8').toString('base64'),
           contentType: `text/calendar; method=${params.method}; charset=utf-8`,
         },
+        ...(extras?.attachments ?? []),
       ],
       retainPayload: true,
     },
@@ -386,6 +419,7 @@ export interface RequestNotificationParams {
   notes?: string;
   aiSummary?: string;
   ownerLanguage: string;
+  tenantId: string;
 }
 
 /**
@@ -398,6 +432,12 @@ export async function sendRequestNotificationEmail(params: RequestNotificationPa
   const fromLine = params.attendeeEmail
     ? `${esc(params.attendeeName)} (${esc(params.attendeeEmail)})`
     : esc(fill(copy['owner.request_from'], { who: params.attendeeName }));
+  const { fields, originals } = await translateCustomerFreeText({
+    fields: { notes: params.notes, aiSummary: params.aiSummary },
+    targetLanguage: params.ownerLanguage,
+    tenantId: params.tenantId,
+  });
+  const original = [originals?.aiSummary, originals?.notes].filter((v): v is string => !!v?.trim());
   const body =
     `<p>${esc(copy['owner.request_intro'])}</p>` +
     `<p><strong>${esc(params.serviceName)}</strong><br/>${esc(
@@ -406,8 +446,13 @@ export async function sendRequestNotificationEmail(params: RequestNotificationPa
       }),
     )}</p>` +
     `<p>${fromLine}</p>` +
-    (params.aiSummary ? `<p>${esc(fill(copy['owner.request_summary'], { text: params.aiSummary }))}</p>` : '') +
-    (params.notes ? `<p>${esc(fill(copy['owner.request_notes'], { text: params.notes }))}</p>` : '') +
+    (fields.aiSummary ? `<p>${esc(fill(copy['owner.request_summary'], { text: fields.aiSummary }))}</p>` : '') +
+    (fields.notes ? `<p>${esc(fill(copy['owner.request_notes'], { text: fields.notes }))}</p>` : '') +
+    (original.length
+      ? `<p><strong>${esc(copy['owner.original_heading'])}</strong><br/>${original
+          .map((v) => esc(v.trim()).replace(/\n/g, '<br/>'))
+          .join('<br/><br/>')}</p>`
+      : '') +
     `<p>${esc(copy['owner.request_follow_up'])}</p>`;
   await sendOrReport('request notification email', {}, {
     to: params.ownerEmail,

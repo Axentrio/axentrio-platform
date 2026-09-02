@@ -396,6 +396,16 @@ export const updateSchedulerSchema = z
     // undefined leaves alone, null clears", which a two-state switch has no use for.
     bookingsPaused: z.boolean().optional(),
     travel: travelSettingsSchema.optional(),
+    /**
+     * Extras carried by every CUSTOMER booking-confirmation email for this Agent.
+     *
+     * Only the text is writable here. The attachment list has its own multipart routes -
+     * bytes never travel through a JSON settings PUT - so the read response carries the
+     * list and this object does not.
+     */
+    confirmationEmail: z
+      .object({ extraInfo: z.string().trim().max(2000).nullable() })
+      .optional(),
   })
   .refine(
     (d) =>
@@ -406,11 +416,12 @@ export const updateSchedulerSchema = z
       d.bookingRules ||
       d.venueAddress !== undefined ||
       d.bookingsPaused !== undefined ||
-      d.travel !== undefined,
+      d.travel !== undefined ||
+      d.confirmationEmail !== undefined,
     {
       message:
         'At least one of provider, eventType, availability, serviceArea, bookingRules, ' +
-        'venueAddress, bookingsPaused or travel is required',
+        'venueAddress, bookingsPaused, travel or confirmationEmail is required',
     }
   );
 

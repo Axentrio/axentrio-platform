@@ -113,6 +113,11 @@ const envSchema = z.object({
   S3_SIGNED_URL_EXPIRY: z.string().default('900').transform(Number),
   CDN_URL: z.string().optional(),
 
+  // Per-file ceiling for a booking-confirmation email attachment, in MB. Platform-wide, not
+  // per tenant: it exists because Resend rejects the WHOLE message when it is too large, so
+  // it is a delivery constraint, not a plan feature.
+  BOOKING_CONFIRMATION_ATTACHMENT_MAX_MB: z.string().default('10').transform(Number),
+
   // Google Maps Platform — travel-time aware scheduling (ADR-0014).
   // ONE platform-held key for Geocoding + Routes. Absent is a supported state and the
   // emergency stop: with no key the whole feature is inert platform-wide and the scheduler
@@ -438,6 +443,11 @@ export const config = {
     maxFileSize: env.MAX_FILE_SIZE,
     allowedFileTypes: env.ALLOWED_FILE_TYPES.split(','),
     uploadDir: env.UPLOAD_DIR,
+  },
+
+  booking: {
+    /** Per-file ceiling for a confirmation-email attachment, in MB. */
+    confirmationAttachmentMaxMb: env.BOOKING_CONFIRMATION_ATTACHMENT_MAX_MB,
   },
 
   tenant: {

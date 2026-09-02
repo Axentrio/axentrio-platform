@@ -28,6 +28,11 @@ export function presentTenantSettings(
       tenant.settings?.inbox?.defaultTakeoverHours,
     ),
   };
+  // Internal-notification language. Lives on the tenant (one business, one internal
+  // language), so it is merged in here like the inbox preferences.
+  if (tenant.settings?.businessLanguage) {
+    settings.businessLanguage = tenant.settings.businessLanguage;
+  }
   if (settings.ai) {
     const tenantApiKey = tenant.settings?.ai?.apiKey;
     // Defensive: bot.settings.ai shouldn't carry apiKey, but strip it anyway.

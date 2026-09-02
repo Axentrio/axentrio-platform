@@ -25,9 +25,9 @@ import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
 import { applyExternalRemoval } from './inbound-calendar-sync';
 import { returningRows } from '../utils/raw-sql';
-import { buildBookingEventContent } from '../booking/booking-providers/booking-content';
+import { buildBookingEventContent, storedFileNames } from '../booking/booking-providers/booking-content';
 import { getBookingCopy } from '../booking/booking-copy';
-import { resolveOwnerLanguage } from '../booking/booking-language';
+import { resolveOwnerLanguage } from '../i18n/audience-language';
 import { getBotConfigForBotId } from '../services/bot-config.service';
 import { formatServicePrice } from '../booking/pricing/service-discount';
 import { buildManageUrl } from './booking-token';
@@ -301,7 +301,7 @@ async function buildReconciledContent(
       bookingId: row.id,
       durationMin: reconciledDurationMin(b),
       sourceChannel: b?.source_channel,
-      uploadedFileCount: Array.isArray(b?.uploaded_files) ? b.uploaded_files.length : 0,
+      uploadedFileNames: storedFileNames(b?.uploaded_files),
     },
     {
       name: eventType.name,

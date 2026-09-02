@@ -244,6 +244,34 @@ export class BookingSettings {
   @Column({ type: 'text', name: 'travel_grouping_period', default: 'none' })
   travelGroupingPeriod!: GroupingPeriod;
 
+  /**
+   * Owner-authored text appended to every CUSTOMER booking-confirmation email for this
+   * Agent ("arrive 10 minutes early", "parking is behind the building").
+   *
+   * Never translated and never passed to an LLM - it is the owner's own words, and a
+   * rewritten instruction is a wrong instruction. Rendered escaped with `<br/>` for the
+   * line breaks, because the customer body is a hand-escaped HTML string.
+   */
+  @Column({ type: 'text', nullable: true, name: 'confirmation_extra_info' })
+  confirmationExtraInfo?: string | null;
+
+  /**
+   * Files attached to every CUSTOMER booking-confirmation email for this Agent.
+   *
+   * METADATA only - the bytes live in S3 under the durable `booking-confirmation/` prefix.
+   * Not the chat `UploadSession` store on purpose: that one is pruned after 30 days, which
+   * would silently drop a tenant's price list from their confirmation emails after a month.
+   */
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb", name: 'confirmation_attachments' })
+  confirmationAttachments!: Array<{
+    id: string;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+    fileKey: string;
+    uploadedAt: string;
+  }>;
+
 
 
   @CreateDateColumn({ name: 'created_at' })

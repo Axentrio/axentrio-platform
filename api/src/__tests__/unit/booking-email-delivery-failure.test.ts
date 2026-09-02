@@ -52,6 +52,7 @@ const bookingParams = {
   attendeeEmail: 'jan@example.com',
   organizerEmail: 'bookings@axentrio.com',
   tenantId: '00000000-0000-0000-0000-000000000001',
+  botId: 'bot-test',
   bookingId: '00000000-0000-0000-0000-000000000002',
   customerLanguage: 'en',
   ownerLanguage: 'en',

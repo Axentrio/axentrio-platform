@@ -37,7 +37,7 @@ import {
   normalizeLanguageCode,
   customerLanguageFor,
   resolveOwnerLanguage,
-} from '../../booking/booking-language';
+} from '../../i18n/audience-language';
 
 describe('normalizeLanguageCode', () => {
   it('normalizes regional tags to base codes', () => {
@@ -109,6 +109,20 @@ describe('resolveOwnerLanguage', () => {
     userGetOne.mockReset();
     tenantFindOne.mockReset();
     userGetOne.mockImplementation(async () => userLookups.shift() ?? null);
+  });
+
+  it('prefers an explicit business language over any portal locale', async () => {
+    userLookups = [{ locale: 'nl' }, { locale: 'nl' }];
+    tenantFindOne.mockResolvedValue({ settings: { businessLanguage: 'fr' } });
+    await expect(resolveOwnerLanguage('ten-1', 'owner@example.com')).resolves.toBe('fr');
+    // The chosen language settles it, so no user lookup is needed at all.
+    expect(userGetOne).not.toHaveBeenCalled();
+  });
+
+  it('ignores an unsupported business language and falls through the locale chain', async () => {
+    userLookups = [null, { locale: 'nl' }];
+    tenantFindOne.mockResolvedValue({ settings: { businessLanguage: 'de' } });
+    await expect(resolveOwnerLanguage('ten-1', 'owner@example.com')).resolves.toBe('nl');
   });
 
   it('uses the support-email user locale when present', async () => {

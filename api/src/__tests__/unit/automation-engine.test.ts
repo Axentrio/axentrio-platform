@@ -9,6 +9,17 @@ vi.mock('../../utils/logger', () => ({
   },
 }));
 
+const { resolveOwnerLanguage, translateFreeText } = vi.hoisted(() => ({
+  resolveOwnerLanguage: vi.fn(async () => 'en'),
+  translateFreeText: vi.fn(async ({ text }: { text: string }) => ({ text, translated: false })),
+}));
+
+vi.mock('../../i18n/audience-language', () => ({ resolveOwnerLanguage }));
+vi.mock('../../i18n/translate-free-text', () => ({ translateFreeText }));
+vi.mock('../../booking/booking-copy', () => ({
+  getBookingCopy: async () => ({ 'owner.original_heading': 'Original message from the customer:' }),
+}));
+
 import { AutomationEngine } from '../../automations/automation.engine';
 import { EmailService } from '../../automations/email.service';
 import type { AppointmentBookedEvent, LeadCreatedEvent } from '../../webhooks/webhook.types';
@@ -135,6 +146,96 @@ describe('AutomationEngine', () => {
     // Guards the engine→template wiring: event.lead.notes must reach the {notes} token.
     expect(emailService.send).toHaveBeenCalledWith(
       expect.objectContaining({ body: 'Request: Leak under the kitchen sink, Kerkstraat 12' }),
+    );
+  });
+
+  it('puts the translated note and the original in the new-lead email body', async () => {
+    // The team reads English; the customer wrote Dutch.
+    resolveOwnerLanguage.mockResolvedValueOnce('en');
+    translateFreeText.mockResolvedValueOnce({
+      text: 'There is a leak under the kitchen sink, Kerkstraat 12',
+      translated: true,
+    });
+    const tenant = makeTenant({
+      emailNotifications: {
+        newLeadAlert: {
+          enabled: true,
+          recipients: ['team@acme.com'],
+          body: 'Request: {notes}',
+        },
+      },
+    });
+
+    const event: LeadCreatedEvent = {
+      id: 'evt-nl',
+      type: 'lead.created',
+      tenantId: 'tenant-1',
+      sessionId: 'session-nl',
+      timestamp: '2026-04-03T10:00:00Z',
+      session: BASE_SESSION,
+      lead: { leadId: '11111111-1111-4111-8111-111111111111',
+        name: 'Bob',
+        email: 'bob@example.com',
+        phone: '+1-555-0100',
+        notes: 'Er is een lek onder de gootsteen, Kerkstraat 12',
+        source: 'tool',
+      },
+    };
+
+    await engine.process(event, tenant);
+
+    const { body } = vi.mocked(emailService.send).mock.calls[0][0];
+    expect(body).toContain('There is a leak under the kitchen sink, Kerkstraat 12');
+    expect(body).toContain('Original message from the customer:');
+    expect(body).toContain('Er is een lek onder de gootsteen, Kerkstraat 12');
+    // Only the free text is translated - the structured fields are passed through.
+    expect(translateFreeText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Er is een lek onder de gootsteen, Kerkstraat 12', targetLanguage: 'en' }),
+    );
+  });
+
+  it('puts the translated note and the original in the new-lead email body', async () => {
+    // The team reads English; the customer wrote Dutch.
+    resolveOwnerLanguage.mockResolvedValueOnce('en');
+    translateFreeText.mockResolvedValueOnce({
+      text: 'There is a leak under the kitchen sink, Kerkstraat 12',
+      translated: true,
+    });
+    const tenant = makeTenant({
+      emailNotifications: {
+        newLeadAlert: {
+          enabled: true,
+          recipients: ['team@acme.com'],
+          body: 'Request: {notes}',
+        },
+      },
+    });
+
+    const event: LeadCreatedEvent = {
+      id: 'evt-nl',
+      type: 'lead.created',
+      tenantId: 'tenant-1',
+      sessionId: 'session-nl',
+      timestamp: '2026-04-03T10:00:00Z',
+      session: BASE_SESSION,
+      lead: { leadId: '11111111-1111-4111-8111-111111111111',
+        name: 'Bob',
+        email: 'bob@example.com',
+        phone: '+1-555-0100',
+        notes: 'Er is een lek onder de gootsteen, Kerkstraat 12',
+        source: 'tool',
+      },
+    };
+
+    await engine.process(event, tenant);
+
+    const { body } = vi.mocked(emailService.send).mock.calls[0][0];
+    expect(body).toContain('There is a leak under the kitchen sink, Kerkstraat 12');
+    expect(body).toContain('Original message from the customer:');
+    expect(body).toContain('Er is een lek onder de gootsteen, Kerkstraat 12');
+    // Only the free text is translated - the structured fields are passed through.
+    expect(translateFreeText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Er is een lek onder de gootsteen, Kerkstraat 12', targetLanguage: 'en' }),
     );
   });
 

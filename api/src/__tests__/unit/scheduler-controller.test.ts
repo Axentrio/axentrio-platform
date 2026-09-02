@@ -848,6 +848,98 @@ describe('scheduler.controller · venue address upsert', () => {
   });
 });
 
+/**
+ * The global booking-confirmation extras.
+ *
+ * The text follows the nullable contract every other optional column here follows: an
+ * omitted key leaves the stored value alone, an explicit null clears it. That distinction is
+ * the whole point - an owner who saves their opening hours must not silently lose the
+ * "arrive 10 minutes early" line they typed last month.
+ */
+describe('scheduler.controller · booking confirmation extras', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', name: 'Valyro', settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    etFind.mockResolvedValue([]);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('writes the information text on its own, without any other section', async () => {
+    const q = (await save({ confirmationEmail: { extraInfo: 'Arrive 10 minutes early.' } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({
+      provided: true,
+      value: 'Arrive 10 minutes early.',
+    });
+  });
+
+  it('leaves the stored text alone when the payload does not mention it', async () => {
+    const q = (await save({ bookingRules: { minGapMin: 15 } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({ provided: false, value: null });
+  });
+
+  it('clears the text on an explicit null', async () => {
+    const q = (await save({ confirmationEmail: { extraInfo: null } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({ provided: true, value: null });
+  });
+
+  it('reads the text and the attachment list back, without the storage key', async () => {
+    bsFindOne.mockResolvedValue({
+      confirmationExtraInfo: 'Parking is behind the building.',
+      confirmationAttachments: [
+        {
+          id: 'att-1',
+          fileName: 'price-list.pdf',
+          mimeType: 'application/pdf',
+          fileSize: 2048,
+          fileKey: 'booking-confirmation/ten-1/bot-1/att-1/price-list.pdf',
+          uploadedAt: '2026-09-01T10:00:00.000Z',
+        },
+      ],
+    } as any);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    const out = sendSuccess.mock.calls.at(-1)?.[1] as any;
+    expect(out.confirmationEmail.extraInfo).toBe('Parking is behind the building.');
+    expect(out.confirmationEmail.attachments).toEqual([
+      {
+        id: 'att-1',
+        fileName: 'price-list.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 2048,
+        uploadedAt: '2026-09-01T10:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('reads an unconfigured Agent as no text and no files', async () => {
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    const out = sendSuccess.mock.calls.at(-1)?.[1] as any;
+    expect(out.confirmationEmail).toEqual({ extraInfo: null, attachments: [] });
+  });
+
+  it('refuses a text over the 2000-character cap', async () => {
+    await expect(
+      updateSchedulerConfig(
+        { tenantId: 'ten-1', body: { confirmationEmail: { extraInfo: 'x'.repeat(2001) } } } as any,
+        res,
+      ),
+    ).rejects.toBeDefined();
+  });
+});
+
 describe('scheduler.controller · pause switch', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -259,6 +259,8 @@ interface PendingAvailability {
   /** #80: carried so the offer record can name the service and its mode without a later join. */
   serviceId?: string;
   locationMode?: string;
+  /** Echo of the part-of-day filter. Suppress chips when matched is false. */
+  clockWindow?: { from: string; to: string; matched: boolean };
   /** The service the slots are for — embedded in the chip so a tap books the
    *  right service when the bot offers more than one. */
   serviceName?: string;
@@ -287,6 +289,7 @@ function buildSlotQuickReplies(
   language: ReturnType<typeof resolveBotLanguage>,
 ): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
+  if (av.clockWindow && !av.clockWindow.matched) return undefined;
   return av.slots.slice(0, 8).map((s) =>
     slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
   );
@@ -2078,6 +2081,7 @@ export class AgentService {
       serviceName: a.serviceName,
       serviceId: a.serviceId,
       locationMode: a.locationMode,
+      clockWindow: a.clockWindow,
       // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
       // shown, and this is deliberately invisible to it.
       grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,

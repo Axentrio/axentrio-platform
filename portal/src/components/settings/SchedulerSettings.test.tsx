@@ -103,6 +103,21 @@ const TRAVEL = {
   blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
 };
 
+/** The global confirmation extras. A non-empty text and one file, so a fixture that never
+ *  hydrated cannot be mistaken for one that round-tripped. */
+const CONFIRMATION = {
+  extraInfo: 'Please arrive 10 minutes early.',
+  attachments: [
+    {
+      id: 'att-1',
+      fileName: 'price-list.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 2 * 1024 * 1024,
+      uploadedAt: '2026-09-01T10:00:00.000Z',
+    },
+  ],
+};
+
 const CONFIG = {
   provider: 'internal',
   eventType: null,
@@ -114,6 +129,7 @@ const CONFIG = {
   bookingsPaused: false,
   agent: { id: 'bot-1', name: 'Valyro' },
   travel: TRAVEL,
+  confirmationEmail: CONFIRMATION,
 };
 
 function renderUI() {
@@ -152,6 +168,49 @@ async function saveUntouched(config: unknown) {
 
 describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
+
+  /**
+   * The confirmation extras follow the venue and travel contract: sent WHOLE every time.
+   * An owner who saves their opening hours must not lose the information text, and an owner
+   * who empties the box must actually clear it - which needs an explicit null, not a key
+   * the API reads as "leave alone".
+   */
+  it('hydrates the information text and returns it unchanged on save', async () => {
+    const payload = await saveUntouched(CONFIG);
+    const box = document.getElementById('confirmation-extra-info') as HTMLTextAreaElement;
+    expect(box.value).toBe(CONFIRMATION.extraInfo);
+    expect(payload.confirmationEmail).toEqual({ extraInfo: CONFIRMATION.extraInfo });
+  });
+
+  it('sends an explicit null when the owner empties the text', async () => {
+    await saveUntouched(CONFIG);
+    const box = document.getElementById('confirmation-extra-info') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: '   ' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(apiPut.mock.calls.length).toBeGreaterThan(1));
+    const payload = apiPut.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(payload.confirmationEmail).toEqual({ extraInfo: null });
+  });
+
+  it('sends the text even for a config that predates the columns', async () => {
+    const { confirmationEmail: _omitted, ...legacy } = CONFIG;
+    const payload = await saveUntouched(legacy);
+    expect(payload.confirmationEmail).toEqual({ extraInfo: null });
+  });
+
+  it('lists each stored attachment with its size and a way to remove it', async () => {
+    await saveUntouched(CONFIG);
+    expect(screen.getByText('price-list.pdf')).toBeInTheDocument();
+    expect(screen.getByText('2.0 MB')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove price-list\.pdf/i })).toBeInTheDocument();
+  });
+
+  it('never sends the attachment list through the settings payload', async () => {
+    // Files have their own multipart endpoints. Echoing the list back here would invite a
+    // future handler to trust it and write metadata for bytes nobody uploaded.
+    const payload = await saveUntouched(CONFIG);
+    expect(payload.confirmationEmail).not.toHaveProperty('attachments');
+  });
 
   it('returns every business rule unchanged when the owner saves without editing', async () => {
     const payload = await saveUntouched(CONFIG);

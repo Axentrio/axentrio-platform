@@ -39,6 +39,7 @@ import type { BotSettings } from "../database/entities/Bot";
 import { AvailabilityRule } from "../database/entities/AvailabilityRule";
 import { businessHoursToAvailability } from "../booking/sync-hours-from-bot";
 import { parseDefaultTakeoverHours } from "../services/inbox-prefs.service";
+import { SUPPORTED_LOCALES, type SupportedLocale } from "../schemas/user.schema";
 import { presentTenantSettings } from "./tenant-settings-view";
 import {
   listTenantUsers,
@@ -106,6 +107,7 @@ interface TenantSettingsBody {
   integrations?: BotSettings["integrations"];
   businessHours?: Record<string, unknown>;
   inbox?: { defaultTakeoverHours?: unknown };
+  businessLanguage?: unknown;
 }
 
 /**
@@ -181,6 +183,23 @@ function applyInboxPrefs(tenant: Tenant, settings: TenantSettingsBody): void {
   tenant.settings = {
     ...(tenant.settings ?? {}),
     inbox: { defaultTakeoverHours: parsed },
+  };
+}
+
+/**
+ * The language internal notification emails are written in. Customer-facing copy never
+ * reads it, so this is a business preference and not a customer one. Stored on the tenant
+ * because one business has one internal language, whatever bot took the booking.
+ */
+function applyBusinessLanguage(tenant: Tenant, settings: TenantSettingsBody): void {
+  const raw = settings.businessLanguage;
+  const parsed = typeof raw === "string" ? raw.trim().toLowerCase() : null;
+  if (!parsed || !(SUPPORTED_LOCALES as readonly string[]).includes(parsed)) {
+    throw new BadRequestError("businessLanguage must be one of en, nl, fr");
+  }
+  tenant.settings = {
+    ...(tenant.settings ?? {}),
+    businessLanguage: parsed as SupportedLocale,
   };
 }
 
@@ -364,6 +383,10 @@ router.patch(
 
     if (settings?.inbox !== undefined) {
       applyInboxPrefs(tenant, settings);
+    }
+
+    if (settings?.businessLanguage !== undefined) {
+      applyBusinessLanguage(tenant, settings);
     }
 
     if (settings) {

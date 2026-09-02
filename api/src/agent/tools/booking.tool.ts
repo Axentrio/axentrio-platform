@@ -28,6 +28,9 @@ import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
 import { isCompleteCustomerAddress } from '../../booking/booking-providers/contact';
+import { dayPartWindow, inferDayPartWindow } from '../day-part';
+import { normalizeLanguageCode } from '../../i18n/audience-language';
+import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
@@ -246,6 +249,16 @@ function lastCustomerText(ctx: ToolContext): string {
   );
 }
 
+function customerTexts(ctx: ToolContext): string[] {
+  const history = ctx.conversationHistory;
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((m) => m.role === 'user')
+    .map((m) => contentToText(m.content))
+    .reverse()
+    .slice(0, 8);
+}
+
 /** Zoneless local ISO — the format create_booking/request_appointment already document. */
 const WALL_CLOCK = "yyyy-MM-dd'T'HH:mm:ss";
 
@@ -329,10 +342,21 @@ function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined 
 
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** Both bounds optional; an absent bound is the edge of the day. Returns undefined when neither is given. */
-function clockWindowArg(args: Record<string, unknown>): ClockWindow | undefined | ToolResult {
+function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockWindow | undefined | ToolResult {
   const from = typeof args.earliestTime === 'string' ? args.earliestTime.trim() : '';
   const to = typeof args.latestTime === 'string' ? args.latestTime.trim() : '';
-  if (!from && !to) return undefined;
+  if (!from && !to) {
+    const inferred = inferDayPartWindow(customerTexts(ctx));
+    return inferred ?? undefined;
+  }
+  if (from && !CLOCK.test(from)) {
+    const w = dayPartWindow(from);
+    if (w) return w;
+  }
+  if (to && !CLOCK.test(to) && to !== '24:00') {
+    const w = dayPartWindow(to);
+    if (w) return w;
+  }
   if ((from && !CLOCK.test(from)) || (to && !CLOCK.test(to) && to !== '24:00') || (from && to && from >= to)) {
     return {
       success: false,
@@ -505,6 +529,7 @@ function availabilityFacts(result: AvailabilityModel, utcSlots: AvailabilitySlot
     serviceId: result.serviceId,
     serviceName: result.serviceName,
     locationMode: result.locationMode,
+    clockWindow: result.clockWindow,
   };
   if (!travel) return { availability: facts };
   return {
@@ -637,7 +662,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.customerAddress as string | undefined
       );
       const locationChoice = locationChoiceArg(args.locationChoice);
-      const window = clockWindowArg(args);
+      const window = clockWindowArg(args, ctx);
       if (window && 'success' in window) return window;
       const full = await checkAvailability(
         'agent',
@@ -903,16 +928,18 @@ async function rejectUnsettledAddress(ctx: ToolContext, booked: TurnAddress): Pr
  * notification is best-effort, just like email/webhook delivery, and must never undo that
  * success.
  */
-async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult): Promise<void> {
+async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult, language: unknown): Promise<void> {
   const preparationInstructions = r.preparationInstructions?.trim();
   if (!preparationInstructions) return;
   try {
+    const lang = normalizeLanguageCode(language) ?? 'en';
+    const copy = await getBookingCopy(lang);
     // Lazy to avoid booking.tool -> message-forwarding -> AgentService ->
     // booking.module -> booking.tool during module initialization.
     const { sendInformationalBotMessage } = await import('../../services/message-forwarding.service');
     await sendInformationalBotMessage(
       ctx.sessionId,
-      `Before your appointment:\n${preparationInstructions}`,
+      `${copy['customer.before_heading']}\n${preparationInstructions}`,
     );
   } catch (err) {
     logger.warn('[booking] preparation instructions chat notification failed', {
@@ -1074,7 +1101,7 @@ export class CreateBookingTool implements ToolAdapter {
       const r = result as CreateBookingResult;
       const isRequest = r.requested === true;
 
-      if (!isRequest && !r.idempotent) await notifyPreparation(ctx, r);
+      if (!isRequest && !r.idempotent) await notifyPreparation(ctx, r, args.language);
       if (!isRequest && !r.idempotent) void (async () => {
         try {
           // #5: the id + canonical UTC time live at result.booking.{id,startTime} —

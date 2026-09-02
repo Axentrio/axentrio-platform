@@ -430,6 +430,10 @@
         "indefinite": "Until I hand back — AI stays blocked",
         "hours_one": "{{count}} hour",
         "hours_other": "{{count}} hours"
+      },
+      "businessLanguage": {
+        "title": "Business language",
+        "description": "Internal notification emails use this language. Customers always get their own language."
       }
     },
     "appearance": {

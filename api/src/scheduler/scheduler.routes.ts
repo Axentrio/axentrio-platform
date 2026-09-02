@@ -1,9 +1,11 @@
-import { Router } from 'express';
-import { asyncHandler } from '../middleware/error-handler';
+import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
+import { ApiError, asyncHandler } from '../middleware/error-handler';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
 import { placesRateLimiter } from '../middleware/rate-limit.middleware';
+import { confirmationAttachmentMaxBytes } from '../booking/booking-providers/confirmation-extras';
 import * as ctrl from './scheduler.controller';
 
 const router = Router();
@@ -15,6 +17,29 @@ router.get('/config', requireRole('admin', 'supervisor', 'agent'), asyncHandler(
 
 // Write: admin only.
 router.put('/config', requireRole('admin'), asyncHandler(ctrl.updateSchedulerConfig));
+
+// Booking-confirmation email attachments. Their OWN multipart routes rather than fields on
+// `PUT /config`: bytes do not belong in a JSON settings payload. Bot-scoped exactly like
+// `/config` - the target Agent comes from the same `targetBotId` query contract.
+//
+// The declared mimetype is only a cheap first filter; the controller re-checks the DETECTED
+// bytes, which is the check that actually holds.
+const confirmationUpload = multer({
+  storage: multer.memoryStorage(),
+  // The SAME ceiling the reader enforces, so a file multer accepts can never be dropped later.
+  limits: { fileSize: confirmationAttachmentMaxBytes() },
+});
+router.post(
+  '/config/confirmation-attachments',
+  requireRole('admin'),
+  confirmationUpload.single('file'),
+  asyncHandler(ctrl.uploadConfirmationAttachment)
+);
+router.delete(
+  '/config/confirmation-attachments/:attachmentId',
+  requireRole('admin'),
+  asyncHandler(ctrl.deleteConfirmationAttachment)
+);
 
 // Address suggestions for the venue form. POST, not GET, so a partially-typed address never
 // lands in a query string, an access log or a referrer header. Rate-limited because each call
@@ -43,5 +68,15 @@ router.post('/bookings/:id/cancel', requireRole('admin'), asyncHandler(ctrl.canc
 router.post('/bookings/:id/reschedule', requireRole('admin'), asyncHandler(ctrl.rescheduleBooking));
 router.post('/bookings/:id/accept', requireRole('admin'), asyncHandler(ctrl.acceptRequest));
 router.post('/bookings/:id/decline', requireRole('admin'), asyncHandler(ctrl.declineRequest));
+
+// Adapter: multer errors (e.g. LIMIT_FILE_SIZE) reach Express before the controller runs, so
+// they bypass asyncHandler's ZodError adapter. Convert them to ApiError so the global handler
+// emits the standard envelope with the multer code preserved in error.code.
+router.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    return next(new ApiError(err.message, 400, err.code));
+  }
+  return next(err);
+});
 
 export default router;

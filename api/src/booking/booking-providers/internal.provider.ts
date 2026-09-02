@@ -46,13 +46,19 @@ import {
   type UpdateBookingResult,
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
-import { buildBookingEventContent } from './booking-content';
+import {
+  buildBookingEventContent,
+  storedFileNames,
+  type BookingContentInput,
+  type ServiceContentInput,
+} from './booking-content';
+import { translateCustomerFreeText } from '../../i18n/translate-free-text';
 import { getBookingCopy, prefetchAudienceBookingCopy, type BookingCopy } from '../booking-copy';
 import {
   customerLanguageFor,
   normalizeLanguageCode,
   resolveOwnerLanguage,
-} from '../booking-language';
+} from '../../i18n/audience-language';
 import { resolveBotLanguage } from '../../config/bot-language';
 import { formatServicePrice } from '../pricing/service-discount';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
@@ -65,7 +71,7 @@ import {
 } from '../../scheduler/calendar-provider';
 import {
   syncCalendarCreate,
-  syncCalendarReschedule,
+  syncCalendarMirror,
   syncCalendarCancel,
 } from './calendar-sync';
 import { ChatSession } from '../../database/entities/ChatSession';
@@ -1856,6 +1862,44 @@ export class InternalProvider implements BookingProvider {
     return recentDup;
   }
 
+  /**
+   * The owner's email detail, in the language the business reads.
+   *
+   * The customer writes their notes and the AI summary in their own language. The calendar
+   * mirror keeps those words verbatim - it is the record of what was said - so this builds a
+   * SECOND copy of the same block from translated values, and reports the originals so the
+   * email can print them underneath. Nothing structured is translated: the values go back
+   * through `buildBookingEventContent`, which renders the labels from the owner's catalog.
+   *
+   * Falls back to `fallback` (the calendar block) when nothing needed translating, which is
+   * every same-language booking - the common case, and one fewer LLM call.
+   */
+  private async ownerDetailFor(
+    ctx: BookingContext,
+    contentInput: BookingContentInput,
+    opts: {
+      service: ServiceContentInput;
+      manageUrl: string;
+      ownerCopy: BookingCopy;
+      ownerLanguage: string;
+      fallback: string;
+    },
+  ): Promise<{ detail: string; freeText?: { notes?: string | null; aiSummary?: string | null } }> {
+    const { fields, originals } = await translateCustomerFreeText({
+      fields: { notes: contentInput.notes, aiSummary: contentInput.aiSummary },
+      targetLanguage: opts.ownerLanguage,
+      tenantId: ctx.tenant.id,
+    });
+    if (!originals) return { detail: opts.fallback };
+    const translated = buildBookingEventContent(
+      { ...contentInput, notes: fields.notes, aiSummary: fields.aiSummary },
+      opts.service,
+      opts.manageUrl,
+      opts.ownerCopy,
+    );
+    return { detail: translated.description, freeText: originals };
+  }
+
   private async sendCreatedBookingConfirmation(
     ctx: BookingContext,
     input: {
@@ -1869,7 +1913,11 @@ export class InternalProvider implements BookingProvider {
       contact: { address: string | null; phone: string | null };
       extras?: BookingExtras;
       effectiveDuration: number;
-      eventContent: { summary: string; description: string };
+      /**
+       * The owner-email detail block and, when the customer's free text was translated for
+       * it, their original words. The CALENDAR body is built separately and untranslated.
+       */
+      ownerDetail: { detail: string; freeText?: { notes?: string | null; aiSummary?: string | null } };
       meetUrl: string | null;
       venue: Awaited<ReturnType<typeof loadBusinessRules>>['venue'];
       videoLinkMissing: boolean;
@@ -1889,7 +1937,7 @@ export class InternalProvider implements BookingProvider {
       contact,
       extras,
       effectiveDuration,
-      eventContent,
+      ownerDetail,
       meetUrl,
       venue,
       videoLinkMissing,
@@ -1901,6 +1949,7 @@ export class InternalProvider implements BookingProvider {
     const manageUrl = buildManageUrl(bookingId);
     const businessName = ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name;
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'REQUEST',
       uid: input.icsUid,
       sequence: 0,
@@ -1926,7 +1975,8 @@ export class InternalProvider implements BookingProvider {
         },
         customerCopy,
       ),
-      ownerDetail: eventContent.description,
+      ownerDetail: ownerDetail.detail,
+      ownerFreeText: ownerDetail.freeText,
       timezone: rule.timezone,
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
@@ -1981,24 +2031,34 @@ export class InternalProvider implements BookingProvider {
       getBookingCopy(langs.customerLanguage, ctx.tenant.id),
       getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
     ]);
+    const contentInput = {
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      customerPhone: contact.phone,
+      customerAddress: contact.address,
+      aiSummary: extras?.aiSummary ?? null,
+      notes: input.notes,
+      intakeAnswers: input.intakeJson,
+      bookingId,
+      durationMin: effectiveDuration,
+      sourceChannel: ctx.session?.channel ?? null,
+      uploadedFileNames: storedFileNames(input.uploadedFiles),
+    };
     const eventContent = buildBookingEventContent(
-      {
-        attendeeName: attendee.name,
-        attendeeEmail: attendee.email,
-        customerPhone: contact.phone,
-        customerAddress: contact.address,
-        aiSummary: extras?.aiSummary ?? null,
-        notes: input.notes,
-        intakeAnswers: input.intakeJson,
-        bookingId,
-        durationMin: effectiveDuration,
-        sourceChannel: ctx.session?.channel ?? null,
-        uploadedFileCount: input.uploadedFiles?.length ?? 0,
-      },
+      contentInput,
       { ...service, priceDisplay },
       buildManageUrl(bookingId),
       ownerCopy,
     );
+    // The CALENDAR keeps the customer's own words - the mirror is a record of what was said.
+    // Only the owner's EMAIL renders them in the business language, with the original below.
+    const ownerEmailDetail = await this.ownerDetailFor(ctx, contentInput, {
+      service: { ...service, priceDisplay },
+      manageUrl: buildManageUrl(bookingId),
+      ownerCopy,
+      ownerLanguage: langs.ownerLanguage,
+      fallback: eventContent.description,
+    });
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
@@ -2042,7 +2102,7 @@ export class InternalProvider implements BookingProvider {
       contact,
       extras,
       effectiveDuration,
-      eventContent,
+      ownerDetail: ownerEmailDetail,
       meetUrl,
       venue,
       videoLinkMissing,
@@ -2448,6 +2508,7 @@ export class InternalProvider implements BookingProvider {
         notes: req.notes,
         aiSummary: req.aiSummary,
         ownerLanguage,
+        tenantId: ctx.tenant.id,
       });
     })();
   }
@@ -2794,24 +2855,33 @@ export class InternalProvider implements BookingProvider {
       getBookingCopy(langs.customerLanguage, ctx.tenant.id),
       getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
     ]);
+    const contentInput = {
+      attendeeName: confirmed.attendeeName,
+      attendeeEmail: confirmed.attendeeEmail,
+      customerPhone: confirmed.customerPhone,
+      customerAddress: confirmed.customerAddress,
+      aiSummary: confirmed.aiSummary,
+      notes: confirmed.notes,
+      intakeAnswers: confirmed.intakeAnswers,
+      bookingId,
+      durationMin: effectiveDuration,
+      sourceChannel: confirmed.sourceChannel,
+      uploadedFileNames: storedFileNames(confirmed.uploadedFiles),
+    };
     const eventContent = buildBookingEventContent(
-      {
-        attendeeName: confirmed.attendeeName,
-        attendeeEmail: confirmed.attendeeEmail,
-        customerPhone: confirmed.customerPhone,
-        customerAddress: confirmed.customerAddress,
-        aiSummary: confirmed.aiSummary,
-        notes: confirmed.notes,
-        intakeAnswers: confirmed.intakeAnswers,
-        bookingId,
-        durationMin: effectiveDuration,
-        sourceChannel: confirmed.sourceChannel,
-        uploadedFileCount: Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles.length : 0,
-      },
+      contentInput,
       { ...service, priceDisplay },
       buildManageUrl(bookingId),
       ownerCopy,
     );
+    // The calendar keeps the customer's own words; only the owner's email is translated.
+    const ownerEmailDetail = await this.ownerDetailFor(ctx, contentInput, {
+      service: { ...service, priceDisplay },
+      manageUrl: buildManageUrl(bookingId),
+      ownerCopy,
+      ownerLanguage: langs.ownerLanguage,
+      fallback: eventContent.description,
+    });
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
@@ -2845,6 +2915,7 @@ export class InternalProvider implements BookingProvider {
     );
 
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'REQUEST',
       uid: confirmed.icsUid,
       sequence: 0,
@@ -2873,7 +2944,8 @@ export class InternalProvider implements BookingProvider {
         },
         customerCopy,
       ),
-      ownerDetail: eventContent.description,
+      ownerDetail: ownerEmailDetail.detail,
+      ownerFreeText: ownerEmailDetail.freeText,
       timezone: input.timezone,
       attendeeName: confirmed.attendeeName ?? '',
       attendeeEmail: confirmed.attendeeEmail ?? '',
@@ -3038,6 +3110,7 @@ export class InternalProvider implements BookingProvider {
       booking.startUtc,
       booking.endUtc,
     ).catch(() => undefined);
+    await this.refreshCalendarMirror(ctx, booking, next, merged.files).catch(() => undefined);
     if (sendInvite) {
       await this.sendInviteAfterContactUpdate(ctx, booking, next.name ?? '', next.email!, rows[0].sequence);
     }
@@ -3053,6 +3126,63 @@ export class InternalProvider implements BookingProvider {
         uploadedFileCount: Array.isArray(merged.files) ? merged.files.length : 0,
       },
     };
+  }
+
+  /**
+   * Make the mirrored calendar event match a booking the customer just added detail to.
+   *
+   * The times are the row's own instants, so nothing moves: only the title and the body
+   * change, which is what carries the new notes, the phone number and the file names to
+   * the owner. Best-effort, exactly like the log write above it - a mirror that could not
+   * be reached leaves the row correct and the reconciler to catch up.
+   */
+  private async refreshCalendarMirror(
+    ctx: BookingContext,
+    booking: Booking,
+    next: { name: string | null; email: string | null; phone: string | null; notes: string | null },
+    files: unknown,
+  ): Promise<void> {
+    if (booking.status !== 'confirmed' && booking.status !== 'pending') return;
+    const rule = await this.loadRule(ctx.bot);
+    const service = await this.serviceForBooking(booking);
+    const { venue } = await loadBusinessRules(ctx.bot.id);
+    const langs = await this.audienceLanguages(ctx, booking);
+    const ownerCopy = await getBookingCopy(langs.ownerLanguage, ctx.tenant.id);
+    const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
+    const content = buildBookingEventContent(
+      {
+        attendeeName: next.name,
+        attendeeEmail: next.email,
+        customerPhone: next.phone,
+        notes: next.notes,
+        customerAddress: booking.customerAddress,
+        aiSummary: booking.aiSummary,
+        intakeAnswers: booking.intakeAnswers,
+        bookingId: booking.id,
+        durationMin: booking.bookedDurationMin ?? service.durationMin,
+        sourceChannel: booking.sourceChannel,
+        uploadedFileNames: storedFileNames(files),
+      },
+      { ...service, priceDisplay },
+      buildManageUrl(booking.id),
+      ownerCopy,
+    );
+    await syncCalendarMirror(
+      ctx,
+      booking.id,
+      content,
+      booking.startUtc,
+      booking.endUtc,
+      rule.timezone,
+      {
+        location: resolveBookingEventLocation(service, {
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        conferencing: service.locationType === 'google_meet',
+      },
+    );
   }
 
   private async resolveUpdatableBooking(ctx: BookingContext, bookingId?: string): Promise<Booking> {
@@ -3175,6 +3305,7 @@ export class InternalProvider implements BookingProvider {
       const oldEmail = booking.attendeeEmail?.trim();
       if (oldEmail && oldEmail.toLowerCase() !== attendeeEmail.toLowerCase()) {
         await sendBookingEmail({
+          botId: ctx.bot.id,
           method: 'CANCEL',
           uid: booking.icsUid,
           sequence,
@@ -3195,6 +3326,7 @@ export class InternalProvider implements BookingProvider {
       const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
       const { venue } = await loadBusinessRules(ctx.bot.id);
       await sendBookingEmail({
+        botId: ctx.bot.id,
         method: 'REQUEST',
         uid: booking.icsUid,
         sequence,
@@ -4331,14 +4463,14 @@ export class InternalProvider implements BookingProvider {
         bookingId,
         durationMin: effectiveDuration,
         sourceChannel: booking.sourceChannel,
-        uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
+        uploadedFileNames: storedFileNames(booking.uploadedFiles),
       },
       { ...service, priceDisplay },
       buildManageUrl(bookingId),
       ownerCopy,
     );
     // Mirror first so a change TO video can mint a join URL before the ICS is sent.
-    const mintedMeetUrl = await syncCalendarReschedule(
+    const mintedMeetUrl = await syncCalendarMirror(
       ctx,
       bookingId,
       rescheduledContent,
@@ -4356,6 +4488,7 @@ export class InternalProvider implements BookingProvider {
     ).catch(() => null);
     const meetUrl = service.locationType === 'google_meet' ? mintedMeetUrl : null;
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'REQUEST',
       uid: booking.icsUid,
       sequence,
@@ -4455,6 +4588,7 @@ export class InternalProvider implements BookingProvider {
 
     const langs = await this.audienceLanguages(ctx, booking);
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'CANCEL',
       uid: booking.icsUid,
       sequence: rows[0].sequence,

@@ -14,7 +14,7 @@ import { resolveCustomerChange } from '../booking/customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import type { Booking } from '../database/entities/Booking';
 import { BOOKING_COPY_EN, getBookingCopy, formatWhen, fill, type BookingCopy } from '../booking/booking-copy';
-import { customerLanguageFor } from '../booking/booking-language';
+import { customerLanguageFor } from '../i18n/audience-language';
 import { getBotConfigForBotId } from '../services/bot-config.service';
 
 function esc(s: string): string {

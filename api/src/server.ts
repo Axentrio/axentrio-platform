@@ -462,6 +462,17 @@ async function startEmailRetryIfEnabled(): Promise<void> {
   }
 }
 
+
+async function startBookingCopyWarmIfEnabled(): Promise<void> {
+  if (process.env.BOOKING_COPY_WARM === "0") return;
+  const { warmBookingCopyCache } = await import("./booking/booking-copy");
+  void warmBookingCopyCache().catch((err) => {
+    logger.warn("[booking-copy] startup warm failed — first booking may be slow", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 async function startServer(): Promise<void> {
   try {
     logger.info("Starting Chatbot Platform API...");
@@ -502,16 +513,7 @@ async function startServer(): Promise<void> {
       );
     }
 
-    // Pre-translate booking email copy for portal locales so the first post-deploy
-    // confirmation does not block chat on a cold LLM catalog translation.
-    if (process.env.BOOKING_COPY_WARM !== "0") {
-      const { warmBookingCopyCache } = await import("./booking/booking-copy");
-      void warmBookingCopyCache().catch((err) => {
-        logger.warn("[booking-copy] startup warm failed — first booking may be slow", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
+    await startBookingCopyWarmIfEnabled();
 
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)
     try {

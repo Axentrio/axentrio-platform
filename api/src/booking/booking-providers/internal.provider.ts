@@ -47,7 +47,7 @@ import {
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
-import { getBookingCopy, prefetchAudienceBookingCopy } from '../booking-copy';
+import { getBookingCopy, prefetchAudienceBookingCopy, type BookingCopy } from '../booking-copy';
 import {
   customerLanguageFor,
   normalizeLanguageCode,
@@ -1344,23 +1344,8 @@ export class InternalProvider implements BookingProvider {
     // idempotency keys. Catch it on (session, service, startUtc) so a re-confirm
     // returns the existing booking instead of failing SLOT_UNAVAILABLE on the now-
     // taken slot. Mirrors requestAppointment's dedup.
-    const recentDup = await bookingRepo.findOne({
-      where: {
-        tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
-        eventTypeId: service.id, startUtc: start,
-        createdAt: createdWithinDedupWindow(),
-      },
-      order: { createdAt: 'DESC' },
-    });
-    // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
-    // slot. 'failed' and 'declined' were also listed here; neither is ever written
-    // (declining a request writes 'cancelled').
-    if (
-      recentDup &&
-      recentDup.status !== 'cancelled' &&
-      rowDedupIdentity(recentDup, serviceNeedsCustomerAddress(service, extras)) ===
-        callDedupIdentity(serviceNeedsCustomerAddress(service, extras), extras)
-    ) {
+    const recentDup = await this.findMatchingRecentCreateDuplicate(ctx, bookingRepo, service, start, extras);
+    if (recentDup) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true, rule.timezone, service.name, service.preparationInstructions);
     }
@@ -1844,6 +1829,123 @@ export class InternalProvider implements BookingProvider {
     throw err;
   }
 
+
+  private async findMatchingRecentCreateDuplicate(
+    ctx: BookingContext,
+    bookingRepo: ReturnType<typeof AppDataSource.getRepository<Booking>>,
+    service: ResolvedService,
+    start: Date,
+    extras?: BookingExtras,
+  ): Promise<Booking | null> {
+    const needsAddress = serviceNeedsCustomerAddress(service, extras);
+    const recentDup = await bookingRepo.findOne({
+      where: {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        sessionId: ctx.session.id,
+        eventTypeId: service.id,
+        startUtc: start,
+        createdAt: createdWithinDedupWindow(),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (!recentDup || recentDup.status === 'cancelled') return null;
+    if (rowDedupIdentity(recentDup, needsAddress) !== callDedupIdentity(needsAddress, extras)) {
+      return null;
+    }
+    return recentDup;
+  }
+
+  private async sendCreatedBookingConfirmation(
+    ctx: BookingContext,
+    input: {
+      bookingId: string;
+      icsUid: string;
+      service: ResolvedService;
+      rule: AvailabilityRule;
+      start: Date;
+      end: Date;
+      attendee: { name: string; email?: string };
+      contact: { address: string | null; phone: string | null };
+      extras?: BookingExtras;
+      effectiveDuration: number;
+      eventContent: { title: string; description: string };
+      meetUrl: string | null;
+      venue: Awaited<ReturnType<typeof loadBusinessRules>>['venue'];
+      videoLinkMissing: boolean;
+      ownerAttachments: EmailAttachment[];
+      customerCopy: BookingCopy;
+      langs: { customerLanguage: string; ownerLanguage: string };
+      priceDisplay?: string;
+    },
+  ): Promise<void> {
+    const {
+      bookingId,
+      service,
+      rule,
+      start,
+      end,
+      attendee,
+      contact,
+      extras,
+      effectiveDuration,
+      eventContent,
+      meetUrl,
+      venue,
+      videoLinkMissing,
+      ownerAttachments,
+      customerCopy,
+      langs,
+      priceDisplay,
+    } = input;
+    const manageUrl = buildManageUrl(bookingId);
+    const businessName = ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name;
+    await sendBookingEmail({
+      method: 'REQUEST',
+      uid: input.icsUid,
+      sequence: 0,
+      start,
+      end,
+      summary: service.name,
+      location: resolveBookingEventLocation(service, {
+        meetUrl,
+        customerAddress: contact.address,
+        venue,
+        locationChoice: extras?.locationChoice,
+      }),
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl,
+          businessName,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
+      ownerDetail: eventContent.description,
+      timezone: rule.timezone,
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: frozenOrganizerFor(ctx.tenant.id),
+      ownerAttachments,
+      videoLinkMissing,
+      organizerName: businessName,
+      manageUrl,
+      durationMin: effectiveDuration,
+      preparationInstructions: service.preparationInstructions,
+      priceDisplay,
+      tenantId: ctx.tenant.id,
+      bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
+    });
+  }
+
   /**
    * Mirror a confirmed booking to the owner's calendar, then send the invite.
    *
@@ -1929,55 +2031,25 @@ export class InternalProvider implements BookingProvider {
     const ownerAttachments = await this.ownerFileAttachments(
       (input.uploadedFiles ?? []).map((f) => f.fileSessionId),
     );
-    // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
-    // Phase 0 fallback); the Meet link rides along when present.
-    await sendBookingEmail({
-      method: 'REQUEST',
-      uid: input.icsUid,
-      sequence: 0,
+    await this.sendCreatedBookingConfirmation(ctx, {
+      bookingId,
+      icsUid: input.icsUid,
+      service,
+      rule,
       start,
       end,
-      summary: service.name,
-      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
-      // which is a modality — it told the customer nothing and occupied the field their
-      // calendar would otherwise use for directions. Omitted entirely when unknown.
-      location: resolveBookingEventLocation(service, {
-        meetUrl,
-        customerAddress: contact.address,
-        venue,
-        locationChoice: extras?.locationChoice,
-      }),
-      // The CUSTOMER's copy — what they need, not the owner's operational detail.
-      description: buildCustomerEventDescription(
-        {
-          serviceName: service.name,
-          serviceDescription: service.description,
-          durationMin: effectiveDuration,
-          meetUrl,
-          preparationInstructions: service.preparationInstructions,
-          manageUrl: buildManageUrl(bookingId),
-          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-          priceDisplay,
-        },
-        customerCopy,
-      ),
-      ownerDetail: eventContent.description,
-      timezone: rule.timezone,
-      attendeeName: attendee.name,
-      attendeeEmail: attendee.email,
-      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
-      organizerEmail: frozenOrganizerFor(ctx.tenant.id),
-      ownerAttachments,
+      attendee,
+      contact,
+      extras,
+      effectiveDuration,
+      eventContent,
+      meetUrl,
+      venue,
       videoLinkMissing,
-      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-      manageUrl: buildManageUrl(bookingId),
-      durationMin: effectiveDuration,
-      preparationInstructions: service.preparationInstructions,
+      ownerAttachments,
+      customerCopy,
+      langs,
       priceDisplay,
-      tenantId: ctx.tenant.id,
-      bookingId,
-      customerLanguage: langs.customerLanguage,
-      ownerLanguage: langs.ownerLanguage,
     });
   }
 

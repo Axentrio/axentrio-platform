@@ -715,6 +715,16 @@ interface RunLoopState {
    * (the call happened, success or fail).
    */
   heldBooking: boolean;
+  /**
+   * A booking time the customer named was refused THIS RUN by the notice or horizon
+   * policy (check_availability out-of-window, or a mutation's REQUEST_OUTSIDE_WINDOW).
+   * Every availability result after it is a list of alternatives, so the customer's
+   * named hour must not count as "already chosen": the hour matches by clock only,
+   * and the date it sat on is the one just refused. Live WhatsApp 2026-08-30: 14 Sept
+   * 10:00 refused on a 14-day horizon, the retry found 10:00 on every day of the
+   * week before the bound, and the chips came off a reply that said "choose below".
+   */
+  namedTimeRefused: boolean;
   pendingAddressFact: BookingAddressReplyFact | null;
   addressFactConflict: boolean;
   addressCorrectionAttempted: boolean;
@@ -739,6 +749,7 @@ function newRunLoopState(): RunLoopState {
     promisedCheckCorrectionAttempted: false,
     availabilityChecked: false,
     heldBooking: false,
+    namedTimeRefused: false,
     pendingAddressFact: null,
     addressFactConflict: false,
     addressCorrectionAttempted: false,
@@ -1757,7 +1768,7 @@ export class AgentService {
     // Chips exist to pick a time. If the customer already named one that we can actually
     // book, or the reply is confirming that one time, attaching hours again is how the
     // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
-    const alreadyChoseTime = !!(
+    const alreadyChoseTime = !state.namedTimeRefused && !!(
       times.confirmableLocal &&
       (namesSingleOfferedTime(customerTimeText, times.confirmableLocal) ||
         namesSingleOfferedTime(finalContent, times.confirmableLocal))
@@ -1900,6 +1911,7 @@ export class AgentService {
       conversationHistory: state.messages,
       specialtyTerms: ctx.specialtyTerms.length ? ctx.specialtyTerms : undefined,
       botOwned: ctx.sessionBotOwned,
+      namedTimeRefused: state.namedTimeRefused,
     };
 
     try {
@@ -1985,6 +1997,18 @@ export class AgentService {
     // because a model handed a `Z` instant reads its digits out loud - so the chips, the
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
+    if (
+      (tool.name === 'check_availability' &&
+        result.success &&
+        (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability') ||
+      (BOOKING_MUTATION_TOOLS.includes(tool.name) &&
+        !result.success &&
+        typeof result.error === 'string' &&
+        result.error.startsWith('REQUEST_OUTSIDE_WINDOW:'))
+    ) {
+      state.namedTimeRefused = true;
+    }
+
     if (tool.name === 'check_availability' && result.success && result.availability) {
       this.absorbAvailability(toolCall, result, result.availability, ctx, state);
       // Live WaterFix 2026-09-01: leftover diary chips made the model say the held

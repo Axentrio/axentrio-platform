@@ -16,6 +16,12 @@ export interface ToolContext {
   specialtyTerms?: string[];
   /** False when a human already owns the session. Absent = treat as bot-owned. */
   botOwned?: boolean;
+  /**
+   * A time the customer named was refused this run by the notice/horizon policy, so the
+   * named-hour match in check_availability must stand down: the hour is a clock-only
+   * match and the date behind it is the refused one. Absent = false.
+   */
+  namedTimeRefused?: boolean;
 }
 
 export interface ToolResult {

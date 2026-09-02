@@ -280,6 +280,7 @@ function namedTimeGuidance(
   guidance?: string,
   heldClocks: string[] = [],
 ): Record<string, unknown> {
+  if (ctx.namedTimeRefused) return {};
   const known = [...offered.confirmable, ...offered.requestable, ...heldClocks];
   if (known.length === 0) return {};
   const said = lastCustomerText(ctx);

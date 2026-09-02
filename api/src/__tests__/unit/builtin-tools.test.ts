@@ -448,6 +448,31 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { guidance?: string }).guidance).not.toContain('€80');
   });
 
+  it('stands down the named-hour match when the named date was refused this run', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+        { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-05', endDate: '2026-10-05' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik maandag 5 oktober 2026 om 10:00 langskomen?' },
+        ],
+        namedTimeRefused: true,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBeUndefined();
+    expect((result.data as { guidance?: string }).guidance ?? '').not.toMatch(/already named this time/i);
+  });
+
   it('tells the model to call create_booking now after an explicit yes', async () => {
     const tool = new CheckAvailabilityTool();
     mockCheckAvailability.mockResolvedValue({

@@ -118,7 +118,7 @@ import {
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
-import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, slotsInClockWindow } from './booking-dates';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, offerableSlotsForWindow } from './booking-dates';
 import {
   resolveDuration,
   assertDurationChosen,
@@ -481,9 +481,7 @@ export class InternalProvider implements BookingProvider {
     const slots = computeSlots(engineInput);
     // Filtered HERE, ahead of travel: the enforce path clears the first 20 slots and stops, so a
     // window applied after it would find nothing but the morning it was asked to skip.
-    const inWindow = clockWindow ? slotsInClockWindow(slots, clockWindow, rule.timezone) : slots;
-    const windowMatched = inWindow.length > 0;
-    const offerable = clockWindow && !windowMatched ? slots : inWindow;
+    const { offerable, windowMatched } = offerableSlotsForWindow(slots, clockWindow, rule.timezone);
     // WHY nothing came back, when the reason is this owner's notice, horizon, or service
     // daily cap, and not a full or closed diary. Only on the path that produced nothing, and
     // it costs no query: it re-runs the pure engine over the busy data already in hand.

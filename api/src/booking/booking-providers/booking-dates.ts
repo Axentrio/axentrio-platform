@@ -113,3 +113,15 @@ export function slotsInClockWindow<T extends { start: string }>(
     return clock >= window.from && clock < window.to;
   });
 }
+
+/** Window first; if it matches nothing, keep the whole day so the model can offer other times. */
+export function offerableSlotsForWindow<T extends { start: string }>(
+  slots: T[],
+  clockWindow: ClockWindow | undefined,
+  timezone: string,
+): { offerable: T[]; windowMatched: boolean } {
+  if (!clockWindow) return { offerable: slots, windowMatched: true };
+  const inWindow = slotsInClockWindow(slots, clockWindow, timezone);
+  const windowMatched = inWindow.length > 0;
+  return { offerable: windowMatched ? inWindow : slots, windowMatched };
+}

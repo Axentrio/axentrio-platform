@@ -76,6 +76,7 @@ import {
   UpdateBookingTool,
 } from '../../agent/tools/booking.tool';
 import { EscalationTool } from '../../agent/tools/escalation.tool';
+import { BookingError } from '../../booking/booking.service';
 import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
 import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
 import { pendingYesNeedsCreate } from '../../agent/pending-booking-confirmation';
@@ -309,6 +310,61 @@ describe('an email the confirmation cannot reach', () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/EMAIL_REQUIRED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('returns SERVICE_NOT_FOUND, not a booking summary, for an unknown UUID', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(
+      new BookingError('That serviceId is not currently a bookable service', 'SERVICE_NOT_FOUND', 404),
+    );
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      {
+        startTime: '2026-04-01T10:00:00Z',
+        attendeeName: 'Ada',
+        serviceId: '550e8400-e29b-41d4-a716-446655440000',
+      },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SERVICE_NOT_FOUND/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('returns SERVICE_NOT_FOUND, not a booking summary, for a non-UUID serviceId', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(
+      new BookingError('That serviceId is not currently a bookable service', 'SERVICE_NOT_FOUND', 404),
+    );
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada', serviceId: 'klantenafspraak' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SERVICE_NOT_FOUND/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('does not invent EMAIL_REQUIRED when the peek throws an unexpected error', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(new Error('connection reset'));
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('connection reset');
+    expect(result.errorSafeForModel).toBe(false);
+    expect(result.error).not.toMatch(/EMAIL_REQUIRED/);
     expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
     expect(mockCreateBooking).not.toHaveBeenCalled();
   });

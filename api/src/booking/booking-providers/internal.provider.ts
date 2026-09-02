@@ -12,6 +12,7 @@ import { In, MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
+import { findBookableService } from './find-bookable-service';
 import type { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { resolveBookingEventLocation } from './event-location';
@@ -302,22 +303,9 @@ export class InternalProvider implements BookingProvider {
    * readiness so a service hidden from online booking is never silently resolved.
    */
   private async resolveService(botId: string, serviceId?: string): Promise<ResolvedService> {
-    const repo = AppDataSource.getRepository(ServiceType);
-    // Inheritance is applied HERE so every caller downstream sees resolved numbers.
     const rules = await loadBusinessRules(botId);
-    if (serviceId) {
-      const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true, onlineBookable: true } });
-      if (!svc) throw new BookingError('That serviceId is not currently a bookable service for this business (it may have been changed or removed). Do not tell the customer the service is unavailable or send them to contact the business. Re-read the SERVICES list and call again with the current id of the service they mean; if only one service is listed there, omit serviceId and retry.', 'SERVICE_NOT_FOUND', 404);
-      return resolveServiceTiming(svc, rules);
-    }
-    const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC', createdAt: 'ASC' } });
-    if (active.length === 0) {
-      throw new BookingError('This business has no online-bookable service set up, so nothing can be booked or captured as an appointment request right now. Do not tell the customer a specific service is unavailable or blame them. Do NOT tell the customer their request was submitted, forwarded, or that the team will review, follow up on, or handle it — no request record is created, so any such claim is false. If you have a tool for taking their contact details or handing off to a person, use it; otherwise explain briefly that it cannot be arranged online and that they should contact the business directly.', 'BOOKING_NOT_CONFIGURED', 400);
-    }
-    if (active.length > 1) {
-      throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);
-    }
-    return resolveServiceTiming(active[0], rules);
+    const svc = await findBookableService(botId, serviceId);
+    return resolveServiceTiming(svc, rules);
   }
 
   /**

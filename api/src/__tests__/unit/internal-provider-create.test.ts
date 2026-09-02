@@ -353,11 +353,11 @@ describe('InternalProvider.createBooking', () => {
   };
 
   it('#36/#2 checkAvailability hard-stops a request-only service (never offers slots)', async () => {
-    const requestService = { ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' };
+    const requestService = { ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' };
     eventTypeFindOne.mockResolvedValue(requestService);
     serviceTypeFind.mockResolvedValue([requestService]);
     await expect(
-      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', 'svc-req'),
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', '11111111-1111-4111-8111-111111111111'),
     ).rejects.toMatchObject({ code: 'REQUEST_ONLY_SERVICE' });
   });
 
@@ -738,12 +738,12 @@ describe('InternalProvider.createBooking', () => {
   // ── Multi-service (K1b) ────────────────────────────────────────────────────
 
   it('books a specific service when serviceId is given', async () => {
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-hair', name: 'Haircut' });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '33333333-3333-4333-8333-333333333333', name: 'Haircut' });
     const res = await provider.createBooking(
-      ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hair'
+      ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '33333333-3333-4333-8333-333333333333'
     );
     expect(res.success).toBe(true);
-    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hair', botId: 'bot-1', isActive: true, onlineBookable: true } });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: '33333333-3333-4333-8333-333333333333', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
@@ -761,12 +761,12 @@ describe('InternalProvider.createBooking', () => {
   });
 
   it('captures a request (no calendar event / email / lock) for a request-only service', async () => {
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' });
     managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(
-      ctx, 'idem-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req'
+      ctx, 'idem-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '11111111-1111-4111-8111-111111111111'
     );
     expect(res.success).toBe(true);
     expect(res.requested).toBe(true);
@@ -861,9 +861,9 @@ describe('InternalProvider.createBooking', () => {
   it('does NOT resolve an explicit serviceId that is not onlineBookable (SERVICE_NOT_FOUND)', async () => {
     eventTypeFindOne.mockResolvedValue(null); // the onlineBookable:true filter excludes it
     await expect(
-      provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hidden')
+      provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '22222222-2222-4222-8222-222222222222')
     ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
-    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hidden', botId: 'bot-1', isActive: true, onlineBookable: true } });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: '22222222-2222-4222-8222-222222222222', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a phantom forward', async () => {
@@ -897,12 +897,12 @@ describe('InternalProvider.createBooking', () => {
 
   it('keeps a request-only service a request regardless of calendar state', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(true); // even with a healthy calendar
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' }]);
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' }]);
     managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
-    const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req');
+    const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '11111111-1111-4111-8111-111111111111');
     expect(res.requested).toBe(true);
     expect(transaction).toHaveBeenCalledOnce();
   });
@@ -1447,7 +1447,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     });
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, intakeQuestions: [] }, { ...EVENT_TYPE, id: 'svc-2' }]); // ≥2 → serviceId required
     await provider.requestAppointment(
-      ctx, 'idem-iq', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-1',
+      ctx, 'idem-iq', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '33333333-3333-4333-8333-333333333333',
       undefined,
       { 'q-1': '  Birthday  ', 'q-2': 7, 'q-unknown': 'dropped', 'q-3-empty': '   ' }
     );

@@ -136,8 +136,11 @@ async function rejectMissingRequiredEmail(
       sessionId,
       typeof serviceId === 'string' ? serviceId : undefined,
     );
-  } catch {
-    return null;
+  } catch (err) {
+    if (!(err instanceof BookingError)) {
+      logger.warn('[Booking] could not peek customerEmailRequired', { sessionId, error: err });
+    }
+    return { success: false, ...toolError(err, 'Could not check booking requirements') };
   }
   if (!required) return null;
   if (typeof email === 'string' && email.trim() && emails.sanitizeEmail(email)) return null;

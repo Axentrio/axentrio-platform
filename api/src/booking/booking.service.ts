@@ -28,6 +28,7 @@ import {
 import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch } from './booking-providers/types';
 import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
+import { findBookableService } from './booking-providers/find-bookable-service';
 import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import { upsertLead } from '../leads/lead-capture.service';
@@ -169,6 +170,32 @@ export async function checkAvailability(
   );
 }
 
+/**
+ * Availability for MOVING one existing booking: the same diary read with that booking's own
+ * occupancy excluded. Without the exclusion a 09:30 target on the caller's own 09:00-10:00
+ * hold reads as busy, so the move is refused against nobody but themselves. The availability
+ * tool calls this for its moveTargets when the range holds exactly one of the caller's rows;
+ * authorization is unchanged - the excluded id comes from the caller's own alreadyHeld result.
+ */
+export async function checkMoveAvailability(
+  caller: BookingCaller,
+  sessionId: string,
+  startDate: string,
+  endDate: string,
+  excludeBookingId: string,
+  serviceId?: string,
+  durationMin?: number,
+  customerAddress?: string,
+  locationChoice?: 'business' | 'customer',
+  customerPhone?: string,
+) {
+  const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
+  return internalProvider.checkAvailability(
+    ctx, startDate, endDate, serviceId, durationMin, excludeBookingId, customerAddress, locationChoice, customerPhone,
+  );
+}
+
 export async function createBooking(
   caller: BookingCaller,
   sessionId: string,
@@ -199,20 +226,8 @@ export async function peekCustomerEmailRequired(
   serviceId?: string,
 ): Promise<boolean> {
   const ctx = await resolveContext(sessionId);
-  const repo = AppDataSource.getRepository(ServiceType);
-  if (typeof serviceId === 'string' && serviceId.trim()) {
-    const svc = await repo.findOne({
-      where: { id: serviceId, botId: ctx.bot.id, isActive: true },
-    });
-    return svc ? serviceRequiresCustomerEmail(svc) : false;
-  }
-  const active = await repo.find({
-    where: { botId: ctx.bot.id, isActive: true, onlineBookable: true },
-    order: { sortOrder: 'ASC', createdAt: 'ASC' },
-    take: 2,
-  });
-  if (active.length === 1) return serviceRequiresCustomerEmail(active[0]);
-  return false;
+  const svc = await findBookableService(ctx.bot.id, serviceId);
+  return serviceRequiresCustomerEmail(svc);
 }
 
 /**

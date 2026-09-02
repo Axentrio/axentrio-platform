@@ -127,6 +127,38 @@ export async function pendingYesNeedsCreate(
   return summaryWasAsked(history, lookup.pending.startTime);
 }
 
+/** A pending move the customer already agreed to; the nudge repeats these exact arguments. */
+export interface PendingAgreedMove {
+  bookingId: string;
+  newStartTime: string;
+  customerAddress?: string;
+}
+
+/**
+ * The reschedule twin of `pendingYesNeedsCreate`: a pending move summary exists and the last
+ * customer line is the agreeing yes. Live WaterFix 2026-09-02, session 1bbd5818: the turn after
+ * "Ja, bevestig de wijziging" called list_bookings and check_availability but never
+ * reschedule_booking, so the customer was told the move could not be confirmed while the slot
+ * was free and the gate held a confirmed summary. The run loop reads this to nudge that turn.
+ */
+export async function pendingYesNeedsReschedule(
+  sessionId: string,
+  history: ToolContext['conversationHistory'],
+): Promise<PendingAgreedMove | null> {
+  const last = lastCustomerUtterance({ conversationHistory: history });
+  if (!last) return null;
+  const lookup = await readPending(sessionId, RESCHEDULE_PREFIX);
+  if (lookup.store !== 'up' || lookup.pending == null) return null;
+  const pending = lookup.pending;
+  if (pending.kind !== 'reschedule' || !pending.bookingId) return null;
+  if (!moveWasAgreed(history, pending, last)) return null;
+  return {
+    bookingId: pending.bookingId,
+    newStartTime: pending.startTime,
+    ...(pending.customerAddress ? { customerAddress: pending.customerAddress } : {}),
+  };
+}
+
 function parsePending(raw: string | null): PendingBookingDetails | null {
   if (!raw) return null;
   try {
@@ -348,20 +380,26 @@ function rescheduleWasConfirmed(
   if (!pending || pending.kind !== 'reschedule') return false;
   if (pending.bookingId !== asked.bookingId || pending.startTime !== asked.newStartTime) return false;
   if (asked.customerAddress !== undefined && pending.customerAddress !== asked.customerAddress) return false;
-  // A MOVE THAT CARRIES A DOOR NEEDS THE DOOR IN THE SUMMARY, whether or not the confirming call
-  // repeats it. Tool arguments are the model's output, not the customer's word: an address it
-  // invented on the first call and repeated on the second is no more agreed to than one it
-  // dropped. So the evidence is the same either way - one message the customer read holding the
-  // question, the hour and this address. A slot chip is not that evidence: it names an hour.
+  return moveWasAgreed(ctx.conversationHistory, pending, last);
+}
+
+/**
+ * The customer's yes matched THIS pending move. A move that carries a door needs the door in
+ * the summary, whether or not the confirming call repeats it: tool arguments are the model's
+ * output, not the customer's word. A slot chip is not that evidence - it names an hour.
+ * Shared by the tool gate and the run-loop nudge so both judge a yes by the same summary.
+ */
+function moveWasAgreed(
+  history: ToolContext['conversationHistory'],
+  pending: PendingBookingDetails,
+  last: string,
+): boolean {
   if (pending.customerAddress) {
-    return (
-      isAffirmativeReply(last) &&
-      summaryCarriedMove(ctx.conversationHistory, pending.startTime, pending.customerAddress)
-    );
+    return isAffirmativeReply(last) && summaryCarriedMove(history, pending.startTime, pending.customerAddress);
   }
   return (
     isConfirmingChip(last, pending.startTime) ||
-    (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime))
+    (isAffirmativeReply(last) && summaryWasAsked(history, pending.startTime))
   );
 }
 

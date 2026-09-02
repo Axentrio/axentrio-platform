@@ -27,6 +27,7 @@ import {
   summaryWasAsked,
   refuseUnlessConfirmed,
   refuseUnlessRescheduleConfirmed,
+  pendingYesNeedsReschedule,
   refuseUnlessCancelConfirmed,
   refuseCreateWhileMovePending,
   putPendingBooking,
@@ -417,6 +418,79 @@ describe('a reschedule the customer keeps confirming', () => {
       toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
     );
     expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+});
+
+/**
+ * THE YES THAT NEVER BECAME A TOOL CALL (live, WaterFix, 2026-09-02, session 1bbd5818).
+ *
+ * reschedule_booking returned CONFIRMATION_REQUIRED, the bot sent the summary, the customer
+ * said "Ja, bevestig de wijziging" - and the next turn called list_bookings and
+ * check_availability, never reschedule_booking, and told the customer the move could not be
+ * confirmed while the slot was free. The run loop asks this predicate to catch that turn.
+ */
+describe('pendingYesNeedsReschedule', () => {
+  beforeEach(() => {
+    store.clear();
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+  });
+
+  const summary = {
+    role: 'assistant' as const,
+    content: 'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00. Zal ik dit boeken?',
+  };
+  const yes = { role: 'user' as const, content: 'ja doe maar' };
+
+  const openMove = (customerAddress?: string) =>
+    refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00', ...(customerAddress ? { customerAddress } : {}) },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+
+  it('returns the pending move after the summary and the yes', async () => {
+    await openMove();
+    // The gate stores wallClockKey's minute-precision zoneless key, and the nudge repeats it.
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toEqual({
+      bookingId: 'bk-9',
+      newStartTime: '2026-09-03T13:00',
+    });
+  });
+
+  it('answers null when nothing is pending', async () => {
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
+  });
+
+  it('answers null on a yes the customer never saw a summary for', async () => {
+    await openMove();
+    expect(await pendingYesNeedsReschedule('sess-confirm', [yes])).toBeNull();
+  });
+
+  it('holds an address move to a summary that read the door back', async () => {
+    await openMove('Turnhoutsebaan 100, 2140 Antwerpen');
+    // The time-only summary does not carry the door, so the yes proves nothing.
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
+    const summaryWithAddress = {
+      role: 'assistant' as const,
+      content:
+        'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00 op Turnhoutsebaan 100, 2140 Antwerpen. Zal ik dit boeken?',
+    };
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summaryWithAddress, yes])).toEqual({
+      bookingId: 'bk-9',
+      newStartTime: '2026-09-03T13:00',
+      customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen',
+    });
+  });
+
+  it('answers null once the gate accepted the confirming call', async () => {
+    await openMove();
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([summary, yes]),
+    );
+    expect(second.refusal).toBeNull();
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
   });
 });
 

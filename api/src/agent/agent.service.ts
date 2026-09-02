@@ -53,7 +53,7 @@ import {
   type OutputValidationContext,
 } from '../guardrails/output-validation';
 import { renderMemoryForPrompt } from '../memory/memory-store';
-import { pendingYesNeedsCreate } from './pending-booking-confirmation';
+import { pendingYesNeedsCreate, pendingYesNeedsReschedule, type PendingAgreedMove } from './pending-booking-confirmation';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -443,6 +443,18 @@ const BOOKING_CORRECTION_NOTE =
 
 const PENDING_YES_NOTE =
   '(Internal note, not from the customer.) The customer already confirmed the pending booking summary. Call create_booking now with the same service, time, and name. Do not send another summary and do not ask for confirmation again.';
+
+/** The move twin of PENDING_YES_NOTE. It repeats the gate's own stored arguments, because the
+ *  observed failure (session 1bbd5818) was a turn that answered a confirmed move with
+ *  list_bookings + check_availability and never called the tool at all. */
+function pendingMoveYesNote(move: PendingAgreedMove): string {
+  const addressBit = move.customerAddress ? ` and customerAddress "${move.customerAddress}"` : '';
+  return (
+    '(Internal note, not from the customer.) The customer already confirmed the pending move summary. ' +
+    `Call reschedule_booking now with bookingId "${move.bookingId}" and newStartTime "${move.newStartTime}"${addressBit}. ` +
+    'Do not send another summary, do not ask for confirmation again, and do not call list_bookings or check_availability first.'
+  );
+}
 
 /** Nudge for a reply that declared a named date shut or full without ever looking. */
 const AVAILABILITY_CORRECTION_NOTE =
@@ -1554,7 +1566,10 @@ export class AgentService {
 
   /**
    * The customer already said yes to a pending summary, but this turn did not call
-   * create_booking. One nudge, then ship whatever they produce.
+   * the booking tool it confirmed. One nudge, then ship whatever they produce.
+   *
+   * Armed off create_booking presence like every booking guard: the booking module ships
+   * create_booking and reschedule_booking together, so a session that can move can also book.
    */
   private async applyPendingYesGuard(
     i: number,
@@ -1565,14 +1580,25 @@ export class AgentService {
     if (state.bookingRecorded || !ctx.bookingClaimGuardArmed) return false;
     if (state.pendingYesNudgeAttempted || i >= MAX_ITERATIONS - 1) return false;
     const history = [...state.messages, { role: 'user' as const, content: ctx.message }];
-    if (!(await pendingYesNeedsCreate(ctx.session.id, history))) return false;
+    let correction: string;
+    let note: string;
+    if (await pendingYesNeedsCreate(ctx.session.id, history)) {
+      correction = 'pending_yes_without_create';
+      note = PENDING_YES_NOTE;
+    } else {
+      const move = await pendingYesNeedsReschedule(ctx.session.id, history);
+      if (!move) return false;
+      correction = 'pending_yes_without_reschedule';
+      note = pendingMoveYesNote(move);
+    }
     state.pendingYesNudgeAttempted = true;
-    (ctx.trace.corrections ??= []).push('pending_yes_without_create');
-    logger.warn('[agent] pending summary already confirmed; nudging model to create_booking', {
+    (ctx.trace.corrections ??= []).push(correction);
+    logger.warn('[agent] pending summary already confirmed; nudging model to call the tool', {
       sessionId: ctx.session.id,
+      correction,
     });
     state.messages.push({ role: 'assistant', content });
-    state.messages.push({ role: 'user', content: PENDING_YES_NOTE });
+    state.messages.push({ role: 'user', content: note });
     return true;
   }
 

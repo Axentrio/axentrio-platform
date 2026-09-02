@@ -401,6 +401,43 @@ function alreadyHeldNote(
 }
 
 /**
+ * Move targets read the diary WITHOUT the caller's own held row: a 09:30 target on their own
+ * 09:00-10:00 hold is busy against nobody but themselves, and guidance that says "a time
+ * missing from moveTargets is not free" must not lie about it. One extra read, only when the
+ * range holds exactly ONE of the caller's rows; the excluded id comes from this caller's own
+ * availability result, so no new authority. A failed read keeps the unexcluded slots: fewer
+ * targets, never wrong ones.
+ */
+async function slotsForMove(
+  utcSlots: AvailabilitySlots,
+  held: AvailabilityResult['alreadyHeld'],
+  args: Record<string, unknown>,
+  chosen: TurnAddress,
+  locationChoice: 'business' | 'customer' | undefined,
+  ctx: ToolContext,
+): Promise<AvailabilitySlots> {
+  if (held?.length !== 1) return utcSlots;
+  try {
+    const move = await checkMoveAvailability(
+      'agent',
+      ctx.sessionId,
+      args.startDate as string,
+      args.endDate as string,
+      held[0].bookingId,
+      args.serviceId as string | undefined,
+      args.durationMin as number | undefined,
+      chosen.address,
+      locationChoice,
+      args.customerPhone as string | undefined,
+    );
+    return Array.isArray(move.slots) ? move.slots : utcSlots;
+  } catch {
+    // Diary read for the move failed; the unexcluded list still serves.
+    return utcSlots;
+  }
+}
+
+/**
  * ONE list, said two ways: the model is given the business's wall clock, the server keeps
  * the instants. Both come out of the same call, so the sentence the model writes and the
  * buttons the customer taps can no longer disagree - which is precisely what happened
@@ -591,33 +628,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      // Move targets read the diary WITHOUT the caller's own held row: a 09:30 target on
-      // their own 09:00-10:00 hold is busy against nobody but themselves, and guidance
-      // that says "a time missing from moveTargets is not free" must not lie about it.
-      // One extra read, only when the range holds exactly ONE of the caller's rows; the
-      // excluded id comes from this caller's own availability result, so no new authority.
-      // A failed read keeps the unexcluded slots: fewer targets, never wrong ones.
-      let moveSlots = utcSlots;
-      const heldRows = result.alreadyHeld ?? [];
-      if (heldRows.length === 1) {
-        try {
-          const move = await checkMoveAvailability(
-            'agent',
-            ctx.sessionId,
-            args.startDate as string,
-            args.endDate as string,
-            heldRows[0].bookingId,
-            args.serviceId as string | undefined,
-            args.durationMin as number | undefined,
-            chosen.address,
-            locationChoice,
-            args.customerPhone as string | undefined,
-          );
-          if (Array.isArray(move.slots)) moveSlots = move.slots;
-        } catch {
-          // Diary read for the move failed; the unexcluded list still serves.
-        }
-      }
+      const moveSlots = await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, ctx);
       const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone));
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);

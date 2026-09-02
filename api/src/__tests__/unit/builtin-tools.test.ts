@@ -30,7 +30,7 @@ vi.mock('../../booking/booking.service', () => ({
   rescheduleBooking: (...args: unknown[]) => mockRescheduleBooking(...args),
   cancelBooking: (...args: unknown[]) => mockCancelBooking(...args),
   updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
-  peekCustomerEmailRequired: (...args: unknown[]) => mockPeekCustomerEmailRequired(...args),
+  peekCustomerEmailRequired: mockPeekCustomerEmailRequired,
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;

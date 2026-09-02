@@ -135,6 +135,29 @@ function buildUserContent(message: string, images?: AgentImageInput[]): string |
 
 const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking', 'update_booking'];
 
+/**
+ * Notice/horizon refused the named time this run. Later availability is a list of
+ * alternatives, so the clock-only "already chose this hour" match must stand down.
+ */
+function absorbNamedTimeRefusal(tool: { name: string }, result: ToolResult, state: RunLoopState): void {
+  if (
+    tool.name === 'check_availability' &&
+    result.success &&
+    (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability'
+  ) {
+    state.namedTimeRefused = true;
+    return;
+  }
+  if (
+    BOOKING_MUTATION_TOOLS.includes(tool.name) &&
+    !result.success &&
+    typeof result.error === 'string' &&
+    result.error.startsWith('REQUEST_OUTSIDE_WINDOW:')
+  ) {
+    state.namedTimeRefused = true;
+  }
+}
+
 /** Broader than the hard output gate: future intent is useful for correcting the
  * model inside the Agent loop, but is not proof enough to replace a reply. */
 function claimsBookingForAgentNudge(text: string): boolean {
@@ -1997,17 +2020,7 @@ export class AgentService {
     // because a model handed a `Z` instant reads its digits out loud - so the chips, the
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
-    if (
-      (tool.name === 'check_availability' &&
-        result.success &&
-        (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability') ||
-      (BOOKING_MUTATION_TOOLS.includes(tool.name) &&
-        !result.success &&
-        typeof result.error === 'string' &&
-        result.error.startsWith('REQUEST_OUTSIDE_WINDOW:'))
-    ) {
-      state.namedTimeRefused = true;
-    }
+    absorbNamedTimeRefusal(tool, result, state);
 
     if (tool.name === 'check_availability' && result.success && result.availability) {
       this.absorbAvailability(toolCall, result, result.availability, ctx, state);

@@ -344,7 +344,7 @@ const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function dayPartFromClockPhrase(value: string): ClockWindow | undefined {
   if (!value || CLOCK.test(value) || value === '24:00') return undefined;
-  return dayPartWindow(value);
+  return dayPartWindow(value) ?? undefined;
 }
 
 function invalidClockWindowResult(from: string, to: string): ToolResult | null {

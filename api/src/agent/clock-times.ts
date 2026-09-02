@@ -24,7 +24,7 @@ export interface ClockTime {
 export function parseClockTimes(text: string): ClockTime[] {
   // `9:00`, `09:30`, `1:30 PM`, `13.00`, and — since 2026-08-13 — `9 AM` and `9a.m.`.
   // The meridiem alternatives are deliberately symmetric — `a.m.` / `a.m` OR `am`, never `am.`.
-  const found = [...text.matchAll(/\b(\d{1,2})(?:([:.uh])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
+  const found = [...text.matchAll(/\b(\d{1,2})(?:([:.])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
   const times: ClockTime[] = [];
   for (const m of found) {
     const suffix = (m[4] ?? '').toLowerCase().replace(/\./g, '');
@@ -229,7 +229,7 @@ const WEEKDAY_ALT = Object.keys(WEEKDAY_NUMBER)
 
 const DAY_MONTH = new RegExp(`\\b(\\d{1,2})\\s+(${MONTH_ALT})(?:\\s+(\\d{4}))?\\b`, 'gi');
 const MONTH_DAY = new RegExp(`\\b(${MONTH_ALT})\\s+(\\d{1,2})(?:\\s*,\\s*|\\s+)(\\d{4})?\\b`, 'gi');
-const NUMERIC_DATE = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/g;
+const NUMERIC_DATE = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g;
 const ISO_DATE = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
 const WEEKDAY = new RegExp(`\\b(${WEEKDAY_ALT})\\b`, 'gi');
 
@@ -252,7 +252,7 @@ export function namesPendingDateAndClock(text: string, startTime: string): boole
   const wantClock = pending.toFormat('HH:mm');
   const wantDate = pending.toFormat('yyyy-MM-dd');
   const wantWeekday = pending.weekday;
-  if (!parseClockTimes(text).some((t) => t.key === wantClock)) return false;
+  if (!parseClockTimes(text.replace(/\b(\d{1,2})[uh](\d{2})\b/gi, '$1:$2')).some((t) => t.key === wantClock)) return false;
   const dates = parseCalendarDates(text, pending.year);
   const weekdays = parseWeekdays(text);
   if (dates.length === 0 && weekdays.length === 0) return false;

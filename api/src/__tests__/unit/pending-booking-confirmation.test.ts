@@ -237,6 +237,7 @@ describe('summaryWasAsked', () => {
     'Shall I book Monday 26 October 2026 at 10:00?',
     'Confirmer le rendez-vous le 26 octobre 2026 à 10h00 ?',
     'Zal ik boeken op 26/10/2026 om 10:00?',
+    'Zal ik boeken op maandag 26 oktober 09:30-10:00?',
   ])('accepts %s', (summary) => {
     expect(
       summaryWasAsked(

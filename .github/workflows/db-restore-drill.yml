@@ -4,6 +4,9 @@ name: Database Restore Drill
 # the runner dies and the data is gone. Do not upload the dump as an artifact:
 # this repository is public.
 on:
+  schedule:
+    # Mondays 04:00 UTC, after both nightly dumps.
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 jobs:
@@ -80,3 +83,80 @@ jobs:
       - name: Delete dump from runner
         if: always()
         run: rm -f "$KEY" dump.err
+
+  restore-nonprod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [staging, dev]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: drill
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: restore_drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drill -d restore_drill"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Pull pg_dump image
+        run: docker pull postgres:17
+
+      - name: Fetch latest dump from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          KEY=$(aws s3 ls "s3://chatbot-db-backups/nonprod/${{ matrix.env }}/" --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' | grep -E "^backup_axentrio_${{ matrix.env }}_.+\.sql\.gz$" | sort | tail -n 1)
+          if [ -z "$KEY" ]; then
+            echo "::error::No backup_axentrio_${{ matrix.env }}_*.sql.gz object in chatbot-db-backups/nonprod/${{ matrix.env }}/"
+            exit 1
+          fi
+          aws s3 cp "s3://chatbot-db-backups/nonprod/${{ matrix.env }}/$KEY" "$KEY" --endpoint-url "$R2_ENDPOINT"
+          SIZE=$(stat -c%s "$KEY")
+          echo "Fetched $KEY ($SIZE bytes)"
+          echo "KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Restore into throwaway database
+        env:
+          PGPASSWORD: drill
+        run: |
+          set -euo pipefail
+          gunzip -c "$KEY" | docker run --rm -i --network host \
+            -e PGPASSWORD \
+            postgres:17 \
+            psql -h 127.0.0.1 -U drill -d restore_drill -v ON_ERROR_STOP=1 --quiet
+
+      - name: Sanity-check schema
+        env:
+          PGPASSWORD: drill
+        run: |
+          set -euo pipefail
+          docker run --rm --network host -e PGPASSWORD postgres:17 \
+            psql -h 127.0.0.1 -U drill -d restore_drill -v ON_ERROR_STOP=1 \
+            -c "SELECT count(*) AS public_tables FROM pg_tables WHERE schemaname = 'public';" \
+            -c "SELECT to_regclass('public.tenants') AS tenants_table;" \
+            -c "SELECT to_regclass('public.chat_sessions') AS chat_sessions_table;"
+          TABLES=$(docker run --rm --network host -e PGPASSWORD postgres:17 \
+            psql -h 127.0.0.1 -U drill -d restore_drill -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname = 'public';")
+          if [ "${TABLES:-0}" -lt 5 ]; then
+            echo "::error::Restore looks empty (public tables=$TABLES)"
+            exit 1
+          fi
+          echo "Restore ok: ${TABLES} public tables"
+
+      - name: Delete dump from runner
+        if: always()
+        run: rm -f "$KEY"

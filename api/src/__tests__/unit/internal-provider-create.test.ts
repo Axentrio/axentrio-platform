@@ -391,6 +391,31 @@ describe('InternalProvider.createBooking', () => {
     expect(res.alreadyHeld).toBeUndefined();
   });
 
+  it('filters slots to the requested clock window before travel', async () => {
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, undefined, { from: '10:00', to: '24:00' },
+    );
+    expect(res.slots.map((s: { start: string }) => s.start)).toEqual([
+      '2026-06-10T08:00:00.000Z',
+      '2026-06-10T08:30:00.000Z',
+    ]);
+    expect(res.clockWindow).toEqual({ from: '10:00', to: '24:00', matched: true });
+  });
+
+  it('returns the whole day with matched:false when the window is empty', async () => {
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, undefined, { from: '12:00', to: '24:00' },
+    );
+    expect(res.slots.map((s: { start: string }) => s.start)).toEqual([
+      '2026-06-10T07:00:00.000Z',
+      '2026-06-10T07:30:00.000Z',
+      '2026-06-10T08:00:00.000Z',
+      '2026-06-10T08:30:00.000Z',
+    ]);
+    expect(res.clockWindow).toEqual({ from: '12:00', to: '24:00', matched: false });
+    expect(res.emptyRange).toBeUndefined();
+  });
+
   it('drops the excluded booking\'s own mirrored calendar event from busy', async () => {
     // The mirror sits in Google at the booking's exact interval, and excludeBookingId only
     // covers the internal row. Without this exclusion every target overlapping the

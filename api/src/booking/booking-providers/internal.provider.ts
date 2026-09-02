@@ -37,6 +37,7 @@ import {
   BookingExtras,
   ListBookingsResult,
   AvailabilityResult,
+  ClockWindow,
   TravelFilterSummary,
   CreateBookingResult,
   RescheduleResult,
@@ -117,7 +118,7 @@ import {
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
-import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, slotsInClockWindow } from './booking-dates';
 import {
   resolveDuration,
   assertDurationChosen,
@@ -364,6 +365,7 @@ export class InternalProvider implements BookingProvider {
     customerAddress?: string,
     locationChoice?: 'business' | 'customer',
     customerPhone?: string,
+    clockWindow?: ClockWindow,
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -477,6 +479,11 @@ export class InternalProvider implements BookingProvider {
       serviceDayLedger,
     };
     const slots = computeSlots(engineInput);
+    // Filtered HERE, ahead of travel: the enforce path clears the first 20 slots and stops, so a
+    // window applied after it would find nothing but the morning it was asked to skip.
+    const inWindow = clockWindow ? slotsInClockWindow(slots, clockWindow, rule.timezone) : slots;
+    const windowMatched = inWindow.length > 0;
+    const offerable = clockWindow && !windowMatched ? slots : inWindow;
     // WHY nothing came back, when the reason is this owner's notice, horizon, or service
     // daily cap, and not a full or closed diary. Only on the path that produced nothing, and
     // it costs no query: it re-runs the pure engine over the busy data already in hand.
@@ -490,7 +497,7 @@ export class InternalProvider implements BookingProvider {
       service,
       itineraryKey,
       rule,
-      slots,
+      slots: offerable,
       rangeStart,
       rangeEnd,
       customerAddress,
@@ -524,6 +531,7 @@ export class InternalProvider implements BookingProvider {
             })),
           }
         : {}),
+      ...(clockWindow ? { clockWindow: { ...clockWindow, matched: windowMatched } } : {}),
     };
   }
 

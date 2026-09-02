@@ -25,7 +25,7 @@ import {
   getOwnedBot,
   getOwnedBotConfig,
 } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch } from './booking-providers/types';
+import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, type ClockWindow } from './booking-providers/types';
 import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { findBookableService } from './booking-providers/find-bookable-service';
@@ -160,13 +160,14 @@ export async function checkAvailability(
   customerAddress?: string,
   locationChoice?: 'business' | 'customer',
   customerPhone?: string,
+  clockWindow?: ClockWindow,
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   // `excludeBookingId` stays undefined here: this entry point is a NEW booking. The reschedule
   // picker has its own function below, which passes both it and the address on the row.
   return internalProvider.checkAvailability(
-    ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress, locationChoice, customerPhone,
+    ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress, locationChoice, customerPhone, clockWindow,
   );
 }
 
@@ -188,11 +189,12 @@ export async function checkMoveAvailability(
   customerAddress?: string,
   locationChoice?: 'business' | 'customer',
   customerPhone?: string,
+  clockWindow?: ClockWindow,
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   return internalProvider.checkAvailability(
-    ctx, startDate, endDate, serviceId, durationMin, excludeBookingId, customerAddress, locationChoice, customerPhone,
+    ctx, startDate, endDate, serviceId, durationMin, excludeBookingId, customerAddress, locationChoice, customerPhone, clockWindow,
   );
 }
 

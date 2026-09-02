@@ -3,7 +3,7 @@
  * timezone, never the server's.
  */
 import { DateTime } from 'luxon';
-import { BookingError } from './types';
+import { BookingError, type ClockWindow } from './types';
 import { luxonBookingDisplayFormat } from '../../contracts/clock-format';
 
 /**
@@ -100,4 +100,16 @@ export function retryRange(
   // too_soon and service_day_full: a week forward from the bound (earliest start, or the
   // day after the capped-out one).
   return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
+}
+
+/** Slots whose business-local start clock lies in `[from, to)`. Zero-padded "HH:mm" compares as text. */
+export function slotsInClockWindow<T extends { start: string }>(
+  slots: T[],
+  window: ClockWindow,
+  timezone: string,
+): T[] {
+  return slots.filter((s) => {
+    const clock = DateTime.fromISO(s.start, { zone: timezone }).toFormat('HH:mm');
+    return clock >= window.from && clock < window.to;
+  });
 }

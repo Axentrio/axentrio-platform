@@ -418,8 +418,43 @@ describe('CheckAvailabilityTool', () => {
       slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }],
       timezone: 'Europe/Brussels',
     });
-    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone, then clock window.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined, undefined, undefined);
+  });
+
+  it("passes the customer's part of day to the diary", async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T10:00:00.000Z', end: '2026-09-03T10:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute({ startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: '12:00' }, makeCtx());
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '24:00' });
+  });
+
+  it('refuses a malformed window', async () => {
+    const tool = new CheckAvailabilityTool();
+    const result = await tool.execute(
+      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'afternoon' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/^INVALID_TIME_WINDOW/);
+    expect(mockCheckAvailability).not.toHaveBeenCalled();
+  });
+
+  it('says the window was full and offers the other times', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T07:00:00.000Z', end: '2026-09-03T07:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      clockWindow: { from: '12:00', to: '24:00', matched: false },
+    });
+    const result = await tool.execute({ startDate: '2026-09-03', endDate: '2026-09-03' }, makeCtx());
+    expect(result.success).toBe(true);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/between 12:00 and 24:00/);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/Do NOT capture a request/);
+    expect(result.availability?.slots).toHaveLength(1);
   });
 
   it('tells the model not to re-offer hours when the customer already named a free time', async () => {

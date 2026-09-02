@@ -18,6 +18,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 import type {
   AvailabilityResult,
+  ClockWindow,
   CreateBookingResult,
   EmptyRangeDiagnosis,
   TravelFilterSummary,
@@ -231,6 +232,11 @@ const NAMED_TIME_AFTER_YES =
  */
 const NAMED_TIME_UNAVAILABLE_GUIDANCE =
   'That time is NOT in "slots", so it cannot be booked - the appointment length, the buffers around it, or another appointment rules it out. Never tell the customer it is available and never invent a time that is not in "slots": say plainly that it cannot be done, and offer the times in "slots" instead.';
+const WINDOW_MISSED_OFFER = (w: ClockWindow) =>
+  `No free time starts between ${w.from} and ${w.to} on the requested date(s). "slots" holds the OTHER free times of those dates. Tell the customer plainly that the part of the day they asked for is full on those dates, offer these times, and offer to check another date for that part of the day.`;
+const WINDOW_MISSED_GUIDANCE = (w: ClockWindow) =>
+  `${WINDOW_MISSED_OFFER(w)} Do NOT capture a request: this service books automatically.`;
+
 
 function lastCustomerText(ctx: ToolContext): string {
   const history = ctx.conversationHistory;
@@ -306,9 +312,35 @@ function namedTimeGuidance(
 type AvailabilityModel = Omit<AvailabilityResult, 'grouping' | 'emptyRange'>;
 type AvailabilitySlots = AvailabilityResult['slots'];
 
+function windowNote(
+  result: AvailabilityModel,
+  utcSlots: AvailabilitySlots,
+  allowRequest = false,
+): { guidance?: string } {
+  const w = result.clockWindow;
+  if (!(w && !w.matched && utcSlots.length > 0)) return {};
+  return { guidance: allowRequest ? WINDOW_MISSED_OFFER(w) : WINDOW_MISSED_GUIDANCE(w) };
+}
+
 /** The only two location choices the schema accepts; anything else is "not stated". */
 function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined {
   return value === 'business' || value === 'customer' ? value : undefined;
+}
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** Both bounds optional; an absent bound is the edge of the day. Returns undefined when neither is given. */
+function clockWindowArg(args: Record<string, unknown>): ClockWindow | undefined | ToolResult {
+  const from = typeof args.earliestTime === 'string' ? args.earliestTime.trim() : '';
+  const to = typeof args.latestTime === 'string' ? args.latestTime.trim() : '';
+  if (!from && !to) return undefined;
+  if ((from && !CLOCK.test(from)) || (to && !CLOCK.test(to) && to !== '24:00') || (from && to && from >= to)) {
+    return {
+      success: false,
+      error: 'INVALID_TIME_WINDOW: earliestTime and latestTime must be business-local "HH:mm" with earliestTime before latestTime. Call again with corrected values or omit them.',
+      errorSafeForModel: true,
+    };
+  }
+  return { from: from || '00:00', to: to || '24:00' };
 }
 
 /**
@@ -415,6 +447,7 @@ async function slotsForMove(
   args: Record<string, unknown>,
   chosen: TurnAddress,
   locationChoice: 'business' | 'customer' | undefined,
+  window: ClockWindow | undefined,
   ctx: ToolContext,
 ): Promise<AvailabilitySlots> {
   if (held?.length !== 1) return utcSlots;
@@ -430,6 +463,7 @@ async function slotsForMove(
       chosen.address,
       locationChoice,
       args.customerPhone as string | undefined,
+      window,
     );
     return Array.isArray(move.slots) ? move.slots : utcSlots;
   } catch {
@@ -577,6 +611,16 @@ export class CheckAvailabilityTool implements ToolAdapter {
         description:
           "The customer's contact phone number. Required if the SERVICES entry flags 'needs phone'. Calling without it returns PHONE_REQUIRED: ask for the number and call again. Do not treat that as the service being unavailable.",
       },
+      earliestTime: {
+        type: 'string',
+        description:
+          "Earliest start the customer will accept, business-local 24h \"HH:mm\". Set it whenever they named a part of the day: afternoon = \"12:00\", evening = \"17:00\", \"after 3pm\" = \"15:00\". Omit when they named an exact time or said nothing about the time of day.",
+      },
+      latestTime: {
+        type: 'string',
+        description:
+          "Latest start the customer will accept, business-local 24h \"HH:mm\" (exclusive). morning = \"12:00\", \"before 4pm\" = \"16:00\". Omit when they named an exact time or said nothing about the time of day.",
+      },
     },
     required: ['startDate', 'endDate'],
   };
@@ -593,6 +637,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.customerAddress as string | undefined
       );
       const locationChoice = locationChoiceArg(args.locationChoice);
+      const window = clockWindowArg(args);
+      if (window && 'success' in window) return window;
       const full = await checkAvailability(
         'agent',
         ctx.sessionId,
@@ -603,6 +649,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.address,
         locationChoice,
         args.customerPhone as string | undefined,
+        window,
       );
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
@@ -629,7 +676,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      const moveSlots = await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, ctx);
+      const moveSlots = await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx);
       const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone));
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
@@ -697,7 +744,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             ...groupedNote,
             ...addressEcho(chosen.address),
             suggestedAction: 'request_appointment',
-            guidance: travelGuidance(travel),
+            guidance: [windowNote(result, utcSlots, true).guidance, travelGuidance(travel)].filter(Boolean).join(' '),
           }),
         };
       }
@@ -763,7 +810,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       }
       return {
         success: true,
-        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address) }),
+        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address), ...windowNote(result, utcSlots) }),
         ...measurement,
         ...availability,
         ...affordance,

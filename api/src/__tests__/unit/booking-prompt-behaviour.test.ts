@@ -1211,7 +1211,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     expect(res.success).toBe(true);
     expect(checkMoveAvailability).toHaveBeenCalledWith(
       'agent', 'cs-1', '2026-09-08', '2026-09-08', 'bk-mine',
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined,
     );
     const data = res.data as Record<string, unknown>;
     expect(data.suggestedAction).toBe('confirm_existing');

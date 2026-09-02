@@ -238,6 +238,8 @@ describe('summaryWasAsked', () => {
     'Confirmer le rendez-vous le 26 octobre 2026 à 10h00 ?',
     'Zal ik boeken op 26/10/2026 om 10:00?',
     'Zal ik boeken op maandag 26 oktober 09:30-10:00?',
+    // "elke dag 09:00-17:00" must not name a foreign date: a hyphen is not a date separator.
+    'Wij werken elke dag 09:00-17:00. Zal ik boeken op maandag 26 oktober om 10:00?',
   ])('accepts %s', (summary) => {
     expect(
       summaryWasAsked(

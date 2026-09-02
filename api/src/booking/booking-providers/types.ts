@@ -422,6 +422,8 @@ export interface BookingExtras {
    * calendar with no context at all.
    */
   aiSummary?: string;
+  /** ISO 639-1 code of the chat language; normalized and stored as `customer_language`. */
+  language?: string;
 }
 
 export interface BookingProvider {

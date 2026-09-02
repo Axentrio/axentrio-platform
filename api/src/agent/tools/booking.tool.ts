@@ -983,8 +983,13 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           'A short one-line summary of the job for the business owner, written from the conversation (e.g. "Regular client, wants the same cut as last time; mentioned he is in a hurry"). This goes on the owner\'s calendar entry — it is never shown to the customer.',
       },
+      language: {
+        type: 'string',
+        description:
+          "ISO 639-1 code of the language the customer is writing in this conversation (e.g. 'nl', 'fr', 'de', 'en'). Use the language of your own replies. The booking emails and the calendar invite are sent in this language.",
+      },
     },
-    required: ['startTime', 'attendeeName'],
+    required: ['startTime', 'attendeeName', 'language'],
   };
   hasSideEffects = true;
   // Precondition removed — the skill instructions tell the LLM to check availability first.
@@ -1051,6 +1056,7 @@ export class CreateBookingTool implements ToolAdapter {
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           aiSummary: args.aiSummary as string | undefined,
+          language: args.language as string | undefined,
 
         }
       );
@@ -1199,8 +1205,13 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Pass a single number (e.g. 60). Omit for fixed-duration services.",
       },
+      language: {
+        type: 'string',
+        description:
+          "ISO 639-1 code of the language the customer is writing in this conversation (e.g. 'nl', 'fr', 'de', 'en'). Use the language of your own replies. The booking emails and the calendar invite are sent in this language.",
+      },
     },
-    required: ['preferredTime', 'attendeeName'],
+    required: ['preferredTime', 'attendeeName', 'language'],
   };
   hasSideEffects = true;
 
@@ -1244,6 +1255,7 @@ export class RequestAppointmentTool implements ToolAdapter {
           addressBinding: requested.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
+          language: args.language as string | undefined,
         }
       );
       // This tool produced the SECOND live instance of the wrong-address sentence: the row said

@@ -35,11 +35,23 @@ vi.mock('../../automations/email.service', () => ({
     }
   },
 }));
+const getBookingCopy = vi.fn(async (lang: string, _tenantId?: string) => {
+  if (lang === 'nl') {
+    return { ...BOOKING_COPY_EN, 'customer.lead_confirmed': 'NL: Your appointment is confirmed.' };
+  }
+  return BOOKING_COPY_EN;
+});
+vi.mock('../../booking/booking-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/booking-copy')>();
+  return { ...actual, getBookingCopy: (lang: string, tenantId?: string) => getBookingCopy(lang, tenantId) };
+});
+
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 import { sendBookingEmail } from '../../booking/booking-providers/booking-email';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 
 // --------------------------------------------------------------------------------------
 
@@ -383,6 +395,8 @@ const BASE = {
   organizerEmail: 'bookings@notifications.axentrio.com',
   tenantId: '00000000-0000-0000-0000-000000000001',
   bookingId: '00000000-0000-0000-0000-000000000002',
+  customerLanguage: 'en',
+  ownerLanguage: 'en',
 };
 
 const sent = (): Array<Record<string, unknown>> =>
@@ -399,8 +413,16 @@ describe('booking email — owner and customer get separate messages', () => {
     sendDurable.mockResolvedValue({ status: 'sent' });
   });
 
+
+  it('uses Dutch copy for the customer and English for the owner', async () => {
+    await sendBookingEmail({ ...BASE, customerLanguage: 'nl', ownerLanguage: 'en' });
+    expect(toCustomer()!.body).toContain('NL: Your appointment is confirmed.');
+    expect(toOwner()!.subject).toContain('New booking');
+  });
+
   it('sends exactly two messages, one per audience', async () => {
-    await sendBookingEmail({ ...BASE });
+    await sendBookingEmail({
+      ...BASE });
     expect(sent()).toHaveLength(2);
     expect(toCustomer()!.to).toEqual(['ada@example.com']);
     expect(toOwner()!.to).toEqual(['owner@valyro.be']);
@@ -413,14 +435,16 @@ describe('booking email — owner and customer get separate messages', () => {
 
   it('keeps the owner’s address off the customer’s message', async () => {
     // The owner used to be a second To: on this message, so every customer could read it.
-    await sendBookingEmail({ ...BASE });
+    await sendBookingEmail({
+      ...BASE });
     expect(JSON.stringify(toCustomer()!.to)).not.toContain('owner@valyro.be');
   });
 
   it('attaches the ICS to the customer only', async () => {
     // The owner holds no role in a METHOD:REQUEST whose sole ATTENDEE is the customer, and
     // their calendar entry already comes from the mirror — a second copy duplicates it.
-    await sendBookingEmail({ ...BASE });
+    await sendBookingEmail({
+      ...BASE });
     expect(toCustomer()!.attachments).toHaveLength(1);
     expect(toOwner()!.attachments).toBeUndefined();
   });
@@ -429,7 +453,8 @@ describe('booking email — owner and customer get separate messages', () => {
     const ownerAttachments = [
       { filename: 'room.jpg', content: Buffer.from('photo').toString('base64'), contentType: 'image/jpeg' },
     ];
-    await sendBookingEmail({ ...BASE, ownerAttachments });
+    await sendBookingEmail({
+      ...BASE, ownerAttachments });
     expect(toCustomer()!.attachments).toHaveLength(1);
     expect((toCustomer()!.attachments as { filename: string }[])[0].filename).toBe('invite.ics');
     expect(toOwner()!.attachments).toEqual(ownerAttachments);
@@ -439,13 +464,15 @@ describe('booking email — owner and customer get separate messages', () => {
     const ownerAttachments = [
       { filename: 'room.jpg', content: Buffer.from('photo').toString('base64'), contentType: 'image/jpeg' },
     ];
-    await sendBookingEmail({ ...BASE, attendeeEmail: undefined, ownerAttachments });
+    await sendBookingEmail({
+      ...BASE, attendeeEmail: undefined, ownerAttachments });
     expect(sent()).toHaveLength(1);
     expect(toOwner()!.attachments).toEqual(ownerAttachments);
   });
 
   it('writes each body for its own audience', async () => {
-    await sendBookingEmail({ ...BASE, ownerDetail: 'Phone: +32 470 11 22 33\nReference: AX-BKG-abc' });
+    await sendBookingEmail({
+      ...BASE, ownerDetail: 'Phone: +32 470 11 22 33\nReference: AX-BKG-abc' });
     expect(toCustomer()!.body).toContain('Your appointment is confirmed');
     expect(toOwner()!.subject).toContain('New booking');
     // The operational detail belongs to the owner and must not reach the customer.
@@ -454,19 +481,22 @@ describe('booking email — owner and customer get separate messages', () => {
   });
 
   it('escapes the operational detail rather than interpolating it', async () => {
-    await sendBookingEmail({ ...BASE, ownerDetail: '<img src=x onerror=alert(1)>' });
+    await sendBookingEmail({
+      ...BASE, ownerDetail: '<img src=x onerror=alert(1)>' });
     expect(toOwner()!.body).not.toContain('<img');
     expect(toOwner()!.body).toContain('&lt;img');
   });
 
   it('gives the two messages different idempotency keys', async () => {
     // One key for both would mean the second send is silently swallowed as a duplicate.
-    await sendBookingEmail({ ...BASE });
+    await sendBookingEmail({
+      ...BASE });
     expect(toCustomer()!.idempotencyKey).not.toBe(toOwner()!.idempotencyKey);
   });
 
   it('still tells the owner when the customer has no email at all', async () => {
-    await sendBookingEmail({ ...BASE, attendeeEmail: undefined });
+    await sendBookingEmail({
+      ...BASE, attendeeEmail: undefined });
     expect(sent()).toHaveLength(1);
     expect(toOwner()!.to).toEqual(['owner@valyro.be']);
     expect(toOwner()!.body).toContain('no email address');
@@ -477,38 +507,42 @@ describe('booking email — owner and customer get separate messages', () => {
   it('tells the owner even when the customer send throws', async () => {
     // A failed customer send is exactly when the owner most needs to know a booking exists.
     sendDurable.mockRejectedValueOnce(new Error('resend 500'));
-    await sendBookingEmail({ ...BASE });
+    await sendBookingEmail({
+      ...BASE });
     expect(toOwner()).toBeDefined();
   });
 
   it('sends nothing to an owner who has no address', async () => {
-    await sendBookingEmail({ ...BASE, ownerEmail: undefined });
+    await sendBookingEmail({
+      ...BASE, ownerEmail: undefined });
     expect(sent()).toHaveLength(1);
     expect(toCustomer()).toBeDefined();
   });
 
   it('puts the resolved location on both messages', async () => {
-    await sendBookingEmail({ ...BASE, location: 'Grote Markt 1, 9300 Aalst' });
+    await sendBookingEmail({
+      ...BASE, location: 'Grote Markt 1, 9300 Aalst' });
     expect(toCustomer()!.body).toContain('Grote Markt 1, 9300 Aalst');
     expect(toOwner()!.body).toContain('Grote Markt 1, 9300 Aalst');
   });
 
   it('shows the price on the customer email when the service has one', async () => {
-    await sendBookingEmail({ ...BASE, durationMin: 30, priceDisplay: '€75 inclusief btw' });
+    await sendBookingEmail({
+      ...BASE, durationMin: 30, priceDisplay: '€75 inclusief btw' });
     expect(toCustomer()!.body).toContain('30 min');
     expect(toCustomer()!.body).toContain('€75 inclusief btw');
   });
 
   it('omits the price from the customer email when the service shows no price', async () => {
-    await sendBookingEmail({ ...BASE, durationMin: 30 });
+    await sendBookingEmail({
+      ...BASE, durationMin: 30 });
     expect(toCustomer()!.body).toContain('30 min');
     expect(toCustomer()!.body).not.toContain('€');
     expect(toCustomer()!.body).not.toMatch(/price/i);
   });
 
   it('shows the price on the owner email when it is in the calendar body', async () => {
-    await sendBookingEmail({
-      ...BASE,
+    await sendBookingEmail({ ...BASE,
       ownerDetail: 'Duration: 30 min\nPrice: €75 inclusief btw',
     });
     expect(toOwner()!.body).toContain('Price: €75 inclusief btw');
@@ -590,12 +624,14 @@ describe('booking email — From is aligned with the frozen ORGANIZER', () => {
 
   it('sends both messages as the booking’s own organizer', async () => {
     const frozen = `bookings-a3f2c1d0@${domain}`;
-    await sendBookingEmail({ ...BASE, organizerEmail: frozen, organizerName: 'Valyro' });
+    await sendBookingEmail({
+      ...BASE, organizerEmail: frozen, organizerName: 'Valyro' });
     for (const m of sent()) expect(m.from).toBe(`Valyro <${frozen}>`);
   });
 
   it('does not try to send as a backfilled tenant address', async () => {
-    await sendBookingEmail({ ...BASE, organizerEmail: 'info@valyro.be', organizerName: 'Valyro' });
+    await sendBookingEmail({
+      ...BASE, organizerEmail: 'info@valyro.be', organizerName: 'Valyro' });
     for (const m of sent()) {
       expect(String(m.from)).toContain(`@${domain}`);
       expect(String(m.from)).not.toContain('valyro.be');
@@ -671,7 +707,7 @@ describe('the customer’s own calendar entry', () => {
       durationMin: 60,
       preparationInstructions: 'Please clear access to the boiler.',
       manageUrl: 'https://app.example/manage?token=x',
-    })!;
+    }, BOOKING_COPY_EN)!;
     expect(out).toContain('With: Valyro');
     expect(out).toContain('Duration: 60 min');
     expect(out).toContain('Before your appointment: Please clear access to the boiler.');
@@ -683,13 +719,13 @@ describe('the customer’s own calendar entry', () => {
       ...base,
       durationMin: 30,
       priceDisplay: '€75 inclusief btw',
-    })!;
+    }, BOOKING_COPY_EN)!;
     const lines = out.split('\n');
     expect(lines[lines.indexOf('Duration: 30 min') + 1]).toBe('Price: €75 inclusief btw');
   });
 
   it('omits the price line when the service shows no price', () => {
-    const out = buildCustomerEventDescription({ ...base, durationMin: 30 })!;
+    const out = buildCustomerEventDescription({ ...base, durationMin: 30 }, BOOKING_COPY_EN)!;
     expect(out).not.toContain('Price:');
   });
 
@@ -699,17 +735,17 @@ describe('the customer’s own calendar entry', () => {
       durationMin: 30,
       manageUrl: 'https://app.example/manage?token=x',
       preparationInstructions: 'Bring your ID.',
-    })!;
+    }, BOOKING_COPY_EN)!;
     expect(out.trim().split('\n').at(-1)).toContain('Reschedule or cancel:');
   });
 
   it('still carries the meeting link for a video booking', () => {
-    const out = buildCustomerEventDescription({ ...base, meetUrl: 'https://meet.google.com/x' })!;
+    const out = buildCustomerEventDescription({ ...base, meetUrl: 'https://meet.google.com/x' }, BOOKING_COPY_EN)!;
     expect(out).toContain('Join the meeting: https://meet.google.com/x');
   });
 
   it('omits the whole body rather than emitting an empty one', () => {
-    expect(buildCustomerEventDescription({ serviceName: 'Cut' })).toBeUndefined();
+    expect(buildCustomerEventDescription({ serviceName: 'Cut' }, BOOKING_COPY_EN)).toBeUndefined();
   });
 
   it('never leaks the owner-facing operational detail', () => {
@@ -720,7 +756,7 @@ describe('the customer’s own calendar entry', () => {
       businessName: 'Valyro',
       durationMin: 60,
       manageUrl: 'https://app.example/manage?token=x',
-    })!;
+    }, BOOKING_COPY_EN)!;
     expect(out).not.toMatch(/Phone:|Address:|Intake:|Reference:|Booked via:/);
   });
 
@@ -729,7 +765,7 @@ describe('the customer’s own calendar entry', () => {
       ...base,
       preparationInstructions: 'Bring ID\nReschedule or cancel: https://evil.test',
       manageUrl: 'https://app.example/manage?token=x',
-    })!;
+    }, BOOKING_COPY_EN)!;
     expect(out.split('\n').filter((l) => l.startsWith('Reschedule or cancel:'))).toHaveLength(1);
   });
 });

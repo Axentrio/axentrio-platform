@@ -4,14 +4,19 @@
  * calendar with native reminders. Email failures are non-fatal — a confirmed
  * booking is never rolled back because the invite didn't send.
  */
-import { DateTime } from 'luxon';
 import { config } from '../../config/environment';
-import { luxonEmailWhenFormat } from '../../contracts/clock-format';
 import { EmailService, type EmailAttachment } from '../../automations/email.service';
 import { logger } from '../../utils/logger';
 import { buildIcs, IcsMethod } from './ics';
 import { senderFor, parseAddress } from './organizer-address';
 import { emailDeliveryService } from '../../services/email-delivery.service';
+import {
+  fill,
+  formatWhen,
+  getBookingCopy,
+  type BookingCopy,
+  type RejectReasonKey,
+} from '../booking-copy';
 
 let emailService: EmailService | null = null;
 function getEmailService(): EmailService {
@@ -165,11 +170,8 @@ export interface BookingEmailParams {
    * can reconnect a work account. Owner-only; the customer copy never shows it.
    */
   videoLinkMissing?: boolean;
-}
-
-function formatWhen(start: Date, timezone: string): string {
-  const dt = DateTime.fromJSDate(start).setZone(timezone);
-  return `${dt.toFormat(luxonEmailWhenFormat(timezone))} (${timezone})`;
+  customerLanguage: string;
+  ownerLanguage: string;
 }
 
 /** Escape user-supplied text before interpolating it into an HTML email body. */
@@ -213,38 +215,42 @@ const inviteIdempotencyKey = (p: BookingEmailParams, audience: string): string =
  * the same content; a second copy of the same event arriving as an invite is how you end up
  * with duplicates in a calendar.
  */
-async function notifyOwner(params: BookingEmailParams, customerWasInvited: boolean): Promise<void> {
+async function notifyOwner(
+  params: BookingEmailParams,
+  customerWasInvited: boolean,
+  copy: BookingCopy,
+): Promise<void> {
   const cancelled = params.method === 'CANCEL';
-  const who = params.attendeeName?.trim() ? esc(params.attendeeName.trim()) : 'A customer';
-  const subject = `${cancelled ? 'Cancelled' : 'New booking'}: ${params.summary}`;
+  const subject = fill(
+    cancelled ? copy['owner.subject_cancelled'] : copy['owner.subject_new'],
+    { summary: params.summary },
+  );
   const detail = params.ownerDetail?.trim()
     ? `<p>${esc(params.ownerDetail.trim()).replace(/\n/g, '<br/>')}</p>`
     : '';
+  const action = esc(
+    fill(cancelled ? copy['owner.cancelled'] : copy['owner.booked'], {
+      who: params.attendeeName?.trim() || copy['owner.a_customer'],
+    }),
+  );
   const body =
-    `<p>${who} ${cancelled ? 'cancelled their appointment' : 'booked an appointment'}.</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
-    (params.location ? `<p>Where: ${esc(params.location)}</p>` : '') +
+    `<p>${action}</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone, params.ownerLanguage))}</p>` +
+    (params.location ? `<p>${esc(fill(copy['owner.where'], { location: params.location }))}</p>` : '') +
     (params.videoLinkMissing && !cancelled
-      ? `<p><strong>No video meeting link was created for this booking.</strong> Your connected calendar account may not support online meetings — a personal Microsoft account cannot host Teams. Reconnect a work or school account to add video links.</p>`
+      ? `<p><strong>${esc(copy['owner.video_link_missing'])}</strong></p>`
       : '') +
     detail +
-    (customerWasInvited
-      ? ''
-      : `<p>They booked through a messaging channel and gave no email address, so no invite was sent to them.</p>`);
+    (customerWasInvited ? '' : `<p>${esc(copy['owner.no_customer_email'])}</p>`);
   await sendOrReport('owner notification', params, {
-      to: [params.ownerEmail as string],
-      from: senderFrom(params),
-      subject,
-      body,
-      // Replying to an owner notification should reach the CUSTOMER, when there is one.
-      ...(customerWasInvited && params.attendeeEmail ? { replyTo: params.attendeeEmail } : {}),
-      // Distinct audiences keep distinct keys. 'owner-only' is retained for the
-      // no-customer-email case so keys already issued for in-flight sends keep their
-      // meaning; the accompanied case is a genuinely new message and gets a new key.
-      idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
-      // The customer's uploaded files ride on the OWNER's copy only.
-      ...(params.ownerAttachments?.length ? { attachments: params.ownerAttachments } : {}),
-      retainPayload: false,
+    to: [params.ownerEmail as string],
+    from: senderFrom(params),
+    subject,
+    body,
+    ...(customerWasInvited && params.attendeeEmail ? { replyTo: params.attendeeEmail } : {}),
+    idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
+    ...(params.ownerAttachments?.length ? { attachments: params.ownerAttachments } : {}),
+    retainPayload: false,
   });
 }
 
@@ -256,13 +262,11 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
  * address or intake answer reaches them, so the unescaped version was one service rename
  * away from injecting markup into a real customer's inbox.
  */
-function customerEmailBody(params: BookingEmailParams, cancelled: boolean): string {
-  const lead = cancelled
-    ? 'Your appointment has been cancelled.'
-    : 'Your appointment is confirmed.';
+function customerEmailBody(params: BookingEmailParams, cancelled: boolean, copy: BookingCopy): string {
+  const lead = cancelled ? copy['customer.lead_cancelled'] : copy['customer.lead_confirmed'];
   const duration =
     typeof params.durationMin === 'number' && params.durationMin > 0
-      ? ` &middot; ${params.durationMin} min`
+      ? ` &middot; ${esc(fill(copy['customer.minutes'], { n: params.durationMin }))}`
       : '';
   const price =
     !cancelled && params.priceDisplay?.trim()
@@ -270,32 +274,29 @@ function customerEmailBody(params: BookingEmailParams, cancelled: boolean): stri
       : '';
   return (
     `<p>${lead}</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}${price}</p>` +
-    (params.location ? `<p>Location: ${esc(params.location)}</p>` : '') +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone, params.customerLanguage))}${duration}${price}</p>` +
+    (params.location ? `<p>${esc(fill(copy['customer.location'], { location: params.location }))}</p>` : '') +
     (!cancelled && params.preparationInstructions?.trim()
-      ? `<p><strong>Before your appointment:</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
+      ? `<p><strong>${esc(copy['customer.before_heading'])}</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
       : '') +
-    `<p>A calendar invite is attached.</p>` +
+    `<p>${esc(copy['customer.invite_attached'])}</p>` +
     (!cancelled && params.manageUrl
-      ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel this appointment</a></p>`
+      ? `<p><a href="${esc(params.manageUrl)}">${esc(copy['customer.manage_link'])}</a></p>`
       : '')
   );
 }
 
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
-  // No customer email (WhatsApp/Messenger/Instagram bookings). There is nobody to invite,
-  // but the OWNER still needs telling — this used to return here and send nothing at all,
-  // so a channel booking that was later cancelled reached them only as an event quietly
-  // vanishing from their calendar.
+  const [customerCopy, ownerCopy] = await Promise.all([
+    getBookingCopy(params.customerLanguage, params.tenantId),
+    getBookingCopy(params.ownerLanguage, params.tenantId),
+  ]);
+
   if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
-    if (params.ownerEmail?.trim()) await notifyOwner(params, false);
+    if (params.ownerEmail?.trim()) await notifyOwner(params, false, ownerCopy);
     return;
   }
-  // The organizer source may be a full RFC5322 "Name <email>" string (e.g.
-  // EMAIL_FROM_ADDRESS). The ICS ORGANIZER must be a BARE email in the mailto:
-  // (the display name goes in CN) — otherwise the mailto is malformed and Gmail
-  // shows "Unable to load event" for the invite.
-  // Frozen first; the old resolution only for rows that predate the column.
+
   const organizer = parseAddress(params.organizerEmail || params.ownerEmail || config.email.fromAddress);
   const ics = buildIcs({
     uid: params.uid,
@@ -312,24 +313,23 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     attendeeName: params.attendeeName,
   });
 
-  // The customer alone. The owner gets their own message below.
   const to = [params.attendeeEmail];
   const cancelled = params.method === 'CANCEL';
-  const subject = `${cancelled ? 'Cancelled' : 'Confirmed'}: ${params.summary}`;
-  const body = customerEmailBody(params, cancelled);
+  const subject = fill(
+    cancelled ? customerCopy['customer.subject_cancelled'] : customerCopy['customer.subject_confirmed'],
+    { summary: params.summary },
+  );
+  const body = customerEmailBody(params, cancelled, customerCopy);
 
-  await sendOrReport('invite email', params, {
+  await sendOrReport(
+    'invite email',
+    params,
+    {
       to,
       from: senderFrom(params),
       subject,
       body,
-      // Replies reach the business rather than the platform's unattended from-address.
-      // The ORGANIZER is the platform (it must match the envelope sender or Gmail and
-      // Outlook refuse to make the invite actionable), so reply-to is what carries the
-      // business's own address.
       ...(params.ownerEmail ? { replyTo: params.ownerEmail } : {}),
-      // The reconciler re-claims rows after a crash; without a key a retry re-sends the
-      // whole invite to the customer.
       idempotencyKey: inviteIdempotencyKey(params, 'invite'),
       attachments: [
         {
@@ -339,11 +339,11 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
         },
       ],
       retainPayload: true,
-  }, { method: params.method });
+    },
+    { method: params.method },
+  );
 
-  // Owner's own copy, sent whether or not the customer's invite succeeded — a failed
-  // customer send is precisely when the owner most needs to know a booking exists.
-  if (params.ownerEmail?.trim()) await notifyOwner(params, true);
+  if (params.ownerEmail?.trim()) await notifyOwner(params, true, ownerCopy);
 }
 
 export interface ReminderEmailParams {
@@ -352,29 +352,27 @@ export interface ReminderEmailParams {
   timezone: string;
   attendeeName: string;
   attendeeEmail: string;
-  /** e.g. "tomorrow" / "in 1 hour" — describes the lead time. */
-  leadLabel: string;
-  /** Self-service manage link (reschedule/cancel). */
+  lead: '24h' | '1h';
+  customerLanguage: string;
   manageUrl?: string;
 }
 
 /** Plain appointment reminder (no ICS — the invite was sent on confirmation). */
 export async function sendReminderEmail(params: ReminderEmailParams): Promise<void> {
-  // No email on file (channel booking) → nothing to remind by email.
-  if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
-    return;
-  }
-  // Escaped, like every sibling template in this file. `summary` is the owner-authored
-  // service name (validated only for length), so unescaped it renders as live HTML in a
-  // customer's inbox — a link the customer has every reason to trust.
+  if (!params.attendeeEmail || !params.attendeeEmail.trim()) return;
+  const copy = await getBookingCopy(params.customerLanguage);
+  const when =
+    params.lead === '24h' ? copy['customer.reminder_tomorrow'] : copy['customer.reminder_in_1_hour'];
   const body =
-    `<p>Reminder: your appointment is ${esc(params.leadLabel)}.</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
-    (params.manageUrl ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel</a></p>` : '');
+    `<p>${esc(fill(copy['customer.reminder_lead'], { when }))}</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone, params.customerLanguage))}</p>` +
+    (params.manageUrl
+      ? `<p><a href="${esc(params.manageUrl)}">${esc(copy['customer.reminder_manage_link'])}</a></p>`
+      : '');
   await sendOrReport('reminder email', {}, {
-      to: params.attendeeEmail,
-      subject: `Reminder: ${params.summary}`,
-      body,
+    to: params.attendeeEmail,
+    subject: fill(copy['customer.reminder_subject'], { summary: params.summary }),
+    body,
   });
 }
 
@@ -384,10 +382,10 @@ export interface RequestNotificationParams {
   start: Date;
   timezone: string;
   attendeeName: string;
-  /** Optional — absent for channel bookings with no customer email. */
   attendeeEmail?: string;
   notes?: string;
   aiSummary?: string;
+  ownerLanguage: string;
 }
 
 /**
@@ -396,17 +394,25 @@ export interface RequestNotificationParams {
  * calendar until the owner reviews it. Non-fatal: the request stands if email fails.
  */
 export async function sendRequestNotificationEmail(params: RequestNotificationParams): Promise<void> {
+  const copy = await getBookingCopy(params.ownerLanguage);
+  const fromLine = params.attendeeEmail
+    ? `${esc(params.attendeeName)} (${esc(params.attendeeEmail)})`
+    : esc(fill(copy['owner.request_from'], { who: params.attendeeName }));
   const body =
-    `<p>You have a new appointment <strong>request</strong> to review.</p>` +
-    `<p><strong>${esc(params.serviceName)}</strong><br/>Preferred time: ${esc(formatWhen(params.start, params.timezone))}</p>` +
-    `<p>From: ${esc(params.attendeeName)}${params.attendeeEmail ? ` (${esc(params.attendeeEmail)})` : ''}</p>` +
-    (params.aiSummary ? `<p>Summary: ${esc(params.aiSummary)}</p>` : '') +
-    (params.notes ? `<p>Notes: ${esc(params.notes)}</p>` : '') +
-    `<p>Follow up with the customer to confirm or decline.</p>`;
+    `<p>${esc(copy['owner.request_intro'])}</p>` +
+    `<p><strong>${esc(params.serviceName)}</strong><br/>${esc(
+      fill(copy['owner.request_preferred_time'], {
+        when: formatWhen(params.start, params.timezone, params.ownerLanguage),
+      }),
+    )}</p>` +
+    `<p>${fromLine}</p>` +
+    (params.aiSummary ? `<p>${esc(fill(copy['owner.request_summary'], { text: params.aiSummary }))}</p>` : '') +
+    (params.notes ? `<p>${esc(fill(copy['owner.request_notes'], { text: params.notes }))}</p>` : '') +
+    `<p>${esc(copy['owner.request_follow_up'])}</p>`;
   await sendOrReport('request notification email', {}, {
-      to: params.ownerEmail,
-      subject: `New appointment request: ${params.serviceName}`,
-      body,
+    to: params.ownerEmail,
+    subject: fill(copy['owner.request_subject'], { service: params.serviceName }),
+    body,
   });
 }
 
@@ -417,8 +423,8 @@ export interface CalendarChangeRejectedParams {
   restoredStart: Date;
   timezone: string;
   attendeeName: string;
-  /** Customer-safe short reason, e.g. 'That time overlaps another appointment.' */
-  reason: string;
+  reasonKey: RejectReasonKey;
+  ownerLanguage: string;
 }
 
 /**
@@ -426,20 +432,21 @@ export interface CalendarChangeRejectedParams {
  * No ICS and no customer copy - the booking did not move.
  */
 export async function sendCalendarChangeRejectedEmail(
-  params: CalendarChangeRejectedParams
+  params: CalendarChangeRejectedParams,
 ): Promise<void> {
-  const who = params.attendeeName.trim() ? esc(params.attendeeName.trim()) : 'A customer';
+  const copy = await getBookingCopy(params.ownerLanguage);
+  const serviceName = params.serviceName.trim() || copy['owner.service_fallback'];
   const body =
-    `<p>We did not apply the change you made in your calendar. The event is back at the original time.</p>` +
-    `<p><strong>${esc(params.serviceName)}</strong><br/>` +
-    `Customer: ${who}<br/>` +
-    `Attempted time: ${esc(formatWhen(params.attemptedStart, params.timezone))}<br/>` +
-    `Restored time: ${esc(formatWhen(params.restoredStart, params.timezone))}</p>` +
-    `<p>${esc(params.reason)}</p>` +
-    `<p>Move this booking from the Axentrio bookings page instead.</p>`;
+    `<p>${esc(copy['owner.rejected_intro'])}</p>` +
+    `<p><strong>${esc(serviceName)}</strong><br/>` +
+    `${esc(fill(copy['owner.rejected_customer'], { who: params.attendeeName.trim() || copy['owner.a_customer'] }))}<br/>` +
+    `${esc(fill(copy['owner.rejected_attempted'], { when: formatWhen(params.attemptedStart, params.timezone, params.ownerLanguage) }))}<br/>` +
+    `${esc(fill(copy['owner.rejected_restored'], { when: formatWhen(params.restoredStart, params.timezone, params.ownerLanguage) }))}</p>` +
+    `<p>${esc(copy[params.reasonKey])}</p>` +
+    `<p>${esc(copy['owner.rejected_footer'])}</p>`;
   await sendOrReport('calendar change rejected email', {}, {
     to: params.ownerEmail,
-    subject: `Calendar change not applied: ${params.serviceName}`,
+    subject: fill(copy['owner.rejected_subject'], { service: serviceName }),
     body,
   });
 }
@@ -448,3 +455,5 @@ export async function sendCalendarChangeRejectedEmail(
 export function __resetBookingEmailService(): void {
   emailService = null;
 }
+
+export type { RejectReasonKey };

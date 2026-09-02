@@ -1718,6 +1718,23 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
   });
 
+  it('stores customer_language from extras.language', async () => {
+    await provider.createBooking(
+      ctx, 'idem-lang', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { language: 'nl-BE' }
+    );
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'customer_language')).toBe('nl');
+  });
+
+  it('falls back to bot default when extras.language is missing', async () => {
+    await provider.createBooking(
+      ctx, 'idem-lang-default', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
+    );
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'customer_language')).toBe('en');
+  });
+
   it('persists the model-written aiSummary on the CONFIRMED path', async () => {
     // The auto path hardcoded null for this; the request path always had it.
     await provider.createBooking(

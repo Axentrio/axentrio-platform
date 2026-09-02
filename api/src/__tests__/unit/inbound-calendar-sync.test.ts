@@ -278,7 +278,7 @@ describe('syncExternalCalendarChanges', () => {
     );
     expect(sendCalendarChangeRejectedEmail).toHaveBeenCalledWith(
       expect.objectContaining({
-        reason: 'That time overlaps another appointment, or falls outside your booking hours.',
+        reasonKey: 'owner.reason_slot_unavailable',
       })
     );
   });

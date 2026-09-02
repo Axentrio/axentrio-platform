@@ -47,6 +47,13 @@ import {
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
+import { getBookingCopy } from '../booking-copy';
+import {
+  customerLanguageFor,
+  normalizeLanguageCode,
+  resolveOwnerLanguage,
+} from '../booking-language';
+import { resolveBotLanguage } from '../../config/bot-language';
 import { formatServicePrice } from '../pricing/service-discount';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
@@ -1454,6 +1461,8 @@ export class InternalProvider implements BookingProvider {
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
     //    constraint is the last-line guard: a racing create gets 23P01.
     const icsUid = `${uuidv4()}@axentrio`;
+    const customerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
     let bookingId: string;
     try {
       bookingId = await AppDataSource.transaction(async (manager) => {
@@ -1497,10 +1506,10 @@ export class InternalProvider implements BookingProvider {
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
-              ai_summary, organizer_email, service_area_match,
+              ai_summary, organizer_email, customer_language, service_area_match,
               customer_place_id, customer_lat, customer_lng, customer_coords_at,
               customer_address_verified, geocode_precision, location_source, travel_check)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -1525,6 +1534,7 @@ export class InternalProvider implements BookingProvider {
             ctx.session?.channel ?? null,
             extras?.aiSummary ?? null,
             frozenOrganizerFor(ctx.tenant.id),
+            customerLanguage,
             // The gate above already passed, so this is 'inside' whenever it applied at all.
             areaMatch,
             // All null unless travel time is active for this Agent and the address placed to
@@ -1855,8 +1865,13 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { bookingId, service, rule, start, end, attendee, contact, extras, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
-    // The rich event body comes from the single P6a builder (ai_summary now flows on the auto
-    // path too — no value flows in here yet, the builder simply omits that line).
+    const storedCustomerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
+    const langs = await this.audienceLanguages(ctx, { customerLanguage: storedCustomerLanguage });
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
     const eventContent = buildBookingEventContent(
       {
         attendeeName: attendee.name,
@@ -1873,6 +1888,7 @@ export class InternalProvider implements BookingProvider {
       },
       { ...service, priceDisplay },
       buildManageUrl(bookingId),
+      ownerCopy,
     );
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
@@ -1925,17 +1941,19 @@ export class InternalProvider implements BookingProvider {
         locationChoice: extras?.locationChoice,
       }),
       // The CUSTOMER's copy — what they need, not the owner's operational detail.
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(bookingId),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
-      // The owner's copy says exactly what their calendar entry says.
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(bookingId),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
       ownerDetail: eventContent.description,
       timezone: rule.timezone,
       attendeeName: attendee.name,
@@ -1951,6 +1969,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
       tenantId: ctx.tenant.id,
       bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
   }
 
@@ -2025,6 +2045,8 @@ export class InternalProvider implements BookingProvider {
     await this.assertRequiredFile(ctx, service, uploadedFiles);
 
     let bookingId: string;
+    const requestCustomerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
     const requestAreaMatch = (await evaluateServiceArea(ctx, service, contact.address ?? null)).match;
     try {
       const rows = await AppDataSource.transaction(async (manager) => {
@@ -2035,10 +2057,10 @@ export class InternalProvider implements BookingProvider {
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
             source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files,
-            organizer_email, service_area_match,
+            organizer_email, customer_language, service_area_match,
             customer_place_id, customer_lat, customer_lng, customer_coords_at,
             customer_address_verified, geocode_precision, location_source, travel_check)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
            RETURNING id`,
           [
           ctx.tenant.id,
@@ -2061,6 +2083,7 @@ export class InternalProvider implements BookingProvider {
           bookedDurationMin ?? null,
           uploadedFiles ? JSON.stringify(uploadedFiles) : null,
           frozenOrganizerFor(ctx.tenant.id),
+          requestCustomerLanguage,
           // EVALUATED, never enforced. Capturing an out-of-area job is correct — refusing
           // one is the single outcome the prompt forbids — but capturing it silently is how
           // an owner turns work away for months without ever seeing it.
@@ -2334,8 +2357,8 @@ export class InternalProvider implements BookingProvider {
       return;
     }
     void (async () => {
-      // Canonical, server-owned business timezone — already on the resolved bot.
       const timezone = ctx.bot.businessTimezone || 'UTC';
+      const ownerLanguage = await resolveOwnerLanguage(ctx.tenant.id, ownerEmail);
       await sendRequestNotificationEmail({
         ownerEmail,
         serviceName: service.name,
@@ -2345,6 +2368,7 @@ export class InternalProvider implements BookingProvider {
         attendeeEmail: req.attendee.email,
         notes: req.notes,
         aiSummary: req.aiSummary,
+        ownerLanguage,
       });
     })();
   }
@@ -2686,7 +2710,11 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { bookingId, confirmed, service, start, end, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, input.timezone) || undefined;
-    // P6a rich body from the row.
+    const langs = await this.audienceLanguages(ctx, confirmed);
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
     const eventContent = buildBookingEventContent(
       {
         attendeeName: confirmed.attendeeName,
@@ -2702,7 +2730,8 @@ export class InternalProvider implements BookingProvider {
         uploadedFileCount: Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles.length : 0,
       },
       { ...service, priceDisplay },
-      buildManageUrl(bookingId)
+      buildManageUrl(bookingId),
+      ownerCopy,
     );
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
@@ -2752,17 +2781,19 @@ export class InternalProvider implements BookingProvider {
         venue,
       }),
       // The CUSTOMER's copy — what they need, not the owner's operational detail.
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(bookingId),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
-      // The owner's copy says exactly what their calendar entry says.
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(bookingId),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
       ownerDetail: eventContent.description,
       timezone: input.timezone,
       attendeeName: confirmed.attendeeName ?? '',
@@ -2778,6 +2809,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
       tenantId: ctx.tenant.id,
       bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
   }
 
@@ -3056,8 +3089,11 @@ export class InternalProvider implements BookingProvider {
     try {
       const rule = await this.loadRule(ctx.bot);
       const service = await this.serviceForBooking(booking);
+      const langs = await this.audienceLanguages(ctx, booking);
+      const [customerCopy] = await Promise.all([
+        getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      ]);
       const oldEmail = booking.attendeeEmail?.trim();
-      // No ownerEmail: a contact-detail edit must not send "New booking" to the business.
       if (oldEmail && oldEmail.toLowerCase() !== attendeeEmail.toLowerCase()) {
         await sendBookingEmail({
           method: 'CANCEL',
@@ -3073,6 +3109,8 @@ export class InternalProvider implements BookingProvider {
           organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
           tenantId: ctx.tenant.id,
           bookingId: booking.id,
+          customerLanguage: langs.customerLanguage,
+          ownerLanguage: langs.ownerLanguage,
         });
       }
       const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
@@ -3089,16 +3127,19 @@ export class InternalProvider implements BookingProvider {
           customerAddress: booking.customerAddress,
           venue,
         }),
-        description: buildCustomerEventDescription({
-          serviceName: service.name,
-          serviceDescription: service.description,
-          durationMin: booking.bookedDurationMin ?? service.durationMin,
-          meetUrl: null,
-          preparationInstructions: service.preparationInstructions,
-          manageUrl: buildManageUrl(booking.id),
-          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-          priceDisplay,
-        }),
+        description: buildCustomerEventDescription(
+          {
+            serviceName: service.name,
+            serviceDescription: service.description,
+            durationMin: booking.bookedDurationMin ?? service.durationMin,
+            meetUrl: null,
+            preparationInstructions: service.preparationInstructions,
+            manageUrl: buildManageUrl(booking.id),
+            businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+            priceDisplay,
+          },
+          customerCopy,
+        ),
         timezone: rule.timezone,
         attendeeName,
         attendeeEmail,
@@ -3110,6 +3151,8 @@ export class InternalProvider implements BookingProvider {
         priceDisplay,
         tenantId: ctx.tenant.id,
         bookingId: booking.id,
+        customerLanguage: langs.customerLanguage,
+        ownerLanguage: langs.ownerLanguage,
       });
     } catch (error) {
       logger.warn('[Booking] contact-update invite failed (non-fatal)', { bookingId: booking.id, error });
@@ -3119,6 +3162,16 @@ export class InternalProvider implements BookingProvider {
 
 
   /** Load a booking and verify it belongs to this tenant + bot (else 404). */
+  private async audienceLanguages(
+    ctx: BookingContext,
+    row: { customerLanguage?: string | null },
+  ): Promise<{ customerLanguage: string; ownerLanguage: string }> {
+    return {
+      customerLanguage: customerLanguageFor(row, ctx.botSettings),
+      ownerLanguage: await resolveOwnerLanguage(ctx.tenant.id, ctx.botSettings.ai?.supportEmail),
+    };
+  }
+
   private async loadOwned(ctx: BookingContext, bookingId: string): Promise<Booking> {
     const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
     if (!booking || booking.tenantId !== ctx.tenant.id || booking.botId !== ctx.bot.id) {
@@ -3359,9 +3412,9 @@ export class InternalProvider implements BookingProvider {
           start_utc, end_utc, blocked_range, calendar_key,
           attendee_name, attendee_email, notes, ics_uid,
           source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
-          organizer_email, related_booking_id, request_kind, service_area_match)
+          organizer_email, customer_language, related_booking_id, request_kind, service_area_match)
        VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
-               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING id`,
       [
         ctx.tenant.id,
@@ -3381,6 +3434,7 @@ export class InternalProvider implements BookingProvider {
         original.customerPhone ?? null,
         original.bookedDurationMin ?? null,
         original.organizerEmail ?? null,
+        original.customerLanguage ?? null,
         original.id,
         kind,
         areaMatch,
@@ -4180,6 +4234,11 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { booking, bookingId, service, rule, start, end, sequence, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
+    const langs = await this.audienceLanguages(ctx, booking);
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const rescheduledContent = buildBookingEventContent(
       {
@@ -4196,7 +4255,8 @@ export class InternalProvider implements BookingProvider {
         uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
       },
       { ...service, priceDisplay },
-      buildManageUrl(bookingId)
+      buildManageUrl(bookingId),
+      ownerCopy,
     );
     // Mirror first so a change TO video can mint a join URL before the ICS is sent.
     const mintedMeetUrl = await syncCalendarReschedule(
@@ -4228,16 +4288,19 @@ export class InternalProvider implements BookingProvider {
         customerAddress: booking.customerAddress,
         venue,
       }),
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(booking.id),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(booking.id),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
@@ -4250,6 +4313,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
       tenantId: ctx.tenant.id,
       bookingId: booking.id,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
 
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
@@ -4309,6 +4374,7 @@ export class InternalProvider implements BookingProvider {
     }
     await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason);
 
+    const langs = await this.audienceLanguages(ctx, booking);
     await sendBookingEmail({
       method: 'CANCEL',
       uid: booking.icsUid,
@@ -4324,6 +4390,8 @@ export class InternalProvider implements BookingProvider {
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       tenantId: ctx.tenant.id,
       bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
 
     // Drop pending reminders (they'd no-op via sequence/status anyway).

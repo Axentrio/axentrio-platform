@@ -11,6 +11,8 @@ import { ServiceType } from '../database/entities/ServiceType';
 import type { CalendarProviderType } from '../database/entities/CalendarCredential';
 import { BookingError } from '../booking/booking-providers/types';
 import { sendCalendarChangeRejectedEmail } from '../booking/booking-providers/booking-email';
+import type { RejectReasonKey } from '../booking/booking-copy';
+import { resolveOwnerLanguage } from '../booking/booking-language';
 import { externalCancelBooking, externalRescheduleBooking } from '../booking/booking.service';
 import { getBotBusinessTimezone } from '../booking/business-timezone';
 import { getBotConfigForBotId } from '../services/bot-config.service';
@@ -56,7 +58,7 @@ export type InboundDecision =
   | { action: 'none' }
   | { action: 'cancel' }
   | { action: 'move'; startISO: string; durationMin: number }
-  | { action: 'restore'; reason: string }
+  | { action: 'restore'; reasonKey: RejectReasonKey }
   | { action: 'defer' };
 
 export function decideInboundChange(
@@ -67,16 +69,16 @@ export function decideInboundChange(
   if (state.kind === 'no_access' || state.kind === 'no_connection') return { action: 'defer' };
   if (state.cancelled) return { action: 'cancel' };
   if (state.startISO === null || state.endISO === null) {
-    return { action: 'restore', reason: 'An all-day event has no appointment time.' };
+    return { action: 'restore', reasonKey: 'owner.reason_all_day' };
   }
   const start = new Date(state.startISO);
   const end = new Date(state.endISO);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
-    return { action: 'restore', reason: 'The end time is not after the start time.' };
+    return { action: 'restore', reasonKey: 'owner.reason_end_before_start' };
   }
   const durationMin = Math.round((end.getTime() - start.getTime()) / 60_000);
   if (durationMin <= 0) {
-    return { action: 'restore', reason: 'The end time is not after the start time.' };
+    return { action: 'restore', reasonKey: 'owner.reason_end_before_start' };
   }
   if (
     Math.floor(start.getTime() / 1000) === Math.floor(booking.startUtc.getTime() / 1000) &&
@@ -89,16 +91,16 @@ export function decideInboundChange(
 
 /** Owner-readable reason for a refused external move. Keyed on the error code so no
  *  LLM-facing or customer-facing string is ever forwarded verbatim. */
-function ownerReasonFor(err: BookingError): string {
+function ownerReasonFor(err: BookingError): RejectReasonKey {
   switch (err.code) {
     case 'SLOT_UNAVAILABLE':
-      return 'That time overlaps another appointment, or falls outside your booking hours.';
+      return 'owner.reason_slot_unavailable';
     case 'TRAVEL_TIME_CONFLICT':
-      return 'That time cannot be reached from the appointments either side of it.';
+      return 'owner.reason_travel_conflict';
     case 'BOOKING_NOT_RESCHEDULABLE':
-      return 'That booking is no longer open for changes.';
+      return 'owner.reason_not_reschedulable';
     default:
-      return 'Axentrio could not apply that change.';
+      return 'owner.reason_default';
   }
 }
 
@@ -295,7 +297,7 @@ async function applyExternalEventState(input: {
   }
 
   const attemptedISO = input.state.kind === 'found' ? input.state.startISO : null;
-  return restoreExternalEvent(input, booking, attemptedISO, decision.reason);
+  return restoreExternalEvent(input, booking, attemptedISO, decision.reasonKey);
 }
 
 async function restoreExternalEvent(
@@ -307,7 +309,7 @@ async function restoreExternalEvent(
   },
   booking: Booking,
   attemptedISO: string | null,
-  reason: string
+  reasonKey: RejectReasonKey
 ): Promise<'applied' | 'failed' | 'lost'> {
   if (!(await holdLease(input.lease))) return 'lost';
   const timezone = await getBotBusinessTimezone(input.botId);
@@ -328,7 +330,7 @@ async function restoreExternalEvent(
     botId: input.botId,
     booking,
     attemptedStart: attemptedISO ? new Date(attemptedISO) : booking.startUtc,
-    reason,
+    reasonKey,
     timezone,
   });
   return 'applied';
@@ -338,13 +340,15 @@ async function notifyOwnerRejected(input: {
   botId: string;
   booking: Booking;
   attemptedStart: Date;
-  reason: string;
+  reasonKey: RejectReasonKey;
   timezone: string;
 }): Promise<void> {
   let ownerEmail: string | undefined;
+  let ownerLanguage = 'en';
   try {
     const bot = await getBotConfigForBotId(input.botId);
     ownerEmail = bot.settings?.ai?.supportEmail?.trim() || undefined;
+    ownerLanguage = await resolveOwnerLanguage(input.booking.tenantId, ownerEmail);
   } catch {
     ownerEmail = undefined;
   }
@@ -360,12 +364,13 @@ async function notifyOwnerRejected(input: {
     : null;
   await sendCalendarChangeRejectedEmail({
     ownerEmail,
-    serviceName: service?.name ?? 'Appointment',
+    serviceName: service?.name ?? '',
     attemptedStart: input.attemptedStart,
     restoredStart: input.booking.startUtc,
     timezone: input.timezone,
     attendeeName: input.booking.attendeeName ?? '',
-    reason: input.reason,
+    reasonKey: input.reasonKey,
+    ownerLanguage,
   });
 }
 

@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildBoundAddressSection, buildServicesSection, formatHoursForPlaceholder } from '../../modules/booking.module';
 import { composeSystemPrompt } from '../../llm/compose-system-prompt';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 import type { ServiceType } from '../../database/entities/ServiceType';
 
 const svc = (over: Partial<ServiceType> = {}): ServiceType =>
@@ -670,9 +671,7 @@ describe('intake questions — the calendar toggle', () => {
   it('keeps an answer off the calendar when the owner said so', () => {
     const out = buildBookingEventContent(
       { intakeAnswers: ANSWERS },
-      { name: 'Repair', intakeQuestions: QS },
-      'https://app.example/m',
-    );
+      { name: 'Repair', intakeQuestions: QS }, 'https://app.example/m', BOOKING_COPY_EN);
     expect(out.description).toContain('Which floor?: Second');
     expect(out.description).not.toContain('4417');
   });
@@ -680,9 +679,7 @@ describe('intake questions — the calendar toggle', () => {
   it('shows everything when no question opts out', () => {
     const out = buildBookingEventContent(
       { intakeAnswers: ANSWERS },
-      { name: 'Repair', intakeQuestions: [{ id: 'q1', label: 'Which floor?' }, { id: 'q2', label: 'Gate code' }] },
-      'https://app.example/m',
-    );
+      { name: 'Repair', intakeQuestions: [{ id: 'q1', label: 'Which floor?' }, { id: 'q2', label: 'Gate code' }] }, 'https://app.example/m', BOOKING_COPY_EN);
     expect(out.description).toContain('4417');
   });
 });

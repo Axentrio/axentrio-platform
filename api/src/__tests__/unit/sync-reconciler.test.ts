@@ -77,6 +77,7 @@ vi.mock('../../scheduler/inbound-calendar-sync', () => ({
 
 import { reconcilePendingBookingSyncs } from '../../scheduler/sync-reconciler';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 
 const BID = '11111111-2222-3333-4444-555555555555';
 const EVID = '111111112222333344445555 55555555'.replace(/\s/g, ''); // hyphens stripped
@@ -331,7 +332,7 @@ describe('reconciler content parity', () => {
       SERVICE,
       // The manage URL is built from the booking id by both paths.
       expect.anything() as never
-    );
+    , BOOKING_COPY_EN);
     expect(sent.summary).toBe(expected.summary);
   });
 

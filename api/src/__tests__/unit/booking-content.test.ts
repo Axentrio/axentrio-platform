@@ -8,6 +8,7 @@
  * raw service name; rich content lives in `description`.
  */
 import { describe, it, expect } from 'vitest';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 import {
   buildBookingEventContent,
   type BookingContentInput,
@@ -20,7 +21,7 @@ function build(
   booking: BookingContentInput,
   service: ServiceContentInput = { name: 'Haircut' },
 ) {
-  return buildBookingEventContent(booking, service, MANAGE);
+  return buildBookingEventContent(booking, service, MANAGE, BOOKING_COPY_EN);
 }
 
 describe('buildBookingEventContent — summary + line order', () => {

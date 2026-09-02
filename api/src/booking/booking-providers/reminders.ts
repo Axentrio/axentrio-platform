@@ -15,6 +15,8 @@ import { Booking } from '../../database/entities/Booking';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { getBotBusinessTimezone } from '../business-timezone';
 import { logger } from '../../utils/logger';
+import { getBotConfigForBotId } from '../../services/bot-config.service';
+import { customerLanguageFor } from '../booking-language';
 import { sendReminderEmail } from './booking-email';
 import { buildManageUrl } from '../../scheduler/booking-token';
 
@@ -29,10 +31,6 @@ interface ReminderJobData {
 const LEAD_MS: Record<ReminderJobData['kind'], number> = {
   '24h': 24 * 3600_000,
   '1h': 1 * 3600_000,
-};
-const LEAD_LABEL: Record<ReminderJobData['kind'], string> = {
-  '24h': 'tomorrow',
-  '1h': 'in 1 hour',
 };
 
 /**
@@ -96,14 +94,16 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
     // a denormalization; the bot is authoritative on read).
     const timezone = await getBotBusinessTimezone(booking.botId);
 
+    const bot = await getBotConfigForBotId(booking.botId);
     await sendReminderEmail({
       summary: eventType?.name ?? 'Your appointment',
       start: booking.startUtc,
       timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
-      leadLabel: LEAD_LABEL[kind],
+      lead: kind,
       manageUrl: buildManageUrl(bookingId),
+      customerLanguage: customerLanguageFor(booking, bot.settings),
     });
   };
 }

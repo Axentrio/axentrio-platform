@@ -41,6 +41,7 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
     }
 
     req.tenantId = tenant.id;
+    req.user.tenantId = tenant.id;
     logger.info('Super admin context switch', {
       userId: req.userId,
       targetTenantId: tenant.id,

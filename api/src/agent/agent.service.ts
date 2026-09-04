@@ -53,7 +53,8 @@ import {
   type OutputValidationContext,
 } from '../guardrails/output-validation';
 import { renderMemoryForPrompt } from '../memory/memory-store';
-import { pendingYesNeedsCreate } from './pending-booking-confirmation';
+import { pendingYesNeedsCreate, pendingYesNeedsReschedule, type PendingAgreedMove } from './pending-booking-confirmation';
+import { refusedNamedTimeStillApplies, rememberRefusedNamedTime, clearRefusedNamedTime } from './refused-named-time';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -134,6 +135,44 @@ function buildUserContent(message: string, images?: AgentImageInput[]): string |
 }
 
 const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking', 'update_booking'];
+
+/**
+ * Notice/horizon refused the named time this run. Later availability is a list of
+ * alternatives, so the clock-only "already chose this hour" match must stand down.
+ */
+function absorbNamedTimeRefusal(
+  tool: { name: string },
+  toolCall: ToolCall,
+  result: ToolResult,
+  ctx: RunLoopContext,
+  state: RunLoopState,
+): void {
+  const horizonCheck =
+    tool.name === 'check_availability' &&
+    result.success &&
+    (result.data as { suggestedAction?: string } | undefined)?.suggestedAction === 'check_availability';
+  const horizonMutation =
+    BOOKING_MUTATION_TOOLS.includes(tool.name) &&
+    !result.success &&
+    typeof result.error === 'string' &&
+    result.error.startsWith('REQUEST_OUTSIDE_WINDOW:');
+  if (!horizonCheck && !horizonMutation) return;
+  state.namedTimeRefused = true;
+  const args = toolCall.arguments ?? {};
+  const dateArg =
+    (typeof args.startDate === 'string' && args.startDate) ||
+    (typeof args.startTime === 'string' && args.startTime) ||
+    (typeof args.preferredTime === 'string' && args.preferredTime) ||
+    '';
+  const localDate = /^(\d{4}-\d{2}-\d{2})/.exec(dateArg)?.[1];
+  const customer = latestCustomerTimeText([
+    ...ctx.conversationHistory.map((m) => ({ role: m.role, text: contentToText(m.content) })),
+    { role: 'user', text: ctx.message },
+  ]);
+  const clock = parseClockTimes(customer)[0]?.key;
+  if (!localDate || !clock) return;
+  void rememberRefusedNamedTime(ctx.session.id, localDate, clock);
+}
 
 /** Broader than the hard output gate: future intent is useful for correcting the
  * model inside the Agent loop, but is not proof enough to replace a reply. */
@@ -220,6 +259,8 @@ interface PendingAvailability {
   /** #80: carried so the offer record can name the service and its mode without a later join. */
   serviceId?: string;
   locationMode?: string;
+  /** Echo of the part-of-day filter. Suppress chips when matched is false. */
+  clockWindow?: { from: string; to: string; matched: boolean };
   /** The service the slots are for — embedded in the chip so a tap books the
    *  right service when the bot offers more than one. */
   serviceName?: string;
@@ -248,6 +289,7 @@ function buildSlotQuickReplies(
   language: ReturnType<typeof resolveBotLanguage>,
 ): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
+  if (av.clockWindow && !av.clockWindow.matched) return undefined;
   return av.slots.slice(0, 8).map((s) =>
     slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
   );
@@ -443,6 +485,18 @@ const BOOKING_CORRECTION_NOTE =
 
 const PENDING_YES_NOTE =
   '(Internal note, not from the customer.) The customer already confirmed the pending booking summary. Call create_booking now with the same service, time, and name. Do not send another summary and do not ask for confirmation again.';
+
+/** The move twin of PENDING_YES_NOTE. It repeats the gate's own stored arguments, because the
+ *  observed failure (session 1bbd5818) was a turn that answered a confirmed move with
+ *  list_bookings + check_availability and never called the tool at all. */
+function pendingMoveYesNote(move: PendingAgreedMove): string {
+  const addressBit = move.customerAddress ? ` and customerAddress "${move.customerAddress}"` : '';
+  return (
+    '(Internal note, not from the customer.) The customer already confirmed the pending move summary. ' +
+    `Call reschedule_booking now with bookingId "${move.bookingId}" and newStartTime "${move.newStartTime}"${addressBit}. ` +
+    'Do not send another summary, do not ask for confirmation again, and do not call list_bookings or check_availability first.'
+  );
+}
 
 /** Nudge for a reply that declared a named date shut or full without ever looking. */
 const AVAILABILITY_CORRECTION_NOTE =
@@ -703,6 +757,16 @@ interface RunLoopState {
    * (the call happened, success or fail).
    */
   heldBooking: boolean;
+  /**
+   * A booking time the customer named was refused THIS RUN by the notice or horizon
+   * policy (check_availability out-of-window, or a mutation's REQUEST_OUTSIDE_WINDOW).
+   * Every availability result after it is a list of alternatives, so the customer's
+   * named hour must not count as "already chosen": the hour matches by clock only,
+   * and the date it sat on is the one just refused. Live WhatsApp 2026-08-30: 14 Sept
+   * 10:00 refused on a 14-day horizon, the retry found 10:00 on every day of the
+   * week before the bound, and the chips came off a reply that said "choose below".
+   */
+  namedTimeRefused: boolean;
   pendingAddressFact: BookingAddressReplyFact | null;
   addressFactConflict: boolean;
   addressCorrectionAttempted: boolean;
@@ -727,6 +791,7 @@ function newRunLoopState(): RunLoopState {
     promisedCheckCorrectionAttempted: false,
     availabilityChecked: false,
     heldBooking: false,
+    namedTimeRefused: false,
     pendingAddressFact: null,
     addressFactConflict: false,
     addressCorrectionAttempted: false,
@@ -896,6 +961,7 @@ export class AgentService {
     // error AFTER the tool succeeded still returns `handoffRequested: true` from
     // the catch below.
     const state = newRunLoopState();
+    state.namedTimeRefused = await refusedNamedTimeStillApplies(session.id, message);
     // Same gate message-forwarding uses to run the bot. Missing ownership
     // (tests / older rows) defaults to bot_owned, matching the DB default.
     const sessionBotOwned =
@@ -1554,7 +1620,10 @@ export class AgentService {
 
   /**
    * The customer already said yes to a pending summary, but this turn did not call
-   * create_booking. One nudge, then ship whatever they produce.
+   * the booking tool it confirmed. One nudge, then ship whatever they produce.
+   *
+   * Armed off create_booking presence like every booking guard: the booking module ships
+   * create_booking and reschedule_booking together, so a session that can move can also book.
    */
   private async applyPendingYesGuard(
     i: number,
@@ -1565,14 +1634,25 @@ export class AgentService {
     if (state.bookingRecorded || !ctx.bookingClaimGuardArmed) return false;
     if (state.pendingYesNudgeAttempted || i >= MAX_ITERATIONS - 1) return false;
     const history = [...state.messages, { role: 'user' as const, content: ctx.message }];
-    if (!(await pendingYesNeedsCreate(ctx.session.id, history))) return false;
+    let correction: string;
+    let note: string;
+    if (await pendingYesNeedsCreate(ctx.session.id, history)) {
+      correction = 'pending_yes_without_create';
+      note = PENDING_YES_NOTE;
+    } else {
+      const move = await pendingYesNeedsReschedule(ctx.session.id, history);
+      if (!move) return false;
+      correction = 'pending_yes_without_reschedule';
+      note = pendingMoveYesNote(move);
+    }
     state.pendingYesNudgeAttempted = true;
-    (ctx.trace.corrections ??= []).push('pending_yes_without_create');
-    logger.warn('[agent] pending summary already confirmed; nudging model to create_booking', {
+    (ctx.trace.corrections ??= []).push(correction);
+    logger.warn('[agent] pending summary already confirmed; nudging model to call the tool', {
       sessionId: ctx.session.id,
+      correction,
     });
     state.messages.push({ role: 'assistant', content });
-    state.messages.push({ role: 'user', content: PENDING_YES_NOTE });
+    state.messages.push({ role: 'user', content: note });
     return true;
   }
 
@@ -1731,7 +1811,7 @@ export class AgentService {
     // Chips exist to pick a time. If the customer already named one that we can actually
     // book, or the reply is confirming that one time, attaching hours again is how the
     // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
-    const alreadyChoseTime = !!(
+    const alreadyChoseTime = !state.namedTimeRefused && !!(
       times.confirmableLocal &&
       (namesSingleOfferedTime(customerTimeText, times.confirmableLocal) ||
         namesSingleOfferedTime(finalContent, times.confirmableLocal))
@@ -1874,6 +1954,7 @@ export class AgentService {
       conversationHistory: state.messages,
       specialtyTerms: ctx.specialtyTerms.length ? ctx.specialtyTerms : undefined,
       botOwned: ctx.sessionBotOwned,
+      namedTimeRefused: state.namedTimeRefused,
     };
 
     try {
@@ -1959,6 +2040,8 @@ export class AgentService {
     // because a model handed a `Z` instant reads its digits out loud - so the chips, the
     // offer record and the invented-time guard take the instants from the field the model
     // never sees, exactly as #81's scoring comes off `measurement`.
+    absorbNamedTimeRefusal(tool, toolCall, result, ctx, state);
+
     if (tool.name === 'check_availability' && result.success && result.availability) {
       this.absorbAvailability(toolCall, result, result.availability, ctx, state);
       // Live WaterFix 2026-09-01: leftover diary chips made the model say the held
@@ -1974,6 +2057,7 @@ export class AgentService {
       // the slots, for the same reason the slots are cleared: the offer was about a
       // decision the customer has already made.
       state.pendingAffordance = null;
+      void clearRefusedNamedTime(ctx.session.id);
       state.bookingRecorded = true;
     }
   }
@@ -1997,6 +2081,7 @@ export class AgentService {
       serviceName: a.serviceName,
       serviceId: a.serviceId,
       locationMode: a.locationMode,
+      clockWindow: a.clockWindow,
       // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
       // shown, and this is deliberately invisible to it.
       grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,

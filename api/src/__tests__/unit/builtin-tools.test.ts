@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { DateTime } from 'luxon';
 
 // ── Mocks (must come before imports) ────────────────────────────────────────
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
+const mockRequestBooking = vi.fn();
 const mockListBookings = vi.fn();
 const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 const mockUpdateBooking = vi.fn();
+const mockPeekCustomerEmailRequired = vi.fn(async (_sessionId?: string, _serviceId?: string) => false);
+
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: vi.fn(),
@@ -23,10 +27,13 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
 vi.mock('../../booking/booking.service', () => ({
   checkAvailability: (...args: unknown[]) => mockCheckAvailability(...args),
   createBooking: (...args: unknown[]) => mockCreateBooking(...args),
+  requestBooking: (...args: unknown[]) => mockRequestBooking(...args),
   listBookings: (...args: unknown[]) => mockListBookings(...args),
   rescheduleBooking: (...args: unknown[]) => mockRescheduleBooking(...args),
   cancelBooking: (...args: unknown[]) => mockCancelBooking(...args),
   updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
+  peekCustomerEmailRequired: (sessionId: string, serviceId?: string) =>
+    mockPeekCustomerEmailRequired(sessionId, serviceId),
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;
@@ -70,6 +77,7 @@ import {
   UpdateBookingTool,
 } from '../../agent/tools/booking.tool';
 import { EscalationTool } from '../../agent/tools/escalation.tool';
+import { BookingError } from '../../booking/booking.service';
 import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
 import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
 import { pendingYesNeedsCreate } from '../../agent/pending-booking-confirmation';
@@ -291,6 +299,88 @@ describe('an email the confirmation cannot reach', () => {
     expect(result.success).toBe(true);
     expect(mockCreateBooking).toHaveBeenCalled();
   });
+
+  it('returns EMAIL_REQUIRED before CONFIRMATION_REQUIRED when the service needs email', async () => {
+    mockPeekCustomerEmailRequired.mockResolvedValue(true);
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/EMAIL_REQUIRED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('returns SERVICE_NOT_FOUND, not a booking summary, for an unknown UUID', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(
+      new BookingError('That serviceId is not currently a bookable service', 'SERVICE_NOT_FOUND', 404),
+    );
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      {
+        startTime: '2026-04-01T10:00:00Z',
+        attendeeName: 'Ada',
+        serviceId: '550e8400-e29b-41d4-a716-446655440000',
+      },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SERVICE_NOT_FOUND/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('returns SERVICE_NOT_FOUND, not a booking summary, for a non-UUID serviceId', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(
+      new BookingError('That serviceId is not currently a bookable service', 'SERVICE_NOT_FOUND', 404),
+    );
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada', serviceId: 'klantenafspraak' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SERVICE_NOT_FOUND/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('does not invent EMAIL_REQUIRED when the peek throws an unexpected error', async () => {
+    mockPeekCustomerEmailRequired.mockRejectedValue(new Error('connection reset'));
+    const tool = new CreateBookingTool();
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Ada' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'boek het morgen om 10:00' }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('connection reset');
+    expect(result.errorSafeForModel).toBe(false);
+    expect(result.error).not.toMatch(/EMAIL_REQUIRED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
+  it('still captures a request when email is missing, so there is no dead end', async () => {
+    mockPeekCustomerEmailRequired.mockResolvedValue(true);
+    mockRequestBooking.mockResolvedValue({ success: true, requested: true, bookingId: 'r1' });
+    const tool = new RequestAppointmentTool();
+    const result = await tool.execute(
+      { preferredTime: 'next Tuesday', attendeeName: 'Ada', aiSummary: 'x' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    expect(mockRequestBooking).toHaveBeenCalled();
+  });
 });
 
 describe('CheckAvailabilityTool', () => {
@@ -328,8 +418,57 @@ describe('CheckAvailabilityTool', () => {
       slots: [{ start: '2026-04-01T10:00:00Z', end: '2026-04-01T10:30:00Z' }],
       timezone: 'Europe/Brussels',
     });
-    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone, then clock window.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined, undefined, undefined, undefined);
+  });
+
+  it("passes the customer's part of day to the diary", async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T10:00:00.000Z', end: '2026-09-03T10:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute({ startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: '12:00' }, makeCtx());
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '24:00' });
+  });
+
+  it('accepts a day-part word as a clock window', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T14:00:00.000Z', end: '2026-09-03T14:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    const result = await tool.execute(
+      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'afternoon' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(true);
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '18:00' });
+  });
+
+  it('refuses a malformed window', async () => {
+    const tool = new CheckAvailabilityTool();
+    const result = await tool.execute(
+      { startDate: '2026-09-03', endDate: '2026-09-03', earliestTime: 'soon' },
+      makeCtx(),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/^INVALID_TIME_WINDOW/);
+    expect(mockCheckAvailability).not.toHaveBeenCalled();
+  });
+
+  it('says the window was full and offers the other times', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-03T07:00:00.000Z', end: '2026-09-03T07:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      clockWindow: { from: '12:00', to: '24:00', matched: false },
+    });
+    const result = await tool.execute({ startDate: '2026-09-03', endDate: '2026-09-03' }, makeCtx());
+    expect(result.success).toBe(true);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/between 12:00 and 24:00/);
+    expect((result.data as { guidance?: string }).guidance).toMatch(/Do NOT capture a request/);
+    expect(result.availability?.slots).toHaveLength(1);
   });
 
   it('tells the model not to re-offer hours when the customer already named a free time', async () => {
@@ -357,6 +496,31 @@ describe('CheckAvailabilityTool', () => {
     expect((result.data as { guidance?: string }).guidance).toMatch(/do not list or offer other times/i);
     expect((result.data as { guidance?: string }).guidance).toMatch(/CONFIRMATION_REQUIRED/);
     expect((result.data as { guidance?: string }).guidance).not.toContain('€80');
+  });
+
+  it('stands down the named-hour match when the named date was refused this run', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-10-05T07:00:00.000Z', end: '2026-10-05T07:30:00.000Z' },
+        { start: '2026-10-05T08:00:00.000Z', end: '2026-10-05T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-10-05', endDate: '2026-10-05' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Kan ik maandag 5 oktober 2026 om 10:00 langskomen?' },
+        ],
+        namedTimeRefused: true,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect((result.data as { requestedTimeAvailable?: boolean }).requestedTimeAvailable).toBeUndefined();
+    expect((result.data as { guidance?: string }).guidance ?? '').not.toMatch(/already named this time/i);
   });
 
   it('tells the model to call create_booking now after an explicit yes', async () => {
@@ -593,12 +757,17 @@ describe('CreateBookingTool', () => {
     const keyed = pendingTime || (await wallClockKey(ctx.sessionId, String(args.startTime ?? '')));
     const clock = keyed.match(/T(\d{2}):(\d{2})/);
     const hhmm = clock ? `${clock[1]}:${clock[2]}` : '10:00';
+    const keyedDt = DateTime.fromISO(keyed);
+    const months = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+    const dateAsk = keyedDt.isValid
+      ? `Zal ik boeken op ${keyedDt.day} ${months[keyedDt.month - 1]} ${keyedDt.year} om ${hhmm}?`
+      : `Zal ik boeken om ${hhmm}?`;
     return tool.execute(args, {
       ...ctx,
       runId: `${ctx.runId}:yes`,
       conversationHistory: [
         ...ctx.conversationHistory,
-        { role: 'assistant', content: `Zal ik boeken om ${hhmm}?` },
+        { role: 'assistant', content: dateAsk },
         { role: 'user', content: 'ja' },
       ],
     });
@@ -633,7 +802,7 @@ describe('CreateBookingTool', () => {
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user', content: 'Ja, dat klopt' },
       ]),
     ).resolves.toBe(true);
@@ -647,7 +816,7 @@ describe('CreateBookingTool', () => {
     await expect(
       pendingYesNeedsCreate('sess-confirm-nudge', [
         { role: 'user', content: DUMP },
-        { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user', content: 'What is the address?' },
       ]),
     ).resolves.toBe(false);
@@ -687,7 +856,7 @@ describe('CreateBookingTool', () => {
       runId: 'run-yes',
       conversationHistory: [
         { role: 'user' as const, content: DUMP },
-        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant' as const, content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         { role: 'user' as const, content: 'Ja, dat klopt' },
       ],
     };
@@ -727,7 +896,7 @@ describe('CreateBookingTool', () => {
         { role: 'user' as const, content: DUMP },
         { role: 'assistant' as const, content: 'Zal ik de beschikbaarheid checken?' },
         { role: 'user' as const, content: 'Ja, dat klopt' },
-        { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+        { role: 'assistant' as const, content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
       ],
     };
     await tool.execute(BOOK_ARGS, makeCtx(yesCtx));
@@ -761,7 +930,7 @@ describe('CreateBookingTool', () => {
         runId: 'run-2',
         conversationHistory: [
           { role: 'user', content: DUMP },
-          { role: 'assistant', content: 'Zal ik 10:00 boeken?' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
           { role: 'user', content: 'Ja, dat klopt' },
         ],
       }),

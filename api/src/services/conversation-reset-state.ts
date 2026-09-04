@@ -60,6 +60,7 @@ export function sessionScratchKeys(sessionId: string): string[] {
     `booking:confirm-reschedule:${sessionId}`,
     `booking:confirm-cancel:${sessionId}`,
     `booking:offered:${sessionId}`,
+    `booking:refused-date:${sessionId}`,
     `gr:loop:${sessionId}`,
     `turn:state:${sessionId}`,
     `agent:lock:${sessionId}`,

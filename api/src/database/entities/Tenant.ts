@@ -193,6 +193,8 @@ export class Tenant {
       /** Preselects the Takeover menu: 1–24 hours or 'indefinite'. */
       defaultTakeoverHours?: number | 'indefinite';
     };
+    /** Language Axentrio writes INTERNAL notifications in. Customer-facing copy never reads it. */
+    businessLanguage?: 'en' | 'nl' | 'fr';
   };
 
   /**

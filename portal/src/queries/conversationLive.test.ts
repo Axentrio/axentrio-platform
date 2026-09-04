@@ -24,6 +24,7 @@ import {
   applyCommandConversation,
   findCachedChat,
   mergeDefined,
+  mergeLiveTail,
   normalizeChatStatus,
   summaryToChatPatch,
   __resetConversationLiveState,
@@ -32,6 +33,7 @@ import {
 } from './conversationLive';
 import type {
   Chat,
+  Message,
   ConversationSummaryPayload,
   ConversationUpsertEvent,
   MessageCreatedEvent,
@@ -396,6 +398,11 @@ function observeDetail(client: QueryClient, sessionId: string): () => void {
   return observer.subscribe(() => {});
 }
 
+/** A GET /chats/:id snapshot shaped like the detail cache entry. */
+function detailSnapshot(messages: Message[]): Chat & { messages: Message[] } {
+  return { ...makeChat(), messages };
+}
+
 function messageEvent(overrides: Partial<MessageCreatedEvent['message']> = {}, rev = 500): MessageCreatedEvent {
   const message = {
     id: 'm-new',
@@ -525,21 +532,42 @@ describe('applyMessageCreated', () => {
     expect(qc.getQueryData(queryKeys.chats.detail('c1'))).toBeUndefined();
   });
 
-  it('seeds an observed empty detail query; a later GET wipe + second event restores', () => {
+  it('mergeLiveTail keeps a socket row the GET snapshot has not caught up with, and never duplicates it', () => {
     const stop = observeDetail(qc, 'c1');
     const first = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
     expect(first.isNew).toBe(true);
-    expect(qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages).toEqual([
-      expect.objectContaining({ id: 'm-early', content: 'inbound hello' }),
-    ]);
 
-    // A later GET that raced past the snapshot must not hide a second delivery.
-    qc.setQueryData(queryKeys.chats.detail('c1'), { ...makeChat(), messages: [] });
-    const second = applyMessageCreated(qc, messageEvent({ id: 'm-early' }));
-    expect(second.isNew).toBe(true);
-    expect(qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages![0].id).toBe(
-      'm-early',
-    );
+    // A GET that raced past the append comes back WITHOUT the row: keep it.
+    const behind = mergeLiveTail('c1', detailSnapshot([]));
+    expect(behind.messages.map((m) => m.id)).toEqual(['m-early']);
+
+    // The next GET carries the row: fold once, never twice.
+    const caughtUp = mergeLiveTail('c1', detailSnapshot([behind.messages[0]]));
+    expect(caughtUp.messages.map((m) => m.id)).toEqual(['m-early']);
+
+    // The tail is forgotten now, so a later empty snapshot stays empty
+    // (a server-side deletion must stick).
+    expect(mergeLiveTail('c1', detailSnapshot([])).messages).toEqual([]);
+    stop();
+  });
+
+  it('mergeLiveTail drops a tail row the snapshot has already moved past', () => {
+    const stop = observeDetail(qc, 'c1');
+    applyMessageCreated(qc, messageEvent({ id: 'm-early' })); // 12:00:00
+
+    // The snapshot's newest message is NEWER than the tail row, so the server
+    // has already seen that instant — it is authoritative.
+    const newer: Message = {
+      id: 'm-server',
+      chatId: 'c1',
+      type: 'text',
+      content: 'from the server',
+      sender: 'user',
+      isRead: true,
+      createdAt: '2026-08-14T12:05:00.000Z',
+    };
+    const merged = mergeLiveTail('c1', detailSnapshot([newer]));
+    expect(merged.messages.map((m) => m.id)).toEqual(['m-server']);
     stop();
   });
 

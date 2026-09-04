@@ -25,7 +25,10 @@ import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
 import { applyExternalRemoval } from './inbound-calendar-sync';
 import { returningRows } from '../utils/raw-sql';
-import { buildBookingEventContent } from '../booking/booking-providers/booking-content';
+import { buildBookingEventContent, storedFileNames } from '../booking/booking-providers/booking-content';
+import { getBookingCopy } from '../booking/booking-copy';
+import { resolveOwnerLanguage } from '../i18n/audience-language';
+import { getBotConfigForBotId } from '../services/bot-config.service';
 import { formatServicePrice } from '../booking/pricing/service-discount';
 import { buildManageUrl } from './booking-token';
 
@@ -277,12 +280,15 @@ function reconciledDurationMin(b: BookingContentRow | undefined): number | null 
 }
 
 /** The event body, from the SAME P6a builder the inline create uses. */
-function buildReconciledContent(
+async function buildReconciledContent(
   row: ClaimedRow,
   b: BookingContentRow | undefined,
   eventType: ServiceType,
   timezone: string,
-): { summary: string; description: string } {
+): Promise<{ summary: string; description: string }> {
+  const bot = await getBotConfigForBotId(row.bot_id);
+  const ownerLanguage = await resolveOwnerLanguage(row.tenant_id, bot.settings?.ai?.supportEmail);
+  const ownerCopy = await getBookingCopy(ownerLanguage, row.tenant_id);
   return buildBookingEventContent(
     {
       attendeeName: b?.attendee_name,
@@ -295,7 +301,7 @@ function buildReconciledContent(
       bookingId: row.id,
       durationMin: reconciledDurationMin(b),
       sourceChannel: b?.source_channel,
-      uploadedFileCount: Array.isArray(b?.uploaded_files) ? b.uploaded_files.length : 0,
+      uploadedFileNames: storedFileNames(b?.uploaded_files),
     },
     {
       name: eventType.name,
@@ -304,7 +310,8 @@ function buildReconciledContent(
       preparationInstructions: eventType.preparationInstructions,
       priceDisplay: formatServicePrice(eventType, timezone) || undefined,
     },
-    buildManageUrl(row.id)
+    buildManageUrl(row.id),
+    ownerCopy,
   );
 }
 
@@ -374,7 +381,7 @@ async function loadEventMeta(
     [row.id]
   );
   const b = bookingRows[0];
-  const content = buildReconciledContent(row, b, eventType, timezone);
+  const content = await buildReconciledContent(row, b, eventType, timezone);
   const location = await resolveMirrorLocation(row.bot_id, eventType, b?.customer_address);
   return {
     content,

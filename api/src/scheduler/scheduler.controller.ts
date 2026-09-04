@@ -54,7 +54,15 @@ import {
 } from '../booking/booking.service';
 import { findPreset, listPresetSummaries, presetServiceSchema, presetAvailabilitySchema } from './presets';
 import { BookingError } from '../booking/booking-providers/types';
-import { ApiError } from '../middleware/error-handler';
+import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
+import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { createS3Client } from '../config/s3.config';
+import { getValidationService } from '../file-handling/validation.service';
+import {
+  CONFIRMATION_ATTACHMENT_TYPES,
+  confirmationAttachmentMaxBytes,
+} from '../booking/booking-providers/confirmation-extras';
 import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
@@ -250,12 +258,31 @@ function readVenueAddress(s: BookingSettings | null) {
 function readTravelSettings(s: BookingSettings | null) {
   return {
     enabled: s?.travelTimeEnabled === true,
-    slackMin: s?.travelSlackMin ?? null,
     startFromBase: s?.travelStartFromBase === true,
     baseDepartOffsetMin: s?.travelBaseDepartOffsetMin ?? 0,
     groupingPeriod: s?.travelGroupingPeriod ?? 'none',
-    routePriority: s?.travelRoutePriority ?? 'auto',
-    maxDetourMin: s?.travelMaxDetourMin ?? null,
+    maxTravelMin: s?.travelMaxTravelMin ?? null,
+  };
+}
+
+/**
+ * The extras every CUSTOMER confirmation email carries for this Agent.
+ *
+ * `fileKey` is deliberately absent: it is the S3 object path, and the portal never needs it
+ * - it addresses an attachment by `id` on the delete route. Returning it would hand every
+ * admin a storage path they have no use for.
+ */
+function readConfirmationEmail(s: BookingSettings | null) {
+  const stored = Array.isArray(s?.confirmationAttachments) ? s.confirmationAttachments : [];
+  return {
+    extraInfo: s?.confirmationExtraInfo ?? null,
+    attachments: stored.map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      mimeType: a.mimeType,
+      fileSize: a.fileSize,
+      uploadedAt: a.uploadedAt,
+    })),
   };
 }
 
@@ -302,6 +329,7 @@ async function readConfig(tenantId: string, bot: Bot) {
     // "not paused" and quietly un-pause a business on its next Save.
     bookingsPaused: bookingSettings?.bookingsPaused === true,
     venueAddress: readVenueAddress(bookingSettings),
+    confirmationEmail: readConfirmationEmail(bookingSettings),
     // WHICH AGENT THESE SETTINGS BELONG TO.
     //
     // Since #86 this is whichever Agent the caller named, defaulting to the anchor — so it is
@@ -547,6 +575,15 @@ function buildSettingsUpsert(
   // verified address it no longer had.
   add('venue_place_id', venuePlaceId, venueProvided);
 
+  // Nullable text, so it follows the same value+provided pairing: an omitted `confirmationEmail`
+  // leaves the stored text alone, and an explicit null clears it. The attachment list is NOT
+  // written here - bytes have their own multipart routes.
+  add(
+    'confirmation_extra_info',
+    data.confirmationEmail?.extraInfo ?? null,
+    data.confirmationEmail !== undefined
+  );
+
   // NOT NULL, so the INSERT arm must always bind a real boolean — it cannot ride the
   // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write. Same for
   // the two travel switches.
@@ -559,20 +596,13 @@ function buildSettingsUpsert(
     add(column, submitted === true, submitted !== undefined);
   }
 
-  // Nullable int, so it follows the RULE_COLUMNS contract — undefined leaves the stored
-  // value alone, an explicit null clears it.
-  add('travel_slack_min', t.slackMin ?? null, t.slackMin !== undefined);
-
   // TEXT with a NOT NULL default, so it follows the boolean contract rather than the nullable-int
   // one: undefined leaves the stored value alone, and there is no "clear it" - `none` is off.
   add('travel_grouping_period', t.groupingPeriod ?? 'none', t.groupingPeriod !== undefined);
 
-  // Same NOT NULL TEXT contract as groupingPeriod. Default `auto` is today's existing order.
-  add('travel_route_priority', t.routePriority ?? 'auto', t.routePriority !== undefined);
-
-  // Same nullable-int contract as slack: undefined leaves the stored value alone, an explicit
-  // null clears it back to "no threshold".
-  add('travel_max_detour_min', t.maxDetourMin ?? null, t.maxDetourMin !== undefined);
+  // Same nullable-int contract as the other optional travel numbers: undefined leaves the
+  // stored value alone, an explicit null clears it back to "no limit".
+  add('travel_max_travel_min', t.maxTravelMin ?? null, t.maxTravelMin !== undefined);
 
   // NOT NULL with a default, so the INSERT arm must bind a real integer — it cannot ride the
   // nullable-int contract above, which would write null on a first save and violate the column.
@@ -694,7 +724,8 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     data.bookingRules ||
     data.venueAddress !== undefined ||
     data.bookingsPaused !== undefined ||
-    data.travel !== undefined
+    data.travel !== undefined ||
+    data.confirmationEmail !== undefined
   ) {
     await writeBookingSettingsSection(tenantId, bot, data);
   }
@@ -1122,4 +1153,146 @@ export async function selectVenueAddress(req: Request, res: Response): Promise<v
     formattedAddress: resolved.place.formattedAddress,
     components: resolved.place.components ?? null,
   });
+}
+
+/**
+ * Store one file that every CUSTOMER booking-confirmation email for this Agent will carry.
+ *
+ * Its own multipart route rather than a field on `PUT /config`: bytes do not belong in a
+ * JSON settings payload, and the owner adds a file at a different moment from when they
+ * edit the text.
+ *
+ * The DETECTED type decides, never the client-declared one - a `.pdf` header on a script is
+ * exactly what a forged mimetype buys. Same gate `knowledge.uploadFile` uses, with the
+ * allowlist widened to the document and image types an owner would sensibly attach.
+ *
+ * Stored under `booking-confirmation/`, NOT in the chat upload store: that one is pruned
+ * after 30 days, which would silently drop a tenant's price list a month after they set it.
+ */
+export async function uploadConfirmationAttachment(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
+
+  // `req.file` is typed by @types/multer's Express augmentation, so no cast is needed.
+  const file = req.file;
+  if (!file) throw new BadRequestError('No file provided');
+
+  if (!config.s3?.bucket) {
+    throw new ApiError('File storage is not configured', 503, ERROR_CODES.FILE_SERVICE_UNAVAILABLE);
+  }
+
+  const maxBytes = confirmationAttachmentMaxBytes();
+  if (file.buffer.length > maxBytes) {
+    throw new BadRequestError(
+      `That file is larger than the ${config.booking.confirmationAttachmentMaxMb} MB limit.`
+    );
+  }
+
+  const validation = await getValidationService().validateFileBuffer(
+    file.buffer,
+    file.originalname,
+    file.mimetype,
+    tenantId
+  );
+  if (!validation.valid) {
+    throw new BadRequestError(validation.errors.join('; ') || 'File failed validation');
+  }
+  if (
+    !validation.detectedMimeType ||
+    !CONFIRMATION_ATTACHMENT_TYPES.includes(validation.detectedMimeType)
+  ) {
+    throw new BadRequestError('Attach a PDF, a Word document, or a JPEG, PNG or WebP image.');
+  }
+
+  // Sanitized before it becomes part of an S3 object key (path traversal / control chars),
+  // mirroring s3.config.ts and knowledge.uploadFile.
+  const safeName = (file.originalname || 'file')
+    .replace(/[^a-zA-Z0-9.-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .slice(0, 100);
+  const id = randomUUID();
+  const fileKey = `booking-confirmation/${tenantId}/${bot.id}/${id}/${safeName}`;
+
+  await createS3Client().send(
+    new PutObjectCommand({
+      Bucket: config.s3.bucket,
+      Key: fileKey,
+      Body: file.buffer,
+      ContentType: validation.detectedMimeType,
+    })
+  );
+
+  const entry = {
+    id,
+    fileName: safeName,
+    mimeType: validation.detectedMimeType,
+    fileSize: file.buffer.length,
+    fileKey,
+    uploadedAt: new Date().toISOString(),
+  };
+
+  // One statement, so a bot with no settings row yet gets one - the same lazy-create contract
+  // every other setting on this table has. Appending in SQL rather than read-modify-write
+  // means two concurrent uploads cannot lose one another's entry.
+  await AppDataSource.query(
+    `INSERT INTO chatbot_booking_settings (tenant_id, bot_id, confirmation_attachments)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (bot_id) DO UPDATE
+         SET confirmation_attachments = chatbot_booking_settings.confirmation_attachments || $3::jsonb,
+             updated_at = now()`,
+    [tenantId, bot.id, JSON.stringify([entry])]
+  );
+
+  logger.info('[Scheduler] confirmation attachment stored', {
+    tenantId,
+    botId: bot.id,
+    attachmentId: id,
+    fileSize: entry.fileSize,
+  });
+  sendSuccess(res, await readConfig(tenantId, bot));
+}
+
+/**
+ * Remove one confirmation attachment, row entry and stored object together.
+ *
+ * The row entry goes first and the object second: an orphaned object costs storage, an
+ * orphaned entry costs every future confirmation email an unreadable attachment. A missing
+ * object is not an error - the entry is what the emails read.
+ */
+export async function deleteConfirmationAttachment(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
+  const attachmentId = String(req.params.attachmentId ?? '');
+
+  const row = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: bot.id } });
+  const stored = Array.isArray(row?.confirmationAttachments) ? row.confirmationAttachments : [];
+  const target = stored.find((a) => a.id === attachmentId);
+  if (!target) throw new NotFoundError('Attachment not found');
+
+  await AppDataSource.query(
+    `UPDATE chatbot_booking_settings
+        SET confirmation_attachments = $1::jsonb, updated_at = now()
+        WHERE bot_id = $2`,
+    [JSON.stringify(stored.filter((a) => a.id !== attachmentId)), bot.id]
+  );
+
+  if (config.s3?.bucket && target.fileKey) {
+    try {
+      await createS3Client().send(
+        new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: target.fileKey })
+      );
+    } catch (err) {
+      logger.warn('[Scheduler] confirmation attachment object not removed (non-fatal)', {
+        tenantId,
+        botId: bot.id,
+        attachmentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  logger.info('[Scheduler] confirmation attachment removed', { tenantId, botId: bot.id, attachmentId });
+  sendSuccess(res, await readConfig(tenantId, bot));
 }

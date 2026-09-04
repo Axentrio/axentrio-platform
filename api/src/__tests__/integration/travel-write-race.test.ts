@@ -36,8 +36,8 @@ const eligibility = (): ActiveTravelEligibility => ({
   active: true,
   tenantId: tenant.id,
   itineraryKey: key as ActiveTravelEligibility['itineraryKey'],
-  slackMin: 0,
-  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const,
+  minGapMin: 0,
+  startFromBase: false, maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
 });
 
 /** Write a held booking straight in, already placed, as the pre-lock pass would have left it. */
@@ -105,7 +105,8 @@ async function book(
         coarse: false,
       },
       neighbours,
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup: replayLookup({}),
     });
     if (verdict !== 'clear') return 'refused';

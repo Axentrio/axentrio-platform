@@ -2,7 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
-import { ForbiddenError, NotFoundError } from './error-handler';
+import { BadRequestError, ForbiddenError, NotFoundError } from './error-handler';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Requires the user to be a super admin. Returns 403 if not.
@@ -28,6 +30,10 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
     return;
   }
 
+  if (!UUID_RE.test(targetTenantId)) {
+    return next(new BadRequestError('Invalid tenant context'));
+  }
+
   try {
     const tenantRepo = AppDataSource.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({ where: { id: targetTenantId } });
@@ -40,7 +46,12 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
       return next(new ForbiddenError('Tenant is suspended'));
     }
 
+    if (tenant.status === 'cancelled') {
+      return next(new ForbiddenError('Tenant is cancelled'));
+    }
+
     req.tenantId = tenant.id;
+    req.user.tenantId = tenant.id;
     logger.info('Super admin context switch', {
       userId: req.userId,
       targetTenantId: tenant.id,

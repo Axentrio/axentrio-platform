@@ -11,13 +11,15 @@
  */
 import type { ToolContext, ToolResult } from './tool-adapter';
 import { contentToText } from '../llm/llm.types';
-import { namesSingleOfferedTime, parseClockTimes } from './clock-times';
+import { namesPendingDateAndClock, namesSingleOfferedTime, parseClockTimes } from './clock-times';
 import { SLOT_CHIP_CONFIRM_PREFIX } from '../config/bot-language';
 import { getRedisClient } from '../config/redis';
 import { wallClockKey } from './offered-slots-store';
 import { logger } from '../utils/logger';
 
 export const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
+/** Its own code, because the model's recovery is a different tool rather than a second yes. */
+export const MOVE_PENDING = 'MOVE_PENDING';
 
 const KEY_PREFIX = 'booking:confirm:';
 const RESCHEDULE_PREFIX = 'booking:confirm-reschedule:';
@@ -83,17 +85,19 @@ export function lastCustomerUtterance(ctx: Pick<ToolContext, 'conversationHistor
 const SUMMARY_ASK = /boek|book|bevestig|confirm|afspraak|appointment|samenvatting|summary|klopt/i;
 
 /**
- * A prior assistant reply named this hour and asked a question. Only replies
- * BEFORE the last real customer line count: a same-turn "Zal ik boeken?" after
- * the yes is the model talking to itself, not a summary the customer saw.
+ * A prior assistant reply named this booking's date and clock and asked a question.
+ * Only replies BEFORE the last real customer line count: a same-turn "Zal ik boeken?"
+ * after the yes is the model talking to itself, not a summary the customer saw.
+ *
+ * Date and clock must be one phrase. A refusal that names 2 November 10:00 and a
+ * range starting 26 October must not confirm a 26 October 10:00 booking. Live
+ * WhatsApp 2026-09-02, session 3f63a9b5.
  */
 export function summaryWasAsked(
   history: ToolContext['conversationHistory'],
   startTime: string,
 ): boolean {
-  const clock = startTime.match(/T(\d{2}):(\d{2})/);
-  if (!clock || !Array.isArray(history)) return false;
-  const hhmm = `${clock[1]}:${clock[2]}`;
+  if (!Array.isArray(history)) return false;
   let lastUser = -1;
   for (let i = history.length - 1; i >= 0; i--) {
     const m = history[i];
@@ -109,7 +113,7 @@ export function summaryWasAsked(
     if (m.role !== 'assistant') continue;
     const text = contentToText(m.content);
     if (!text.includes('?') || !SUMMARY_ASK.test(text)) continue;
-    if (parseClockTimes(text).some((t) => t.key === hhmm)) return true;
+    if (namesPendingDateAndClock(text, startTime)) return true;
   }
   return false;
 }
@@ -123,6 +127,42 @@ export async function pendingYesNeedsCreate(
   const lookup = await readPending(sessionId);
   if (lookup.store !== 'up' || lookup.pending == null) return false;
   return summaryWasAsked(history, lookup.pending.startTime);
+}
+
+/** A pending move the customer already agreed to; the nudge repeats these exact arguments. */
+export interface PendingAgreedMove {
+  bookingId: string;
+  newStartTime: string;
+  customerAddress?: string;
+}
+
+/**
+ * The reschedule twin of `pendingYesNeedsCreate`: a pending move summary exists and the last
+ * customer line is the agreeing yes. Live WaterFix 2026-09-02, session 1bbd5818: the turn after
+ * "Ja, bevestig de wijziging" called list_bookings and check_availability but never
+ * reschedule_booking, so the customer was told the move could not be confirmed while the slot
+ * was free and the gate held a confirmed summary. The run loop reads this to nudge that turn.
+ */
+export async function pendingYesNeedsReschedule(
+  sessionId: string,
+  history: ToolContext['conversationHistory'],
+): Promise<PendingAgreedMove | null> {
+  const last = lastCustomerUtterance({ conversationHistory: history });
+  if (!last) return null;
+  const lookup = await readPending(sessionId, RESCHEDULE_PREFIX);
+  if (lookup.store !== 'up' || lookup.pending == null) return null;
+  const pending = lookup.pending;
+  if (pending.kind !== 'reschedule' || !pending.bookingId) return null;
+  if (!moveWasAgreed(history, pending, last)) return null;
+  // The gate stores wallClockKey's minute-precision key; the tool contract documents seconds
+  // ("2026-06-19T14:00:00"), so the nudge hands the model the documented shape. The retrying
+  // call is re-keyed by the gate, so it still matches the stored pending.
+  const withSeconds = /T\d{2}:\d{2}$/.test(pending.startTime) ? `${pending.startTime}:00` : pending.startTime;
+  return {
+    bookingId: pending.bookingId,
+    newStartTime: withSeconds,
+    ...(pending.customerAddress ? { customerAddress: pending.customerAddress } : {}),
+  };
 }
 
 function parsePending(raw: string | null): PendingBookingDetails | null {
@@ -346,20 +386,26 @@ function rescheduleWasConfirmed(
   if (!pending || pending.kind !== 'reschedule') return false;
   if (pending.bookingId !== asked.bookingId || pending.startTime !== asked.newStartTime) return false;
   if (asked.customerAddress !== undefined && pending.customerAddress !== asked.customerAddress) return false;
-  // A MOVE THAT CARRIES A DOOR NEEDS THE DOOR IN THE SUMMARY, whether or not the confirming call
-  // repeats it. Tool arguments are the model's output, not the customer's word: an address it
-  // invented on the first call and repeated on the second is no more agreed to than one it
-  // dropped. So the evidence is the same either way - one message the customer read holding the
-  // question, the hour and this address. A slot chip is not that evidence: it names an hour.
+  return moveWasAgreed(ctx.conversationHistory, pending, last);
+}
+
+/**
+ * The customer's yes matched THIS pending move. A move that carries a door needs the door in
+ * the summary, whether or not the confirming call repeats it: tool arguments are the model's
+ * output, not the customer's word. A slot chip is not that evidence - it names an hour.
+ * Shared by the tool gate and the run-loop nudge so both judge a yes by the same summary.
+ */
+function moveWasAgreed(
+  history: ToolContext['conversationHistory'],
+  pending: PendingBookingDetails,
+  last: string,
+): boolean {
   if (pending.customerAddress) {
-    return (
-      isAffirmativeReply(last) &&
-      summaryCarriedMove(ctx.conversationHistory, pending.startTime, pending.customerAddress)
-    );
+    return isAffirmativeReply(last) && summaryCarriedMove(history, pending.startTime, pending.customerAddress);
   }
   return (
     isConfirmingChip(last, pending.startTime) ||
-    (isAffirmativeReply(last) && summaryWasAsked(ctx.conversationHistory, pending.startTime))
+    (isAffirmativeReply(last) && summaryWasAsked(history, pending.startTime))
   );
 }
 
@@ -413,6 +459,39 @@ export async function refuseUnlessRescheduleConfirmed(
       errorSafeForModel: true,
       data: { needsConfirmation: true, bookingId, newStartTime, customerAddress },
     },
+  };
+}
+
+/**
+ * A NEW BOOKING WHILE A MOVE IS OPEN IS ALMOST ALWAYS THE MOVE.
+ *
+ * Live on WaterFix (2026-09-01) a customer asked to move an at-home appointment, the first time
+ * they named was not offered, and the bot showed the next day's list instead. They tapped a slot,
+ * said yes, and the model called `create_booking`. The tenant then held TWO confirmed
+ * appointments for the same person: the original still standing on its slot, and a second one the
+ * customer never asked for. Nothing downstream can catch that - both writes are individually
+ * valid, and a duplicate is only wrong because of an intention recorded a few turns earlier.
+ *
+ * The pending move IS that record, so this refuses the create once and names the booking the
+ * customer was moving. Refusing forever would trap the customer who genuinely wants a second
+ * appointment, so the record is cleared as it refuses: a model that calls again gets through, one
+ * turn later, having been told what it was about to do.
+ */
+export async function refuseCreateWhileMovePending(ctx: ToolContext): Promise<ToolResult | null> {
+  const lookup = await readPending(ctx.sessionId, RESCHEDULE_PREFIX);
+  if (lookup.store === 'down') return null;
+  const pending = lookup.pending;
+  if (!pending?.bookingId) return null;
+  await clearPending(ctx.sessionId, RESCHEDULE_PREFIX);
+  return {
+    success: false,
+    error:
+      `${MOVE_PENDING}: You were moving this customer's existing appointment (bookingId "${pending.bookingId}"). ` +
+      `Creating a booking now leaves that one standing and gives them two. If they picked a new time for THAT ` +
+      `appointment, call reschedule_booking with bookingId "${pending.bookingId}" and the time they chose. Only if ` +
+      `they want a SECOND appointment as well as the one they already have, call create_booking again.`,
+    errorSafeForModel: true,
+    data: { movePending: true, bookingId: pending.bookingId, movingFrom: pending.startTime },
   };
 }
 

@@ -25,8 +25,10 @@ import {
   getOwnedBot,
   getOwnedBotConfig,
 } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch } from './booking-providers/types';
+import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, type ClockWindow } from './booking-providers/types';
+import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
+import { findBookableService } from './booking-providers/find-bookable-service';
 import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import { upsertLead } from '../leads/lead-capture.service';
@@ -158,13 +160,41 @@ export async function checkAvailability(
   customerAddress?: string,
   locationChoice?: 'business' | 'customer',
   customerPhone?: string,
+  clockWindow?: ClockWindow,
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   // `excludeBookingId` stays undefined here: this entry point is a NEW booking. The reschedule
   // picker has its own function below, which passes both it and the address on the row.
   return internalProvider.checkAvailability(
-    ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress, locationChoice, customerPhone,
+    ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress, locationChoice, customerPhone, clockWindow,
+  );
+}
+
+/**
+ * Availability for MOVING one existing booking: the same diary read with that booking's own
+ * occupancy excluded. Without the exclusion a 09:30 target on the caller's own 09:00-10:00
+ * hold reads as busy, so the move is refused against nobody but themselves. The availability
+ * tool calls this for its moveTargets when the range holds exactly one of the caller's rows;
+ * authorization is unchanged - the excluded id comes from the caller's own alreadyHeld result.
+ */
+export async function checkMoveAvailability(
+  caller: BookingCaller,
+  sessionId: string,
+  startDate: string,
+  endDate: string,
+  excludeBookingId: string,
+  serviceId?: string,
+  durationMin?: number,
+  customerAddress?: string,
+  locationChoice?: 'business' | 'customer',
+  customerPhone?: string,
+  clockWindow?: ClockWindow,
+) {
+  const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
+  return internalProvider.checkAvailability(
+    ctx, startDate, endDate, serviceId, durationMin, excludeBookingId, customerAddress, locationChoice, customerPhone, clockWindow,
   );
 }
 
@@ -185,6 +215,21 @@ export async function createBooking(
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
   attributeToOffer(ctx, result.booking?.id, startTime, serviceId, 'booking');
   return result;
+}
+
+/**
+ * Does this call's service require an email before create_booking may ask
+ * for confirmation? EMAIL_REQUIRED must beat CONFIRMATION_REQUIRED: otherwise
+ * the model summarises "book without email", the customer says yes, the write
+ * gate refuses, and a second summary is asked.
+ */
+export async function peekCustomerEmailRequired(
+  sessionId: string,
+  serviceId?: string,
+): Promise<boolean> {
+  const ctx = await resolveContext(sessionId);
+  const svc = await findBookableService(ctx.bot.id, serviceId);
+  return serviceRequiresCustomerEmail(svc);
 }
 
 /**

@@ -239,6 +239,13 @@ describe('unofferedSingleTimeIn — one invented time IS the whole recommendatio
     expect(unofferedSingleTimeIn('How about 8.30 AM?', OFFERED)).toBe('8.30 AM');
   });
 
+  it('does not read a duration like 1u30 or 1h30 as an invented time', () => {
+    // `u` and `h` are duration separators in Dutch and French. The reply guards must not
+    // read them as clocks, because a false hit replaces a correct reply with a wrong time.
+    expect(unofferedSingleTimeIn('De afspraak duurt 1u30.', OFFERED)).toBeNull();
+    expect(unofferedSingleTimeIn('Le rendez-vous dure 1h30.', OFFERED)).toBeNull();
+  });
+
   it('says nothing when the reply names no time at all', () => {
     expect(unofferedSingleTimeIn('Here are some available times:', OFFERED)).toBeNull();
   });

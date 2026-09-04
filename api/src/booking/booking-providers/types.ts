@@ -219,6 +219,17 @@ export interface EmptyRangeDiagnosis {
   boundary: string;
 }
 
+/**
+ * The part of a day the customer asked for, as business-local wall clock. `from` inclusive,
+ * `to` exclusive, "HH:mm"; `to` may be "24:00". Applied to slot STARTS, before travel and
+ * before the model/chip prefixes, so "afternoon" cannot come back as the first eight morning
+ * slots. Live 2026-09-02: a customer asked for the afternoon and got the morning.
+ */
+export interface ClockWindow {
+  from: string;
+  to: string;
+}
+
 export interface AvailabilityResult {
   slots: BookingSlot[];
   timezone: string;
@@ -247,6 +258,12 @@ export interface AvailabilityResult {
    * A later check_availability must not let the model tell the customer those times are unavailable.
    */
   alreadyHeld?: Array<{ bookingId: string; start: string; end: string }>;
+  /**
+   * Echo of the window the call was filtered by. `matched: false` means the range HAD free
+   * slots but none inside the window, and `slots` then holds the unfiltered list so the model
+   * can offer the other parts of the day instead of a request.
+   */
+  clockWindow?: ClockWindow & { matched: boolean };
   /**
    * What the grouping scorer thought of these slots (#81, LP4).
    *
@@ -405,6 +422,8 @@ export interface BookingExtras {
    * calendar with no context at all.
    */
   aiSummary?: string;
+  /** ISO 639-1 code of the chat language; normalized and stored as `customer_language`. */
+  language?: string;
 }
 
 export interface BookingProvider {
@@ -429,6 +448,7 @@ export interface BookingProvider {
     locationChoice?: 'business' | 'customer',
     /** Required when the service flags needs phone. Agent-only; ignored for admin/reschedule. */
     customerPhone?: string,
+    clockWindow?: ClockWindow,
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

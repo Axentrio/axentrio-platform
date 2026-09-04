@@ -76,13 +76,15 @@ const boundsVerdict = async (input: {
   candidate: TravelCandidate;
   before?: TravelNeighbour | null;
   after?: TravelNeighbour | null;
-  slackMin: number;
+  minGapMin: number;
+  maxTravelMin?: number | null;
 }) =>
   (
     await assessSlotRouted({
       candidate: input.candidate,
       neighbours: [input.before, input.after].filter((n): n is TravelNeighbour => !!n),
-      slackMin: input.slackMin,
+      minGapMin: input.minGapMin,
+      maxTravelMin: input.maxTravelMin ?? null,
       lookup: replayLookup({}),
     })
   ).verdict;
@@ -90,8 +92,9 @@ const boundsVerdict = async (input: {
 const slotVerdict = async (input: {
   candidate: TravelCandidate;
   neighbours: TravelNeighbour[];
-  slackMin: number;
-}) => (await assessSlotRouted({ ...input, lookup: replayLookup({}) })).verdict;
+  minGapMin: number;
+  maxTravelMin?: number | null;
+}) => (await assessSlotRouted({ ...input, maxTravelMin: input.maxTravelMin ?? null, lookup: replayLookup({}) })).verdict;
 
 describe('assessTravel — the certain no', () => {
   it('refuses a slot whose preceding job cannot possibly be left in time', async () => {
@@ -101,7 +104,8 @@ describe('assessTravel — the certain no', () => {
       candidate: candidate({ start: '2026-09-01T10:10:00Z', end: '2026-09-01T11:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', LIEGE),
       after: null,
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     expect(verdict).toBe('unreachable');
   });
@@ -111,7 +115,8 @@ describe('assessTravel — the certain no', () => {
       candidate: candidate({ start: '2026-09-01T09:00:00Z', end: '2026-09-01T10:00:00Z' }),
       before: null,
       after: known('2026-09-01T10:10:00Z', '2026-09-01T11:00:00Z', LIEGE),
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     expect(verdict).toBe('unreachable');
   });
@@ -123,7 +128,7 @@ describe('assessTravel — the certain no', () => {
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT),
       after: null,
-      slackMin: 58,
+      minGapMin: 58,
     });
     expect(verdict).toBe('unreachable');
   });
@@ -135,7 +140,7 @@ describe('assessTravel — the certain yes', () => {
       candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
       after: null,
-      slackMin: 5,
+      minGapMin: 5,
     });
     expect(verdict).toBe('clear');
   });
@@ -146,7 +151,7 @@ describe('assessTravel — the certain yes', () => {
         candidate: candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z' }),
         before: null,
         after: null,
-        slackMin: 15,
+        minGapMin: 15,
       })
     ).toBe('clear');
   });
@@ -160,7 +165,8 @@ describe('assessTravel — the undecided middle', () => {
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT),
       after: null,
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     expect(verdict).toBe('undecided');
   });
@@ -170,7 +176,8 @@ describe('assessTravel — the undecided middle', () => {
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT), // undecided
       after: known('2026-09-01T12:05:00Z', '2026-09-01T13:00:00Z', LIEGE), // impossible
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     expect(verdict).toBe('unreachable');
   });
@@ -185,7 +192,8 @@ describe('assessTravel — what a neighbour without coordinates means', () => {
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z' }),
         before: locationless('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('clear');
   });
@@ -198,7 +206,8 @@ describe('assessTravel — what a neighbour without coordinates means', () => {
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z' }),
         before: unresolved('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('undecided');
   });
@@ -211,7 +220,8 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
         candidate: candidate({ start: '2026-09-01T10:10:00Z', end: '2026-09-01T11:00:00Z' }),
         before: coarse('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', LIEGE),
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('unreachable');
   });
@@ -222,7 +232,8 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
         candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
         before: coarse('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('undecided');
   });
@@ -235,7 +246,8 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
         candidate: candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z', coarse: true }),
         before: null,
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('undecided');
   });
@@ -246,7 +258,8 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z', coarse: true }),
         before: locationless('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: locationless('2026-09-01T11:05:00Z', '2026-09-01T12:00:00Z'),
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('undecided');
   });
@@ -262,7 +275,8 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
         }),
         before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
         after: null,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('unreachable');
   });
@@ -315,7 +329,8 @@ describe('neighbour selection', () => {
       await slotVerdict({
         candidate: candidate({ start: '2026-09-01T10:15:00Z', end: '2026-09-01T11:00:00Z', point: LIEGE }),
         neighbours: diaryWithCall,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('unreachable');
   });
@@ -344,7 +359,8 @@ describe('neighbour selection', () => {
       await slotVerdict({
         candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
         neighbours,
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('clear');
 
@@ -354,7 +370,8 @@ describe('neighbour selection', () => {
       await slotVerdict({
         candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
         neighbours: [known('2026-09-01T10:00:00Z', '2026-09-01T10:30:00Z', ACROSS_TOWN)],
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
       })
     ).toBe('undecided');
   });
@@ -364,7 +381,8 @@ describe('neighbour selection', () => {
     const verdict = await slotVerdict({
       candidate: candidate({ start: '2026-09-02T00:15:00Z', end: '2026-09-02T01:00:00Z' }),
       neighbours: overnight,
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     // Liège→Brussels in 45 minutes is ~87 km: possible at motorway speed, not proven at a
     // crawl. The point of the test is that the midnight boundary did not hide the neighbour.
@@ -380,7 +398,7 @@ describe('assessSlot — both sides at once', () => {
         known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
         known('2026-09-01T11:30:00Z', '2026-09-01T12:00:00Z', BRUSSELS),
       ],
-      slackMin: 5,
+      minGapMin: 5,
     });
     expect(verdict).toBe('clear');
   });
@@ -392,7 +410,8 @@ describe('assessSlot — both sides at once', () => {
         known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
         known('2026-09-01T11:05:00Z', '2026-09-01T12:00:00Z', LIEGE),
       ],
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
     });
     expect(verdict).toBe('unreachable');
   });
@@ -462,7 +481,8 @@ describe('assessSlotRouted — the per-call budget', () => {
       await assessSlotRouted({
         candidate: slot(`2026-09-01T${hour}:30:00Z`, `2026-09-01T${hour}:50:00Z`),
         neighbours: diary(`2026-09-01T${hour}:00:00Z`, `2026-09-01T${hour}:00:00Z`),
-        slackMin: 0,
+        minGapMin: 0,
+      maxTravelMin: null,
         lookup,
         budget,
       });
@@ -478,7 +498,8 @@ describe('assessSlotRouted — the per-call budget', () => {
     const { verdict, fullyRouted, degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup: async () => ({ minutes: null, cause: 'budget_spent' as const }),
       budget,
     });
@@ -494,7 +515,8 @@ describe('assessSlotRouted — the per-call budget', () => {
     const { degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup,
       budget,
     });
@@ -510,7 +532,8 @@ describe('assessSlotRouted — the per-call budget', () => {
     await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup,
     });
     expect(calls).toHaveLength(1);
@@ -520,7 +543,8 @@ describe('assessSlotRouted — the per-call budget', () => {
     const { verdict, degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup: async () => ({ minutes: null, cause: 'cap_exhausted' }),
     });
     expect(verdict).toBe('undecided');
@@ -532,7 +556,8 @@ describe('assessSlotRouted — the per-call budget', () => {
     const { fullyRouted, degradedCauses } = await assessSlotRouted({
       candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
       neighbours: [known('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z', NEXT_DOOR)],
-      slackMin: 0,
+      minGapMin: 0,
+      maxTravelMin: null,
       lookup: replayLookup({}),
     });
     expect(fullyRouted).toBe(false);
@@ -551,7 +576,8 @@ describe('assessSlotRouted — the per-call budget', () => {
 describe('assessSlotRouted — did anything actually constrain the verdict', () => {
   const slot = candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z' });
   const run = (neighbours: TravelNeighbour[]) =>
-    assessSlotRouted({ candidate: slot, neighbours, slackMin: 0, lookup: replayLookup({}) });
+    assessSlotRouted({ candidate: slot, neighbours, minGapMin: 0,
+      maxTravelMin: null, lookup: replayLookup({}) });
 
   it('an empty day constrains nothing', async () => {
     const { verdict, hadConstrainingLeg } = await run([]);
@@ -719,7 +745,8 @@ describe('an estimated leg may clear a slot but may never refuse one', () => {
       point: GHENT,
     }),
     neighbours: [known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', BRUSSELS)],
-    slackMin: 0,
+    minGapMin: 0,
+      maxTravelMin: null,
   };
 
   it('CLEARS on an estimate that fits', async () => {
@@ -758,5 +785,109 @@ describe('an estimated leg may clear a slot but may never refuse one', () => {
       lookup: async () => ({ minutes: 20, estimated: true, cause: 'estimated' }),
     });
     expect(assessment.fullyRouted).toBe(false);
+  });
+});
+
+describe('maximum travel time', () => {
+  // Brussels→Ghent is ~47 km: inside the haversine band at a 45-minute cap, so the lookup
+  // is what decides. Gent→Liège is already a certain-no at 45 minutes and would not test it.
+  const neighbour = known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', BRUSSELS);
+  const cand = candidate({
+    start: '2026-09-01T12:00:00Z',
+    end: '2026-09-01T13:00:00Z',
+    point: GHENT,
+  });
+  const gap180 = {
+    candidate: cand,
+    neighbours: [neighbour],
+    minGapMin: 0,
+  };
+
+  it('refuses a 70-minute drive against a 45-minute cap', async () => {
+    const { verdict } = await assessSlotRouted({
+      ...gap180,
+      maxTravelMin: 45,
+      lookup: async () => ({ minutes: 70 }),
+    });
+    expect(verdict).toBe('unreachable');
+  });
+
+  it('clears a 40-minute drive against a 45-minute cap', async () => {
+    const { verdict } = await assessSlotRouted({
+      ...gap180,
+      maxTravelMin: 45,
+      lookup: async () => ({ minutes: 40 }),
+    });
+    expect(verdict).toBe('clear');
+  });
+
+  it('lets the gap alone decide when there is no cap', async () => {
+    const { verdict } = await assessSlotRouted({
+      ...gap180,
+      maxTravelMin: null,
+      lookup: async () => ({ minutes: 70 }),
+    });
+    expect(verdict).toBe('clear');
+  });
+
+  it('refuses a 300 km pair against a 30-minute cap without a lookup', async () => {
+    const far: GeoPoint = { lat: 50.8503, lng: 8.7 };
+    let lookedUp = 0;
+    const { verdict } = await assessSlotRouted({
+      candidate: candidate({
+        start: '2026-09-01T14:00:00Z',
+        end: '2026-09-01T15:00:00Z',
+        point: far,
+      }),
+      neighbours: [known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', BRUSSELS)],
+      minGapMin: 0,
+      maxTravelMin: 30,
+      lookup: async () => {
+        lookedUp += 1;
+        return { minutes: null };
+      },
+    });
+    expect(verdict).toBe('unreachable');
+    expect(lookedUp).toBe(0);
+  });
+
+  it('keeps an estimated over-cap drive undecided', async () => {
+    const { verdict } = await assessSlotRouted({
+      ...gap180,
+      maxTravelMin: 45,
+      lookup: async () => ({ minutes: 70, estimated: true, cause: 'estimated' }),
+    });
+    expect(verdict).toBe('undecided');
+  });
+});
+
+describe('the safety margin is the Minimum Gap', () => {
+  const neighbour = known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', BRUSSELS);
+  const cand = candidate({
+    start: '2026-09-01T10:40:00Z',
+    end: '2026-09-01T11:40:00Z',
+    point: GHENT,
+  });
+
+  it('refuses when drive plus Minimum Gap does not fit the free time', async () => {
+    const { verdict } = await assessSlotRouted({
+      candidate: cand,
+      neighbours: [neighbour],
+      minGapMin: 30,
+      maxTravelMin: null,
+      lookup: async () => ({ minutes: 75 }),
+    });
+    expect(verdict).toBe('unreachable');
+  });
+
+  it('clears when drive plus Minimum Gap fits', async () => {
+    const { verdict } = await assessSlotRouted({
+      candidate: cand,
+      neighbours: [neighbour],
+      minGapMin: 30,
+      maxTravelMin: null,
+      lookup: async () => ({ minutes: 65 }),
+    });
+    expect(verdict).toBe('clear');
   });
 });

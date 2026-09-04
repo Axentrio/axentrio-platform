@@ -20,8 +20,13 @@ import type { EmailAttachment } from '../../automations/email.service';
 
 /** Per-file ceiling. A bigger file stays in the portal. */
 const PER_FILE_MAX_BYTES = 10 * 1024 * 1024;
-/** Whole-email ceiling across all attachments — well under Resend's ~40MB limit. */
-const TOTAL_MAX_BYTES = 15 * 1024 * 1024;
+/**
+ * Whole-email ceiling across all attachments — well under Resend's ~40MB limit.
+ *
+ * Exported because the booking-confirmation extras attach to the same kind of message and
+ * must obey the same ceiling; a second copy of this number is a second thing to forget.
+ */
+export const TOTAL_MAX_BYTES = 15 * 1024 * 1024;
 
 /** The upload-store surface this needs — a subset of UploadService, so it is trivially testable. */
 export interface UploadedFileStore {

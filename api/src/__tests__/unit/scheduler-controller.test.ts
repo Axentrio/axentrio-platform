@@ -848,6 +848,98 @@ describe('scheduler.controller · venue address upsert', () => {
   });
 });
 
+/**
+ * The global booking-confirmation extras.
+ *
+ * The text follows the nullable contract every other optional column here follows: an
+ * omitted key leaves the stored value alone, an explicit null clears it. That distinction is
+ * the whole point - an owner who saves their opening hours must not silently lose the
+ * "arrive 10 minutes early" line they typed last month.
+ */
+describe('scheduler.controller · booking confirmation extras', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', name: 'Valyro', settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    etFind.mockResolvedValue([]);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = allQueryCalls().find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('writes the information text on its own, without any other section', async () => {
+    const q = (await save({ confirmationEmail: { extraInfo: 'Arrive 10 minutes early.' } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({
+      provided: true,
+      value: 'Arrive 10 minutes early.',
+    });
+  });
+
+  it('leaves the stored text alone when the payload does not mention it', async () => {
+    const q = (await save({ bookingRules: { minGapMin: 15 } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({ provided: false, value: null });
+  });
+
+  it('clears the text on an explicit null', async () => {
+    const q = (await save({ confirmationEmail: { extraInfo: null } }))!;
+    expect(bound(q, 'confirmation_extra_info')).toEqual({ provided: true, value: null });
+  });
+
+  it('reads the text and the attachment list back, without the storage key', async () => {
+    bsFindOne.mockResolvedValue({
+      confirmationExtraInfo: 'Parking is behind the building.',
+      confirmationAttachments: [
+        {
+          id: 'att-1',
+          fileName: 'price-list.pdf',
+          mimeType: 'application/pdf',
+          fileSize: 2048,
+          fileKey: 'booking-confirmation/ten-1/bot-1/att-1/price-list.pdf',
+          uploadedAt: '2026-09-01T10:00:00.000Z',
+        },
+      ],
+    } as any);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    const out = sendSuccess.mock.calls.at(-1)?.[1] as any;
+    expect(out.confirmationEmail.extraInfo).toBe('Parking is behind the building.');
+    expect(out.confirmationEmail.attachments).toEqual([
+      {
+        id: 'att-1',
+        fileName: 'price-list.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 2048,
+        uploadedAt: '2026-09-01T10:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('reads an unconfigured Agent as no text and no files', async () => {
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    const out = sendSuccess.mock.calls.at(-1)?.[1] as any;
+    expect(out.confirmationEmail).toEqual({ extraInfo: null, attachments: [] });
+  });
+
+  it('refuses a text over the 2000-character cap', async () => {
+    await expect(
+      updateSchedulerConfig(
+        { tenantId: 'ten-1', body: { confirmationEmail: { extraInfo: 'x'.repeat(2001) } } } as any,
+        res,
+      ),
+    ).rejects.toBeDefined();
+  });
+});
+
 describe('scheduler.controller · pause switch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -935,10 +1027,9 @@ describe('scheduler.controller · travel time switch', () => {
     return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
   };
 
-  it('writes all three settings and is a sufficient reason to write on its own', async () => {
-    const q = (await save({ travel: { enabled: true, slackMin: 10, startFromBase: true } }))!;
+  it('writes the travel switches and is a sufficient reason to write on its own', async () => {
+    const q = (await save({ travel: { enabled: true, startFromBase: true } }))!;
     expect(bound(q, 'travel_time_enabled')).toEqual({ provided: true, value: true });
-    expect(bound(q, 'travel_slack_min')).toEqual({ provided: true, value: 10 });
     expect(bound(q, 'travel_start_from_base')).toEqual({ provided: true, value: true });
   });
 
@@ -978,7 +1069,7 @@ describe('scheduler.controller · travel time switch', () => {
   it('writes NOTHING when the enable is refused, not even the fields that rode along', async () => {
     itineraryKeyIsShared.mockResolvedValue(true);
     await updateSchedulerConfig(
-      { tenantId: 'ten-1', body: { travel: { enabled: true, slackMin: 15 } } } as any,
+      { tenantId: 'ten-1', body: { travel: { enabled: true, startFromBase: true } } } as any,
       res
     ).catch(() => undefined);
     expect(allQueryCalls().some((c) => String(c[0]).includes('chatbot_booking_settings'))).toBe(false);
@@ -1002,14 +1093,20 @@ describe('scheduler.controller · travel time switch', () => {
     expect(bound(q, 'travel_start_from_base').value).toBe(false);
   });
 
-  it('clears the slack on an explicit null', async () => {
-    const q = (await save({ travel: { slackMin: null } }))!;
-    expect(bound(q, 'travel_slack_min')).toEqual({ provided: true, value: null });
+  it('is returned by readConfig so the portal cannot hydrate it wrong', async () => {
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelStartFromBase: true } as never);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
+      travel: { enabled: true, startFromBase: true },
+    });
   });
 
-  it('leaves a stored slack alone when the travel payload does not mention it', async () => {
-    const q = (await save({ travel: { enabled: true } }))!;
-    expect(bound(q, 'travel_slack_min')).toEqual({ provided: false, value: null });
+  it('reads a missing settings row as off', async () => {
+    bsFindOne.mockResolvedValue(null);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
+      travel: { enabled: false, startFromBase: false },
+    });
   });
 
   it('leaves every travel setting alone when the payload does not mention travel', async () => {
@@ -1019,21 +1116,6 @@ describe('scheduler.controller · travel time switch', () => {
     expect(bound(q, 'travel_start_from_base')).toEqual({ provided: false, value: false });
   });
 
-  it('is returned by readConfig so the portal cannot hydrate it wrong', async () => {
-    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelStartFromBase: true } as never);
-    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
-    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
-      travel: { enabled: true, slackMin: 10, startFromBase: true },
-    });
-  });
-
-  it('reads a missing settings row as off, with no slack', async () => {
-    bsFindOne.mockResolvedValue(null);
-    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
-    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
-      travel: { enabled: false, slackMin: null, startFromBase: false },
-    });
-  });
 });
 
 /**

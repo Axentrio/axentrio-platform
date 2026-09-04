@@ -135,36 +135,30 @@ describe('certainlyReachableWithin — the certain-yes pre-filter', () => {
 });
 
 describe('travelGapMinutes', () => {
-  it('degrades to exactly the flat gap when there is no routing answer', () => {
-    expect(travelGapMinutes({ driveMin: null, slackMin: 10, minGapMin: 15 })).toBe(15);
+  it('degrades to exactly the Minimum Gap when there is no routing answer', () => {
+    expect(travelGapMinutes({ driveMin: null, minGapMin: 15 })).toBe(15);
   });
 
-  it('does not add slack to the unknown case', () => {
-    // The regression that would quietly tighten every business not using this feature.
-    expect(travelGapMinutes({ driveMin: null, slackMin: 45, minGapMin: 5 })).toBe(5);
+  it('adds the drive on top of the Minimum Gap', () => {
+    expect(travelGapMinutes({ driveMin: 30, minGapMin: 5 })).toBe(35);
   });
 
-  it('keeps the flat gap as a floor when the drive is short', () => {
-    expect(travelGapMinutes({ driveMin: 2, slackMin: 3, minGapMin: 20 })).toBe(20);
-  });
-
-  it('raises the gap to drive + slack when the drive dominates', () => {
-    // Achraf's case: 30-minute drive, 10 minutes of slack, a 5-minute flat gap.
-    expect(travelGapMinutes({ driveMin: 30, slackMin: 10, minGapMin: 5 })).toBe(40);
+  it('adds a short drive rather than treating the gap as a floor', () => {
+    expect(travelGapMinutes({ driveMin: 2, minGapMin: 20 })).toBe(22);
   });
 
   it('treats a malformed drive time as unknown rather than as zero', () => {
-    expect(travelGapMinutes({ driveMin: NaN, slackMin: 10, minGapMin: 15 })).toBe(15);
-    expect(travelGapMinutes({ driveMin: -1, slackMin: 10, minGapMin: 15 })).toBe(15);
-    expect(travelGapMinutes({ driveMin: Infinity, slackMin: 10, minGapMin: 15 })).toBe(15);
+    expect(travelGapMinutes({ driveMin: NaN, minGapMin: 15 })).toBe(15);
+    expect(travelGapMinutes({ driveMin: -1, minGapMin: 15 })).toBe(15);
+    expect(travelGapMinutes({ driveMin: Infinity, minGapMin: 15 })).toBe(15);
   });
 
-  it('normalises negative configuration to zero instead of subtracting', () => {
-    expect(travelGapMinutes({ driveMin: 30, slackMin: -10, minGapMin: -5 })).toBe(30);
+  it('normalises a negative gap to zero instead of subtracting', () => {
+    expect(travelGapMinutes({ driveMin: 30, minGapMin: -5 })).toBe(30);
   });
 
   it('is zero only when nothing is configured and nothing is known', () => {
-    expect(travelGapMinutes({ driveMin: null, slackMin: 0, minGapMin: 0 })).toBe(0);
+    expect(travelGapMinutes({ driveMin: null, minGapMin: 0 })).toBe(0);
   });
 });
 

@@ -15,6 +15,8 @@
  * snapshot tests are byte-stable.
  */
 
+import { fill, type BookingCopy } from '../booking-copy';
+
 /** Per-field code-point cap. */
 const FIELD_CAP = 500;
 /** Whole-description code-point cap. */
@@ -43,12 +45,27 @@ export interface BookingContentInput {
   /** widget | whatsapp | messenger | instagram | telegram. */
   sourceChannel?: string | null;
   /**
-   * How many files the customer attached. Deliberately a COUNT, not links: a calendar
-   * event lives in a third party for weeks, and the only URLs available today either
-   * expire in 300s or are unsigned and permanent. A long-lived signed link to
-   * customer-uploaded content is a security decision, not a formatting one.
+   * The NAMES of the files the customer attached. Names, never links: a calendar event
+   * lives in a third party for weeks, and the only URLs available today either expire in
+   * 300s or are unsigned and permanent. A long-lived signed link to customer-uploaded
+   * content is a security decision, not a formatting one - so the line names the files
+   * and sends the owner back to Axentrio to open them.
    */
-  uploadedFileCount?: number | null;
+  uploadedFileNames?: string[] | null;
+}
+
+/**
+ * File names off a stored `uploaded_files` jsonb value.
+ *
+ * The column is arbitrary jsonb written by several upload paths, so every entry is read
+ * defensively: an entry carrying no usable `fileName` is dropped rather than rendered as
+ * `undefined` in the owner's calendar.
+ */
+export function storedFileNames(files: unknown): string[] {
+  if (!Array.isArray(files)) return [];
+  return files
+    .map((f) => (f as { fileName?: unknown } | null)?.fileName)
+    .filter((n): n is string => typeof n === 'string' && n.trim() !== '');
 }
 
 export interface ServiceContentInput {
@@ -107,19 +124,28 @@ function renderIntakeValue(v: unknown): string | null {
   return null;
 }
 
-/** The `Customer:` line, or null when both name and email are empty. */
-function customerLine(name?: string | null, email?: string | null): string | null {
-  const n = present(name) ? normalizeField(name) : '';
-  const e = present(email) ? normalizeField(email) : '';
-  if (n && e) return `Customer: ${n} <${e}>`;
-  if (!n && e) return `Customer: <${e}>`;
-  if (n && !e) return `Customer: ${n}`;
-  return null;
+
+
+/** How many file names the body lists before the rest become a bare count. */
+const FILE_NAMES_CAP = 5;
+
+/** The `Files:` line, or null when the customer attached nothing. */
+function filesLine(names: string[] | null | undefined, copy: BookingCopy): string | null {
+  if (!Array.isArray(names)) return null;
+  const cleaned = names.filter(present).map((n) => normalizeField(n));
+  if (cleaned.length === 0) return null;
+  const shown = cleaned.slice(0, FILE_NAMES_CAP);
+  const dropped = cleaned.length - shown.length;
+  return fill(copy['event.files'], {
+    names: dropped > 0 ? `${shown.join(', ')} +${dropped}` : shown.join(', '),
+  });
 }
 
 /** The `Price:` line, or null when the service shows no price. */
-function priceLine(priceDisplay?: string | null): string | null {
-  return present(priceDisplay) ? `Price: ${normalizeField(priceDisplay)}` : null;
+function priceLine(priceDisplay: string | null | undefined, copy: BookingCopy): string | null {
+  return present(priceDisplay)
+    ? fill(copy['event.price'], { price: normalizeField(priceDisplay) })
+    : null;
 }
 
 /** Question metadata the intake block needs: id -> label, plus the ids the owner
@@ -194,7 +220,8 @@ function renderIntakeEntries(
  *  ids). */
 function intakeLines(
   intakeAnswers: unknown,
-  questions?: ServiceContentInput['intakeQuestions'],
+  questions: ServiceContentInput['intakeQuestions'] | undefined,
+  intakeLabel: string,
 ): string[] {
   if (!intakeAnswers || typeof intakeAnswers !== 'object' || Array.isArray(intakeAnswers)) {
     return [];
@@ -203,7 +230,7 @@ function intakeLines(
   const { labelById, excluded } = intakeQuestionMeta(questions);
   const ordered = orderedIntakeKeys(obj, questions);
   const entries = renderIntakeEntries(obj, ordered, labelById, excluded);
-  return entries.length ? ['Intake:', ...entries] : [];
+  return entries.length ? [intakeLabel, ...entries] : [];
 }
 
 /**
@@ -212,7 +239,12 @@ function intakeLines(
  * the END of MIDDLE (last line first), a single `... (truncated)` marker is
  * inserted, then TAIL is re-appended.
  */
-function assembleCapped(head: string[], middle: string[], tail: string[]): string {
+function assembleCapped(
+  head: string[],
+  middle: string[],
+  tail: string[],
+  truncatedLabel: string,
+): string {
   const join = (lines: string[]) => lines.join('\n');
   const full = join([...head, ...middle, ...tail]);
   if (Array.from(full).length <= BODY_CAP) return full;
@@ -220,11 +252,11 @@ function assembleCapped(head: string[], middle: string[], tail: string[]): strin
   const kept = [...middle];
   while (kept.length > 0) {
     kept.pop();
-    const candidate = join([...head, ...kept, '… (truncated)', ...tail]);
+    const candidate = join([...head, ...kept, truncatedLabel, ...tail]);
     if (Array.from(candidate).length <= BODY_CAP) return candidate;
   }
   // All of MIDDLE dropped - HEAD + marker + TAIL (per-field caps keep this small).
-  return join([...head, '… (truncated)', ...tail]);
+  return join([...head, truncatedLabel, ...tail]);
 }
 
 /**
@@ -250,46 +282,57 @@ export function buildBookingEventContent(
   booking: BookingContentInput,
   service: ServiceContentInput,
   manageUrl: string,
+  copy: BookingCopy,
 ): { summary: string; description: string } {
-  // HEAD - never dropped.
-  const head: string[] = [`Service: ${normalizeField(service.name)}`];
+  const head: string[] = [fill(copy['event.service'], { text: normalizeField(service.name) })];
   if (present(service.description)) head.push(normalizeField(service.description));
-  const customer = customerLine(booking.attendeeName, booking.attendeeEmail);
-  if (customer) head.push(customer);
-  if (present(booking.customerPhone)) head.push(`Phone: ${normalizeField(booking.customerPhone)}`);
-  if (present(booking.customerAddress)) head.push(`Address: ${normalizeField(booking.customerAddress)}`);
+  if (present(booking.attendeeName)) {
+    head.push(fill(copy['event.customer'], { name: normalizeField(booking.attendeeName) }));
+  }
+  if (present(booking.attendeeEmail)) {
+    head.push(fill(copy['event.email'], { text: normalizeField(booking.attendeeEmail) }));
+  }
+  if (present(booking.customerPhone)) {
+    head.push(fill(copy['event.phone'], { text: normalizeField(booking.customerPhone) }));
+  }
+  if (present(booking.customerAddress)) {
+    head.push(fill(copy['event.address'], { text: normalizeField(booking.customerAddress) }));
+  }
   if (typeof booking.durationMin === 'number' && booking.durationMin > 0) {
-    head.push(`Duration: ${booking.durationMin} min`);
+    head.push(fill(copy['event.duration'], { n: booking.durationMin }));
   }
-  const price = priceLine(service.priceDisplay);
+  const price = priceLine(service.priceDisplay, copy);
   if (price) head.push(price);
-  if (present(booking.sourceChannel)) head.push(`Booked via: ${normalizeField(booking.sourceChannel)}`);
+  if (present(booking.sourceChannel)) {
+    head.push(fill(copy['event.booked_via'], { text: normalizeField(booking.sourceChannel) }));
+  }
 
-  // MIDDLE - droppable (last line first) under the body cap.
   const middle: string[] = [];
-  if (present(booking.aiSummary)) middle.push(`Summary: ${normalizeField(booking.aiSummary)}`);
-  if (present(booking.notes)) middle.push(`Notes: ${normalizeField(booking.notes)}`);
+  if (present(booking.aiSummary)) {
+    middle.push(fill(copy['event.summary'], { text: normalizeField(booking.aiSummary) }));
+  }
+  if (present(booking.notes)) {
+    middle.push(fill(copy['event.notes'], { text: normalizeField(booking.notes) }));
+  }
   if (present(service.preparationInstructions)) {
-    middle.push(`Preparation: ${normalizeField(service.preparationInstructions)}`);
+    middle.push(fill(copy['event.preparation'], { text: normalizeField(service.preparationInstructions) }));
   }
-  if (typeof booking.uploadedFileCount === 'number' && booking.uploadedFileCount > 0) {
-    const n = booking.uploadedFileCount;
-    middle.push(`Files: ${n} attached — open the booking in Axentrio to view`);
-  }
-  middle.push(...intakeLines(booking.intakeAnswers, service.intakeQuestions));
+  const files = filesLine(booking.uploadedFileNames, copy);
+  if (files) middle.push(files);
+  middle.push(...intakeLines(booking.intakeAnswers, service.intakeQuestions, copy['event.intake']));
 
-  // TAIL - never dropped.
-  // TAIL - never dropped. The reference goes here precisely because it must survive
-  // truncation: it is what an owner reads out when they call the customer back.
   const tail: string[] = [];
   const reference = bookingReference(booking.bookingId);
-  if (reference) tail.push(`Reference: ${reference}`);
-  tail.push(`Manage: ${manageUrl}`);
+  if (reference) tail.push(fill(copy['event.reference'], { ref: reference }));
+  tail.push(fill(copy['event.manage'], { url: manageUrl }));
 
   const who = present(booking.attendeeName) ? normalizeField(booking.attendeeName) : '';
+  const serviceName = normalizeField(service.name);
   return {
-    summary: who ? `Booking: ${normalizeField(service.name)} - ${who}` : `Booking: ${normalizeField(service.name)}`,
-    description: assembleCapped(head, middle, tail),
+    summary: who
+      ? fill(copy['event.title_with_name'], { service: serviceName, who })
+      : fill(copy['event.title'], { service: serviceName }),
+    description: assembleCapped(head, middle, tail, copy['event.truncated']),
   };
 }
 
@@ -306,28 +349,35 @@ export function buildBookingEventContent(
  * The manage link goes LAST and is never truncated away, because it is the only self-service
  * route the customer has.
  */
-export function buildCustomerEventDescription(input: {
-  serviceName: string;
-  serviceDescription?: string | null;
-  durationMin?: number | null;
-  meetUrl?: string | null;
-  preparationInstructions?: string | null;
-  manageUrl?: string | null;
-  businessName?: string | null;
-  priceDisplay?: string | null;
-}): string | undefined {
+export function buildCustomerEventDescription(
+  input: {
+    serviceName: string;
+    serviceDescription?: string | null;
+    durationMin?: number | null;
+    meetUrl?: string | null;
+    preparationInstructions?: string | null;
+    manageUrl?: string | null;
+    businessName?: string | null;
+    priceDisplay?: string | null;
+  },
+  copy: BookingCopy,
+): string | undefined {
   const lines: string[] = [];
-  if (present(input.businessName)) lines.push(`With: ${normalizeField(input.businessName)}`);
+  if (present(input.businessName)) {
+    lines.push(fill(copy['ics.with'], { business: normalizeField(input.businessName) }));
+  }
   if (present(input.serviceDescription)) lines.push(normalizeField(input.serviceDescription));
   if (typeof input.durationMin === 'number' && input.durationMin > 0) {
-    lines.push(`Duration: ${input.durationMin} min`);
+    lines.push(fill(copy['ics.duration'], { n: input.durationMin }));
   }
-  const price = priceLine(input.priceDisplay);
+  const price = priceLine(input.priceDisplay, copy);
   if (price) lines.push(price);
-  if (present(input.meetUrl)) lines.push(`Join the meeting: ${input.meetUrl}`);
+  if (present(input.meetUrl)) lines.push(fill(copy['ics.join'], { url: input.meetUrl! }));
   if (present(input.preparationInstructions)) {
-    lines.push(`Before your appointment: ${normalizeField(input.preparationInstructions)}`);
+    lines.push(
+      fill(copy['ics.before'], { text: normalizeField(input.preparationInstructions) }),
+    );
   }
-  if (present(input.manageUrl)) lines.push(`Reschedule or cancel: ${input.manageUrl}`);
+  if (present(input.manageUrl)) lines.push(fill(copy['ics.manage'], { url: input.manageUrl! }));
   return lines.length ? lines.join('\n') : undefined;
 }

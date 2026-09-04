@@ -12,6 +12,9 @@ vi.mock('../../booking/booking.service', () => ({
   adminRescheduleBooking: vi.fn(),
   adminAvailability: vi.fn(),
 }));
+vi.mock('../../services/bot-config.service', () => ({
+  getBotConfigForBotId: vi.fn().mockResolvedValue({ settings: { ai: { language: 'en' } } }),
+}));
 vi.mock('../../scheduler/booking-token', () => ({
   signBookingToken: () => 'tok',
   verifyBookingToken: () => ({ bookingId: 'bk-1' }),
@@ -34,7 +37,15 @@ const START = new Date('2026-06-10T08:00:00.000Z');
 
 function view(over: Record<string, unknown>) {
   return {
-    booking: { id: 'bk-1', status: 'confirmed', startUtc: START, endUtc: new Date(START.getTime() + 1800000) },
+    booking: {
+      id: 'bk-1',
+      botId: 'bot-1',
+      tenantId: 'tenant-1',
+      status: 'confirmed',
+      startUtc: START,
+      endUtc: new Date(START.getTime() + 1800000),
+      customerLanguage: null,
+    },
     timezone: 'Europe/Amsterdam',
     eventName: 'Boiler repair',
     rescheduleUntilMin: null,

@@ -9,11 +9,8 @@
  */
 export const META_GRAPH_VERSION = 'v25.0';
 
-/** Graph API host for Facebook/Messenger and WhatsApp Cloud API calls. */
+/** Graph API host for Messenger, Instagram DMs (Facebook Login path), and WhatsApp. */
 export const FB_GRAPH_API = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
-
-/** Graph API host for the Instagram-Login messaging path. */
-export const IG_GRAPH_API = `https://graph.instagram.com/${META_GRAPH_VERSION}`;
 
 /** Facebook Login OAuth dialog endpoint. */
 export const FB_OAUTH_DIALOG = `https://www.facebook.com/${META_GRAPH_VERSION}/dialog/oauth`;

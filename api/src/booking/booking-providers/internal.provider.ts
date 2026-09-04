@@ -12,6 +12,7 @@ import { In, MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
+import { findBookableService } from './find-bookable-service';
 import type { Bot } from '../../database/entities/Bot';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { resolveBookingEventLocation } from './event-location';
@@ -36,6 +37,7 @@ import {
   BookingExtras,
   ListBookingsResult,
   AvailabilityResult,
+  ClockWindow,
   TravelFilterSummary,
   CreateBookingResult,
   RescheduleResult,
@@ -44,7 +46,20 @@ import {
   type UpdateBookingResult,
 } from './types';
 import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
-import { buildBookingEventContent } from './booking-content';
+import {
+  buildBookingEventContent,
+  storedFileNames,
+  type BookingContentInput,
+  type ServiceContentInput,
+} from './booking-content';
+import { translateCustomerFreeText } from '../../i18n/translate-free-text';
+import { getBookingCopy, prefetchAudienceBookingCopy, type BookingCopy } from '../booking-copy';
+import {
+  customerLanguageFor,
+  normalizeLanguageCode,
+  resolveOwnerLanguage,
+} from '../../i18n/audience-language';
+import { resolveBotLanguage } from '../../config/bot-language';
 import { formatServicePrice } from '../pricing/service-discount';
 import { cancelReminders, scheduleAndPersistReminders } from './reminders';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
@@ -56,7 +71,7 @@ import {
 } from '../../scheduler/calendar-provider';
 import {
   syncCalendarCreate,
-  syncCalendarReschedule,
+  syncCalendarMirror,
   syncCalendarCancel,
 } from './calendar-sync';
 import { ChatSession } from '../../database/entities/ChatSession';
@@ -116,7 +131,7 @@ import {
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
-import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange } from './booking-dates';
+import { normalizeDateRange, parseBookingStart, formatBookingDisplayTime, retryRange, offerableSlotsForWindow } from './booking-dates';
 import {
   resolveDuration,
   assertDurationChosen,
@@ -302,22 +317,9 @@ export class InternalProvider implements BookingProvider {
    * readiness so a service hidden from online booking is never silently resolved.
    */
   private async resolveService(botId: string, serviceId?: string): Promise<ResolvedService> {
-    const repo = AppDataSource.getRepository(ServiceType);
-    // Inheritance is applied HERE so every caller downstream sees resolved numbers.
     const rules = await loadBusinessRules(botId);
-    if (serviceId) {
-      const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true, onlineBookable: true } });
-      if (!svc) throw new BookingError('That serviceId is not currently a bookable service for this business (it may have been changed or removed). Do not tell the customer the service is unavailable or send them to contact the business. Re-read the SERVICES list and call again with the current id of the service they mean; if only one service is listed there, omit serviceId and retry.', 'SERVICE_NOT_FOUND', 404);
-      return resolveServiceTiming(svc, rules);
-    }
-    const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC', createdAt: 'ASC' } });
-    if (active.length === 0) {
-      throw new BookingError('This business has no online-bookable service set up, so nothing can be booked or captured as an appointment request right now. Do not tell the customer a specific service is unavailable or blame them. Do NOT tell the customer their request was submitted, forwarded, or that the team will review, follow up on, or handle it — no request record is created, so any such claim is false. If you have a tool for taking their contact details or handing off to a person, use it; otherwise explain briefly that it cannot be arranged online and that they should contact the business directly.', 'BOOKING_NOT_CONFIGURED', 400);
-    }
-    if (active.length > 1) {
-      throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);
-    }
-    return resolveServiceTiming(active[0], rules);
+    const svc = await findBookableService(botId, serviceId);
+    return resolveServiceTiming(svc, rules);
   }
 
   /**
@@ -376,6 +378,7 @@ export class InternalProvider implements BookingProvider {
     customerAddress?: string,
     locationChoice?: 'business' | 'customer',
     customerPhone?: string,
+    clockWindow?: ClockWindow,
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -435,13 +438,27 @@ export class InternalProvider implements BookingProvider {
     // availability is being computed for is a fact about the request, not something each
     // helper should re-derive. Travel filtering will scope to this same key (ADR-0016).
     const itineraryKey = await resolveItineraryKey(ctx.bot.id);
+    // The excluded booking's own MIRRORED calendar event sits at its current interval, and
+    // excludeBookingId only covers the internal row. Left in, every target overlapping the
+    // appointment being moved reads busy against nobody but itself - the admin reschedule
+    // picker and the agent's moveTargets both ride this method (live: Lena Five, a 09:30
+    // target refused on her own 09:00-10:00 hold). Same exclusion the reschedule write
+    // path has always applied: rescheduleBooking defaults excludeExternalInterval to the
+    // row's own interval. Tenant-guarded lookup; a foreign or unknown id excludes nothing.
+    const excludedRow = excludeBookingId
+      ? await AppDataSource.getRepository(Booking).findOne({
+          where: { id: excludeBookingId, tenantId: ctx.tenant.id },
+          select: ['id', 'startUtc', 'endUtc'],
+        })
+      : null;
     const busy = await loadAllBusy(
       ctx,
       itineraryKey,
       rangeStart,
       rangeEnd,
       rule.timezone,
-      excludeBookingId
+      excludeBookingId,
+      excludedRow ? { start: excludedRow.startUtc, end: excludedRow.endUtc } : undefined
     );
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
@@ -475,6 +492,9 @@ export class InternalProvider implements BookingProvider {
       serviceDayLedger,
     };
     const slots = computeSlots(engineInput);
+    // Filtered HERE, ahead of travel: the enforce path clears the first 20 slots and stops, so a
+    // window applied after it would find nothing but the morning it was asked to skip.
+    const { offerable, windowMatched } = offerableSlotsForWindow(slots, clockWindow, rule.timezone);
     // WHY nothing came back, when the reason is this owner's notice, horizon, or service
     // daily cap, and not a full or closed diary. Only on the path that produced nothing, and
     // it costs no query: it re-runs the pure engine over the busy data already in hand.
@@ -488,7 +508,7 @@ export class InternalProvider implements BookingProvider {
       service,
       itineraryKey,
       rule,
-      slots,
+      slots: offerable,
       rangeStart,
       rangeEnd,
       customerAddress,
@@ -522,6 +542,7 @@ export class InternalProvider implements BookingProvider {
             })),
           }
         : {}),
+      ...(clockWindow ? { clockWindow: { ...clockWindow, matched: windowMatched } } : {}),
     };
   }
 
@@ -740,7 +761,8 @@ export class InternalProvider implements BookingProvider {
       const { verdict, degradedCauses } = await assessSlotRouted({
         candidate: slotCandidate,
         neighbours: withBaseNeighbour(input.neighbours, slotCandidate, base, dayStart),
-        slackMin: input.eligibility.slackMin,
+        minGapMin: input.eligibility.minGapMin,
+        maxTravelMin: input.eligibility.maxTravelMin,
         lookup: input.lookup,
         budget: input.budget,
       });
@@ -1070,7 +1092,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict } = await assessSlotRouted({
       candidate: selection.candidate,
       neighbours: withBaseNeighbour(selection.others, selection.candidate, { at, location: venue }, dayStart),
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: input.lookup,
     });
     return { verdict, bookingId: selection.bookingId };
@@ -1140,7 +1163,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: input.candidate.point, coarse: input.candidate.coarse },
       neighbours,
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: replayLookup(input.drives ?? {}),
     });
     if (verdict === 'clear') return;
@@ -1209,7 +1233,8 @@ export class InternalProvider implements BookingProvider {
     const { verdict, fullyRouted, hadConstrainingLeg, degradedCauses } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
       neighbours,
-      slackMin: input.eligibility.slackMin,
+      minGapMin: input.eligibility.minGapMin,
+      maxTravelMin: input.eligibility.maxTravelMin,
       lookup: recordingLookup(driveLookupFor(input.eligibility, ctx.session?.id ?? null), drives),
     });
     // The only place a degradation CAUSE exists — the column records that a booking degraded,
@@ -1313,28 +1338,20 @@ export class InternalProvider implements BookingProvider {
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
 
+    // While slot/travel/INSERT work runs, warm the phrase catalog for both audiences.
+    // mirrorCreatedBooking awaits getBookingCopy; a cold miss is a multi-second LLM call
+    // the customer would otherwise wait on inside the booking tool response.
+    prefetchAudienceBookingCopy(ctx.tenant.id, ctx.botSettings, {
+      customerLanguage: normalizeLanguageCode(extras?.language),
+    });
+
     // Idempotency on the PARSED instant (codex): the model may pass the same time
     // as a `Z` slot one turn and a zoneless local string the next → different
     // idempotency keys. Catch it on (session, service, startUtc) so a re-confirm
     // returns the existing booking instead of failing SLOT_UNAVAILABLE on the now-
     // taken slot. Mirrors requestAppointment's dedup.
-    const recentDup = await bookingRepo.findOne({
-      where: {
-        tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
-        eventTypeId: service.id, startUtc: start,
-        createdAt: createdWithinDedupWindow(),
-      },
-      order: { createdAt: 'DESC' },
-    });
-    // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
-    // slot. 'failed' and 'declined' were also listed here; neither is ever written
-    // (declining a request writes 'cancelled').
-    if (
-      recentDup &&
-      recentDup.status !== 'cancelled' &&
-      rowDedupIdentity(recentDup, serviceNeedsCustomerAddress(service, extras)) ===
-        callDedupIdentity(serviceNeedsCustomerAddress(service, extras), extras)
-    ) {
+    const recentDup = await this.findMatchingRecentCreateDuplicate(ctx, bookingRepo, service, start, extras);
+    if (recentDup) {
       await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true, rule.timezone, service.name, service.preparationInstructions);
     }
@@ -1442,6 +1459,8 @@ export class InternalProvider implements BookingProvider {
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
     //    constraint is the last-line guard: a racing create gets 23P01.
     const icsUid = `${uuidv4()}@axentrio`;
+    const customerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
     let bookingId: string;
     try {
       bookingId = await AppDataSource.transaction(async (manager) => {
@@ -1485,10 +1504,10 @@ export class InternalProvider implements BookingProvider {
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
-              ai_summary, organizer_email, service_area_match,
+              ai_summary, organizer_email, customer_language, service_area_match,
               customer_place_id, customer_lat, customer_lng, customer_coords_at,
               customer_address_verified, geocode_precision, location_source, travel_check)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -1513,6 +1532,7 @@ export class InternalProvider implements BookingProvider {
             ctx.session?.channel ?? null,
             extras?.aiSummary ?? null,
             frozenOrganizerFor(ctx.tenant.id),
+            customerLanguage,
             // The gate above already passed, so this is 'inside' whenever it applied at all.
             areaMatch,
             // All null unless travel time is active for this Agent and the address placed to
@@ -1815,6 +1835,167 @@ export class InternalProvider implements BookingProvider {
     throw err;
   }
 
+
+  private async findMatchingRecentCreateDuplicate(
+    ctx: BookingContext,
+    bookingRepo: ReturnType<typeof AppDataSource.getRepository<Booking>>,
+    service: ResolvedService,
+    start: Date,
+    extras?: BookingExtras,
+  ): Promise<Booking | null> {
+    const needsAddress = serviceNeedsCustomerAddress(service, extras);
+    const recentDup = await bookingRepo.findOne({
+      where: {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        sessionId: ctx.session.id,
+        eventTypeId: service.id,
+        startUtc: start,
+        createdAt: createdWithinDedupWindow(),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (!recentDup || recentDup.status === 'cancelled') return null;
+    if (rowDedupIdentity(recentDup, needsAddress) !== callDedupIdentity(needsAddress, extras)) {
+      return null;
+    }
+    return recentDup;
+  }
+
+  /**
+   * The owner's email detail, in the language the business reads.
+   *
+   * The customer writes their notes and the AI summary in their own language. The calendar
+   * mirror keeps those words verbatim - it is the record of what was said - so this builds a
+   * SECOND copy of the same block from translated values, and reports the originals so the
+   * email can print them underneath. Nothing structured is translated: the values go back
+   * through `buildBookingEventContent`, which renders the labels from the owner's catalog.
+   *
+   * Falls back to `fallback` (the calendar block) when nothing needed translating, which is
+   * every same-language booking - the common case, and one fewer LLM call.
+   */
+  private async ownerDetailFor(
+    ctx: BookingContext,
+    contentInput: BookingContentInput,
+    opts: {
+      service: ServiceContentInput;
+      manageUrl: string;
+      ownerCopy: BookingCopy;
+      ownerLanguage: string;
+      fallback: string;
+    },
+  ): Promise<{ detail: string; freeText?: { notes?: string | null; aiSummary?: string | null } }> {
+    const { fields, originals } = await translateCustomerFreeText({
+      fields: { notes: contentInput.notes, aiSummary: contentInput.aiSummary },
+      targetLanguage: opts.ownerLanguage,
+      tenantId: ctx.tenant.id,
+    });
+    if (!originals) return { detail: opts.fallback };
+    const translated = buildBookingEventContent(
+      { ...contentInput, notes: fields.notes, aiSummary: fields.aiSummary },
+      opts.service,
+      opts.manageUrl,
+      opts.ownerCopy,
+    );
+    return { detail: translated.description, freeText: originals };
+  }
+
+  private async sendCreatedBookingConfirmation(
+    ctx: BookingContext,
+    input: {
+      bookingId: string;
+      icsUid: string;
+      service: ResolvedService;
+      rule: AvailabilityRule;
+      start: Date;
+      end: Date;
+      attendee: { name: string; email?: string };
+      contact: { address: string | null; phone: string | null };
+      extras?: BookingExtras;
+      effectiveDuration: number;
+      /**
+       * The owner-email detail block and, when the customer's free text was translated for
+       * it, their original words. The CALENDAR body is built separately and untranslated.
+       */
+      ownerDetail: { detail: string; freeText?: { notes?: string | null; aiSummary?: string | null } };
+      meetUrl: string | null;
+      venue: Awaited<ReturnType<typeof loadBusinessRules>>['venue'];
+      videoLinkMissing: boolean;
+      ownerAttachments: EmailAttachment[] | undefined;
+      customerCopy: BookingCopy;
+      langs: { customerLanguage: string; ownerLanguage: string };
+      priceDisplay?: string;
+    },
+  ): Promise<void> {
+    const {
+      bookingId,
+      service,
+      rule,
+      start,
+      end,
+      attendee,
+      contact,
+      extras,
+      effectiveDuration,
+      ownerDetail,
+      meetUrl,
+      venue,
+      videoLinkMissing,
+      ownerAttachments,
+      customerCopy,
+      langs,
+      priceDisplay,
+    } = input;
+    const manageUrl = buildManageUrl(bookingId);
+    const businessName = ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name;
+    await sendBookingEmail({
+      botId: ctx.bot.id,
+      method: 'REQUEST',
+      uid: input.icsUid,
+      sequence: 0,
+      start,
+      end,
+      summary: service.name,
+      location: resolveBookingEventLocation(service, {
+        meetUrl,
+        customerAddress: contact.address,
+        venue,
+        locationChoice: extras?.locationChoice,
+      }),
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl,
+          businessName,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
+      ownerDetail: ownerDetail.detail,
+      ownerFreeText: ownerDetail.freeText,
+      timezone: rule.timezone,
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: frozenOrganizerFor(ctx.tenant.id),
+      ownerAttachments,
+      videoLinkMissing,
+      organizerName: businessName,
+      manageUrl,
+      durationMin: effectiveDuration,
+      preparationInstructions: service.preparationInstructions,
+      priceDisplay,
+      tenantId: ctx.tenant.id,
+      bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
+    });
+  }
+
   /**
    * Mirror a confirmed booking to the owner's calendar, then send the invite.
    *
@@ -1843,25 +2024,41 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { bookingId, service, rule, start, end, attendee, contact, extras, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
-    // The rich event body comes from the single P6a builder (ai_summary now flows on the auto
-    // path too — no value flows in here yet, the builder simply omits that line).
+    const storedCustomerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
+    const langs = await this.audienceLanguages(ctx, { customerLanguage: storedCustomerLanguage });
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
+    const contentInput = {
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      customerPhone: contact.phone,
+      customerAddress: contact.address,
+      aiSummary: extras?.aiSummary ?? null,
+      notes: input.notes,
+      intakeAnswers: input.intakeJson,
+      bookingId,
+      durationMin: effectiveDuration,
+      sourceChannel: ctx.session?.channel ?? null,
+      uploadedFileNames: storedFileNames(input.uploadedFiles),
+    };
     const eventContent = buildBookingEventContent(
-      {
-        attendeeName: attendee.name,
-        attendeeEmail: attendee.email,
-        customerPhone: contact.phone,
-        customerAddress: contact.address,
-        aiSummary: extras?.aiSummary ?? null,
-        notes: input.notes,
-        intakeAnswers: input.intakeJson,
-        bookingId,
-        durationMin: effectiveDuration,
-        sourceChannel: ctx.session?.channel ?? null,
-        uploadedFileCount: input.uploadedFiles?.length ?? 0,
-      },
+      contentInput,
       { ...service, priceDisplay },
       buildManageUrl(bookingId),
+      ownerCopy,
     );
+    // The CALENDAR keeps the customer's own words - the mirror is a record of what was said.
+    // Only the owner's EMAIL renders them in the business language, with the original below.
+    const ownerEmailDetail = await this.ownerDetailFor(ctx, contentInput, {
+      service: { ...service, priceDisplay },
+      manageUrl: buildManageUrl(bookingId),
+      ownerCopy,
+      ownerLanguage: langs.ownerLanguage,
+      fallback: eventContent.description,
+    });
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
@@ -1894,51 +2091,25 @@ export class InternalProvider implements BookingProvider {
     const ownerAttachments = await this.ownerFileAttachments(
       (input.uploadedFiles ?? []).map((f) => f.fileSessionId),
     );
-    // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
-    // Phase 0 fallback); the Meet link rides along when present.
-    await sendBookingEmail({
-      method: 'REQUEST',
-      uid: input.icsUid,
-      sequence: 0,
+    await this.sendCreatedBookingConfirmation(ctx, {
+      bookingId,
+      icsUid: input.icsUid,
+      service,
+      rule,
       start,
       end,
-      summary: service.name,
-      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
-      // which is a modality — it told the customer nothing and occupied the field their
-      // calendar would otherwise use for directions. Omitted entirely when unknown.
-      location: resolveBookingEventLocation(service, {
-        meetUrl,
-        customerAddress: contact.address,
-        venue,
-        locationChoice: extras?.locationChoice,
-      }),
-      // The CUSTOMER's copy — what they need, not the owner's operational detail.
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(bookingId),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
-      // The owner's copy says exactly what their calendar entry says.
-      ownerDetail: eventContent.description,
-      timezone: rule.timezone,
-      attendeeName: attendee.name,
-      attendeeEmail: attendee.email,
-      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
-      organizerEmail: frozenOrganizerFor(ctx.tenant.id),
-      ownerAttachments,
+      attendee,
+      contact,
+      extras,
+      effectiveDuration,
+      ownerDetail: ownerEmailDetail,
+      meetUrl,
+      venue,
       videoLinkMissing,
-      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-      manageUrl: buildManageUrl(bookingId),
-      durationMin: effectiveDuration,
-      preparationInstructions: service.preparationInstructions,
+      ownerAttachments,
+      customerCopy,
+      langs,
       priceDisplay,
-      tenantId: ctx.tenant.id,
-      bookingId,
     });
   }
 
@@ -2013,6 +2184,8 @@ export class InternalProvider implements BookingProvider {
     await this.assertRequiredFile(ctx, service, uploadedFiles);
 
     let bookingId: string;
+    const requestCustomerLanguage =
+      normalizeLanguageCode(extras?.language) ?? resolveBotLanguage(ctx.botSettings.ai?.language);
     const requestAreaMatch = (await evaluateServiceArea(ctx, service, contact.address ?? null)).match;
     try {
       const rows = await AppDataSource.transaction(async (manager) => {
@@ -2023,10 +2196,10 @@ export class InternalProvider implements BookingProvider {
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
             source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files,
-            organizer_email, service_area_match,
+            organizer_email, customer_language, service_area_match,
             customer_place_id, customer_lat, customer_lng, customer_coords_at,
             customer_address_verified, geocode_precision, location_source, travel_check)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
            RETURNING id`,
           [
           ctx.tenant.id,
@@ -2049,6 +2222,7 @@ export class InternalProvider implements BookingProvider {
           bookedDurationMin ?? null,
           uploadedFiles ? JSON.stringify(uploadedFiles) : null,
           frozenOrganizerFor(ctx.tenant.id),
+          requestCustomerLanguage,
           // EVALUATED, never enforced. Capturing an out-of-area job is correct — refusing
           // one is the single outcome the prompt forbids — but capturing it silently is how
           // an owner turns work away for months without ever seeing it.
@@ -2322,8 +2496,8 @@ export class InternalProvider implements BookingProvider {
       return;
     }
     void (async () => {
-      // Canonical, server-owned business timezone — already on the resolved bot.
       const timezone = ctx.bot.businessTimezone || 'UTC';
+      const ownerLanguage = await resolveOwnerLanguage(ctx.tenant.id, ownerEmail);
       await sendRequestNotificationEmail({
         ownerEmail,
         serviceName: service.name,
@@ -2333,6 +2507,8 @@ export class InternalProvider implements BookingProvider {
         attendeeEmail: req.attendee.email,
         notes: req.notes,
         aiSummary: req.aiSummary,
+        ownerLanguage,
+        tenantId: ctx.tenant.id,
       });
     })();
   }
@@ -2674,24 +2850,38 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { bookingId, confirmed, service, start, end, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, input.timezone) || undefined;
-    // P6a rich body from the row.
+    const langs = await this.audienceLanguages(ctx, confirmed);
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
+    const contentInput = {
+      attendeeName: confirmed.attendeeName,
+      attendeeEmail: confirmed.attendeeEmail,
+      customerPhone: confirmed.customerPhone,
+      customerAddress: confirmed.customerAddress,
+      aiSummary: confirmed.aiSummary,
+      notes: confirmed.notes,
+      intakeAnswers: confirmed.intakeAnswers,
+      bookingId,
+      durationMin: effectiveDuration,
+      sourceChannel: confirmed.sourceChannel,
+      uploadedFileNames: storedFileNames(confirmed.uploadedFiles),
+    };
     const eventContent = buildBookingEventContent(
-      {
-        attendeeName: confirmed.attendeeName,
-        attendeeEmail: confirmed.attendeeEmail,
-        customerPhone: confirmed.customerPhone,
-        customerAddress: confirmed.customerAddress,
-        aiSummary: confirmed.aiSummary,
-        notes: confirmed.notes,
-        intakeAnswers: confirmed.intakeAnswers,
-        bookingId,
-        durationMin: effectiveDuration,
-        sourceChannel: confirmed.sourceChannel,
-        uploadedFileCount: Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles.length : 0,
-      },
+      contentInput,
       { ...service, priceDisplay },
-      buildManageUrl(bookingId)
+      buildManageUrl(bookingId),
+      ownerCopy,
     );
+    // The calendar keeps the customer's own words; only the owner's email is translated.
+    const ownerEmailDetail = await this.ownerDetailFor(ctx, contentInput, {
+      service: { ...service, priceDisplay },
+      manageUrl: buildManageUrl(bookingId),
+      ownerCopy,
+      ownerLanguage: langs.ownerLanguage,
+      fallback: eventContent.description,
+    });
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const eventLocation = resolveBookingEventLocation(service, {
       // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
@@ -2725,6 +2915,7 @@ export class InternalProvider implements BookingProvider {
     );
 
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'REQUEST',
       uid: confirmed.icsUid,
       sequence: 0,
@@ -2740,18 +2931,21 @@ export class InternalProvider implements BookingProvider {
         venue,
       }),
       // The CUSTOMER's copy — what they need, not the owner's operational detail.
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(bookingId),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
-      // The owner's copy says exactly what their calendar entry says.
-      ownerDetail: eventContent.description,
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(bookingId),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
+      ownerDetail: ownerEmailDetail.detail,
+      ownerFreeText: ownerEmailDetail.freeText,
       timezone: input.timezone,
       attendeeName: confirmed.attendeeName ?? '',
       attendeeEmail: confirmed.attendeeEmail ?? '',
@@ -2766,6 +2960,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
       tenantId: ctx.tenant.id,
       bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
   }
 
@@ -2914,6 +3110,7 @@ export class InternalProvider implements BookingProvider {
       booking.startUtc,
       booking.endUtc,
     ).catch(() => undefined);
+    await this.refreshCalendarMirror(ctx, booking, next, merged.files).catch(() => undefined);
     if (sendInvite) {
       await this.sendInviteAfterContactUpdate(ctx, booking, next.name ?? '', next.email!, rows[0].sequence);
     }
@@ -2929,6 +3126,63 @@ export class InternalProvider implements BookingProvider {
         uploadedFileCount: Array.isArray(merged.files) ? merged.files.length : 0,
       },
     };
+  }
+
+  /**
+   * Make the mirrored calendar event match a booking the customer just added detail to.
+   *
+   * The times are the row's own instants, so nothing moves: only the title and the body
+   * change, which is what carries the new notes, the phone number and the file names to
+   * the owner. Best-effort, exactly like the log write above it - a mirror that could not
+   * be reached leaves the row correct and the reconciler to catch up.
+   */
+  private async refreshCalendarMirror(
+    ctx: BookingContext,
+    booking: Booking,
+    next: { name: string | null; email: string | null; phone: string | null; notes: string | null },
+    files: unknown,
+  ): Promise<void> {
+    if (booking.status !== 'confirmed' && booking.status !== 'pending') return;
+    const rule = await this.loadRule(ctx.bot);
+    const service = await this.serviceForBooking(booking);
+    const { venue } = await loadBusinessRules(ctx.bot.id);
+    const langs = await this.audienceLanguages(ctx, booking);
+    const ownerCopy = await getBookingCopy(langs.ownerLanguage, ctx.tenant.id);
+    const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
+    const content = buildBookingEventContent(
+      {
+        attendeeName: next.name,
+        attendeeEmail: next.email,
+        customerPhone: next.phone,
+        notes: next.notes,
+        customerAddress: booking.customerAddress,
+        aiSummary: booking.aiSummary,
+        intakeAnswers: booking.intakeAnswers,
+        bookingId: booking.id,
+        durationMin: booking.bookedDurationMin ?? service.durationMin,
+        sourceChannel: booking.sourceChannel,
+        uploadedFileNames: storedFileNames(files),
+      },
+      { ...service, priceDisplay },
+      buildManageUrl(booking.id),
+      ownerCopy,
+    );
+    await syncCalendarMirror(
+      ctx,
+      booking.id,
+      content,
+      booking.startUtc,
+      booking.endUtc,
+      rule.timezone,
+      {
+        location: resolveBookingEventLocation(service, {
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        conferencing: service.locationType === 'google_meet',
+      },
+    );
   }
 
   private async resolveUpdatableBooking(ctx: BookingContext, bookingId?: string): Promise<Booking> {
@@ -3044,10 +3298,14 @@ export class InternalProvider implements BookingProvider {
     try {
       const rule = await this.loadRule(ctx.bot);
       const service = await this.serviceForBooking(booking);
+      const langs = await this.audienceLanguages(ctx, booking);
+      const [customerCopy] = await Promise.all([
+        getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      ]);
       const oldEmail = booking.attendeeEmail?.trim();
-      // No ownerEmail: a contact-detail edit must not send "New booking" to the business.
       if (oldEmail && oldEmail.toLowerCase() !== attendeeEmail.toLowerCase()) {
         await sendBookingEmail({
+          botId: ctx.bot.id,
           method: 'CANCEL',
           uid: booking.icsUid,
           sequence,
@@ -3061,11 +3319,14 @@ export class InternalProvider implements BookingProvider {
           organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
           tenantId: ctx.tenant.id,
           bookingId: booking.id,
+          customerLanguage: langs.customerLanguage,
+          ownerLanguage: langs.ownerLanguage,
         });
       }
       const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
       const { venue } = await loadBusinessRules(ctx.bot.id);
       await sendBookingEmail({
+        botId: ctx.bot.id,
         method: 'REQUEST',
         uid: booking.icsUid,
         sequence,
@@ -3077,16 +3338,19 @@ export class InternalProvider implements BookingProvider {
           customerAddress: booking.customerAddress,
           venue,
         }),
-        description: buildCustomerEventDescription({
-          serviceName: service.name,
-          serviceDescription: service.description,
-          durationMin: booking.bookedDurationMin ?? service.durationMin,
-          meetUrl: null,
-          preparationInstructions: service.preparationInstructions,
-          manageUrl: buildManageUrl(booking.id),
-          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-          priceDisplay,
-        }),
+        description: buildCustomerEventDescription(
+          {
+            serviceName: service.name,
+            serviceDescription: service.description,
+            durationMin: booking.bookedDurationMin ?? service.durationMin,
+            meetUrl: null,
+            preparationInstructions: service.preparationInstructions,
+            manageUrl: buildManageUrl(booking.id),
+            businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+            priceDisplay,
+          },
+          customerCopy,
+        ),
         timezone: rule.timezone,
         attendeeName,
         attendeeEmail,
@@ -3098,6 +3362,8 @@ export class InternalProvider implements BookingProvider {
         priceDisplay,
         tenantId: ctx.tenant.id,
         bookingId: booking.id,
+        customerLanguage: langs.customerLanguage,
+        ownerLanguage: langs.ownerLanguage,
       });
     } catch (error) {
       logger.warn('[Booking] contact-update invite failed (non-fatal)', { bookingId: booking.id, error });
@@ -3107,6 +3373,16 @@ export class InternalProvider implements BookingProvider {
 
 
   /** Load a booking and verify it belongs to this tenant + bot (else 404). */
+  private async audienceLanguages(
+    ctx: BookingContext,
+    row: { customerLanguage?: string | null },
+  ): Promise<{ customerLanguage: string; ownerLanguage: string }> {
+    return {
+      customerLanguage: customerLanguageFor(row, ctx.botSettings),
+      ownerLanguage: await resolveOwnerLanguage(ctx.tenant.id, ctx.botSettings.ai?.supportEmail),
+    };
+  }
+
   private async loadOwned(ctx: BookingContext, bookingId: string): Promise<Booking> {
     const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
     if (!booking || booking.tenantId !== ctx.tenant.id || booking.botId !== ctx.bot.id) {
@@ -3347,9 +3623,9 @@ export class InternalProvider implements BookingProvider {
           start_utc, end_utc, blocked_range, calendar_key,
           attendee_name, attendee_email, notes, ics_uid,
           source_channel, ai_summary, customer_address, customer_phone, booked_duration_min,
-          organizer_email, related_booking_id, request_kind, service_area_match)
+          organizer_email, customer_language, related_booking_id, request_kind, service_area_match)
        VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6,tstzrange($5,$6,'[)'),$7,
-               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING id`,
       [
         ctx.tenant.id,
@@ -3369,6 +3645,7 @@ export class InternalProvider implements BookingProvider {
         original.customerPhone ?? null,
         original.bookedDurationMin ?? null,
         original.organizerEmail ?? null,
+        original.customerLanguage ?? null,
         original.id,
         kind,
         areaMatch,
@@ -4168,6 +4445,11 @@ export class InternalProvider implements BookingProvider {
   ): Promise<void> {
     const { booking, bookingId, service, rule, start, end, sequence, effectiveDuration } = input;
     const priceDisplay = formatServicePrice(service, rule.timezone) || undefined;
+    const langs = await this.audienceLanguages(ctx, booking);
+    const [customerCopy, ownerCopy] = await Promise.all([
+      getBookingCopy(langs.customerLanguage, ctx.tenant.id),
+      getBookingCopy(langs.ownerLanguage, ctx.tenant.id),
+    ]);
     const { venue } = await loadBusinessRules(ctx.bot.id);
     const rescheduledContent = buildBookingEventContent(
       {
@@ -4181,13 +4463,14 @@ export class InternalProvider implements BookingProvider {
         bookingId,
         durationMin: effectiveDuration,
         sourceChannel: booking.sourceChannel,
-        uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
+        uploadedFileNames: storedFileNames(booking.uploadedFiles),
       },
       { ...service, priceDisplay },
-      buildManageUrl(bookingId)
+      buildManageUrl(bookingId),
+      ownerCopy,
     );
     // Mirror first so a change TO video can mint a join URL before the ICS is sent.
-    const mintedMeetUrl = await syncCalendarReschedule(
+    const mintedMeetUrl = await syncCalendarMirror(
       ctx,
       bookingId,
       rescheduledContent,
@@ -4205,6 +4488,7 @@ export class InternalProvider implements BookingProvider {
     ).catch(() => null);
     const meetUrl = service.locationType === 'google_meet' ? mintedMeetUrl : null;
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'REQUEST',
       uid: booking.icsUid,
       sequence,
@@ -4216,16 +4500,19 @@ export class InternalProvider implements BookingProvider {
         customerAddress: booking.customerAddress,
         venue,
       }),
-      description: buildCustomerEventDescription({
-        serviceName: service.name,
-        serviceDescription: service.description,
-        durationMin: effectiveDuration,
-        meetUrl,
-        preparationInstructions: service.preparationInstructions,
-        manageUrl: buildManageUrl(booking.id),
-        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
-        priceDisplay,
-      }),
+      description: buildCustomerEventDescription(
+        {
+          serviceName: service.name,
+          serviceDescription: service.description,
+          durationMin: effectiveDuration,
+          meetUrl,
+          preparationInstructions: service.preparationInstructions,
+          manageUrl: buildManageUrl(booking.id),
+          businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+          priceDisplay,
+        },
+        customerCopy,
+      ),
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
@@ -4238,6 +4525,8 @@ export class InternalProvider implements BookingProvider {
       priceDisplay,
       tenantId: ctx.tenant.id,
       bookingId: booking.id,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
 
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
@@ -4297,7 +4586,9 @@ export class InternalProvider implements BookingProvider {
     }
     await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason);
 
+    const langs = await this.audienceLanguages(ctx, booking);
     await sendBookingEmail({
+      botId: ctx.bot.id,
       method: 'CANCEL',
       uid: booking.icsUid,
       sequence: rows[0].sequence,
@@ -4312,6 +4603,8 @@ export class InternalProvider implements BookingProvider {
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       tenantId: ctx.tenant.id,
       bookingId,
+      customerLanguage: langs.customerLanguage,
+      ownerLanguage: langs.ownerLanguage,
     });
 
     // Drop pending reminders (they'd no-op via sequence/status anyway).

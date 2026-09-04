@@ -27,6 +27,14 @@ interface NotificationPreferencesResponse {
   preferences: NotificationPreferences;
 }
 
+/** The languages Axentrio ships copy in. Labelled in the language itself, so a French
+ *  reader recognises their option whatever the portal is currently set to. */
+const BUSINESS_LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'nl', label: 'Nederlands' },
+  { code: 'fr', label: 'Français' },
+] as const;
+
 const NotificationSettings: React.FC = () => {
   const { notificationPreferences: serverPrefs, setNotificationPreferences } = useAppAuth();
   const { t } = useTranslation();
@@ -36,6 +44,11 @@ const NotificationSettings: React.FC = () => {
   const storedDefault = tenant?.settings?.inbox?.defaultTakeoverHours;
   const defaultTakeoverValue =
     typeof storedDefault === 'number' ? String(storedDefault) : 'indefinite';
+  const businessLanguageValue =
+    typeof tenant?.settings?.businessLanguage === 'string' &&
+    BUSINESS_LANGUAGES.some(({ code }) => code === tenant.settings.businessLanguage)
+      ? (tenant.settings.businessLanguage as string)
+      : 'en';
   const [prefs, setPrefs] = useState<ResolvedNotificationPreferences>(() => serverPrefs);
   const [savedPrefs, setSavedPrefs] = useState<ResolvedNotificationPreferences>(() => serverPrefs);
   const [desktopEnabled, setDesktopEnabled] = useState(() => isDesktopNotificationsEnabled());
@@ -193,6 +206,31 @@ const NotificationSettings: React.FC = () => {
                 onCheckedChange={(checked) => setPrefs((previous) => ({ ...previous, newMessage: checked }))}
               />
             </div>
+          </div>
+
+          {/* Internal-notification language. Deliberately separate from the customer's
+              language, which always follows the conversation. */}
+          <div className="p-4 bg-surface-3 rounded-xl space-y-2">
+            <Label htmlFor="business-language" className="text-text-primary">
+              {t('settings.notifications.businessLanguage.title')}
+            </Label>
+            <p className="text-sm text-text-secondary">
+              {t('settings.notifications.businessLanguage.description')}
+            </p>
+            <select
+              id="business-language"
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+              value={businessLanguageValue}
+              onChange={(e) => {
+                updateTenant.mutate({ settings: { businessLanguage: e.target.value } });
+              }}
+            >
+              {BUSINESS_LANGUAGES.map(({ code, label }) => (
+                <option key={code} value={code}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="p-4 bg-surface-3 rounded-xl space-y-2">

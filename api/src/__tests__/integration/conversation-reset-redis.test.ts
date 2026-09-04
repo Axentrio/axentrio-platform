@@ -47,12 +47,13 @@ import {
 import { conversationCommands } from '../../services/conversation-command.service';
 import { peekPendingBooking, putPendingBooking } from '../../agent/pending-booking-confirmation';
 import { peekOfferedSlots, rememberOfferedSlots } from '../../agent/offered-slots-store';
+import { rememberRefusedNamedTime } from '../../agent/refused-named-time';
 import { redisLoopStore } from '../../guardrails/loop-store';
 
 const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
 const VISITOR = '32475126011';
 const SLOT_START = '2026-10-26T10:00:00';
-const TOOL_KEY_PREFIXES = ['booking:confirm:', 'booking:offered:', 'gr:loop:'] as const;
+const TOOL_KEY_PREFIXES = ['booking:confirm:', 'booking:offered:', 'booking:refused-date:', 'gr:loop:'] as const;
 
 async function resetActor(tenantId: string) {
   const user = await createTestUser(tenantId, { role: 'super_admin' });
@@ -97,6 +98,7 @@ describe('Superadmin reset Redis scratch', () => {
     });
     expect(written).toBe(true);
     await rememberOfferedSlots(session.id, ['2026-10-26T08:00:00.000Z'], 'Europe/Brussels');
+    await rememberRefusedNamedTime(session.id, '2026-11-02', '10:00');
     await redisLoopStore.advance(session.id, {
       hash: 'slot-26-oct',
       meaningful: true,
@@ -109,6 +111,7 @@ describe('Superadmin reset Redis scratch', () => {
     expect(await redisLoopStore.peek(session.id)).toMatchObject({ repeated: 1 });
     expect(await client.exists(`booking:confirm:${session.id}`)).toBe(1);
     expect(await client.exists(`booking:offered:${session.id}`)).toBe(1);
+    expect(await client.exists(`booking:refused-date:${session.id}`)).toBe(1);
     expect(await client.exists(`gr:loop:${session.id}`)).toBe(1);
 
     const agent = await resetActor(tenant.id);

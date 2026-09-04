@@ -226,12 +226,12 @@ export async function createOutlookEvent(
 }
 
 /** Patch an event's times. When `location` or `conferencing` is present, those
- *  fields are rewritten too. Never touches the body. */
+ *  fields are rewritten too. Subject and body are patched when supplied. */
 export async function updateOutlookEvent(
   botId: string,
   eventId: string,
   input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'> &
-    Partial<Pick<CalendarEventInput, 'location' | 'conferencing'>>
+    Partial<Pick<CalendarEventInput, 'location' | 'conferencing' | 'summary' | 'description'>>
 ): Promise<UpdateEventResult> {
   const cred = await getActiveCredential(botId);
   if (!cred) return { status: 'no_connection' };
@@ -241,6 +241,8 @@ export async function updateOutlookEvent(
     end: utcDateTime(input.endISO),
   };
   const base: Record<string, unknown> = { ...times };
+  if (input.summary !== undefined) base.subject = input.summary;
+  if (input.description !== undefined) base.body = { contentType: 'text', content: input.description };
   if (input.location !== undefined) base.location = { displayName: input.location };
   if (input.conferencing === false) base.isOnlineMeeting = false;
 

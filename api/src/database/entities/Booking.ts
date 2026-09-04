@@ -291,6 +291,11 @@ export class Booking {
   @Column({ type: 'varchar', length: 320, name: 'organizer_email', nullable: true })
   organizerEmail?: string | null;
 
+  /** ISO 639-1 code the customer used in the chat that made this booking. Null on rows
+   *  older than the column and on API (n8n) bookings; callers fall back to the bot default. */
+  @Column({ type: 'varchar', length: 16, name: 'customer_language', nullable: true })
+  customerLanguage?: string | null;
+
   @Column({ type: 'int', default: 0 })
   sequence!: number;
 
@@ -298,6 +303,7 @@ export class Booking {
   reminderJobIds!: string[];
 
   @Column({ type: 'varchar', length: 255, name: 'idempotency_key', nullable: true })
+
   idempotencyKey?: string | null;
 
   @CreateDateColumn({ name: 'created_at' })

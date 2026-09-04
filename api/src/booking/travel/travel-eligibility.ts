@@ -30,7 +30,7 @@ import { AppDataSource } from '../../database/data-source';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { getEntitlements } from '../../billing/entitlements';
 import { config } from '../../config/environment';
-import type { GroupingPeriod, RoutePriority } from '../../contracts/travel';
+import type { GroupingPeriod } from '../../contracts/travel';
 import { logger } from '../../utils/logger';
 import { itineraryKeyIsShared, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { Bot } from '../../database/entities/Bot';
@@ -57,8 +57,8 @@ export interface ActiveTravelEligibility {
   tenantId: string;
   /** The diary travel is a claim about (ADR-0016). */
   itineraryKey: ItineraryKey;
-  /** The owner's margin on top of the drive. Never applied without a drive to pad. */
-  slackMin: number;
+  /** The owner's Minimum Gap, added on top of every drive. */
+  minGapMin: number;
   /** Gate the day's first job against the venue. */
   startFromBase: boolean;
   /**
@@ -67,13 +67,10 @@ export interface ActiveTravelEligibility {
    */
   baseDepartOffsetMin: number;
   /**
-   * Minutes of detour the owner is willing to call good (#81), or null for no threshold.
-   *
-   * A PREFERENCE, and it never refuses anything. It reads a slot the gate has already cleared and
-   * says only whether grouping likes it, so nothing here can turn a confirmable time into a
-   * Request - which is ADR-0017's rule.
+   * The longest drive one appointment may need to or from its neighbours (ADR-0019).
+   * Null or 0 means no limit. Under `enforce` a drive over it is `unreachable`.
    */
-  maxDetourMin: number | null;
+  maxTravelMin: number | null;
   /**
    * LP5: may grouping actually REORDER what a customer is offered (#82)?
    *
@@ -83,12 +80,6 @@ export interface ActiveTravelEligibility {
    */
   /** Over what stretch grouping looks for nearby work. `none` switches it off entirely. */
   groupingPeriod: GroupingPeriod;
-  /**
-   * Presentation-only sort of the Slot list grouping already scored (ADR-0017).
-   *
-   * Inert when `groupingPeriod` is `none`. Never changes membership or feasibility class.
-   */
-  routePriority: RoutePriority;
 }
 
 /**
@@ -161,15 +152,14 @@ export async function resolveTravelEligibility(input: {
     active: true,
     tenantId: input.tenantId,
     itineraryKey: input.itineraryKey,
-    slackMin: Math.max(0, settings.travelSlackMin ?? 0),
+    minGapMin: Math.max(0, settings.minGapMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,
     baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
     groupingPeriod: settings.travelGroupingPeriod ?? 'none',
-    routePriority: settings.travelRoutePriority ?? 'auto',
-    // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
-    // that silently marks every slot unpreferred is indistinguishable from one that is off, and
+    // Zero and negative are read as "no limit" rather than "nothing qualifies": a ceiling
+    // that silently marks every slot unreachable is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.
-    maxDetourMin: (settings.travelMaxDetourMin ?? 0) > 0 ? (settings.travelMaxDetourMin as number) : null,
+    maxTravelMin: (settings.travelMaxTravelMin ?? 0) > 0 ? (settings.travelMaxTravelMin as number) : null,
   };
 }
 

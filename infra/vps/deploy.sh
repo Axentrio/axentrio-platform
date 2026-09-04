@@ -54,7 +54,9 @@ case "$SERVICE" in
     TAG=$ARG_TAG
     TAG_PREFIX=sha-
     DEPS=(redis)
-    AFTER=(redis n8n-db n8n caddy)
+    AFTER=(redis clamav n8n-db n8n)
+    CADDYFILE=Caddyfile.prod
+    APPLY_CADDY=1
     ;;
   staging-api)
     ENV_NAME=staging
@@ -62,6 +64,7 @@ case "$SERVICE" in
     TAG_PREFIX=sha-
     DEPS=(postgres staging-redis)
     AFTER=(postgres staging-redis)
+    CADDYFILE=Caddyfile.nonprod
     APPLY_CADDY=1
     ;;
   dev-api)
@@ -70,6 +73,7 @@ case "$SERVICE" in
     TAG_PREFIX=dev-
     DEPS=(postgres dev-redis)
     AFTER=(postgres dev-redis)
+    CADDYFILE=
     ;;
   *)
     echo "unknown service: $SERVICE" >&2
@@ -136,8 +140,8 @@ if [[ "$APPLY_CADDY" == 1 ]]; then
   # Reload only when the Caddyfile differs from the last APPLIED config.
   # Comparing host file vs in-container file is useless: the bind mount makes
   # them always equal even while the caddy process still runs an old config.
-  applied_hash_path="${ROOT}/.caddyfile.applied.sha256"
-  want_hash=$(sha256sum "${ROOT}/Caddyfile.nonprod" | awk '{print $1}')
+  applied_hash_path="${ROOT}/.${CADDYFILE}.applied.sha256"
+  want_hash=$(sha256sum "${ROOT}/${CADDYFILE}" | awk '{print $1}')
   have_hash=$(cat "$applied_hash_path" 2>/dev/null || true)
   "${COMPOSE[@]}" up -d --no-deps caddy
   if [[ "$want_hash" == "$have_hash" ]]; then

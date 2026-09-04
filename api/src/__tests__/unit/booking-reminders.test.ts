@@ -12,6 +12,7 @@ const eventTypeFindOne = vi.fn();
 // PR 1a: the reminder timezone now comes from the BOT's canonical
 // businessTimezone (via getBotBusinessTimezone), not the AvailabilityRule.
 const botFindOne = vi.fn();
+const getBotConfigForBotId = vi.fn();
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: any) => {
@@ -22,6 +23,10 @@ vi.mock('../../database/data-source', () => ({
       return {};
     },
   },
+}));
+
+vi.mock('../../services/bot-config.service', () => ({
+  getBotConfigForBotId: (...a: any[]) => getBotConfigForBotId(...a),
 }));
 
 vi.mock('../../utils/logger', () => ({
@@ -74,6 +79,7 @@ describe('reminders · processor', () => {
     vi.clearAllMocks();
     eventTypeFindOne.mockResolvedValue({ name: 'Intro call' });
     botFindOne.mockResolvedValue({ id: 'bot-1', businessTimezone: 'Europe/Brussels' });
+    getBotConfigForBotId.mockResolvedValue({ settings: { ai: { language: 'en' } } });
   });
 
   it('sends the reminder when the booking is still confirmed and current', async () => {
@@ -85,12 +91,14 @@ describe('reminders · processor', () => {
       startUtc: new Date('2026-06-10T07:00:00Z'),
       attendeeName: 'Ada',
       attendeeEmail: 'ada@example.com',
+      customerLanguage: 'en',
     });
     await proc(job({ bookingId: 'bk-1', kind: '24h', sequence: 0 }));
     expect(sendReminderEmail).toHaveBeenCalledOnce();
     expect(sendReminderEmail.mock.calls[0][0]).toMatchObject({
       summary: 'Intro call',
-      leadLabel: 'tomorrow',
+      lead: '24h',
+      customerLanguage: 'en',
       // The bot's canonical businessTimezone, never the AvailabilityRule copy.
       timezone: 'Europe/Brussels',
     });
@@ -112,5 +120,39 @@ describe('reminders · processor', () => {
     bookingFindOne.mockResolvedValue(null);
     await proc(job({ bookingId: 'gone', kind: '1h', sequence: 0 }));
     expect(sendReminderEmail).not.toHaveBeenCalled();
+  });
+
+  it('passes stored customerLanguage through to the reminder email', async () => {
+    bookingFindOne.mockResolvedValue({
+      id: 'bk-fr',
+      status: 'confirmed',
+      sequence: 0,
+      botId: 'bot-1',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      attendeeName: 'Ada',
+      attendeeEmail: 'ada@example.com',
+      customerLanguage: 'fr',
+    });
+    await proc(job({ bookingId: 'bk-fr', kind: '1h', sequence: 0 }));
+    expect(sendReminderEmail.mock.calls[0][0]).toMatchObject({
+      lead: '1h',
+      customerLanguage: 'fr',
+    });
+  });
+
+  it('defaults reminder language to bot setting when customerLanguage is missing', async () => {
+    getBotConfigForBotId.mockResolvedValue({ settings: { ai: { language: 'nl' } } });
+    bookingFindOne.mockResolvedValue({
+      id: 'bk-nl',
+      status: 'confirmed',
+      sequence: 0,
+      botId: 'bot-1',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      attendeeName: 'Ada',
+      attendeeEmail: 'ada@example.com',
+      customerLanguage: null,
+    });
+    await proc(job({ bookingId: 'bk-nl', kind: '24h', sequence: 0 }));
+    expect(sendReminderEmail.mock.calls[0][0].customerLanguage).toBe('nl');
   });
 });

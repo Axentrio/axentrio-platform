@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { CUSTOMER_MESSAGE, customerMessage, rescheduleOptionsState } from '../../scheduler/booking-public.controller';
 import { BookingError } from '../../booking/booking-providers/types';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 
 /** Vocabulary that only ever makes sense to the model. */
 const BOT_DIRECTIVE = /request_appointment|reschedule_booking|check_availability|do not offer|do not say|capture it with|the bot\b/i;
@@ -58,6 +59,22 @@ describe('customer-facing copy for a BookingError', () => {
     // just because nobody remembered this file.
     const err = new BookingError('Internal: itinerary key resolution failed for bot xyz', 'SOME_NEW_CODE', 500);
     expect(customerMessage(err)).toBe('This link is invalid or has expired.');
+  });
+
+  it('uses localized copy when a BookingCopy is supplied', () => {
+    const frCopy = {
+      ...BOOKING_COPY_EN,
+      'manage.err_SLOT_UNAVAILABLE': 'Ce créneau vient d\'être pris.',
+      'manage.err_invalid_link': 'Ce lien est invalide ou expiré.',
+    };
+    const err = new BookingError('Do not offer times', 'SLOT_UNAVAILABLE', 409);
+    expect(customerMessage(err, frCopy)).toBe('Ce créneau vient d\'être pris.');
+    expect(customerMessage(new BookingError('x', 'UNKNOWN_CODE', 500), frCopy)).toBe('Ce lien est invalide ou expiré.');
+  });
+
+  it('prefers throw-site customerMessage over catalog copy', () => {
+    const err = new BookingError('model text', 'SLOT_UNAVAILABLE', 409, {}, 'Custom customer-facing line.');
+    expect(customerMessage(err)).toBe('Custom customer-facing line.');
   });
 });
 

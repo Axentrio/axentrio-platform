@@ -26,6 +26,7 @@ import { useSocket } from "@websocket/SocketContext";
 import {
   applyCommandConversation,
   mergeDefined,
+  mergeLiveTail,
   newUuid,
   normalizeChatStatus,
   seedChatDetail,
@@ -203,7 +204,7 @@ export const chatOptions = {
         const raw = (await api.get<Any>(
           `/chats/${chatId}`,
         )) as ChatDetailResponse;
-        return normalizeChatDetail(raw) as ChatDetailResponse;
+        return mergeLiveTail(chatId, normalizeChatDetail(raw) as ChatDetailResponse);
       },
       enabled: !!chatId,
       staleTime: 5 * 60 * 1000,
@@ -474,7 +475,14 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     isFetching: detailIsFetching,
     error: detailError,
     refetch: detailRefetch,
-  } = useQuery(chatOptions.detail(chatId));
+  } = useQuery({
+    ...chatOptions.detail(chatId),
+    // Sockets patch the open thread for instant updates, but polling ALWAYS
+    // runs as the safety net: a socket can be connected-but-deaf, which used
+    // to freeze the open pane until a reselect or a reload.
+    refetchInterval: LIVE_QUERY_REFETCH_MS,
+    refetchIntervalInBackground: false,
+  });
   const raw = detailData as ChatDetailResponse | undefined;
   const chat: Chat | null = raw ? (raw as unknown as Chat) : null;
   const messages: Message[] = raw?.messages ?? [];

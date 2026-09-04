@@ -38,6 +38,7 @@ vi.mock('../../booking/booking.service', async (importOriginal) => {
     checkAvailability: (...a: unknown[]) => mockCheckAvailability(...a),
     createBooking: (...a: unknown[]) => mockCreateBooking(...a),
     requestBooking: (...a: unknown[]) => mockRequestBooking(...a),
+    peekCustomerEmailRequired: async () => false,
   };
 });
 

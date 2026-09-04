@@ -6,9 +6,9 @@
  * Save writes that blank back over the value they set. Nothing errors. The setting simply forgets
  * itself one save later, and the owner concludes the feature does not work.
  *
- * `travel_max_detour_min` is the reason this file exists. Its READER has existed since #81
- * (`travel-eligibility` -> `insertion-scorer`) and nothing could ever write it, so every business
- * on the platform ran with "no threshold" whether that suited them or not - a whole setting that
+ * `travel_max_travel_min` is the reason this file exists. Its READER has existed since #81
+ * (`travel-eligibility` -> the travel gate) and nothing could ever write it, so every business
+ * on the platform ran with "no limit" whether that suited them or not - a whole setting that
  * existed in the engine and nowhere else.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -51,45 +51,45 @@ beforeEach(async () => {
 
 describe('maximum travel time', () => {
   it('persists, and comes back on the read the editor hydrates from', async () => {
-    const res = await save({ maxDetourMin: 30 });
+    const res = await save({ maxTravelMin: 30 });
     expect(res.status).toBe(200);
-    expect((await stored())?.travelMaxDetourMin).toBe(30);
+    expect((await stored())?.travelMaxTravelMin).toBe(30);
 
     // The half that actually bites: written but not read means the next Save blanks it.
     const back = await read();
-    expect(back.body.data.travel.maxDetourMin).toBe(30);
+    expect(back.body.data.travel.maxTravelMin).toBe(30);
   });
 
   it('is left ALONE by a save that does not mention it', async () => {
-    await save({ maxDetourMin: 30 });
+    await save({ maxTravelMin: 30 });
     // An owner toggling something else entirely must not silently clear a threshold they set.
     await save({ startFromBase: true });
 
-    expect((await stored())?.travelMaxDetourMin).toBe(30);
+    expect((await stored())?.travelMaxTravelMin).toBe(30);
   });
 
   it('is CLEARED by an explicit null, because that is how an owner turns it off', async () => {
-    await save({ maxDetourMin: 30 });
-    await save({ maxDetourMin: null });
+    await save({ maxTravelMin: 30 });
+    await save({ maxTravelMin: null });
 
-    expect((await stored())?.travelMaxDetourMin).toBeNull();
+    expect((await stored())?.travelMaxTravelMin).toBeNull();
   });
 
   it('refuses a value beyond the ceiling rather than storing it', async () => {
     // Past two hours an owner is describing a different business rather than a detour.
     // 422 rather than 400 - this API's validation status, confirmed against the running route.
-    const res = await save({ maxDetourMin: 500 });
+    const res = await save({ maxTravelMin: 500 });
     expect(res.status).toBe(422);
     // And the refusal must not be cosmetic: nothing may reach the column.
-    expect((await stored())?.travelMaxDetourMin ?? null).toBeNull();
+    expect((await stored())?.travelMaxTravelMin ?? null).toBeNull();
   });
 
   it('accepts zero, which means no threshold rather than "nothing qualifies"', async () => {
     // A value that silently marked every slot unpreferred would be indistinguishable from the
     // feature being off, and off is overwhelmingly what an owner who typed 0 meant.
-    const res = await save({ maxDetourMin: 0 });
+    const res = await save({ maxTravelMin: 0 });
     expect(res.status).toBe(200);
-    expect((await stored())?.travelMaxDetourMin).toBe(0);
+    expect((await stored())?.travelMaxTravelMin).toBe(0);
   });
 });
 
@@ -126,29 +126,4 @@ describe('grouping period', () => {
   });
 });
 
-describe('route priority', () => {
-  it('persists and reads back, defaulting to auto', async () => {
-    const res = await save({ routePriority: 'nearest' });
-    expect(res.status).toBe(200);
-    expect((await stored())?.travelRoutePriority).toBe('nearest');
-    expect((await read()).body.data.travel.routePriority).toBe('nearest');
-  });
 
-  it('accepts farthest as well as nearest', async () => {
-    const res = await save({ routePriority: 'farthest' });
-    expect(res.status).toBe(200);
-    expect((await stored())?.travelRoutePriority).toBe('farthest');
-    expect((await read()).body.data.travel.routePriority).toBe('farthest');
-  });
-
-  it('refuses a mode nobody has implemented', async () => {
-    const res = await save({ routePriority: 'optimize' });
-    expect(res.status).toBe(422);
-  });
-
-  it('is left alone by a save that does not mention it', async () => {
-    await save({ routePriority: 'nearest' });
-    await save({ startFromBase: true });
-    expect((await stored())?.travelRoutePriority).toBe('nearest');
-  });
-});

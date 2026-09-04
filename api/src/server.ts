@@ -449,6 +449,512 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Boot sequence
+/**
+ * Kill switch for every queue processor and background sweep. Default ON.
+ *
+ * Set BACKGROUND_JOBS_ENABLED=false to run an instance that serves HTTP and
+ * WebSocket traffic but performs no scheduled work. That is what makes it safe
+ * to point a second instance at the live database - during a host migration,
+ * or to verify a build - without double-running the destructive sweeps below.
+ */
+const backgroundJobsEnabled = process.env.BACKGROUND_JOBS_ENABLED !== "false";
+
+async function startBackgroundJobs(): Promise<void> {
+      // Cleanup old webhook event logs and message deliveries (7-day retention)
+      const cleanupChannelLogs = async () => {
+        try {
+          const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          await AppDataSource.query(
+            `DELETE FROM "webhook_event_log" WHERE "createdAt" < $1 AND "status" IN ('processed', 'skipped')`,
+            [cutoff],
+          );
+          await AppDataSource.query(
+            `DELETE FROM "message_deliveries" WHERE "createdAt" < $1 AND "status" IN ('sent', 'delivered', 'read')`,
+            [cutoff],
+          );
+        } catch (error) {
+          logger.error("Channel event log cleanup failed", { error });
+        }
+      };
+      setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000);
+
+      // Audit log cleanup — batched to avoid table locks
+      const cleanupAuditLogs = async () => {
+        try {
+          let totalDeleted = 0;
+          let batchDeleted: number;
+
+          do {
+            // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
+            const deletedRows = returningRows<{ id: string }>(
+              await AppDataSource.query(
+                `DELETE FROM audit_logs WHERE id IN (
+                SELECT id FROM audit_logs
+                WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
+                ORDER BY created_at ASC
+                LIMIT 1000
+              )
+              RETURNING id`,
+                [config.audit.retentionDays],
+              ),
+            );
+            batchDeleted = deletedRows.length;
+            totalDeleted += batchDeleted;
+          } while (batchDeleted === 1000);
+
+          if (totalDeleted > 0) {
+            logger.info("Audit log cleanup complete", {
+              deletedCount: totalDeleted,
+            });
+          }
+        } catch (error) {
+          logger.error("Audit log cleanup failed", { error });
+        }
+      };
+
+      // Run cleanup after 10 seconds, then every 24 hours
+      setTimeout(cleanupAuditLogs, 10_000);
+      setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
+
+      // Auto-close stale sessions — sessions with no activity for 30 minutes
+      // Batched to avoid locking many rows at once under load.
+      const STALE_BATCH_SIZE = 200;
+      const STALE_MAX_BATCHES = 50; // Cap at 10k sessions per run
+      const autoCloseStaleSessions = async () => {
+        try {
+          const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
+          let totalClosed = 0;
+          let batchClosed: number;
+          let batches = 0;
+          do {
+            const rows = returningRows<{ id: string }>(
+              await AppDataSource.query(
+                // Bulk sweep, deliberately NOT per-row through the command service
+                // (thousands of rows). ownership + version move in the SAME statement
+                // so the columns can never desync and an in-flight AI commit is fenced.
+                `UPDATE chat_sessions
+               SET status = 'closed', ownership = 'closed',
+                   ownership_version = ownership_version + 1,
+                   ended_at = NOW(), updated_at = NOW()
+               WHERE id IN (
+                 SELECT id FROM chat_sessions
+                 WHERE status IN ('bot', 'waiting')
+                 AND last_activity_at < $1
+                 AND last_activity_at IS NOT NULL
+                 -- Keep guardrail-paused sessions open: they need human review (and the
+                 -- SLA sweep re-alerts on them); auto-closing would silently drop a flag.
+                 AND NOT (ai_auto_reply_enabled = false AND guardrail_status <> 'normal')
+                 LIMIT $2
+                 FOR UPDATE SKIP LOCKED
+               )
+               RETURNING id`,
+                [cutoff, STALE_BATCH_SIZE],
+              ),
+            );
+            batchClosed = rows.length;
+            totalClosed += batchClosed;
+            batches++;
+          } while (
+            batchClosed === STALE_BATCH_SIZE &&
+            batches < STALE_MAX_BATCHES
+          );
+
+          if (totalClosed > 0) {
+            logger.info(`Auto-closed ${totalClosed} stale sessions`);
+          }
+
+          // Return stale UNACCEPTED handoffs to bot — a queue timeout, NOT a
+          // human-control duration (D3): only `handoff_requested` qualifies, so a
+          // CLAIMED conversation (ownership human_owned, whose legacy status is
+          // also 'handoff') is never swept back mid-conversation. Each return is
+          // an atomic ownership transition through the command service
+          // (cancelHandoff also times out the open HandoffRequest row, which the
+          // old raw UPDATE left dangling as 'requested' forever).
+          const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
+          const { conversationCommands } = await import(
+            "./services/conversation-command.service"
+          );
+          let totalReturned = 0;
+          let returnedBatch: number;
+          batches = 0;
+          do {
+            const stale = (await AppDataSource.query(
+              `SELECT id FROM chat_sessions
+               WHERE ownership = 'handoff_requested'
+               AND last_activity_at < $1
+               AND last_activity_at IS NOT NULL
+               LIMIT $2`,
+              [handoffCutoff, STALE_BATCH_SIZE],
+            )) as Array<{ id: string }>;
+            returnedBatch = 0;
+            for (const row of stale) {
+              try {
+                const result = await conversationCommands.cancelHandoff(row.id, {
+                  kind: "system",
+                  source: "stale_handoff_sweep",
+                });
+                if (result.outcome === "cancelled") {
+                  returnedBatch++;
+                  // B-PR3a: normalized ownership event, post-commit — a swept
+                  // conversation must leave the operators' pending list live.
+                  const { emitConversationUpsertForSession } = await import(
+                    "./realtime/conversation-events"
+                  );
+                  await emitConversationUpsertForSession(row.id);
+                }
+              } catch (err) {
+                // A concurrent claim/close between SELECT and cancel is expected;
+                // the command's own state checks make the sweep re-entrant.
+                logger.debug("Stale handoff sweep skipped a session", {
+                  sessionId: row.id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+            totalReturned += returnedBatch;
+            batches++;
+          } while (
+            returnedBatch === STALE_BATCH_SIZE &&
+            batches < STALE_MAX_BATCHES
+          );
+
+          if (totalReturned > 0) {
+            logger.info(
+              `Auto-returned ${totalReturned} stale handoff sessions to bot`,
+            );
+          }
+        } catch (error) {
+          logger.error("Stale session cleanup failed", { error });
+        }
+      };
+      setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
+
+      // Timed human-control expiry (B-PR5a): return sessions whose timed takeover
+      // deadline (`human_control_until`) has passed to the bot. Every release goes
+      // through the transactional command service (candidate rows locked FOR
+      // UPDATE SKIP LOCKED, expiry re-checked on the locked row, emit after
+      // commit) - see timed-control-expiry.service.ts. Runs every 60s as a
+      // LIVENESS floor; the inbound-message check in message-forwarding releases
+      // an expired session the moment a customer writes, so correctness does not
+      // wait on this tick. Unflagged: a timed claim without a running expiry
+      // worker must not exist (the codex-locked ordering that gated B-PR2b).
+      const sweepTimedControl = async () => {
+        try {
+          const { sweepExpiredTimedControl } = await import(
+            "./services/timed-control-expiry.service"
+          );
+          await sweepExpiredTimedControl();
+        } catch (error) {
+          logger.error("Timed-control expiry sweep failed", { error });
+        }
+      };
+      setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
+
+      // Handoff-notification outbox backstop (ADR-0018). The handoff call sites
+      // dispatch the alert immediately for latency and retire the row; this sweep
+      // only picks up rows a crash left behind (past their grace), replays the
+      // idempotent notify, and parks a row as dead after the attempt cap.
+      // Re-entrancy-guarded like the sweeps above and safe on every instance
+      // (FOR UPDATE SKIP LOCKED claims disjoint rows).
+      const sweepHandoffOutboxTick = async () => {
+        try {
+          const { sweepHandoffOutbox } = await import(
+            "./notifications/notification-outbox.worker"
+          );
+          await sweepHandoffOutbox();
+        } catch (error) {
+          logger.error("Handoff-notification outbox sweep failed", { error });
+        }
+      };
+      setInterval(sweepHandoffOutboxTick, 30 * 1000); // Run every 30 seconds
+
+      // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
+      // platform LLM budget, and a background pass on this budget previously caused
+      // customer-facing 429s on live replies. Enable per-environment only after the
+      // abstain-rate metrics are being watched. Mirrors TURN_COALESCER_ENABLED.
+      if (process.env.LEAD_ENRICHMENT_ENABLED === "true") {
+        const { runLeadEnrichmentSweep } = await import(
+          "./leads/enrichment/enrich-lead.job"
+        );
+        // 5-minute tick; the job is internally sequential and re-entrancy-guarded, so a
+        // slow sweep can never overlap itself.
+        setInterval(
+          () => {
+            void runLeadEnrichmentSweep().catch((err) => {
+              logger.error("[lead-enrich] sweep failed", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          },
+          5 * 60 * 1000,
+        );
+        logger.info("[lead-enrich] sweep enabled (5m tick)");
+      }
+
+      // Customer-memory sweep. DEFAULT ON: only CUSTOMER_MEMORY_ENABLED=false disables it.
+      {
+        const { isCustomerMemoryEnabled } = await import("./memory/memory-config");
+        if (isCustomerMemoryEnabled()) {
+          const { runCustomerMemorySweep } = await import(
+            "./memory/memory-sweep.job"
+          );
+          setInterval(() => {
+            void runCustomerMemorySweep().catch((err) => {
+              logger.error("[customer-memory] sweep failed", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }, 5 * 60 * 1000);
+          logger.info("[customer-memory] sweep enabled (5m tick)");
+        }
+      }
+
+      // Agent-trace retention (30 days). The schedule lives in the service - see
+      // startAgentTraceRetentionSweep for why it must also run at boot.
+      //
+      // Imported here, not at the top of the file, to match every other sweep wired in
+      // this boot block.
+      const { startAgentTraceRetentionSweep } = await import(
+        "./agent/trace-retention.service"
+      );
+      startAgentTraceRetentionSweep();
+      const {
+        startCustomerMemoryRetentionSweep,
+        startStuckMemoryRunWatcher,
+      } = await import("./memory/memory-retention.service");
+      startCustomerMemoryRetentionSweep();
+      startStuckMemoryRunWatcher();
+
+      // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
+      // env flag, because it is a NO-OP for every tenant that has not chosen a period,
+      // and a data-protection control should not depend on remembering to enable it.
+      // Erasure is per-tenant opt-in via `settings.leadRetentionDays`; unset = keep.
+      const sweepRetention = async () => {
+        try {
+          const { sweepLeadRetention } = await import(
+            "./leads/lead-retention.service"
+          );
+          await sweepLeadRetention();
+        } catch (err) {
+          logger.error("[lead-retention] sweep failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
+
+      const recrawlWebsites = async () => {
+        try {
+          const { recrawlStaleWebsiteOrigins } = await import(
+            "./knowledge/website-crawl.service"
+          );
+          const { KnowledgeService } = await import(
+            "./knowledge/knowledge.service"
+          );
+          await recrawlStaleWebsiteOrigins(new KnowledgeService(AppDataSource));
+        } catch (error) {
+          logger.error("Website recrawl sweep failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+      setTimeout(recrawlWebsites, 5 * 60 * 1000);
+      setInterval(recrawlWebsites, 24 * 60 * 60 * 1000);
+
+      // Cloud-import reaper: stuck/failed S3 objects + stale staging/ prefix.
+      const storageReaper = async () => {
+        try {
+          const { reapStaleStorageImports } = await import(
+            "./integrations/storage/reaper"
+          );
+          await reapStaleStorageImports();
+        } catch (error) {
+          logger.error("Storage import reaper failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+      setTimeout(storageReaper, 10 * 60 * 1000);
+      setInterval(storageReaper, 24 * 60 * 60 * 1000);
+
+      // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
+      // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps
+      // taking bookings, so a lapsed card and a Google outage look identical from outside. This is
+      // the watchdog that makes that failure announce itself.
+      //
+      // Unflagged and ungated, for the same reason as lead retention below: a watchdog that only
+      // runs when somebody remembers to enable it is not a watchdog. (The LLM provider probe this
+      // borrows its SHAPE from does carry a kill switch, `PROVIDER_HEALTH_PROBE_ENABLED` - the
+      // shape is the precedent here, not the gating.) One run shortly after boot as well as on the
+      // interval, so a redeploy does not leave it silent until the first tick.
+      const travelHealth = async () => {
+        try {
+          const { runTravelHealthCheck, reconcileObservedDegradation } =
+            await import("./booking/travel/travel-health");
+          await runTravelHealthCheck();
+          await reconcileObservedDegradation();
+        } catch (err) {
+          logger.error("[travel-health] check failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      setTimeout(travelHealth, 90_000);
+      setInterval(travelHealth, 30 * 60 * 1000); // Every 30 minutes
+
+      // Agents already sharing a diary when this shipped never fire a rekey, so the event-driven
+      // detector alone would only ever catch the cases that arrive after it.
+      const sweepSharedItineraries = async () => {
+        try {
+          const { reconcileSharedItineraries } = await import(
+            "./booking/travel/travel-health"
+          );
+          await reconcileSharedItineraries();
+        } catch (err) {
+          logger.error("[travel-health] shared-itinerary reconciliation failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      setTimeout(sweepSharedItineraries, 120_000);
+      setInterval(sweepSharedItineraries, 24 * 60 * 60 * 1000); // Daily
+
+      // Coordinate expiry, daily plus one run shortly after boot (ADR-0014). The Maps terms
+      // permit a booking's latitude and longitude for 30 consecutive days and no longer;
+      // `place_id` stays. Unflagged and ungated for the same reason as lead retention above —
+      // it is a no-op for every tenant that has never placed an address, and a licence control
+      // nobody remembers to enable is not a control.
+      //
+      // THE INTERVAL IS NOT SET HERE, unlike every sweep above it. The age at which this one
+      // deletes is derived from how often it runs, so the two numbers cannot live in different
+      // files — see `startCoordinateExpirySweep`.
+      const { startCoordinateExpirySweep } = await import(
+        "./booking/travel/coordinate-retention.service"
+      );
+      startCoordinateExpirySweep();
+
+      // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
+      // leads are one row per IDENTITY, so the same human on WhatsApp and in the widget
+      // owns two rows and no per-row counter can see the repeat.
+      //
+      // No env flag, unlike the enrichment sweep: this spends no LLM budget (it is two
+      // indexed statements per tenant), it is entitlement-gated per tenant inside the
+      // service, and a feature that only works if someone remembers to set a variable is
+      // a feature that does not work.
+      const sweepRepeats = async () => {
+        try {
+          const { sweepRepeatCustomers } = await import(
+            "./leads/repeat-detection.service"
+          );
+          await sweepRepeatCustomers();
+        } catch (err) {
+          logger.error("[lead-repeat] sweep failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      // One run shortly after boot as well as daily: the columns start empty, and a
+      // fresh deploy should not leave the leads inbox showing nobody as returning for a
+      // day. The pass only writes rows whose values changed, so the extra run costs a
+      // no-op UPDATE per tenant. 60s of headroom so it starts behind the boot traffic.
+      setTimeout(sweepRepeats, 60_000);
+      setInterval(sweepRepeats, 24 * 60 * 60 * 1000); // Daily
+
+      // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
+      const { reconcilePendingBookingSyncs } = await import(
+        "./scheduler/sync-reconciler"
+      );
+      setInterval(
+        () => {
+          reconcilePendingBookingSyncs().catch((error) =>
+            logger.error("Booking sync reconciliation failed", { error }),
+          );
+        },
+        5 * 60 * 1000,
+      ); // Every 5 minutes
+
+      // Pull owner edits made directly in the connected calendar back into the booking.
+      // Kill switch: INBOUND_CALENDAR_SYNC_ENABLED=false.
+      if (process.env.INBOUND_CALENDAR_SYNC_ENABLED !== "false") {
+        const { syncExternalCalendarChanges } = await import(
+          "./scheduler/inbound-calendar-sync"
+        );
+        setInterval(
+          () => {
+            syncExternalCalendarChanges().catch((error) =>
+              logger.error("Inbound calendar sync failed", { error }),
+            );
+          },
+          5 * 60 * 1000,
+        ); // Every 5 minutes
+      }
+
+      await startEmailRetryIfEnabled();
+
+
+      // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
+      // silently-broken one (expired token, revoked permission, page disconnect)
+      // flips to error + notifies even with no outbound traffic to trigger the
+      // reactive probe. Ships DARK: opt-in via CHANNEL_HEALTH_SWEEP_ENABLED. Reuses
+      // the debounced probe path (Redis NX dedupe), first run delayed past boot.
+      if (process.env.CHANNEL_HEALTH_SWEEP_ENABLED === "true") {
+        const { sweepStaleChannels } = await import(
+          "./channels/health-check.service"
+        );
+        const runChannelSweep = () =>
+          sweepStaleChannels().catch((error) =>
+            logger.error("Channel health sweep failed", { error }),
+          );
+        setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
+        setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
+      }
+
+      // Platform LLM health probe. The platform key is a single point of failure —
+      // no tenant supplies its own — and when it ran out of credit on 2026-08-03
+      // every bot failed silently until a customer complained over Telegram. One
+      // 1-token completion every 5 minutes is the cheapest way for that to announce
+      // itself. Alerts only on a state CHANGE, so a standing outage sends one email,
+      // not one per tick. Opt-out rather than opt-in: the failure it catches is
+      // total, so the safe default is on.
+      if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== "false") {
+        const { runProviderHealthCheck } = await import("./llm/provider-health");
+        const runProbe = () =>
+          runProviderHealthCheck().catch((error) =>
+            // runProviderHealthCheck never throws by design; this is belt-and-braces
+            // so a probe bug can never take down the boot sequence.
+            logger.error("Provider health probe failed", { error }),
+          );
+        setTimeout(runProbe, 60 * 1000); // first run 1 min after boot, once warm
+        setInterval(runProbe, 5 * 60 * 1000);
+      }
+
+      // Handoff / guardrail-pause SLA sweep — re-alerts staff about conversations
+      // unacknowledged past the SLA so enforce-driven pauses/handoffs aren't silently
+      // abandoned. Ships DARK: opt-in via SLA_SWEEP_ENABLED (enable once B1 desktop
+      // delivery is confirmed). Bucketed + capped so it can't spam.
+      if (process.env.SLA_SWEEP_ENABLED === "true") {
+        const { sweepOverdueHandoffsAndPauses } = await import(
+          "./notifications/sla-sweep"
+        );
+        setInterval(
+          () => {
+            sweepOverdueHandoffsAndPauses().catch((error) =>
+              logger.error("SLA sweep failed", { error }),
+            );
+          },
+          5 * 60 * 1000,
+        ); // every 5 minutes
+      }
+
+      // Nightly Insights refresh — judges closed/handoff sessions and
+      // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
+      // gapInsights Feature per ADR-0013).
+      const { registerInsightsRefreshJob } = await import(
+        "./insights/refresh-insights.job"
+      );
+      registerInsightsRefreshJob();
+}
+
 async function startEmailRetryIfEnabled(): Promise<void> {
   // Retry failed customer calendar invites. Kill switch: EMAIL_RETRY_ENABLED=false.
   if (process.env.EMAIL_RETRY_ENABLED !== "false") {
@@ -460,6 +966,17 @@ async function startEmailRetryIfEnabled(): Promise<void> {
   } else {
     logger.info("[EmailRetry] disabled via EMAIL_RETRY_ENABLED");
   }
+}
+
+
+async function startBookingCopyWarmIfEnabled(): Promise<void> {
+  if (process.env.BOOKING_COPY_WARM === "0") return;
+  const { warmBookingCopyCache } = await import("./booking/booking-copy");
+  void warmBookingCopyCache().catch((err) => {
+    logger.warn("[booking-copy] startup warm failed — first booking may be slow", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 async function startServer(): Promise<void> {
@@ -502,6 +1019,8 @@ async function startServer(): Promise<void> {
       );
     }
 
+    await startBookingCopyWarmIfEnabled();
+
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)
     try {
       const { initializeQueues } = await import("./queue/message-queue");
@@ -514,6 +1033,7 @@ async function startServer(): Promise<void> {
       );
     }
 
+    if (backgroundJobsEnabled) {
     // Register knowledge ingestion processor
     try {
       const { registerProcessor } = await import("./queue/message-queue");
@@ -561,11 +1081,23 @@ async function startServer(): Promise<void> {
       );
       logger.info("Notification push processor registered");
 
-      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import(
-        "./booking/booking-providers/reminders"
-      );
+      const {
+        createBookingReminderProcessor,
+        REMINDER_QUEUE,
+        reconcileBookingReminders,
+      } = await import("./booking/booking-providers/reminders");
       registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());
       logger.info("Booking reminder processor registered");
+      void reconcileBookingReminders()
+        .then((restored) =>
+          logger.info("Booking reminders reconciled", { restored }),
+        )
+        .catch((err) =>
+          logger.warn("Booking reminder reconcile failed (non-fatal)", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+
 
       // Message turn coalescer (burst debounce). The processor has a deps-ready
       // guard, so registering it before forwarding/agent init (below) is safe —
@@ -587,6 +1119,8 @@ async function startServer(): Promise<void> {
         error: err,
       });
     }
+    }
+
 
     // Register Stripe billing provider — boot env validation already
     // guaranteed the secret/webhook/price IDs are present outside test.
@@ -665,499 +1199,14 @@ async function startServer(): Promise<void> {
       "Channel adapters registered: telegram, messenger, instagram, whatsapp",
     );
 
-    // Cleanup old webhook event logs and message deliveries (7-day retention)
-    const cleanupChannelLogs = async () => {
-      try {
-        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-        await AppDataSource.query(
-          `DELETE FROM "webhook_event_log" WHERE "createdAt" < $1 AND "status" IN ('processed', 'skipped')`,
-          [cutoff],
-        );
-        await AppDataSource.query(
-          `DELETE FROM "message_deliveries" WHERE "createdAt" < $1 AND "status" IN ('sent', 'delivered', 'read')`,
-          [cutoff],
-        );
-      } catch (error) {
-        logger.error("Channel event log cleanup failed", { error });
-      }
-    };
-    setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000);
-
-    // Audit log cleanup — batched to avoid table locks
-    const cleanupAuditLogs = async () => {
-      try {
-        let totalDeleted = 0;
-        let batchDeleted: number;
-
-        do {
-          // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
-          const deletedRows = returningRows<{ id: string }>(
-            await AppDataSource.query(
-              `DELETE FROM audit_logs WHERE id IN (
-              SELECT id FROM audit_logs
-              WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
-              ORDER BY created_at ASC
-              LIMIT 1000
-            )
-            RETURNING id`,
-              [config.audit.retentionDays],
-            ),
-          );
-          batchDeleted = deletedRows.length;
-          totalDeleted += batchDeleted;
-        } while (batchDeleted === 1000);
-
-        if (totalDeleted > 0) {
-          logger.info("Audit log cleanup complete", {
-            deletedCount: totalDeleted,
-          });
-        }
-      } catch (error) {
-        logger.error("Audit log cleanup failed", { error });
-      }
-    };
-
-    // Run cleanup after 10 seconds, then every 24 hours
-    setTimeout(cleanupAuditLogs, 10_000);
-    setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
-
-    // Auto-close stale sessions — sessions with no activity for 30 minutes
-    // Batched to avoid locking many rows at once under load.
-    const STALE_BATCH_SIZE = 200;
-    const STALE_MAX_BATCHES = 50; // Cap at 10k sessions per run
-    const autoCloseStaleSessions = async () => {
-      try {
-        const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
-        let totalClosed = 0;
-        let batchClosed: number;
-        let batches = 0;
-        do {
-          const rows = returningRows<{ id: string }>(
-            await AppDataSource.query(
-              // Bulk sweep, deliberately NOT per-row through the command service
-              // (thousands of rows). ownership + version move in the SAME statement
-              // so the columns can never desync and an in-flight AI commit is fenced.
-              `UPDATE chat_sessions
-             SET status = 'closed', ownership = 'closed',
-                 ownership_version = ownership_version + 1,
-                 ended_at = NOW(), updated_at = NOW()
-             WHERE id IN (
-               SELECT id FROM chat_sessions
-               WHERE status IN ('bot', 'waiting')
-               AND last_activity_at < $1
-               AND last_activity_at IS NOT NULL
-               -- Keep guardrail-paused sessions open: they need human review (and the
-               -- SLA sweep re-alerts on them); auto-closing would silently drop a flag.
-               AND NOT (ai_auto_reply_enabled = false AND guardrail_status <> 'normal')
-               LIMIT $2
-               FOR UPDATE SKIP LOCKED
-             )
-             RETURNING id`,
-              [cutoff, STALE_BATCH_SIZE],
-            ),
-          );
-          batchClosed = rows.length;
-          totalClosed += batchClosed;
-          batches++;
-        } while (
-          batchClosed === STALE_BATCH_SIZE &&
-          batches < STALE_MAX_BATCHES
-        );
-
-        if (totalClosed > 0) {
-          logger.info(`Auto-closed ${totalClosed} stale sessions`);
-        }
-
-        // Return stale UNACCEPTED handoffs to bot — a queue timeout, NOT a
-        // human-control duration (D3): only `handoff_requested` qualifies, so a
-        // CLAIMED conversation (ownership human_owned, whose legacy status is
-        // also 'handoff') is never swept back mid-conversation. Each return is
-        // an atomic ownership transition through the command service
-        // (cancelHandoff also times out the open HandoffRequest row, which the
-        // old raw UPDATE left dangling as 'requested' forever).
-        const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
-        const { conversationCommands } = await import(
-          "./services/conversation-command.service"
-        );
-        let totalReturned = 0;
-        let returnedBatch: number;
-        batches = 0;
-        do {
-          const stale = (await AppDataSource.query(
-            `SELECT id FROM chat_sessions
-             WHERE ownership = 'handoff_requested'
-             AND last_activity_at < $1
-             AND last_activity_at IS NOT NULL
-             LIMIT $2`,
-            [handoffCutoff, STALE_BATCH_SIZE],
-          )) as Array<{ id: string }>;
-          returnedBatch = 0;
-          for (const row of stale) {
-            try {
-              const result = await conversationCommands.cancelHandoff(row.id, {
-                kind: "system",
-                source: "stale_handoff_sweep",
-              });
-              if (result.outcome === "cancelled") {
-                returnedBatch++;
-                // B-PR3a: normalized ownership event, post-commit — a swept
-                // conversation must leave the operators' pending list live.
-                const { emitConversationUpsertForSession } = await import(
-                  "./realtime/conversation-events"
-                );
-                await emitConversationUpsertForSession(row.id);
-              }
-            } catch (err) {
-              // A concurrent claim/close between SELECT and cancel is expected;
-              // the command's own state checks make the sweep re-entrant.
-              logger.debug("Stale handoff sweep skipped a session", {
-                sessionId: row.id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          }
-          totalReturned += returnedBatch;
-          batches++;
-        } while (
-          returnedBatch === STALE_BATCH_SIZE &&
-          batches < STALE_MAX_BATCHES
-        );
-
-        if (totalReturned > 0) {
-          logger.info(
-            `Auto-returned ${totalReturned} stale handoff sessions to bot`,
-          );
-        }
-      } catch (error) {
-        logger.error("Stale session cleanup failed", { error });
-      }
-    };
-    setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
-
-    // Timed human-control expiry (B-PR5a): return sessions whose timed takeover
-    // deadline (`human_control_until`) has passed to the bot. Every release goes
-    // through the transactional command service (candidate rows locked FOR
-    // UPDATE SKIP LOCKED, expiry re-checked on the locked row, emit after
-    // commit) - see timed-control-expiry.service.ts. Runs every 60s as a
-    // LIVENESS floor; the inbound-message check in message-forwarding releases
-    // an expired session the moment a customer writes, so correctness does not
-    // wait on this tick. Unflagged: a timed claim without a running expiry
-    // worker must not exist (the codex-locked ordering that gated B-PR2b).
-    const sweepTimedControl = async () => {
-      try {
-        const { sweepExpiredTimedControl } = await import(
-          "./services/timed-control-expiry.service"
-        );
-        await sweepExpiredTimedControl();
-      } catch (error) {
-        logger.error("Timed-control expiry sweep failed", { error });
-      }
-    };
-    setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
-
-    // Handoff-notification outbox backstop (ADR-0018). The handoff call sites
-    // dispatch the alert immediately for latency and retire the row; this sweep
-    // only picks up rows a crash left behind (past their grace), replays the
-    // idempotent notify, and parks a row as dead after the attempt cap.
-    // Re-entrancy-guarded like the sweeps above and safe on every instance
-    // (FOR UPDATE SKIP LOCKED claims disjoint rows).
-    const sweepHandoffOutboxTick = async () => {
-      try {
-        const { sweepHandoffOutbox } = await import(
-          "./notifications/notification-outbox.worker"
-        );
-        await sweepHandoffOutbox();
-      } catch (error) {
-        logger.error("Handoff-notification outbox sweep failed", { error });
-      }
-    };
-    setInterval(sweepHandoffOutboxTick, 30 * 1000); // Run every 30 seconds
-
-    // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
-    // platform LLM budget, and a background pass on this budget previously caused
-    // customer-facing 429s on live replies. Enable per-environment only after the
-    // abstain-rate metrics are being watched. Mirrors TURN_COALESCER_ENABLED.
-    if (process.env.LEAD_ENRICHMENT_ENABLED === "true") {
-      const { runLeadEnrichmentSweep } = await import(
-        "./leads/enrichment/enrich-lead.job"
+    if (backgroundJobsEnabled) {
+      await startBackgroundJobs();
+    } else {
+      logger.warn(
+        "Background jobs disabled via BACKGROUND_JOBS_ENABLED=false — no sweeps, no queue processors",
       );
-      // 5-minute tick; the job is internally sequential and re-entrancy-guarded, so a
-      // slow sweep can never overlap itself.
-      setInterval(
-        () => {
-          void runLeadEnrichmentSweep().catch((err) => {
-            logger.error("[lead-enrich] sweep failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-        },
-        5 * 60 * 1000,
-      );
-      logger.info("[lead-enrich] sweep enabled (5m tick)");
     }
 
-    // Customer-memory sweep. DEFAULT ON: only CUSTOMER_MEMORY_ENABLED=false disables it.
-    {
-      const { isCustomerMemoryEnabled } = await import("./memory/memory-config");
-      if (isCustomerMemoryEnabled()) {
-        const { runCustomerMemorySweep } = await import(
-          "./memory/memory-sweep.job"
-        );
-        setInterval(() => {
-          void runCustomerMemorySweep().catch((err) => {
-            logger.error("[customer-memory] sweep failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-        }, 5 * 60 * 1000);
-        logger.info("[customer-memory] sweep enabled (5m tick)");
-      }
-    }
-
-    // Agent-trace retention (30 days). The schedule lives in the service - see
-    // startAgentTraceRetentionSweep for why it must also run at boot.
-    //
-    // Imported here, not at the top of the file, to match every other sweep wired in
-    // this boot block.
-    const { startAgentTraceRetentionSweep } = await import(
-      "./agent/trace-retention.service"
-    );
-    startAgentTraceRetentionSweep();
-    const {
-      startCustomerMemoryRetentionSweep,
-      startStuckMemoryRunWatcher,
-    } = await import("./memory/memory-retention.service");
-    startCustomerMemoryRetentionSweep();
-    startStuckMemoryRunWatcher();
-
-    // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
-    // env flag, because it is a NO-OP for every tenant that has not chosen a period,
-    // and a data-protection control should not depend on remembering to enable it.
-    // Erasure is per-tenant opt-in via `settings.leadRetentionDays`; unset = keep.
-    const sweepRetention = async () => {
-      try {
-        const { sweepLeadRetention } = await import(
-          "./leads/lead-retention.service"
-        );
-        await sweepLeadRetention();
-      } catch (err) {
-        logger.error("[lead-retention] sweep failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
-
-    const recrawlWebsites = async () => {
-      try {
-        const { recrawlStaleWebsiteOrigins } = await import(
-          "./knowledge/website-crawl.service"
-        );
-        const { KnowledgeService } = await import(
-          "./knowledge/knowledge.service"
-        );
-        await recrawlStaleWebsiteOrigins(new KnowledgeService(AppDataSource));
-      } catch (error) {
-        logger.error("Website recrawl sweep failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
-    setTimeout(recrawlWebsites, 5 * 60 * 1000);
-    setInterval(recrawlWebsites, 24 * 60 * 60 * 1000);
-
-    // Cloud-import reaper: stuck/failed S3 objects + stale staging/ prefix.
-    const storageReaper = async () => {
-      try {
-        const { reapStaleStorageImports } = await import(
-          "./integrations/storage/reaper"
-        );
-        await reapStaleStorageImports();
-      } catch (error) {
-        logger.error("Storage import reaper failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
-    setTimeout(storageReaper, 10 * 60 * 1000);
-    setInterval(storageReaper, 24 * 60 * 60 * 1000);
-
-    // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
-    // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps
-    // taking bookings, so a lapsed card and a Google outage look identical from outside. This is
-    // the watchdog that makes that failure announce itself.
-    //
-    // Unflagged and ungated, for the same reason as lead retention below: a watchdog that only
-    // runs when somebody remembers to enable it is not a watchdog. (The LLM provider probe this
-    // borrows its SHAPE from does carry a kill switch, `PROVIDER_HEALTH_PROBE_ENABLED` - the
-    // shape is the precedent here, not the gating.) One run shortly after boot as well as on the
-    // interval, so a redeploy does not leave it silent until the first tick.
-    const travelHealth = async () => {
-      try {
-        const { runTravelHealthCheck, reconcileObservedDegradation } =
-          await import("./booking/travel/travel-health");
-        await runTravelHealthCheck();
-        await reconcileObservedDegradation();
-      } catch (err) {
-        logger.error("[travel-health] check failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    setTimeout(travelHealth, 90_000);
-    setInterval(travelHealth, 30 * 60 * 1000); // Every 30 minutes
-
-    // Agents already sharing a diary when this shipped never fire a rekey, so the event-driven
-    // detector alone would only ever catch the cases that arrive after it.
-    const sweepSharedItineraries = async () => {
-      try {
-        const { reconcileSharedItineraries } = await import(
-          "./booking/travel/travel-health"
-        );
-        await reconcileSharedItineraries();
-      } catch (err) {
-        logger.error("[travel-health] shared-itinerary reconciliation failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    setTimeout(sweepSharedItineraries, 120_000);
-    setInterval(sweepSharedItineraries, 24 * 60 * 60 * 1000); // Daily
-
-    // Coordinate expiry, daily plus one run shortly after boot (ADR-0014). The Maps terms
-    // permit a booking's latitude and longitude for 30 consecutive days and no longer;
-    // `place_id` stays. Unflagged and ungated for the same reason as lead retention above —
-    // it is a no-op for every tenant that has never placed an address, and a licence control
-    // nobody remembers to enable is not a control.
-    //
-    // THE INTERVAL IS NOT SET HERE, unlike every sweep above it. The age at which this one
-    // deletes is derived from how often it runs, so the two numbers cannot live in different
-    // files — see `startCoordinateExpirySweep`.
-    const { startCoordinateExpirySweep } = await import(
-      "./booking/travel/coordinate-retention.service"
-    );
-    startCoordinateExpirySweep();
-
-    // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
-    // leads are one row per IDENTITY, so the same human on WhatsApp and in the widget
-    // owns two rows and no per-row counter can see the repeat.
-    //
-    // No env flag, unlike the enrichment sweep: this spends no LLM budget (it is two
-    // indexed statements per tenant), it is entitlement-gated per tenant inside the
-    // service, and a feature that only works if someone remembers to set a variable is
-    // a feature that does not work.
-    const sweepRepeats = async () => {
-      try {
-        const { sweepRepeatCustomers } = await import(
-          "./leads/repeat-detection.service"
-        );
-        await sweepRepeatCustomers();
-      } catch (err) {
-        logger.error("[lead-repeat] sweep failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    // One run shortly after boot as well as daily: the columns start empty, and a
-    // fresh deploy should not leave the leads inbox showing nobody as returning for a
-    // day. The pass only writes rows whose values changed, so the extra run costs a
-    // no-op UPDATE per tenant. 60s of headroom so it starts behind the boot traffic.
-    setTimeout(sweepRepeats, 60_000);
-    setInterval(sweepRepeats, 24 * 60 * 60 * 1000); // Daily
-
-    // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
-    const { reconcilePendingBookingSyncs } = await import(
-      "./scheduler/sync-reconciler"
-    );
-    setInterval(
-      () => {
-        reconcilePendingBookingSyncs().catch((error) =>
-          logger.error("Booking sync reconciliation failed", { error }),
-        );
-      },
-      5 * 60 * 1000,
-    ); // Every 5 minutes
-
-    // Pull owner edits made directly in the connected calendar back into the booking.
-    // Kill switch: INBOUND_CALENDAR_SYNC_ENABLED=false.
-    if (process.env.INBOUND_CALENDAR_SYNC_ENABLED !== "false") {
-      const { syncExternalCalendarChanges } = await import(
-        "./scheduler/inbound-calendar-sync"
-      );
-      setInterval(
-        () => {
-          syncExternalCalendarChanges().catch((error) =>
-            logger.error("Inbound calendar sync failed", { error }),
-          );
-        },
-        5 * 60 * 1000,
-      ); // Every 5 minutes
-    }
-
-    await startEmailRetryIfEnabled();
-
-
-    // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
-    // silently-broken one (expired token, revoked permission, page disconnect)
-    // flips to error + notifies even with no outbound traffic to trigger the
-    // reactive probe. Ships DARK: opt-in via CHANNEL_HEALTH_SWEEP_ENABLED. Reuses
-    // the debounced probe path (Redis NX dedupe), first run delayed past boot.
-    if (process.env.CHANNEL_HEALTH_SWEEP_ENABLED === "true") {
-      const { sweepStaleChannels } = await import(
-        "./channels/health-check.service"
-      );
-      const runChannelSweep = () =>
-        sweepStaleChannels().catch((error) =>
-          logger.error("Channel health sweep failed", { error }),
-        );
-      setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
-      setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
-    }
-
-    // Platform LLM health probe. The platform key is a single point of failure —
-    // no tenant supplies its own — and when it ran out of credit on 2026-08-03
-    // every bot failed silently until a customer complained over Telegram. One
-    // 1-token completion every 5 minutes is the cheapest way for that to announce
-    // itself. Alerts only on a state CHANGE, so a standing outage sends one email,
-    // not one per tick. Opt-out rather than opt-in: the failure it catches is
-    // total, so the safe default is on.
-    if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== "false") {
-      const { runProviderHealthCheck } = await import("./llm/provider-health");
-      const runProbe = () =>
-        runProviderHealthCheck().catch((error) =>
-          // runProviderHealthCheck never throws by design; this is belt-and-braces
-          // so a probe bug can never take down the boot sequence.
-          logger.error("Provider health probe failed", { error }),
-        );
-      setTimeout(runProbe, 60 * 1000); // first run 1 min after boot, once warm
-      setInterval(runProbe, 5 * 60 * 1000);
-    }
-
-    // Handoff / guardrail-pause SLA sweep — re-alerts staff about conversations
-    // unacknowledged past the SLA so enforce-driven pauses/handoffs aren't silently
-    // abandoned. Ships DARK: opt-in via SLA_SWEEP_ENABLED (enable once B1 desktop
-    // delivery is confirmed). Bucketed + capped so it can't spam.
-    if (process.env.SLA_SWEEP_ENABLED === "true") {
-      const { sweepOverdueHandoffsAndPauses } = await import(
-        "./notifications/sla-sweep"
-      );
-      setInterval(
-        () => {
-          sweepOverdueHandoffsAndPauses().catch((error) =>
-            logger.error("SLA sweep failed", { error }),
-          );
-        },
-        5 * 60 * 1000,
-      ); // every 5 minutes
-    }
-
-    // Nightly Insights refresh — judges closed/handoff sessions and
-    // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
-    // gapInsights Feature per ADR-0013).
-    const { registerInsightsRefreshJob } = await import(
-      "./insights/refresh-insights.job"
-    );
-    registerInsightsRefreshJob();
 
     const PORT = config.server.port;
     httpServer.listen(PORT, () => {

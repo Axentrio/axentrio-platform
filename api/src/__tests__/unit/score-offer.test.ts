@@ -42,9 +42,9 @@ const eligibility = {
   active: true as const,
   tenantId: 'tenant-1',
   itineraryKey: 'bot:1',
-  slackMin: 0,
+  minGapMin: 0,
   startFromBase: false,
-  maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const,
+  maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
 };
 
 /** Monday 8 Sep 2026 and Tuesday 9 Sep 2026, both inside the London working day. */
@@ -588,10 +588,8 @@ describe('grouping anchors on confirmed bookings alone', () => {
   });
 });
 
-describe('Route Priority spends nothing the scorer did not already spend', () => {
-  it('leaves elementsSpent unchanged across auto, nearest and farthest', async () => {
-    // The selector re-reads already-computed costs. A mode that bought its own legs would
-    // move the Tenant closer to the monthly cap — the ADR-0017 trap.
+describe('grouping spend', () => {
+  it('records one paid element for a half-day pass', async () => {
     driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
       return async () => {
         if (opts?.cacheOnly !== true) opts?.onBilled?.();
@@ -599,33 +597,15 @@ describe('Route Priority spends nothing the scorer did not already spend', () =>
       };
     });
 
-    const input = {
+    const auto = await scoreOfferedSlots({
       ...base,
       ...noBase,
       slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
       requestable: [],
       neighbours: [neighbour(MON, '13:00', 1), neighbour(MON, '16:00', 2)],
-    };
-
-    const auto = await scoreOfferedSlots({
-      ...input,
-      eligibility: { ...eligibility, groupingPeriod: 'half_day', routePriority: 'auto' },
-    });
-    const nearest = await scoreOfferedSlots({
-      ...input,
-      eligibility: { ...eligibility, groupingPeriod: 'half_day', routePriority: 'nearest' },
-    });
-    const farthest = await scoreOfferedSlots({
-      ...input,
-      eligibility: { ...eligibility, groupingPeriod: 'half_day', routePriority: 'farthest' },
+      eligibility: { ...eligibility, groupingPeriod: 'half_day' },
     });
 
     expect(auto!.elementsSpent).toBe(1);
-    expect(nearest!.elementsSpent).toBe(auto!.elementsSpent);
-    expect(farthest!.elementsSpent).toBe(auto!.elementsSpent);
-    // The selector never reaches the reservation itself. Score-offer already mocked the
-    // lookup, so a mode that called `driveLookupFor` extra times would still be invisible
-    // here unless it also reserved — which is the spend this test forbids.
-    expect(reserveTravelElements).not.toHaveBeenCalled();
   });
 });

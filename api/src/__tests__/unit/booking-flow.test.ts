@@ -45,6 +45,7 @@ vi.mock('../../booking/booking.service', () => ({
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
   updateBooking: vi.fn(),
+  peekCustomerEmailRequired: vi.fn().mockResolvedValue(false),
 }));
 
 // ── Mock RAG service ────────────────────────────────────────────────
@@ -283,8 +284,8 @@ describe('Booking Flow — Full Agent Loop', () => {
       'Tue 10:00',
       'Tue 14:00',
     ]);
-    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone.
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined, undefined, undefined);
+    // Trailing undefineds: customerAddress, then #149 locationChoice, then phone, then clock window.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined, undefined, undefined, undefined);
 
     // Turn 3: User picks 10am and gives info. LLM re-verifies availability then books.
     // The precondition requires check_availability in the SAME turn before create_booking.

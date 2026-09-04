@@ -27,9 +27,12 @@ import {
   summaryWasAsked,
   refuseUnlessConfirmed,
   refuseUnlessRescheduleConfirmed,
+  pendingYesNeedsReschedule,
   refuseUnlessCancelConfirmed,
+  refuseCreateWhileMovePending,
   putPendingBooking,
   CONFIRMATION_REQUIRED,
+  MOVE_PENDING,
 } from '../../agent/pending-booking-confirmation';
 import { slotChipQuickReply } from '../../config/bot-language';
 import type { ToolContext } from '../../agent/tool-adapter';
@@ -154,7 +157,20 @@ describe('isConfirmingChip', () => {
 describe('summaryWasAsked', () => {
   const start = '2026-10-26T10:00:00';
 
-  it('accepts a prior booking question that names the hour', () => {
+  it('accepts a prior booking question that names the date and hour', () => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'dump' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+        start,
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a clock-only booking question', () => {
     expect(
       summaryWasAsked(
         [
@@ -164,7 +180,7 @@ describe('summaryWasAsked', () => {
         ],
         start,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('rejects an availability question that does not name the hour', () => {
@@ -179,7 +195,7 @@ describe('summaryWasAsked', () => {
   it('rejects a booking question for a different hour', () => {
     expect(
       summaryWasAsked(
-        [{ role: 'assistant', content: 'Zal ik boeken om 11:00?' }],
+        [{ role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 11:00?' }],
         start,
       ),
     ).toBe(false);
@@ -192,11 +208,49 @@ describe('summaryWasAsked', () => {
           { role: 'user', content: 'dump' },
           { role: 'assistant', content: 'Zal ik de beschikbaarheid checken?' },
           { role: 'user', content: 'Ja, dat klopt' },
-          { role: 'assistant', content: 'Zal ik boeken om 10:00?' },
+          { role: 'assistant', content: 'Zal ik boeken op maandag 26 oktober 2026 om 10:00?' },
         ],
         start,
       ),
     ).toBe(false);
+  });
+
+  it('rejects the live horizon-refusal that named 2 November 10:00 for a 26 October pending', () => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'Is maandag 2 november 2026 om 10:00 vrij?' },
+          {
+            role: 'assistant',
+            content:
+              'Ik kan maandag 2 november om 10:00 momenteel niet controleren; wil je dat ik 26 oktober tot en met 1 november nakijk?',
+          },
+          { role: 'user', content: 'ja' },
+        ],
+        start,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    'Zal ik boeken op maandag 26 oktober 2026, 10:00?',
+    'Shall I book Monday 26 October 2026 at 10:00?',
+    'Confirmer le rendez-vous le 26 octobre 2026 à 10h00 ?',
+    'Zal ik boeken op 26/10/2026 om 10:00?',
+    'Zal ik boeken op maandag 26 oktober 09:30-10:00?',
+    // "elke dag 09:00-17:00" must not name a foreign date: a hyphen is not a date separator.
+    'Wij werken elke dag 09:00-17:00. Zal ik boeken op maandag 26 oktober om 10:00?',
+  ])('accepts %s', (summary) => {
+    expect(
+      summaryWasAsked(
+        [
+          { role: 'user', content: 'dump' },
+          { role: 'assistant', content: summary },
+          { role: 'user', content: 'Ja, dat klopt' },
+        ],
+        start,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -258,7 +312,7 @@ describe('confirmation keys do not cross kinds', () => {
     expect(first.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
 
     const history = [
-      { role: 'assistant' as const, content: 'Zal ik boeken om 10:00?' },
+      { role: 'assistant' as const, content: 'Zal ik boeken op woensdag 10 juni 2026 om 10:00?' },
       { role: 'user' as const, content: 'Ja, dat klopt' },
     ];
     const refused = await refuseUnlessConfirmed(
@@ -404,6 +458,7 @@ describe('a reschedule the customer keeps confirming', () => {
     expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
   });
 
+
   it('still refuses when the model names a DIFFERENT address than the one confirmed', async () => {
     await refuseUnlessRescheduleConfirmed(
       { bookingId: 'bk-1', newStartTime: '2026-09-03T13:00:00', customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' },
@@ -414,6 +469,124 @@ describe('a reschedule the customer keeps confirming', () => {
       toolCtx([summary, { role: 'user', content: 'ja doe maar' }]),
     );
     expect(other.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+  });
+});
+
+/**
+ * THE YES THAT NEVER BECAME A TOOL CALL (live, WaterFix, 2026-09-02, session 1bbd5818).
+ *
+ * reschedule_booking returned CONFIRMATION_REQUIRED, the bot sent the summary, the customer
+ * said "Ja, bevestig de wijziging" - and the next turn called list_bookings and
+ * check_availability, never reschedule_booking, and told the customer the move could not be
+ * confirmed while the slot was free. The run loop asks this predicate to catch that turn.
+ */
+describe('pendingYesNeedsReschedule', () => {
+  beforeEach(() => {
+    store.clear();
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+  });
+
+  const summary = {
+    role: 'assistant' as const,
+    content: 'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00. Zal ik dit boeken?',
+  };
+  const yes = { role: 'user' as const, content: 'ja doe maar' };
+
+  const openMove = (customerAddress?: string) =>
+    refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00', ...(customerAddress ? { customerAddress } : {}) },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+
+  it('returns the pending move after the summary and the yes', async () => {
+    await openMove();
+    // The gate stores a minute-precision key; the nudge answers the tool contract's
+    // documented seconds form, and the retrying call is re-keyed so it still matches.
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toEqual({
+      bookingId: 'bk-9',
+      newStartTime: '2026-09-03T13:00:00',
+    });
+  });
+
+  it('answers null when nothing is pending', async () => {
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
+  });
+
+  it('answers null on a yes the customer never saw a summary for', async () => {
+    await openMove();
+    expect(await pendingYesNeedsReschedule('sess-confirm', [yes])).toBeNull();
+  });
+
+  it('holds an address move to a summary that read the door back', async () => {
+    await openMove('Turnhoutsebaan 100, 2140 Antwerpen');
+    // The time-only summary does not carry the door, so the yes proves nothing.
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
+    const summaryWithAddress = {
+      role: 'assistant' as const,
+      content:
+        'Ter bevestiging: ik verplaats je afspraak naar donderdag om 13:00 op Turnhoutsebaan 100, 2140 Antwerpen. Zal ik dit boeken?',
+    };
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summaryWithAddress, yes])).toEqual({
+      bookingId: 'bk-9',
+      newStartTime: '2026-09-03T13:00:00',
+      customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen',
+    });
+  });
+
+  it('answers null once the gate accepted the confirming call', async () => {
+    await openMove();
+    const second = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-9', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([summary, yes]),
+    );
+    expect(second.refusal).toBeNull();
+    expect(await pendingYesNeedsReschedule('sess-confirm', [summary, yes])).toBeNull();
+  });
+});
+
+/**
+ * TWO APPOINTMENTS FROM ONE MOVE (live, WaterFix, 2026-09-01).
+ *
+ * The customer asked to move an at-home appointment, the hour they named was not offered, and the
+ * bot showed the next day instead. They tapped a slot and said yes, and the model called
+ * create_booking. The tenant was left holding the original AND a second appointment nobody asked
+ * for. Both writes are individually valid, so only the move recorded a few turns earlier says the
+ * second one is wrong.
+ */
+describe('a create while a move is still open', () => {
+  beforeEach(() => {
+    store.clear();
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+  });
+
+  const openAMove = async () =>
+    refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-7', newStartTime: '2026-09-03T13:00:00' },
+      toolCtx([{ role: 'user', content: 'verzet de afspraak naar 13:00' }]),
+    );
+
+  it('says nothing when no move is open', async () => {
+    expect(await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'boek maar' }]))).toBeNull();
+  });
+
+  it('refuses the create and names the appointment being moved', async () => {
+    await openAMove();
+    const refused = await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]));
+    expect(refused?.error).toMatch(MOVE_PENDING);
+    expect(refused?.error).toContain('bk-7');
+    expect(refused?.error).toMatch(/call reschedule_booking/i);
+  });
+
+  it('lets a genuine second appointment through on the next call', async () => {
+    // The customer who really does want two. Refusing forever would strand them for a day, so the
+    // record is spent by the refusal that reported it.
+    await openAMove();
+    await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]));
+    expect(await refuseCreateWhileMovePending(toolCtx([{ role: 'user', content: 'ja, boek maar' }]))).toBeNull();
   });
 });
 

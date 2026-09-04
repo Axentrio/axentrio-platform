@@ -8,6 +8,9 @@ import type {
   WebhookEvent,
 } from '../webhooks/webhook.types';
 import type { Tenant } from '../database/entities/Tenant';
+import { resolveOwnerLanguage } from '../i18n/audience-language';
+import { translateFreeText } from '../i18n/translate-free-text';
+import { getBookingCopy } from '../booking/booking-copy';
 
 type EmailNotificationConfig = {
   enabled: boolean;
@@ -56,6 +59,7 @@ export class AutomationEngine {
           emailNotifications.newLeadAlert,
           tenantName,
           botName,
+          tenant.id,
         );
         return;
       }
@@ -94,11 +98,18 @@ export class AutomationEngine {
     await this.emailService.send({ to: attendeeEmail, subject, body });
   }
 
+  /**
+   * The new-lead alert is an INTERNAL email: the team reads it, the customer never does. The
+   * only customer-written field on a lead is `notes`, so that one value is rendered in the
+   * business language with the customer's own words kept underneath. Name, email and phone
+   * are structured data and are passed through untouched.
+   */
   private async sendNewLeadAlert(
     event: LeadCreatedEvent,
     config: (EmailNotificationConfig & { recipients: string[] }) | undefined,
     tenantName: string,
     botName: string,
+    tenantId: string,
   ): Promise<void> {
     if (!config?.enabled) return;
 
@@ -106,7 +117,15 @@ export class AutomationEngine {
     if (recipients.length === 0) return;
 
     const variables = buildVariablesFromEvent(
-      { type: event.type, data: { name: event.lead.name, email: event.lead.email, phone: event.lead.phone, notes: event.lead.notes } },
+      {
+        type: event.type,
+        data: {
+          name: event.lead.name,
+          email: event.lead.email,
+          phone: event.lead.phone,
+          notes: await this.notesForTeam(event.lead.notes, tenantId),
+        },
+      },
       tenantName,
       botName
     );
@@ -114,6 +133,18 @@ export class AutomationEngine {
     const body = config.body ? renderTemplate(config.body, variables) : `A new lead has been captured.`;
 
     await this.emailService.send({ to: recipients, subject, body });
+  }
+
+  /** The translation first, then the original under its heading. Returns the note
+   *  unchanged when it already reads in the business language, or when the translation
+   *  fails open - the team must always see the customer's words, whatever the model did. */
+  private async notesForTeam(notes: string | undefined, tenantId: string): Promise<string | undefined> {
+    if (!notes?.trim()) return notes;
+    const targetLanguage = await resolveOwnerLanguage(tenantId);
+    const { text, translated } = await translateFreeText({ text: notes, targetLanguage, tenantId });
+    if (!translated) return notes;
+    const copy = await getBookingCopy(targetLanguage, tenantId);
+    return `${text}\n\n${copy['owner.original_heading']}\n${notes}`;
   }
 
   private async sendConversationSummary(

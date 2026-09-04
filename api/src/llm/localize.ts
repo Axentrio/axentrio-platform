@@ -36,8 +36,10 @@ import { logger } from '../utils/logger';
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"')]+/gi;
 
-/** True if `out` introduces a URL that wasn't in the original message (injection). */
-function addsUrl(original: string, out: string): boolean {
+/** True if `out` introduces a URL that wasn't in the original message (injection).
+ *  Shared with `i18n/translate-free-text.ts`, which applies the same check to a
+ *  translated customer note - one copy, so the two can never diverge. */
+export function addsUrl(original: string, out: string): boolean {
   const orig = new Set((original.match(URL_RE) || []).map((u) => u.toLowerCase()));
   return (out.match(URL_RE) || []).some((u) => !orig.has(u.toLowerCase()));
 }

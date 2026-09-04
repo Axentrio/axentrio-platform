@@ -444,7 +444,7 @@ export interface CalendarEventInput {
 
 /** Times always; location and conferencing only when an Axentrio reschedule must rewrite them. */
 export type CalendarEventPatch = Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'> &
-  Partial<Pick<CalendarEventInput, 'location' | 'conferencing'>>;
+  Partial<Pick<CalendarEventInput, 'location' | 'conferencing' | 'summary' | 'description'>>;
 
 export type UpdateEventResult =
   | { status: 'ok'; meetUrl: string | null }
@@ -541,11 +541,37 @@ export async function createCalendarEvent(
   }
 }
 
+function googleCalendarPatchBody(
+  eventId: string,
+  input: CalendarEventPatch,
+): { body: Record<string, unknown>; conferenceVersion: boolean } {
+  const body: Record<string, unknown> = {
+    start: { dateTime: input.startISO, timeZone: input.timezone },
+    end: { dateTime: input.endISO, timeZone: input.timezone },
+  };
+  if (input.location !== undefined) body.location = input.location;
+  if (input.conferencing === false) body.conferenceData = null;
+  if (input.summary !== undefined) body.summary = input.summary;
+  if (input.description !== undefined) body.description = input.description;
+  if (input.conferencing === true) {
+    body.conferenceData = {
+      createRequest: {
+        requestId: `axentrio-${eventId}-${input.startISO}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    };
+  }
+  return {
+    body,
+    conferenceVersion: input.conferencing === true || input.conferencing === false,
+  };
+}
+
 /**
  * Update an existing event's times. When `location` or `conferencing` is present,
  * those fields are rewritten too — a type change must not leave a leftover Meet
  * conference or street, and a change TO video must mint a conference.
- * Description is never patched, so owner body edits survive.
+ * Summary and description are patched only when supplied; times-only patches stay unchanged.
  */
 export async function updateCalendarEvent(
   botId: string,
@@ -558,21 +584,7 @@ export async function updateCalendarEvent(
   const target = calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
   try {
-    const body: Record<string, unknown> = {
-      start: { dateTime: input.startISO, timeZone: input.timezone },
-      end: { dateTime: input.endISO, timeZone: input.timezone },
-    };
-    if (input.location !== undefined) body.location = input.location;
-    if (input.conferencing === false) body.conferenceData = null;
-    if (input.conferencing === true) {
-      body.conferenceData = {
-        createRequest: {
-          requestId: `axentrio-${eventId}-${input.startISO}`,
-          conferenceSolutionKey: { type: 'hangoutsMeet' },
-        },
-      };
-    }
-    const conferenceVersion = input.conferencing === true || input.conferencing === false;
+    const { body, conferenceVersion } = googleCalendarPatchBody(eventId, input);
     const resp = await withGoogleRetry(() =>
       axios.patch(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,

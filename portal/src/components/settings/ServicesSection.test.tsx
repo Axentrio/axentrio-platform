@@ -113,6 +113,38 @@ describe('ServicesSection — where does it happen?', () => {
     expect([...select.options].map((o) => o.value)).not.toContain('in_person');
   });
 
+  it('defaults On the road to customer location with address required', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'on_the_road' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
+    expect(select.value).toBe('customer_location');
+    expect(screen.getByLabelText(/requires customer address/i)).toBeChecked();
+  });
+
+  it('defaults At one location to business location without address required', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'at_one_location' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
+    expect(select.value).toBe('business_location');
+    expect(screen.getByLabelText(/requires customer address/i)).not.toBeChecked();
+  });
+
+  it('defaults Both to custom location', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'both' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    const select = (await screen.findByLabelText(/where does it happen/i)) as HTMLSelectElement;
+    expect(select.value).toBe('custom');
+  });
+
   it('sends the chosen type when the service is saved', async () => {
     const select = await openNew();
     fireEvent.change(select, { target: { value: 'google_meet' } });
@@ -180,7 +212,11 @@ describe('ServicesSection — where does it happen?', () => {
   });
 
   it('locks the address flag off on a new Something else service', async () => {
-    await openNew();
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI({ workLocation: 'both' });
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
     const box = screen.getByLabelText(/requires customer address/i);
     expect(box).not.toBeChecked();
     expect(box).toBeDisabled();

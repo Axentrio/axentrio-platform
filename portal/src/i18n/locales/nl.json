@@ -428,6 +428,10 @@
         "indefinite": "Tot ik het teruggeef — de AI blijft geblokkeerd",
         "hours_one": "{{count}} uur",
         "hours_other": "{{count}} uur"
+      },
+      "businessLanguage": {
+        "title": "Taal van het bedrijf",
+        "description": "Interne meldingsmails gebruiken deze taal. Klanten krijgen altijd hun eigen taal."
       }
     },
     "appearance": {

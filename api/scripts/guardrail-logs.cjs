@@ -11,9 +11,9 @@
  * observation (nothing was changed). Read the `reasons` to judge true vs false
  * positives, then enable enforce per tenant once precision looks good.
  *
- * Usage (against prod, via Railway-injected DATABASE_URL):
- *   railway run -s chatbot-api -- node scripts/guardrail-logs.cjs
- *   railway run -s chatbot-api -- node scripts/guardrail-logs.cjs --days 7
+ * Usage (against prod VPS env):
+ *   PROD_SSH_HOST=deploy@<prod-ip> api/scripts/prod-env.sh node scripts/guardrail-logs.cjs
+ *   PROD_SSH_HOST=deploy@<prod-ip> api/scripts/prod-env.sh node scripts/guardrail-logs.cjs --days 7
  */
 const { Client } = require('pg');
 
@@ -22,7 +22,7 @@ const days = daysArg !== -1 ? Number(process.argv[daysArg + 1]) || 7 : 7;
 
 async function main() {
   if (!process.env.DATABASE_URL) {
-    console.error('DATABASE_URL not set (run via `railway run -s chatbot-api -- node ...`).');
+    console.error('DATABASE_URL not set (run via PROD_SSH_HOST=deploy@<ip> api/scripts/prod-env.sh node ...).');
     process.exit(1);
   }
   const c = new Client({

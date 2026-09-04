@@ -91,7 +91,6 @@ const VENUE = { placeId: null, street: 'Grote Markt 1', postalCode: '9300', city
 
 const TRAVEL = {
   enabled: true,
-  slackMin: 10,
   startFromBase: true,
   // NON-ZERO deliberately (#91). Zero is the field's default, so a fixture carrying zero would
   // pass the round-trip below even if the editor never hydrated the value at all.
@@ -99,11 +98,24 @@ const TRAVEL = {
   // Non-default for the same reason as the offset above: 'none' is what an unhydrated selector
   // reads as, so a 'none' fixture could not tell "round-tripped" from "never read".
   groupingPeriod: 'half_day' as const,
-  // Non-default so an unhydrated selector cannot pass as a round-trip.
-  routePriority: 'nearest' as const,
   // Same again - null is the unhydrated value, so a null fixture would prove nothing.
-  maxDetourMin: 45,
+  maxTravelMin: 45,
   blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
+};
+
+/** The global confirmation extras. A non-empty text and one file, so a fixture that never
+ *  hydrated cannot be mistaken for one that round-tripped. */
+const CONFIRMATION = {
+  extraInfo: 'Please arrive 10 minutes early.',
+  attachments: [
+    {
+      id: 'att-1',
+      fileName: 'price-list.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 2 * 1024 * 1024,
+      uploadedAt: '2026-09-01T10:00:00.000Z',
+    },
+  ],
 };
 
 const CONFIG = {
@@ -117,6 +129,7 @@ const CONFIG = {
   bookingsPaused: false,
   agent: { id: 'bot-1', name: 'Valyro' },
   travel: TRAVEL,
+  confirmationEmail: CONFIRMATION,
 };
 
 function renderUI() {
@@ -155,6 +168,49 @@ async function saveUntouched(config: unknown) {
 
 describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
+
+  /**
+   * The confirmation extras follow the venue and travel contract: sent WHOLE every time.
+   * An owner who saves their opening hours must not lose the information text, and an owner
+   * who empties the box must actually clear it - which needs an explicit null, not a key
+   * the API reads as "leave alone".
+   */
+  it('hydrates the information text and returns it unchanged on save', async () => {
+    const payload = await saveUntouched(CONFIG);
+    const box = document.getElementById('confirmation-extra-info') as HTMLTextAreaElement;
+    expect(box.value).toBe(CONFIRMATION.extraInfo);
+    expect(payload.confirmationEmail).toEqual({ extraInfo: CONFIRMATION.extraInfo });
+  });
+
+  it('sends an explicit null when the owner empties the text', async () => {
+    await saveUntouched(CONFIG);
+    const box = document.getElementById('confirmation-extra-info') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: '   ' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(apiPut.mock.calls.length).toBeGreaterThan(1));
+    const payload = apiPut.mock.calls.at(-1)![1] as Record<string, unknown>;
+    expect(payload.confirmationEmail).toEqual({ extraInfo: null });
+  });
+
+  it('sends the text even for a config that predates the columns', async () => {
+    const { confirmationEmail: _omitted, ...legacy } = CONFIG;
+    const payload = await saveUntouched(legacy);
+    expect(payload.confirmationEmail).toEqual({ extraInfo: null });
+  });
+
+  it('lists each stored attachment with its size and a way to remove it', async () => {
+    await saveUntouched(CONFIG);
+    expect(screen.getByText('price-list.pdf')).toBeInTheDocument();
+    expect(screen.getByText('2.0 MB')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove price-list\.pdf/i })).toBeInTheDocument();
+  });
+
+  it('never sends the attachment list through the settings payload', async () => {
+    // Files have their own multipart endpoints. Echoing the list back here would invite a
+    // future handler to trust it and write metadata for bytes nobody uploaded.
+    const payload = await saveUntouched(CONFIG);
+    expect(payload.confirmationEmail).not.toHaveProperty('attachments');
+  });
 
   it('returns every business rule unchanged when the owner saves without editing', async () => {
     const payload = await saveUntouched(CONFIG);
@@ -423,13 +479,12 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
     const payload = await saveUntouched(CONFIG);
     expect(payload.travel).toEqual({
       enabled: true,
-      slackMin: 10,
       startFromBase: true,
       baseDepartOffsetMin: 30,
       groupingPeriod: 'half_day',
-      routePriority: 'nearest',
-      maxDetourMin: 45,
+      maxTravelMin: 45,
     });
+    expect(screen.queryByLabelText(/route priority/i)).toBeNull();
   });
 
   it('does not send blockedReason back — that is the server answer, not an owner setting', async () => {
@@ -476,17 +531,17 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
     expect(box).not.toBeDisabled();
   });
 
-  it('refuses a slack value the API would reject, before the Save', async () => {
+  it('refuses a maximum travel time the API would reject', async () => {
     apiGet.mockImplementation((url: string) => {
       if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) {
-        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, slackMin: 500 } });
+        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, maxTravelMin: 500 } });
       }
       if (url.includes('/services')) return Promise.resolve({ services: [] });
       return Promise.resolve({});
     });
     renderUI();
-    expect(await screen.findByText(/whole number between 0 and 120/i)).toBeInTheDocument();
+    expect(await screen.findByText(/maximum travel time must be a whole number between 0 and 120/i)).toBeInTheDocument();
   });
 
   it('states the single-driver assumption', async () => {

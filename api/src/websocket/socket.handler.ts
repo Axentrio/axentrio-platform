@@ -31,6 +31,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Participant } from '../database/entities/Participant';
+import { Tenant } from '../database/entities/Tenant';
 import { scheduleTurn } from '../services/turn-coalescer';
 import {
   resolveBotKeyStrict,
@@ -159,31 +160,54 @@ async function authenticateClerkAgent(socket: TenantSocket, token: string): Prom
         type: 'agent',
       };
       socket.data.tenantId = dbIds.tenantId;
-      return;
     }
   }
 
-  const { User } = await import('../database/entities/User');
-  const { Agent } = await import('../database/entities/Agent');
-  const userRepo = AppDataSource.getRepository(User);
-  const agentRepo = AppDataSource.getRepository(Agent);
+  if (!socket.data.user) {
+    const { User } = await import('../database/entities/User');
+    const { Agent } = await import('../database/entities/Agent');
+    const userRepo = AppDataSource.getRepository(User);
+    const agentRepo = AppDataSource.getRepository(Agent);
 
-  const user = await userRepo.findOne({ where: { clerkUserId } });
-  if (!user) throw new Error('Authentication error: User not provisioned');
+    const user = await userRepo.findOne({ where: { clerkUserId } });
+    if (!user) throw new Error('Authentication error: User not provisioned');
 
-  const agent = await agentRepo.findOne({ where: { userId: user.id } });
-  if (!agent) throw new Error('Authentication error: Agent not provisioned');
+    const agent = await agentRepo.findOne({ where: { userId: user.id } });
+    if (!agent) throw new Error('Authentication error: Agent not provisioned');
 
-  socket.data.user = {
-    id: agent.id,
-    userId: user.id,
-    name: user.name || user.email?.split('@')[0] || '',
-    email: user.email || '',
-    tenantId: user.tenantId,
-    role: user.role,
-    type: 'agent',
-  };
-  socket.data.tenantId = user.tenantId;
+    socket.data.user = {
+      id: agent.id,
+      userId: user.id,
+      name: user.name || user.email?.split('@')[0] || '',
+      email: user.email || '',
+      tenantId: user.tenantId,
+      role: user.role,
+      type: 'agent',
+    };
+    socket.data.tenantId = user.tenantId;
+  }
+
+  await applySocketTenantContext(socket);
+}
+
+/** Socket twin of resolveTenantContext (super-admin.middleware.ts): a super
+ *  admin may view another tenant; the socket must join THAT tenant's rooms. */
+export async function applySocketTenantContext(
+  socket: TenantSocket,
+  loadTenant: (id: string) => Promise<Tenant | null> = (id) =>
+    AppDataSource.getRepository(Tenant).findOne({ where: { id } }),
+): Promise<void> {
+  const target = socket.handshake.auth?.tenantContext as string | undefined;
+  const user = socket.data.user;
+  if (!target || !user || user.type !== 'agent' || user.role !== 'super_admin') return;
+  if (!UUID_RE.test(target)) throw new Error('Authentication error: Invalid tenant context');
+  const tenant = await loadTenant(target);
+  if (!tenant) throw new Error('Authentication error: Tenant not found');
+  if (tenant.status === 'suspended') throw new Error('Authentication error: Tenant is suspended');
+  if (tenant.status === 'cancelled') throw new Error('Authentication error: Tenant is cancelled');
+  user.tenantId = tenant.id;
+  socket.data.tenantId = tenant.id;
+  logger.info('Super admin socket context switch', { userId: user.userId, targetTenantId: tenant.id });
 }
 
 /**

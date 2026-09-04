@@ -304,6 +304,30 @@ describe('google-calendar.service', () => {
       expect((axios.patch as any).mock.calls[0][1].location).toBe('');
       expect((axios.patch as any).mock.calls[0][2].params).toEqual({ conferenceDataVersion: 1 });
     });
+
+    it('patches summary and description when the caller supplies them', async () => {
+      // The mirror has to follow the row: a note the customer added after booking is only
+      // visible to the owner if the body is rewritten.
+      (axios.patch as any).mockResolvedValue({ data: {} });
+      await updateCalendarEvent('bot1', 'ev-1', {
+        ...times,
+        summary: 'Booking: Haircut - Ada',
+        description: 'Service: Haircut\nNotes: gate code 4417',
+      });
+      expect((axios.patch as any).mock.calls[0][1]).toMatchObject({
+        summary: 'Booking: Haircut - Ada',
+        description: 'Service: Haircut\nNotes: gate code 4417',
+      });
+    });
+
+    it('sends neither key on a times-only patch', async () => {
+      // Inbound calendar sync restores a time and must not rewrite the owner's event body.
+      (axios.patch as any).mockResolvedValue({ data: {} });
+      await updateCalendarEvent('bot1', 'ev-1', { ...times });
+      const body = (axios.patch as any).mock.calls[0][1];
+      expect(Object.keys(body).sort()).toEqual(['end', 'start']);
+      expect((axios.patch as any).mock.calls[0][2].params).toBeUndefined();
+    });
   });
 
   describe('withGoogleRetry', () => {

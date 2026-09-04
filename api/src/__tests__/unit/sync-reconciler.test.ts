@@ -77,6 +77,7 @@ vi.mock('../../scheduler/inbound-calendar-sync', () => ({
 
 import { reconcilePendingBookingSyncs } from '../../scheduler/sync-reconciler';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 
 const BID = '11111111-2222-3333-4444-555555555555';
 const EVID = '111111112222333344445555 55555555'.replace(/\s/g, ''); // hyphens stripped
@@ -269,7 +270,8 @@ describe('reconciler content parity', () => {
     start_utc: '2026-07-01T10:00:00Z',
     end_utc: '2026-07-01T11:30:00Z',
     source_channel: 'whatsapp',
-    uploaded_files: ['f1', 'f2', 'f3'],
+    // Stored upload metadata, so the body can NAME the files instead of counting them.
+    uploaded_files: [{ fileName: 'boiler.jpg' }, { fileName: 'meter.jpg' }, { fileName: 'invoice.pdf' }],
     booked_duration_min: null,
   };
 
@@ -326,12 +328,12 @@ describe('reconciler content parity', () => {
         bookingId: BID,
         durationMin: 90, // derived from the stored span, since booked_duration_min is null
         sourceChannel: STORED.source_channel,
-        uploadedFileCount: 3,
+        uploadedFileNames: ['boiler.jpg', 'meter.jpg', 'invoice.pdf'],
       },
       SERVICE,
       // The manage URL is built from the booking id by both paths.
       expect.anything() as never
-    );
+    , BOOKING_COPY_EN);
     expect(sent.summary).toBe(expected.summary);
   });
 
@@ -352,9 +354,9 @@ describe('reconciler content parity', () => {
     expect(body).toContain('Gate code 4417');
     expect(body).toContain('Which floor?: Second'); // intake_answers, labelled from the service
     expect(body).toContain('whatsapp'); // source_channel
-    // The whole line, not just the digit — a bare '3' also matches the phone number and the
-    // postcode, so it stayed green with the file count hard-wired to zero.
-    expect(body).toContain('Files: 3 attached');
+    // The names, not a count: an owner who cannot see WHAT was sent has to open Axentrio
+    // to find out whether the photo they need is even there.
+    expect(body).toContain('Files: boiler.jpg, meter.jpg, invoice.pdf');
     expect(body).toContain('Duration: 90 min'); // derived from start_utc/end_utc
     expect(sent.summary).toContain('Boiler repair');
     expect(sent.summary).toContain('Ada Lovelace');

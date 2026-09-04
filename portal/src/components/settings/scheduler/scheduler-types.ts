@@ -69,13 +69,13 @@ export type SchedulerFormState = {
   venue: VenueAddress;
   reviewingVenue: boolean;
   travelEnabled: boolean;
-  travelSlack: number | null;
   travelStartFromBase: boolean;
   travelBaseDepart: number;
   travelGroupingPeriod: 'none' | 'half_day' | 'full_day';
-  travelRoutePriority: 'auto' | 'nearest' | 'farthest';
-  travelMaxDetourMin: string;
+  travelMaxTravelMin: string;
   bookingsPaused: boolean;
+  /** Owner-authored text on every customer confirmation email. `''` means none. */
+  confirmationExtraInfo: string;
   rules: BookingRules;
   showPreview: boolean;
   hydrated: boolean;
@@ -91,13 +91,12 @@ export function createSchedulerForm(): SchedulerFormState {
     venue: { street: null, postalCode: null, city: null, country: null, placeId: null },
     reviewingVenue: false,
     travelEnabled: false,
-    travelSlack: null,
     travelStartFromBase: false,
     travelBaseDepart: 0,
     travelGroupingPeriod: 'none',
-    travelRoutePriority: 'auto',
-    travelMaxDetourMin: '',
+    travelMaxTravelMin: '',
     bookingsPaused: false,
+    confirmationExtraInfo: '',
     rules: {
       maxBookingsPerDay: null,
       maxBookedMinutesPerDay: null,

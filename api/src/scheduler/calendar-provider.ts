@@ -65,7 +65,8 @@ export interface CalendarProvider {
   getBusy(botId: string, startISO: string, endISO: string, timezone?: string): Promise<BusyInterval[] | null>;
   /** Create the owner event; null when no connection; throws on non-idempotent failure. */
   createEvent(botId: string, input: CalendarEventInput, opts?: CreateEventOpts): Promise<CalendarEventResult | null>;
-  /** Patch event times. Location and conferencing only when the caller sends them. Never the body. */
+  /** Patch event times. Location, conferencing, summary and description ride along only
+   *  when the caller sends them - a times-only patch stays a times-only patch. */
   updateEvent(
     botId: string,
     eventId: string,

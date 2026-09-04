@@ -9,12 +9,15 @@
  * so reschedule/cancel can remove them.
  */
 import type { Job } from 'bull';
+import { MoreThan } from 'typeorm';
 import { addJob, removeJob } from '../../queue/message-queue';
 import { AppDataSource } from '../../database/data-source';
 import { Booking } from '../../database/entities/Booking';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { getBotBusinessTimezone } from '../business-timezone';
 import { logger } from '../../utils/logger';
+import { getBotConfigForBotId } from '../../services/bot-config.service';
+import { customerLanguageFor } from '../../i18n/audience-language';
 import { sendReminderEmail } from './booking-email';
 import { buildManageUrl } from '../../scheduler/booking-token';
 
@@ -29,10 +32,6 @@ interface ReminderJobData {
 const LEAD_MS: Record<ReminderJobData['kind'], number> = {
   '24h': 24 * 3600_000,
   '1h': 1 * 3600_000,
-};
-const LEAD_LABEL: Record<ReminderJobData['kind'], string> = {
-  '24h': 'tomorrow',
-  '1h': 'in 1 hour',
 };
 
 /**
@@ -96,14 +95,16 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
     // a denormalization; the bot is authoritative on read).
     const timezone = await getBotBusinessTimezone(booking.botId);
 
+    const bot = await getBotConfigForBotId(booking.botId);
     await sendReminderEmail({
       summary: eventType?.name ?? 'Your appointment',
       start: booking.startUtc,
       timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
-      leadLabel: LEAD_LABEL[kind],
+      lead: kind,
       manageUrl: buildManageUrl(bookingId),
+      customerLanguage: customerLanguageFor(booking, bot.settings),
     });
   };
 }
@@ -130,4 +131,26 @@ export async function scheduleAndPersistReminders(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * Re-create the delayed reminder jobs for every confirmed future booking.
+ *
+ * The jobs live only in Redis, so a Redis move, flush, or eviction drops them
+ * and nothing else notices. Bull ignores a duplicate `jobId` and the ids are
+ * deterministic, so running this on every boot is idempotent. The stored
+ * `reminder_job_ids` are recomputed from the same inputs, so they stay correct
+ * without a write.
+ */
+export async function reconcileBookingReminders(now: Date = new Date()): Promise<number> {
+  const rows = await AppDataSource.getRepository(Booking).find({
+    where: { status: 'confirmed', startUtc: MoreThan(now) },
+    select: ['id', 'startUtc', 'sequence'],
+  });
+  let restored = 0;
+  for (const booking of rows) {
+    const ids = await scheduleReminders(booking.id, booking.startUtc, booking.sequence, now);
+    restored += ids.length;
+  }
+  return restored;
 }

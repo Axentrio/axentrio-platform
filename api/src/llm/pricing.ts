@@ -9,6 +9,7 @@ export const LLM_CALL_PATHS = [
   'kb_preprocess',
   'doc_ocr',
   'localize',
+  'booking_copy',
   'insights_judge',
   'insights_topic_merge',
   'insights_gap_recommendation',

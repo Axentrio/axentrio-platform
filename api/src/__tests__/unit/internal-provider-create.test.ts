@@ -138,6 +138,23 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
   }),
 }));
 
+vi.mock('../../booking/booking-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/booking-copy')>();
+  return {
+    ...actual,
+    getBookingCopy: vi.fn(async () => actual.BOOKING_COPY_EN),
+    prefetchAudienceBookingCopy: vi.fn(),
+  };
+});
+
+vi.mock('../../i18n/audience-language', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../i18n/audience-language')>();
+  return {
+    ...actual,
+    resolveOwnerLanguage: vi.fn(async () => 'en'),
+  };
+});
+
 // Travel time: the seam is the PLACEMENT, not Google. Which Agents may spend an element is
 // settled in travel-booking-place.test.ts; what matters here is what the provider does with
 // each verdict, so the column mapping stays real and only the verdict is injected. Default
@@ -353,11 +370,11 @@ describe('InternalProvider.createBooking', () => {
   };
 
   it('#36/#2 checkAvailability hard-stops a request-only service (never offers slots)', async () => {
-    const requestService = { ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' };
+    const requestService = { ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' };
     eventTypeFindOne.mockResolvedValue(requestService);
     serviceTypeFind.mockResolvedValue([requestService]);
     await expect(
-      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', 'svc-req'),
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', '11111111-1111-4111-8111-111111111111'),
     ).rejects.toMatchObject({ code: 'REQUEST_ONLY_SERVICE' });
   });
 
@@ -389,6 +406,55 @@ describe('InternalProvider.createBooking', () => {
     ]);
     const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
     expect(res.alreadyHeld).toBeUndefined();
+  });
+
+  it('filters slots to the requested clock window before travel', async () => {
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, undefined, { from: '10:00', to: '24:00' },
+    );
+    expect(res.slots.map((s: { start: string }) => s.start)).toEqual([
+      '2026-06-10T08:00:00.000Z',
+      '2026-06-10T08:30:00.000Z',
+    ]);
+    expect(res.clockWindow).toEqual({ from: '10:00', to: '24:00', matched: true });
+  });
+
+  it('returns the whole day with matched:false when the window is empty', async () => {
+    const res = await provider.checkAvailability(
+      ctx, '2026-06-10', '2026-06-11', undefined, undefined, undefined, undefined, undefined, undefined, { from: '12:00', to: '24:00' },
+    );
+    expect(res.slots.map((s: { start: string }) => s.start)).toEqual([
+      '2026-06-10T07:00:00.000Z',
+      '2026-06-10T07:30:00.000Z',
+      '2026-06-10T08:00:00.000Z',
+      '2026-06-10T08:30:00.000Z',
+    ]);
+    expect(res.clockWindow).toEqual({ from: '12:00', to: '24:00', matched: false });
+    expect(res.emptyRange).toBeUndefined();
+  });
+
+  it('drops the excluded booking\'s own mirrored calendar event from busy', async () => {
+    // The mirror sits in Google at the booking's exact interval, and excludeBookingId only
+    // covers the internal row. Without this exclusion every target overlapping the
+    // appointment being moved reads busy against nobody but itself - the admin reschedule
+    // picker and the agent's moveTargets both ride this method (live: Lena Five, a 09:30
+    // target refused on her own 09:00-10:00 hold).
+    const mirror = [{ start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T08:00:00Z') }];
+    getGoogleBusyForBot.mockResolvedValue(mirror);
+    const plain = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(plain.slots.some((s: { start: string }) => s.start === '2026-06-10T07:30:00.000Z')).toBe(false);
+
+    bookingFindOne.mockResolvedValueOnce({
+      id: 'bk-mine',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      endUtc: new Date('2026-06-10T08:00:00Z'),
+    });
+    const excluded = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', undefined, undefined, 'bk-mine');
+    expect(bookingFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'bk-mine', tenantId: 'ten-1' }) })
+    );
+    expect(excluded.slots.some((s: { start: string }) => s.start === '2026-06-10T07:30:00.000Z')).toBe(true);
+    getGoogleBusyForBot.mockResolvedValue(null);
   });
 
   it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {
@@ -738,12 +804,12 @@ describe('InternalProvider.createBooking', () => {
   // ── Multi-service (K1b) ────────────────────────────────────────────────────
 
   it('books a specific service when serviceId is given', async () => {
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-hair', name: 'Haircut' });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '33333333-3333-4333-8333-333333333333', name: 'Haircut' });
     const res = await provider.createBooking(
-      ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hair'
+      ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '33333333-3333-4333-8333-333333333333'
     );
     expect(res.success).toBe(true);
-    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hair', botId: 'bot-1', isActive: true, onlineBookable: true } });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: '33333333-3333-4333-8333-333333333333', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
@@ -761,12 +827,12 @@ describe('InternalProvider.createBooking', () => {
   });
 
   it('captures a request (no calendar event / email / lock) for a request-only service', async () => {
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' });
     managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(
-      ctx, 'idem-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req'
+      ctx, 'idem-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '11111111-1111-4111-8111-111111111111'
     );
     expect(res.success).toBe(true);
     expect(res.requested).toBe(true);
@@ -861,9 +927,9 @@ describe('InternalProvider.createBooking', () => {
   it('does NOT resolve an explicit serviceId that is not onlineBookable (SERVICE_NOT_FOUND)', async () => {
     eventTypeFindOne.mockResolvedValue(null); // the onlineBookable:true filter excludes it
     await expect(
-      provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hidden')
+      provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '22222222-2222-4222-8222-222222222222')
     ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
-    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hidden', botId: 'bot-1', isActive: true, onlineBookable: true } });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: '22222222-2222-4222-8222-222222222222', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('BOOKING_NOT_CONFIGURED coaches a graceful fallback, never a phantom forward', async () => {
@@ -897,12 +963,12 @@ describe('InternalProvider.createBooking', () => {
 
   it('keeps a request-only service a request regardless of calendar state', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(true); // even with a healthy calendar
-    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
-    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' }]);
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: '11111111-1111-4111-8111-111111111111', name: 'Sleeve tattoo', bookingMode: 'request' }]);
     managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
-    const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req');
+    const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '11111111-1111-4111-8111-111111111111');
     expect(res.requested).toBe(true);
     expect(transaction).toHaveBeenCalledOnce();
   });
@@ -1326,9 +1392,12 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, name: 'Consultation' }]); // sole active service
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(null);
-    managerQuery.mockImplementation(async (sql: string) =>
-      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
-    );
+    bookingQuery.mockResolvedValue([]); // no busy intervals (createBooking paths in this block)
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'req-1' }];
+      return [];
+    });
   });
 
   afterEach(() => vi.useRealTimers());
@@ -1447,7 +1516,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     });
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, intakeQuestions: [] }, { ...EVENT_TYPE, id: 'svc-2' }]); // ≥2 → serviceId required
     await provider.requestAppointment(
-      ctx, 'idem-iq', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-1',
+      ctx, 'idem-iq', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, '33333333-3333-4333-8333-333333333333',
       undefined,
       { 'q-1': '  Birthday  ', 'q-2': 7, 'q-unknown': 'dropped', 'q-3-empty': '   ' }
     );
@@ -1667,6 +1736,23 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }
     );
     expect(res.success).toBe(true);
+  });
+
+  it('stores customer_language from extras.language', async () => {
+    await provider.createBooking(
+      ctx, 'idem-lang', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { language: 'nl-BE' }
+    );
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'customer_language')).toBe('nl');
+  });
+
+  it('falls back to bot default when extras.language is missing', async () => {
+    await provider.createBooking(
+      ctx, 'idem-lang-default', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
+    );
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'customer_language')).toBe('en');
   });
 
   it('persists the model-written aiSummary on the CONFIRMED path', async () => {
@@ -2034,8 +2120,9 @@ describe('InternalProvider.createBooking - travel placement', () => {
     active: true as const,
     tenantId: 'ten-1',
     itineraryKey: 'bot:bot-1',
-    slackMin: 0,
+    minGapMin: 0,
     startFromBase: false,
+    maxTravelMin: null,
   };
 
   beforeEach(() => {
@@ -2214,6 +2301,15 @@ describe('InternalProvider.createBooking - travel placement', () => {
       expect(managerQuery).not.toHaveBeenCalled();
     });
 
+    it('refuses a recorded drive over the maximum travel time', async () => {
+      resolveTravelEligibility.mockResolvedValue({ ...ACTIVE, maxTravelMin: 45 } as any);
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
+        neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+      ] });
+      driveAnswer.mockResolvedValueOnce({ minutes: 70 });
+      await expect(single('idem-gate-max-travel')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
+    });
+
     it('captures the undecided middle instead of confirming or refusing it', async () => {
       // ~47 km with an hour to cover it: possible at motorway speed, not proven at a crawl.
       // Without a routing answer that is an opinion, and an opinion is the owner's to hold.
@@ -2357,8 +2453,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     active: true as const,
     tenantId: 'ten-1',
     itineraryKey: 'bot:bot-1',
-    slackMin: 0,
+    minGapMin: 0,
     startFromBase: false,
+    maxTravelMin: null,
   };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
     blockedStart: new Date(start),

@@ -12,7 +12,6 @@
  *
  * Contract: `docs/specs/location-aware-planning.md`, "Ordering, and it must be deterministic".
  */
-import type { RoutePriority } from '../../contracts/travel';
 import type { ScoredCandidate } from './insertion-scorer';
 
 /** Bump when the ORDER this produces could change for an unchanged diary. */
@@ -23,11 +22,9 @@ export const SCORER_VERSION = 'lp4-1';
  *
  * Three groups, in this order, and requestable never rises above confirmable:
  *
- *   1. **Preferred** confirmable, cheapest first. This is the only group grouping actually moves.
- *   2. **Unpreferred and neutral** confirmable, chronological. A slot over the owner's threshold
- *      and a slot nobody could score are both "no opinion" - and neither is a reason to bury a
- *      time the customer can actually have.
- *   3. **Requestable**, chronological. A slot travel could not clear is not a slot to steer
+ *   1. Every candidate with `costMinutes !== null`, cheapest first. Ties chronological.
+ *   2. Neutral (`costMinutes === null`), chronological.
+ *   3. Requestable, chronological. A slot travel could not clear is not a slot to steer
  *      anyone toward, and promoting one would offer a customer a time the owner may refuse.
  *
  * Ties inside any group break chronologically, so two equal costs cannot swap between runs.
@@ -39,8 +36,8 @@ export function counterfactualOrder(input: {
 }): string[] {
   const chronologically = (a: { start: Date }, b: { start: Date }) => a.start.getTime() - b.start.getTime();
 
-  const preferred = input.scored
-    .filter((s) => s.preferred === true && s.costMinutes !== null)
+  const scored = input.scored
+    .filter((s) => s.costMinutes !== null)
     .sort((a, b) => {
       const byCost = (a.costMinutes as number) - (b.costMinutes as number);
       // The tie-break is load-bearing: `Array.prototype.sort` is only stable within one engine's
@@ -49,47 +46,11 @@ export function counterfactualOrder(input: {
       return byCost !== 0 ? byCost : chronologically(a, b);
     });
 
-  const rest = input.scored.filter((s) => !(s.preferred === true && s.costMinutes !== null)).sort(chronologically);
+  const neutral = input.scored.filter((s) => s.costMinutes === null).sort(chronologically);
 
   return [
-    ...preferred.map((s) => s.start.toISOString()),
-    ...rest.map((s) => s.start.toISOString()),
-    ...[...input.requestable].sort((a, b) => a.getTime() - b.getTime()).map((d) => d.toISOString()),
-  ];
-}
-
-/**
- * Presentation-only sort of a Slot list feasibility has already produced (ADR-0017).
- *
- * `auto` is the existing counterfactual order, unchanged. `nearest` / `farthest` reorder only
- * among Slots that already have `costMinutes` — unpreferred ARE scored and participate. A true
- * neutral (`costMinutes === null`) keeps the chronological index it already had, so a missing
- * key cannot be pushed to the back the way `applyGrouping`'s `?? Infinity` would.
- */
-export function orderSlotsByRoutePriority(input: {
-  scored: ScoredCandidate[];
-  requestable: Date[];
-  mode: RoutePriority;
-}): string[] {
-  if (input.mode === 'auto') return counterfactualOrder(input);
-
-  const chronological = [...input.scored].sort((a, b) => a.start.getTime() - b.start.getTime());
-  const scoredOnly = chronological.filter((s) => s.costMinutes !== null);
-  const ranked = [...scoredOnly].sort((a, b) => {
-    const byCost =
-      input.mode === 'nearest'
-        ? (a.costMinutes as number) - (b.costMinutes as number)
-        : (b.costMinutes as number) - (a.costMinutes as number);
-    return byCost !== 0 ? byCost : a.start.getTime() - b.start.getTime();
-  });
-
-  const nextRanked = ranked[Symbol.iterator]();
-  const confirmable = chronological.map((s) =>
-    s.costMinutes === null ? s.start.toISOString() : nextRanked.next().value!.start.toISOString()
-  );
-
-  return [
-    ...confirmable,
+    ...scored.map((s) => s.start.toISOString()),
+    ...neutral.map((s) => s.start.toISOString()),
     ...[...input.requestable].sort((a, b) => a.getTime() - b.getTime()).map((d) => d.toISOString()),
   ];
 }

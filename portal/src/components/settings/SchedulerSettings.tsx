@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
+  useUploadConfirmationAttachment,
+  useDeleteConfirmationAttachment,
+  type ConfirmationAttachment,
   type WeeklyHours,
   type Weekday,
   type TimeWindow,
@@ -74,15 +77,13 @@ function venueFromConfig(data: SchedulerConfig): VenueAddress {
 function travelFieldsFromConfig(data: SchedulerConfig) {
   return {
     enabled: data.travel?.enabled === true,
-    slackMin: data.travel?.slackMin ?? null,
     startFromBase: data.travel?.startFromBase === true,
     baseDepartOffsetMin: data.travel?.baseDepartOffsetMin ?? 0,
     groupingPeriod: data.travel?.groupingPeriod ?? 'none',
-    routePriority: data.travel?.routePriority ?? 'auto',
-    maxDetourMin:
-      data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
+    maxTravelMin:
+      data.travel?.maxTravelMin === null || data.travel?.maxTravelMin === undefined
         ? ''
-        : String(data.travel.maxDetourMin),
+        : String(data.travel.maxTravelMin),
   };
 }
 
@@ -101,59 +102,16 @@ function rulesFromConfig(data: SchedulerConfig): SchedulerFormState['rules'] {
 
 
 
-export const SchedulerSettings: React.FC = () => {
-  const { data: bots } = useBots();
-  const agents = bots?.bots ?? [];
-  const multiAgent = agents.length > 1;
+function initialSchedulerBotId(): string | undefined {
+  return new URLSearchParams(window.location.search).get('botId') ?? undefined;
+}
 
-  /**
-   * Which Agent is being edited. `undefined` means the tenant's default.
-   *
-   * Undefined rather than "the anchor's id" on purpose: a single-Agent tenant then sends
-   * exactly the requests it always sent, which is what makes "no change for them" a fact
-   * about the wire rather than a claim about the UI.
-   */
-  const [botId, setBotId] = useState<string | undefined>(
-    // SEEDED FROM THE URL, because the calendar connect flow leaves the page and comes back.
-    // The OAuth callback appends the Agent it connected FOR, taken from its signed state — so
-    // without reading it here an owner who connects Agent B's calendar returns to the DEFAULT
-    // Agent's editor and is toasted "connected" over the anchor's disconnected status. An id
-    // that is not theirs simply 404s on the next read, which is the same refusal any other
-    // route takes.
-    () => new URLSearchParams(window.location.search).get('botId') ?? undefined
-  );
-  /** The serialised payload as hydration left it — `null` until the next hydration lands. */
-  const hydratedPayload = useRef<string | null>(null);
-
-  const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
-  /**
-   * Which roles this owner's address actually plays (#79, LP1).
-   *
-   * Derived server-side from the Service catalog and read here rather than re-derived: the
-   * precedence between `locationType` and `customerAddressRequired` is subtle, and two
-   * implementations of it would eventually disagree about which copy to show. Defaults to
-   * `at_one_location`, which is the wording this screen has always used - an older API that does
-   * not send the field yet changes nothing.
-   */
-  const workLocation = data?.workLocation ?? 'at_one_location';
-
-  const update = useUpdateSchedulerConfig(botId);
-  const queryClient = useQueryClient();
-  // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
-  // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
-  const googleStatus = useGoogleCalendarStatus(botId);
-  const connectGoogle = useConnectGoogleCalendar(botId);
-  const disconnectGoogle = useDisconnectGoogleCalendar(botId);
-  const outlookStatus = useOutlookCalendarStatus(botId);
-  const connectOutlook = useConnectOutlookCalendar(botId);
-  const disconnectOutlook = useDisconnectOutlookCalendar(botId);
-
-  // Toast + refresh after a calendar OAuth callback redirects back with
-  // ?google=connected|error or ?outlook=connected|error.
+function useCalendarOAuthReturnToast(
+  googleStatus: { isFetched: boolean; data?: { connected?: boolean } },
+  outlookStatus: { isFetched: boolean; data?: { connected?: boolean } },
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   useEffect(() => {
-    // Do not consume ?google=error until both status queries have settled.
-    // Otherwise Outlook still looks disconnected, the generic toast fires, and
-    // the param is gone before the real reason can show.
     if (!googleStatus.isFetched || !outlookStatus.isFetched) return;
     const params = new URLSearchParams(window.location.search);
     const providers: Array<{ key: 'google' | 'outlook'; label: string }> = [
@@ -198,6 +156,57 @@ export const SchedulerSettings: React.FC = () => {
     googleStatus.data?.connected,
     outlookStatus.data?.connected,
   ]);
+}
+
+
+export const SchedulerSettings: React.FC = () => {
+  const { data: bots } = useBots();
+  const agents = bots?.bots ?? [];
+  const multiAgent = agents.length > 1;
+
+  /**
+   * Which Agent is being edited. `undefined` means the tenant's default.
+   *
+   * Undefined rather than "the anchor's id" on purpose: a single-Agent tenant then sends
+   * exactly the requests it always sent, which is what makes "no change for them" a fact
+   * about the wire rather than a claim about the UI.
+   */
+  const [botId, setBotId] = useState<string | undefined>(
+    // SEEDED FROM THE URL, because the calendar connect flow leaves the page and comes back.
+    // The OAuth callback appends the Agent it connected FOR, taken from its signed state — so
+    // without reading it here an owner who connects Agent B's calendar returns to the DEFAULT
+    // Agent's editor and is toasted "connected" over the anchor's disconnected status. An id
+    // that is not theirs simply 404s on the next read, which is the same refusal any other
+    // route takes.
+    initialSchedulerBotId
+  );
+  /** The serialised payload as hydration left it — `null` until the next hydration lands. */
+  const hydratedPayload = useRef<string | null>(null);
+
+  const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
+  /**
+   * Which roles this owner's address actually plays (#79, LP1).
+   *
+   * Derived server-side from the Service catalog and read here rather than re-derived: the
+   * precedence between `locationType` and `customerAddressRequired` is subtle, and two
+   * implementations of it would eventually disagree about which copy to show. Defaults to
+   * `at_one_location`, which is the wording this screen has always used - an older API that does
+   * not send the field yet changes nothing.
+   */
+  const workLocation = data?.workLocation ?? 'at_one_location';
+
+  const update = useUpdateSchedulerConfig(botId);
+  const queryClient = useQueryClient();
+  // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
+  // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
+  const googleStatus = useGoogleCalendarStatus(botId);
+  const connectGoogle = useConnectGoogleCalendar(botId);
+  const disconnectGoogle = useDisconnectGoogleCalendar(botId);
+  const outlookStatus = useOutlookCalendarStatus(botId);
+  const connectOutlook = useConnectOutlookCalendar(botId);
+  const disconnectOutlook = useDisconnectOutlookCalendar(botId);
+
+  useCalendarOAuthReturnToast(googleStatus, outlookStatus, queryClient);
 
   // One reducer for the whole scheduler form (react-doctor prefer-useReducer).
   // Field state + hydration live in `form`; the `setX` wrappers below keep the
@@ -212,13 +221,12 @@ export const SchedulerSettings: React.FC = () => {
     venue,
     reviewingVenue,
     travelEnabled,
-    travelSlack,
     travelStartFromBase,
     travelBaseDepart,
     travelGroupingPeriod,
-    travelRoutePriority,
-    travelMaxDetourMin,
+    travelMaxTravelMin,
     bookingsPaused,
+    confirmationExtraInfo,
     rules,
     showPreview,
     hydrated,
@@ -232,13 +240,12 @@ export const SchedulerSettings: React.FC = () => {
     setVenue,
     setReviewingVenue,
     setTravelEnabled,
-    setTravelSlack,
     setTravelStartFromBase,
     setTravelBaseDepart,
     setTravelGroupingPeriod,
-    setTravelRoutePriority,
-    setTravelMaxDetourMin,
+    setTravelMaxTravelMin,
     setBookingsPaused,
+    setConfirmationExtraInfo,
     setRules,
     setShowPreview,
     setHydrated,
@@ -252,13 +259,12 @@ export const SchedulerSettings: React.FC = () => {
       setVenue: makeFieldSetter(dispatch, 'venue'),
       setReviewingVenue: makeFieldSetter(dispatch, 'reviewingVenue'),
       setTravelEnabled: makeFieldSetter(dispatch, 'travelEnabled'),
-      setTravelSlack: makeFieldSetter(dispatch, 'travelSlack'),
       setTravelStartFromBase: makeFieldSetter(dispatch, 'travelStartFromBase'),
       setTravelBaseDepart: makeFieldSetter(dispatch, 'travelBaseDepart'),
       setTravelGroupingPeriod: makeFieldSetter(dispatch, 'travelGroupingPeriod'),
-      setTravelRoutePriority: makeFieldSetter(dispatch, 'travelRoutePriority'),
-      setTravelMaxDetourMin: makeFieldSetter(dispatch, 'travelMaxDetourMin'),
+      setTravelMaxTravelMin: makeFieldSetter(dispatch, 'travelMaxTravelMin'),
       setBookingsPaused: makeFieldSetter(dispatch, 'bookingsPaused'),
+      setConfirmationExtraInfo: makeFieldSetter(dispatch, 'confirmationExtraInfo'),
       setRules: makeFieldSetter(dispatch, 'rules'),
       setShowPreview: makeFieldSetter(dispatch, 'showPreview'),
       setHydrated: makeFieldSetter(dispatch, 'hydrated'),
@@ -278,17 +284,16 @@ export const SchedulerSettings: React.FC = () => {
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
     setBookingsPaused(data.bookingsPaused === true);
+    setConfirmationExtraInfo(data.confirmationEmail?.extraInfo ?? '');
     setVenue(venueFromConfig(data));
     // Read as one object, then written field by field: the setters are per-field, and the
     // mapping is what the hydration test pins.
     const travel = travelFieldsFromConfig(data);
     setTravelEnabled(travel.enabled);
-    setTravelSlack(travel.slackMin);
     setTravelStartFromBase(travel.startFromBase);
     setTravelBaseDepart(travel.baseDepartOffsetMin);
     setTravelGroupingPeriod(travel.groupingPeriod);
-    setTravelRoutePriority(travel.routePriority);
-    setTravelMaxDetourMin(travel.maxDetourMin);
+    setTravelMaxTravelMin(travel.maxTravelMin);
     setRules(rulesFromConfig(data));
     setHydrated(true);
   }, [data, hydrated]);
@@ -370,14 +375,14 @@ export const SchedulerSettings: React.FC = () => {
     if (!Number.isInteger(travelBaseDepart) || travelBaseDepart < 0 || travelBaseDepart > 240) {
       e.push('Travel time: leaving early must be a whole number of minutes between 0 and 240.');
     }
-    // Mirrors `travelSettingsSchema`: an integer 0-120. Slack PADS every drive, so an hour is
-    // already generous and a fat-fingered 500 would swallow the working day — the API refuses
-    // it, and this is the difference between being told before the Save and after it.
-    if (travelSlack !== null && (!Number.isInteger(travelSlack) || travelSlack < 0 || travelSlack > 120)) {
-      e.push('Travel time: extra minutes must be a whole number between 0 and 120.');
+    if (travelMaxTravelMin.trim() !== '') {
+      const n = Number(travelMaxTravelMin);
+      if (!Number.isInteger(n) || n < 0 || n > 120) {
+        e.push('Travel time: maximum travel time must be a whole number between 0 and 120.');
+      }
     }
     return [...new Set(e)];
-  }, [days, overrides, availabilityMode, venue, travelSlack, travelBaseDepart]);
+  }, [days, overrides, availabilityMode, venue, travelMaxTravelMin, travelBaseDepart]);
 
   /**
    * The payload this form would send right now.
@@ -415,16 +420,19 @@ export const SchedulerSettings: React.FC = () => {
       // so a partial travel object would silently keep a stale switch on.
       travel: {
         enabled: travelEnabled,
-        slackMin: travelSlack,
         startFromBase: travelStartFromBase,
         baseDepartOffsetMin: travelBaseDepart,
         groupingPeriod: travelGroupingPeriod,
-        routePriority: travelRoutePriority,
-        // Empty means "no threshold", which the API takes as null rather than 0 - zero is a value
+        // Empty means "no limit", which the API takes as null rather than 0 - zero is a value
         // an owner can type and it means the same thing, but blank is absence, not a number.
-        maxDetourMin: travelMaxDetourMin.trim() === '' ? null : Number(travelMaxDetourMin),
+        maxTravelMin: travelMaxTravelMin.trim() === '' ? null : Number(travelMaxTravelMin),
       },
       bookingsPaused,
+      // Sent whole every time, matching the venue and travel contract above: an omitted key
+      // leaves the stored text alone, so clearing the box has to send an explicit null.
+      confirmationEmail: {
+        extraInfo: confirmationExtraInfo.trim() === '' ? null : confirmationExtraInfo,
+      },
     };
   };
 
@@ -490,6 +498,14 @@ export const SchedulerSettings: React.FC = () => {
 
                 {/* Booking rules — business-wide ceilings over every service */}
                 <BookingRulesSection rules={rules} setRules={setRules} />
+
+                {/* What every customer confirmation email carries, on top of the booking itself */}
+                <ConfirmationEmailSection
+                  extraInfo={confirmationExtraInfo}
+                  setExtraInfo={setConfirmationExtraInfo}
+                  attachments={data?.confirmationEmail?.attachments ?? []}
+                  botId={botId}
+                />
 
                 {/*
                   WHICH Agent this edits. Shown only when the tenant has more than one, so a
@@ -574,18 +590,14 @@ export const SchedulerSettings: React.FC = () => {
                   workLocation={workLocation}
                   travelEnabled={travelEnabled}
                   setTravelEnabled={setTravelEnabled}
-                  travelSlack={travelSlack}
-                  setTravelSlack={setTravelSlack}
                   travelStartFromBase={travelStartFromBase}
                   setTravelStartFromBase={setTravelStartFromBase}
                   travelBaseDepart={travelBaseDepart}
                   setTravelBaseDepart={setTravelBaseDepart}
                   travelGroupingPeriod={travelGroupingPeriod}
                   setTravelGroupingPeriod={setTravelGroupingPeriod}
-                  travelRoutePriority={travelRoutePriority}
-                  setTravelRoutePriority={setTravelRoutePriority}
-                  travelMaxDetourMin={travelMaxDetourMin}
-                  setTravelMaxDetourMin={setTravelMaxDetourMin}
+                  travelMaxTravelMin={travelMaxTravelMin}
+                  setTravelMaxTravelMin={setTravelMaxTravelMin}
                 />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
@@ -912,7 +924,7 @@ const BookingRulesSection: React.FC<{
       />
       <OptionalNumberField
         label="Minimum gap (min)"
-        hint="Free time around each appointment"
+        hint="Free time around each appointment. With travel time on, it is added on top of every drive."
         value={rules.minGapMin}
         min={0}
         max={480}
@@ -957,6 +969,111 @@ const BookingRulesSection: React.FC<{
     </div>
   </div>
 );
+
+
+/** What the file picker offers. The API re-checks the real bytes, which is the check that holds. */
+const ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx';
+
+const formatAttachmentSize = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/**
+ * Extras carried by EVERY customer confirmation email for this Agent.
+ *
+ * The text rides the normal Save, because it is a settings field. The files do not: they go
+ * straight to their own multipart endpoints and land immediately, because an owner who picks
+ * a file expects it uploaded, not queued behind a form they might never submit.
+ */
+const ConfirmationEmailSection: React.FC<{
+  extraInfo: string;
+  setExtraInfo: FormSetter<'confirmationExtraInfo'>;
+  attachments: ConfirmationAttachment[];
+  botId: string | undefined;
+}> = ({ extraInfo, setExtraInfo, attachments, botId }) => {
+  const uploadAttachment = useUploadConfirmationAttachment(botId);
+  const deleteAttachment = useDeleteConfirmationAttachment(botId);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div className="space-y-3 border-t border-edge pt-4">
+      <h3 className="text-sm font-medium text-text-primary">Booking confirmation email</h3>
+      <p className="text-xs text-text-muted">
+        Added to every confirmation email this Agent sends. The headings follow the customer's own
+        language; your own text goes exactly as you write it.
+      </p>
+
+      <div className="space-y-1">
+        <Label htmlFor="confirmation-extra-info">Extra information</Label>
+        <textarea
+          id="confirmation-extra-info"
+          className="min-h-[96px] w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
+          maxLength={2000}
+          value={extraInfo}
+          onChange={(e) => setExtraInfo(e.target.value)}
+          placeholder={
+            'Please arrive 10 minutes early.\nParking is behind the building.\nTell us at least 24 hours before if you need to change the appointment.'
+          }
+        />
+        <p className="text-xs text-text-muted">
+          Up to 2000 characters. Line breaks are kept. This text is never rewritten or translated.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Attachments</Label>
+        {attachments.length === 0 && <p className="text-xs text-text-muted">No files attached yet.</p>}
+        {attachments.map((a) => (
+          <div
+            key={a.id}
+            className="flex items-center justify-between gap-2 rounded-md bg-surface-muted px-3 py-2"
+          >
+            <span className="truncate text-sm text-text-primary">{a.fileName}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-text-muted">{formatAttachmentSize(a.fileSize)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Remove ${a.fileName}`}
+                disabled={deleteAttachment.isPending}
+                onClick={() => deleteAttachment.mutate(a.id)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+        <input
+          ref={fileInput}
+          type="file"
+          className="hidden"
+          accept={ATTACHMENT_ACCEPT}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // Cleared before the request so picking the SAME file twice still fires a change.
+            e.target.value = '';
+            if (file) uploadAttachment.mutate(file);
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={uploadAttachment.isPending}
+          onClick={() => fileInput.current?.click()}
+        >
+          <Plus className="mr-1 h-4 w-4" />
+          Add attachment
+        </Button>
+        <p className="text-xs text-text-muted">
+          PDF, Word or image files. Each file is uploaded straight away - you do not have to save.
+        </p>
+      </div>
+    </div>
+  );
+};
 
 /** Service area — where the business will travel. Hidden only when it is both
  *  inapplicable AND empty; a stored area always stays visible, with the field's
@@ -1242,35 +1359,27 @@ const TravelSection: React.FC<{
   workLocation: WorkLocation;
   travelEnabled: boolean;
   setTravelEnabled: FormSetter<'travelEnabled'>;
-  travelSlack: number | null;
-  setTravelSlack: FormSetter<'travelSlack'>;
   travelStartFromBase: boolean;
   setTravelStartFromBase: FormSetter<'travelStartFromBase'>;
   travelBaseDepart: number;
   setTravelBaseDepart: FormSetter<'travelBaseDepart'>;
   travelGroupingPeriod: SchedulerFormState['travelGroupingPeriod'];
   setTravelGroupingPeriod: FormSetter<'travelGroupingPeriod'>;
-  travelRoutePriority: SchedulerFormState['travelRoutePriority'];
-  setTravelRoutePriority: FormSetter<'travelRoutePriority'>;
-  travelMaxDetourMin: string;
-  setTravelMaxDetourMin: FormSetter<'travelMaxDetourMin'>;
+  travelMaxTravelMin: string;
+  setTravelMaxTravelMin: FormSetter<'travelMaxTravelMin'>;
 }> = ({
   config,
   workLocation,
   travelEnabled,
   setTravelEnabled,
-  travelSlack,
-  setTravelSlack,
   travelStartFromBase,
   setTravelStartFromBase,
   travelBaseDepart,
   setTravelBaseDepart,
   travelGroupingPeriod,
   setTravelGroupingPeriod,
-  travelRoutePriority,
-  setTravelRoutePriority,
-  travelMaxDetourMin,
-  setTravelMaxDetourMin,
+  travelMaxTravelMin,
+  setTravelMaxTravelMin,
 }) => {
   if (workLocation === 'no_location') return null;
   /** Does this business go TO its customers? The only shape geographic grouping applies to. */
@@ -1326,27 +1435,6 @@ const TravelSection: React.FC<{
         </span>
       </label>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <Label htmlFor="travel-slack">Extra minutes per journey</Label>
-          <Input
-            id="travel-slack"
-            type="number"
-            min={0}
-            max={120}
-            value={travelSlack ?? ''}
-            placeholder="0"
-            disabled={!travelEnabled}
-            onChange={(e) =>
-              setTravelSlack(e.target.value === '' ? null : Number(e.target.value))
-            }
-          />
-          <p className="text-xs text-text-muted mt-1">
-            Parking, the doorstep, a job that runs over. Added to every drive.
-          </p>
-        </div>
-      </div>
-
       <label htmlFor="travel-start-from-base" className="flex items-start gap-2 cursor-pointer">
         <Checkbox
           id="travel-start-from-base"
@@ -1380,7 +1468,7 @@ const TravelSection: React.FC<{
         </select>
         <p className="text-xs text-text-muted mt-1">
           Customers still see every time they could have had, in the same list. Only the
-          order changes, so the one that saves you the most driving is offered first.
+          order changes. The time that adds the least driving to the jobs already around it is offered first.
           Nothing about your other customers is ever mentioned.
           {!travelsToCustomers && travelGroupingPeriod !== 'none' && (
             <>
@@ -1393,49 +1481,22 @@ const TravelSection: React.FC<{
       </div>
 
       <div>
-        <Label htmlFor="travel-route-priority">Route priority</Label>
-        <select
-          id="travel-route-priority"
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
-          value={travelRoutePriority}
-          disabled={!travelEnabled || !travelsToCustomers || travelGroupingPeriod === 'none'}
-          onChange={(e) =>
-            setTravelRoutePriority(e.target.value as 'auto' | 'nearest' | 'farthest')
-          }
-        >
-          <option value="auto">Auto</option>
-          <option value="nearest">Nearest first</option>
-          <option value="farthest">Farthest first</option>
-        </select>
-        <p className="text-xs text-text-muted mt-1">
-          Only the order of times already offered. Auto keeps the grouping preference;
-          nearest and farthest sort the same already-measured detours the other way.
-          Times grouping could not score stay where they were.
-        </p>
-      </div>
-
-      <div>
-        <Label htmlFor="travel-max-detour">Maximum extra travel per appointment (min)</Label>
+        <Label htmlFor="travel-max-travel">Maximum travel time between appointments (min)</Label>
         <Input
-          id="travel-max-detour"
+          id="travel-max-travel"
           type="number"
           min={0}
           max={120}
-          value={travelMaxDetourMin}
-          // Gated on GROUPING, not merely on travel. The threshold decides which times
-          // are suggested FIRST, and that ordering only reaches a customer when
-          // grouping is on - so offering the field beside "No grouping" would take a
-          // number and quietly consume nothing.
-          disabled={!travelEnabled || travelGroupingPeriod === 'none'}
+          value={travelMaxTravelMin}
+          disabled={!travelEnabled}
           placeholder="No limit"
-          onChange={(e) => setTravelMaxDetourMin(e.target.value)}
+          onChange={(e) => setTravelMaxTravelMin(e.target.value)}
         />
         <p className="text-xs text-text-muted mt-1">
-          How much EXTRA driving one appointment may add to your day — not how far away
-          it is, so a customer an hour away is still offered if you are already going
-          past. Over this, the time is still bookable; it simply stops being the one
-          suggested first, so it needs grouping switched on to have any effect. Leave
-          it empty for no limit.
+          The longest drive you accept between one appointment and the next, or from your
+          address to the first one. Times that need a longer drive are not offered to
+          customers. You can still pick them yourself from the calendar. Leave it empty
+          for no limit.
         </p>
       </div>
 

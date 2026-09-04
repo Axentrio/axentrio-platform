@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockSessionFindOne = vi.fn();
 const mockTenantFindOne = vi.fn();
+const mockServiceFindOne = vi.fn();
+const mockServiceFind = vi.fn();
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
@@ -11,6 +13,7 @@ vi.mock('../../database/data-source', () => ({
       const name = entity?.name || entity;
       if (name === 'ChatSession') return { findOne: mockSessionFindOne };
       if (name === 'Tenant') return { findOne: mockTenantFindOne };
+      if (name === 'ServiceType') return { findOne: mockServiceFindOne, find: mockServiceFind };
       return {};
     }),
   },
@@ -67,6 +70,7 @@ import {
   adminCancelBooking,
   adminAcceptRequest,
   adminAvailability,
+  peekCustomerEmailRequired,
 } from '../../booking/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -142,7 +146,8 @@ describe('Booking Service (internal dispatcher)', () => {
         undefined,
         undefined,
         // `excludeBookingId` is undefined here on purpose: this entry point is a NEW booking,
-        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice + phone.
+        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice + phone + clock window.
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -216,7 +221,8 @@ describe('Booking Service (internal dispatcher)', () => {
         undefined,
         undefined,
         // `excludeBookingId` is undefined here on purpose: this entry point is a NEW booking,
-        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice + phone.
+        // and only the reschedule pickers pass one. Then the customer's address + #149 locationChoice + phone + clock window.
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -361,5 +367,31 @@ describe('Booking Service (internal dispatcher)', () => {
       ).catch(() => undefined);
       expect(mockRequireFeature).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('peekCustomerEmailRequired', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupValidContext();
+  });
+
+  it('throws SERVICE_NOT_FOUND for an unknown UUID instead of treating email as optional', async () => {
+    mockServiceFindOne.mockResolvedValue(null);
+    await expect(
+      peekCustomerEmailRequired(VALID_UUID, VALID_UUID),
+    ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
+  });
+
+  it('throws SERVICE_NOT_FOUND for a non-UUID serviceId instead of treating email as optional', async () => {
+    mockServiceFindOne.mockRejectedValue(new Error('invalid input syntax for type uuid'));
+    await expect(
+      peekCustomerEmailRequired(VALID_UUID, 'klantenafspraak'),
+    ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
+  });
+
+  it('returns true when the sole bookable service needs email and serviceId is omitted', async () => {
+    mockServiceFind.mockResolvedValue([{ id: VALID_UUID, customerEmailRequired: true }]);
+    await expect(peekCustomerEmailRequired(VALID_UUID)).resolves.toBe(true);
   });
 });

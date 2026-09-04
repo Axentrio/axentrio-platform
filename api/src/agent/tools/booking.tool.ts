@@ -3,12 +3,14 @@ import { addressForTurn, addressToken, type TurnAddress } from '../../booking/tr
 import { getPendingCorrection } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
+  checkMoveAvailability,
   createBooking,
   requestBooking,
   listBookings,
   rescheduleBooking,
   cancelBooking,
   updateBooking,
+  peekCustomerEmailRequired,
   BookingError,
 } from '../../booking/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
@@ -16,6 +18,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 import type {
   AvailabilityResult,
+  ClockWindow,
   CreateBookingResult,
   EmptyRangeDiagnosis,
   TravelFilterSummary,
@@ -25,12 +28,15 @@ import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
 import { isCompleteCustomerAddress } from '../../booking/booking-providers/contact';
+import { dayPartWindow, inferDayPartWindow } from '../day-part';
+import { normalizeLanguageCode } from '../../i18n/audience-language';
+import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
 import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
-import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
+import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, refuseCreateWhileMovePending, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
 
 /**
@@ -120,6 +126,38 @@ function rejectBadEmail(email: unknown): ToolResult | null {
 }
 
 /**
+ * EMAIL_REQUIRED before CONFIRMATION_REQUIRED. A missing required email used
+ * to pass the confirm gate, so the model offered "book without email", the
+ * customer said yes, then the write refused and a second summary was asked.
+ */
+async function rejectMissingRequiredEmail(
+  sessionId: string,
+  serviceId: unknown,
+  email: unknown,
+): Promise<ToolResult | null> {
+  let required = false;
+  try {
+    required = await peekCustomerEmailRequired(
+      sessionId,
+      typeof serviceId === 'string' ? serviceId : undefined,
+    );
+  } catch (err) {
+    if (!(err instanceof BookingError)) {
+      logger.warn('[Booking] could not peek customerEmailRequired', { sessionId, error: err });
+    }
+    return { success: false, ...toolError(err, 'Could not check booking requirements') };
+  }
+  if (!required) return null;
+  if (typeof email === 'string' && email.trim() && emails.sanitizeEmail(email)) return null;
+  return {
+    success: false,
+    error:
+      'EMAIL_REQUIRED: An email address is required for this service, because the calendar invite is sent to it. Ask the customer for their email address and call again with attendeeEmail. Do not tell the customer the service is unavailable, and do not capture a request or a lead. Do not send a booking summary until you have the address.',
+    errorSafeForModel: true,
+  };
+}
+
+/**
  * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
  * …"), so the agent can branch on the codes the SERVICES prompt rules reference
  * (ADDRESS_REQUIRED / PHONE_REQUIRED / SERVICE_REQUIRED / SLOT_UNAVAILABLE / etc.).
@@ -182,9 +220,9 @@ function addressReplyFact(
 }
 
 const NAMED_TIME_GUIDANCE =
-  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
+  'The customer already named this time and it is free. Confirm THAT time only. Do not list or offer other times. Call create_booking if you have their name and, when the service flags needs email, a real attendeeEmail. Do not offer to book without that email, and never put example.com or another placeholder address in the summary. If it returns CONFIRMATION_REQUIRED, send a short summary of the service, date, time, name, and the final price from that service\'s SERVICES line when one is shown, then wait for an explicit yes. Do not tell them they are booked. Naming the time in the same message that gave their details is not confirmation. A tapped slot button after you asked is confirmation - then call create_booking again.';
 const NAMED_TIME_AFTER_YES =
-  'The customer already confirmed this time. Call create_booking now with the same details. Do not send another summary and do not ask for confirmation again.';
+  'The customer already confirmed this time. Call create_booking now with the same details. If it returns EMAIL_REQUIRED, ask for the email and retry. Do not send another summary and do not ask for confirmation again.';
 
 /**
  * The customer named a time this call has just ruled out.
@@ -197,6 +235,11 @@ const NAMED_TIME_AFTER_YES =
  */
 const NAMED_TIME_UNAVAILABLE_GUIDANCE =
   'That time is NOT in "slots", so it cannot be booked - the appointment length, the buffers around it, or another appointment rules it out. Never tell the customer it is available and never invent a time that is not in "slots": say plainly that it cannot be done, and offer the times in "slots" instead.';
+const WINDOW_MISSED_OFFER = (w: ClockWindow) =>
+  `No free time starts between ${w.from} and ${w.to} on the requested date(s). "slots" holds the OTHER free times of those dates. Tell the customer plainly that the part of the day they asked for is full on those dates, offer these times, and offer to check another date for that part of the day.`;
+const WINDOW_MISSED_GUIDANCE = (w: ClockWindow) =>
+  `${WINDOW_MISSED_OFFER(w)} Do NOT capture a request: this service books automatically.`;
+
 
 function lastCustomerText(ctx: ToolContext): string {
   const history = ctx.conversationHistory;
@@ -204,6 +247,16 @@ function lastCustomerText(ctx: ToolContext): string {
   return latestCustomerTimeText(
     history.map((m) => ({ role: m.role, text: contentToText(m.content) })),
   );
+}
+
+function customerTexts(ctx: ToolContext): string[] {
+  const history = ctx.conversationHistory;
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((m) => m.role === 'user')
+    .map((m) => contentToText(m.content))
+    .reverse()
+    .slice(0, 8);
 }
 
 /** Zoneless local ISO — the format create_booking/request_appointment already document. */
@@ -246,6 +299,7 @@ function namedTimeGuidance(
   guidance?: string,
   heldClocks: string[] = [],
 ): Record<string, unknown> {
+  if (ctx.namedTimeRefused) return {};
   const known = [...offered.confirmable, ...offered.requestable, ...heldClocks];
   if (known.length === 0) return {};
   const said = lastCustomerText(ctx);
@@ -271,9 +325,56 @@ function namedTimeGuidance(
 type AvailabilityModel = Omit<AvailabilityResult, 'grouping' | 'emptyRange'>;
 type AvailabilitySlots = AvailabilityResult['slots'];
 
+function windowNote(
+  result: AvailabilityModel,
+  utcSlots: AvailabilitySlots,
+  allowRequest = false,
+): { guidance?: string } {
+  const w = result.clockWindow;
+  if (!(w && !w.matched && utcSlots.length > 0)) return {};
+  return { guidance: allowRequest ? WINDOW_MISSED_OFFER(w) : WINDOW_MISSED_GUIDANCE(w) };
+}
+
 /** The only two location choices the schema accepts; anything else is "not stated". */
 function locationChoiceArg(value: unknown): 'business' | 'customer' | undefined {
   return value === 'business' || value === 'customer' ? value : undefined;
+}
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function dayPartFromClockPhrase(value: string): ClockWindow | undefined {
+  if (!value || CLOCK.test(value) || value === '24:00') return undefined;
+  return dayPartWindow(value) ?? undefined;
+}
+
+function invalidClockWindowResult(from: string, to: string): ToolResult | null {
+  const badFrom = from && !CLOCK.test(from);
+  const badTo = to && !CLOCK.test(to) && to !== '24:00';
+  if (badFrom || badTo || (from && to && from >= to)) {
+    return {
+      success: false,
+      error: 'INVALID_TIME_WINDOW: earliestTime and latestTime must be business-local "HH:mm" with earliestTime before latestTime. Call again with corrected values or omit them.',
+      errorSafeForModel: true,
+    };
+  }
+  return null;
+}
+
+/** Both bounds optional; an absent bound is the edge of the day. Returns undefined when neither is given. */
+function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockWindow | undefined | ToolResult {
+  const from = typeof args.earliestTime === 'string' ? args.earliestTime.trim() : '';
+  const to = typeof args.latestTime === 'string' ? args.latestTime.trim() : '';
+  if (!from && !to) {
+    const inferred = inferDayPartWindow(customerTexts(ctx));
+    return inferred ?? undefined;
+  }
+  const fromDayPart = dayPartFromClockPhrase(from);
+  if (fromDayPart) return fromDayPart;
+  const toDayPart = dayPartFromClockPhrase(to);
+  if (toDayPart) return toDayPart;
+  const invalid = invalidClockWindowResult(from, to);
+  if (invalid) return invalid;
+  return { from: from || '00:00', to: to || '24:00' };
 }
 
 /**
@@ -329,20 +430,80 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
   };
 }
 
+/** Enough for a day of choices; past this the 4000-char model copy is spent on times instead
+ *  of the sentence that says what they are for. */
+const MOVE_TARGET_CAP = 12;
+
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
-  otherSlotCount: number,
+  moveTargets: Array<{ start: string; end: string }>,
 ): Record<string, unknown> {
   if (!held?.length) return {};
-  const otherSlots = otherSlotCount > 0;
+  const capped = moveTargets.length > MOVE_TARGET_CAP;
+  const targets = capped ? moveTargets.slice(0, MOVE_TARGET_CAP) : moveTargets;
+  const otherSlots = targets.length > 0;
+  // Free times travel under their OWN key with guidance that binds them to
+  // reschedule_booking. A bare `slots` list beside the hold note made the model call the
+  // held time unavailable (live, 2026-09-01); NO times at all dead-ended every move into
+  // a handoff, with the requested target sitting free (live, 2026-09-02, session
+  // d4291852: "kan ik niet bevestigen vanuit het beschikbaarheidsresultaat").
+  //
+  // `data` is serialised into the model message and truncated at 4000 characters, and JSON
+  // keeps insertion order: guidance sits BEFORE moveTargets so a long list can never cut off
+  // the sentence that says what the list is for, and the list itself is capped. alreadyHeld
+  // stays the first key; the truncation test pins that.
+  const missingClause = capped
+    ? 'moveTargets holds only the first free times; a time not listed may still be free - call check_availability for a narrower range around it. '
+    : 'A time missing from moveTargets is not free. ';
   return {
     alreadyHeld: held,
     suggestedAction: 'confirm_existing',
-    ...(otherSlots ? {} : { noSlotsInRange: true }),
     guidance: otherSlots
-      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. Do not offer other times from this result. If they wanted a different day, call check_availability for that day.'
-      : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. If they wanted a different day, call check_availability for that day.',
+      ? 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. If they are asking to MOVE that appointment, the free times for the move are in moveTargets: pick the time they asked for and call reschedule_booking with the alreadyHeld bookingId and that newStartTime. ' +
+        missingClause +
+        'Never offer moveTargets as extra appointments. If they wanted a different day, call check_availability for that day.'
+      : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. Tell them they are already booked for that time. There are no other auto-confirmable times in this range. Do not say the business is fully booked or closed. Do not offer other slots from this result. That includes a move: there is no free time in this range to move it to, so offer to check another day. If they wanted a different day, call check_availability for that day.',
+    ...(otherSlots ? { moveTargets: targets } : { noSlotsInRange: true }),
   };
+}
+
+/**
+ * Move targets read the diary WITHOUT the caller's own held row: a 09:30 target on their own
+ * 09:00-10:00 hold is busy against nobody but themselves, and guidance that says "a time
+ * missing from moveTargets is not free" must not lie about it. One extra read, only when the
+ * range holds exactly ONE of the caller's rows; the excluded id comes from this caller's own
+ * availability result, so no new authority. A failed read keeps the unexcluded slots: fewer
+ * targets, never wrong ones.
+ */
+async function slotsForMove(
+  utcSlots: AvailabilitySlots,
+  held: AvailabilityResult['alreadyHeld'],
+  args: Record<string, unknown>,
+  chosen: TurnAddress,
+  locationChoice: 'business' | 'customer' | undefined,
+  window: ClockWindow | undefined,
+  ctx: ToolContext,
+): Promise<AvailabilitySlots> {
+  if (held?.length !== 1) return utcSlots;
+  try {
+    const move = await checkMoveAvailability(
+      'agent',
+      ctx.sessionId,
+      args.startDate as string,
+      args.endDate as string,
+      held[0].bookingId,
+      args.serviceId as string | undefined,
+      args.durationMin as number | undefined,
+      chosen.address,
+      locationChoice,
+      args.customerPhone as string | undefined,
+      window,
+    );
+    return Array.isArray(move.slots) ? move.slots : utcSlots;
+  } catch {
+    // Diary read for the move failed; the unexcluded list still serves.
+    return utcSlots;
+  }
 }
 
 /**
@@ -378,6 +539,7 @@ function availabilityFacts(result: AvailabilityModel, utcSlots: AvailabilitySlot
     serviceId: result.serviceId,
     serviceName: result.serviceName,
     locationMode: result.locationMode,
+    clockWindow: result.clockWindow,
   };
   if (!travel) return { availability: facts };
   return {
@@ -484,6 +646,16 @@ export class CheckAvailabilityTool implements ToolAdapter {
         description:
           "The customer's contact phone number. Required if the SERVICES entry flags 'needs phone'. Calling without it returns PHONE_REQUIRED: ask for the number and call again. Do not treat that as the service being unavailable.",
       },
+      earliestTime: {
+        type: 'string',
+        description:
+          "Earliest start the customer will accept, business-local 24h \"HH:mm\". Set it whenever they named a part of the day: afternoon = \"12:00\", evening = \"17:00\", \"after 3pm\" = \"15:00\". Omit when they named an exact time or said nothing about the time of day.",
+      },
+      latestTime: {
+        type: 'string',
+        description:
+          "Latest start the customer will accept, business-local 24h \"HH:mm\" (exclusive). morning = \"12:00\", \"before 4pm\" = \"16:00\". Omit when they named an exact time or said nothing about the time of day.",
+      },
     },
     required: ['startDate', 'endDate'],
   };
@@ -500,6 +672,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.customerAddress as string | undefined
       );
       const locationChoice = locationChoiceArg(args.locationChoice);
+      const window = clockWindowArg(args, ctx);
+      if (window && 'success' in window) return window;
       const full = await checkAvailability(
         'agent',
         ctx.sessionId,
@@ -510,6 +684,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.address,
         locationChoice,
         args.customerPhone as string | undefined,
+        window,
       );
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
@@ -535,8 +710,9 @@ export class CheckAvailabilityTool implements ToolAdapter {
         chosen.proposedAddress
       );
       const groupedNote = groupingNote(result.travel);
-      const heldNote = alreadyHeldNote(result.alreadyHeld, utcSlots.length);
       const zone = result.timezone ?? 'UTC';
+      const moveSlots = await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx);
+      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone));
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
@@ -549,7 +725,17 @@ export class CheckAvailabilityTool implements ToolAdapter {
         // Live WaterFix 2026-09-01: alreadyHeld and confirm_existing were in the
         // model copy (1321 chars, not truncated) and the model still said the
         // time was unavailable because slots was in the same payload. The hold
-        // note is the whole payload. Do not run namedTimeGuidance here.
+        // note is the whole payload - free times only ride along as moveTargets,
+        // named by guidance for reschedule_booking. Do not run namedTimeGuidance here.
+        // moveTargets are offers the reschedule gate later measures a chip or a named
+        // instant against, so they are recorded like every other offered slot.
+        if (moveSlots.length > 0) {
+          void rememberOfferedSlots(
+            ctx.sessionId,
+            moveSlots.map((s) => s.start),
+            zone,
+          );
+        }
         return {
           success: true,
           ...measurement,
@@ -593,7 +779,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
             ...groupedNote,
             ...addressEcho(chosen.address),
             suggestedAction: 'request_appointment',
-            guidance: travelGuidance(travel),
+            guidance: [windowNote(result, utcSlots, true).guidance, travelGuidance(travel)].filter(Boolean).join(' '),
           }),
         };
       }
@@ -659,7 +845,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       }
       return {
         success: true,
-        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address) }),
+        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address), ...windowNote(result, utcSlots) }),
         ...measurement,
         ...availability,
         ...affordance,
@@ -752,16 +938,18 @@ async function rejectUnsettledAddress(ctx: ToolContext, booked: TurnAddress): Pr
  * notification is best-effort, just like email/webhook delivery, and must never undo that
  * success.
  */
-async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult): Promise<void> {
+async function notifyPreparation(ctx: ToolContext, r: CreateBookingResult, language: unknown): Promise<void> {
   const preparationInstructions = r.preparationInstructions?.trim();
   if (!preparationInstructions) return;
   try {
+    const lang = normalizeLanguageCode(language) ?? 'en';
+    const copy = await getBookingCopy(lang);
     // Lazy to avoid booking.tool -> message-forwarding -> AgentService ->
     // booking.module -> booking.tool during module initialization.
     const { sendInformationalBotMessage } = await import('../../services/message-forwarding.service');
     await sendInformationalBotMessage(
       ctx.sessionId,
-      `Before your appointment:\n${preparationInstructions}`,
+      `${copy['customer.before_heading']}\n${preparationInstructions}`,
     );
   } catch (err) {
     logger.warn('[booking] preparation instructions chat notification failed', {
@@ -832,8 +1020,13 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           'A short one-line summary of the job for the business owner, written from the conversation (e.g. "Regular client, wants the same cut as last time; mentioned he is in a hurry"). This goes on the owner\'s calendar entry — it is never shown to the customer.',
       },
+      language: {
+        type: 'string',
+        description:
+          "ISO 639-1 code of the language the customer is writing in this conversation (e.g. 'nl', 'fr', 'de', 'en'). Use the language of your own replies. The booking emails and the calendar invite are sent in this language.",
+      },
     },
-    required: ['startTime', 'attendeeName'],
+    required: ['startTime', 'attendeeName', 'language'],
   };
   hasSideEffects = true;
   // Precondition removed — the skill instructions tell the LLM to check availability first.
@@ -844,6 +1037,12 @@ export class CreateBookingTool implements ToolAdapter {
     try {
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;
+      const missingEmail = await rejectMissingRequiredEmail(
+        ctx.sessionId,
+        args.serviceId,
+        args.attendeeEmail,
+      );
+      if (missingEmail) return missingEmail;
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same booking instead of inserting a duplicate (#35).
       // Settled BEFORE anything is written. A contested address is the one case where guessing
@@ -855,6 +1054,10 @@ export class CreateBookingTool implements ToolAdapter {
       );
       const unsettledAddress = await rejectUnsettledAddress(ctx, booked);
       if (unsettledAddress) return unsettledAddress;
+      // BEFORE the confirm gate, so the model is told which appointment it was moving rather than
+      // being walked through a summary for a booking it should not be making at all.
+      const movePending = await refuseCreateWhileMovePending(ctx);
+      if (movePending) return movePending;
       // Resolve BEFORE the confirm gate. Fingerprinting the raw arg treats
       // an offered `T10:00:00.000Z` and a later zoneless `T10:00:00` as different
       // bookings, so the customer had to say yes twice.
@@ -890,6 +1093,7 @@ export class CreateBookingTool implements ToolAdapter {
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           aiSummary: args.aiSummary as string | undefined,
+          language: args.language as string | undefined,
 
         }
       );
@@ -907,7 +1111,7 @@ export class CreateBookingTool implements ToolAdapter {
       const r = result as CreateBookingResult;
       const isRequest = r.requested === true;
 
-      if (!isRequest && !r.idempotent) await notifyPreparation(ctx, r);
+      if (!isRequest && !r.idempotent) await notifyPreparation(ctx, r, args.language);
       if (!isRequest && !r.idempotent) void (async () => {
         try {
           // #5: the id + canonical UTC time live at result.booking.{id,startTime} —
@@ -1038,8 +1242,13 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Pass a single number (e.g. 60). Omit for fixed-duration services.",
       },
+      language: {
+        type: 'string',
+        description:
+          "ISO 639-1 code of the language the customer is writing in this conversation (e.g. 'nl', 'fr', 'de', 'en'). Use the language of your own replies. The booking emails and the calendar invite are sent in this language.",
+      },
     },
-    required: ['preferredTime', 'attendeeName'],
+    required: ['preferredTime', 'attendeeName', 'language'],
   };
   hasSideEffects = true;
 
@@ -1083,6 +1292,7 @@ export class RequestAppointmentTool implements ToolAdapter {
           addressBinding: requested.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
+          language: args.language as string | undefined,
         }
       );
       // This tool produced the SECOND live instance of the wrong-address sentence: the row said

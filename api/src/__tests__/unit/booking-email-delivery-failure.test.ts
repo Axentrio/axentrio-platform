@@ -52,7 +52,10 @@ const bookingParams = {
   attendeeEmail: 'jan@example.com',
   organizerEmail: 'bookings@axentrio.com',
   tenantId: '00000000-0000-0000-0000-000000000001',
+  botId: 'bot-test',
   bookingId: '00000000-0000-0000-0000-000000000002',
+  customerLanguage: 'en',
+  ownerLanguage: 'en',
 };
 
 /** Every failure line this file can emit, whatever the shape of the failure. */
@@ -111,7 +114,10 @@ describe('the other two senders report it too', () => {
       summary: 'Boiler repair',
       start: new Date('2026-09-01T09:00:00Z'),
       timezone: 'Europe/Brussels',
-      leadLabel: 'tomorrow',
+      lead: '24h',
+      attendeeName: 'Jan',
+      manageUrl: 'https://example.com/manage',
+      customerLanguage: 'en',
     } as Parameters<typeof sendReminderEmail>[0]);
     expect(failures()[0][1]).toMatchObject({ error: 'not configured' });
   });

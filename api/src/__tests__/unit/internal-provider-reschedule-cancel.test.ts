@@ -205,7 +205,7 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
+  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', minGapMin: 0, startFromBase: false, maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
     blockedStart: new Date(start), blockedEnd: new Date(end), location: { kind: 'known', point },
   });
@@ -948,11 +948,11 @@ describe('InternalProvider reschedule / cancel / list', () => {
       active: true,
       tenantId: 'ten-1',
       itineraryKey: 'bot:1',
-      slackMin: 0,
+      minGapMin: 0,
       startFromBase: false,
       baseDepartOffsetMin: 0,
-      maxDetourMin: null,
-      groupingPeriod: 'none', routePriority: 'auto',
+      maxTravelMin: null,
+      groupingPeriod: 'none',
     } as any);
     answerAccept(requestBooking());
 
@@ -1036,7 +1036,7 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, locationType: 'customer_location', customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const, routePriority: 'auto' as const };
+  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', minGapMin: 0, startFromBase: true, maxTravelMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const };
   const GENT = { lat: 51.05, lng: 3.72 };
   const LIEGE = { lat: 50.6326, lng: 5.5797 };
   const VENUE = { kind: 'known' as const, point: GENT };
@@ -1608,6 +1608,59 @@ describe('InternalProvider.updateBooking', () => {
     const update = bookingQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('UPDATE chatbot_bookings'));
     expect(update?.[1]).toContain('ada@example.com');
     expect(res.booking.attendeeEmail).toBe('ada@example.com');
+  });
+
+  // The mirror is the surface the owner actually reads. Detail the customer added AFTER
+  // booking - a note, a phone number, a photo - reached the row and the portal and stopped
+  // there, so the calendar event kept describing the booking as it was made.
+  describe('calendar mirror refresh', () => {
+    const STORED_FILE = {
+      fileSessionId: 'fs-1',
+      fileName: 'boiler.jpg',
+      mimeType: 'image/jpeg',
+      fileSize: 1024,
+      fileKey: 'chat/boiler.jpg',
+    };
+
+    beforeEach(() => {
+      bookingRefFind.mockResolvedValue([
+        {
+          bookingId: 'bk-1',
+          providerType: 'google',
+          externalEventId: 'ev-1',
+          externalCalendarId: 'primary',
+          meetingUrl: null,
+        },
+      ]);
+      providerUpdateEvent.mockResolvedValue({ status: 'ok', meetUrl: null });
+    });
+
+    it('patches the event body with the new note, the phone number and the file name', async () => {
+      bookingFind.mockResolvedValue([{ ...noEmailBooking(), uploadedFiles: [STORED_FILE] }]);
+      await provider.updateBooking(ctx, { notes: 'gate code 1234', customerPhone: '+32470123456' });
+      expect(providerUpdateEvent).toHaveBeenCalledOnce();
+      const [, eventId, patch] = providerUpdateEvent.mock.calls[0] as [string, string, Record<string, string>];
+      expect(eventId).toBe('ev-1');
+      expect(patch.description).toContain('Notes: gate code 1234');
+      expect(patch.description).toContain('Phone: +32470123456');
+      expect(patch.description).toContain('boiler.jpg');
+      expect(patch.summary).toContain('Intro call');
+      // The row's own instants: an update adds detail, it never moves the appointment.
+      expect(patch.startISO).toBe('2026-06-10T07:00:00.000Z');
+      expect(patch.endISO).toBe('2026-06-10T07:30:00.000Z');
+    });
+
+    it('leaves a request row alone, because it has no event to patch', async () => {
+      bookingFindOne.mockResolvedValue({ ...noEmailBooking(), status: 'request_created' });
+      await provider.updateBooking(ctx, { bookingId: 'bk-1', notes: 'gate code 1234' });
+      expect(providerUpdateEvent).not.toHaveBeenCalled();
+    });
+
+    it('still reports success when the mirror cannot be reached', async () => {
+      providerUpdateEvent.mockRejectedValue(new Error('google down'));
+      const res = await provider.updateBooking(ctx, { notes: 'gate code 1234' });
+      expect(res.success).toBe(true);
+    });
   });
 });
 

@@ -215,6 +215,27 @@ describe('updateOutlookEvent / deleteOutlookEvent', () => {
     });
   });
 
+  it('update patches subject and body when the caller supplies them', async () => {
+    (axios.patch as any).mockResolvedValueOnce({ data: {} });
+    await updateOutlookEvent('b1', 'e1', {
+      startISO: '2026-06-10T07:00:00Z',
+      endISO: '2026-06-10T07:30:00Z',
+      timezone: 'UTC',
+      summary: 'Booking: Haircut - Ada',
+      description: 'Service: Haircut\nNotes: gate code 4417',
+    });
+    expect((axios.patch as any).mock.calls[0][1]).toMatchObject({
+      subject: 'Booking: Haircut - Ada',
+      body: { contentType: 'text', content: 'Service: Haircut\nNotes: gate code 4417' },
+    });
+  });
+
+  it('update leaves subject and body alone on a times-only patch', async () => {
+    (axios.patch as any).mockResolvedValueOnce({ data: {} });
+    await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' });
+    expect(Object.keys((axios.patch as any).mock.calls[0][1]).sort()).toEqual(['end', 'start']);
+  });
+
   it('update returns no_connection when no cred', async () => {
     getActiveCredential.mockResolvedValue(null);
     expect(await updateOutlookEvent('b1', 'e1', { startISO: '2026-06-10T07:00:00Z', endISO: '2026-06-10T07:30:00Z', timezone: 'UTC' })).toEqual({ status: 'no_connection' });

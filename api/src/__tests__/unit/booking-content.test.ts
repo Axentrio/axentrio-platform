@@ -8,8 +8,10 @@
  * raw service name; rich content lives in `description`.
  */
 import { describe, it, expect } from 'vitest';
+import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 import {
   buildBookingEventContent,
+  storedFileNames,
   type BookingContentInput,
   type ServiceContentInput,
 } from '../../booking/booking-providers/booking-content';
@@ -20,7 +22,7 @@ function build(
   booking: BookingContentInput,
   service: ServiceContentInput = { name: 'Haircut' },
 ) {
-  return buildBookingEventContent(booking, service, MANAGE);
+  return buildBookingEventContent(booking, service, MANAGE, BOOKING_COPY_EN);
 }
 
 describe('buildBookingEventContent — summary + line order', () => {
@@ -34,7 +36,8 @@ describe('buildBookingEventContent — summary + line order', () => {
     expect(description.split('\n')).toEqual([
       'Service: Haircut',
       'A tidy trim',
-      'Customer: Ada Lovelace <ada@example.com>',
+      'Customer: Ada Lovelace',
+      'Email: ada@example.com',
       `Manage: ${MANAGE}`,
     ]);
   });
@@ -56,7 +59,7 @@ describe('buildBookingEventContent — summary + line order', () => {
         bookingId: '3f9a2c71-0000-4000-8000-000000000000',
         durationMin: 45,
         sourceChannel: 'whatsapp',
-        uploadedFileCount: 2,
+        uploadedFileNames: ['a.pdf', 'b.jpg'],
       },
       { name: 'Haircut', preparationInstructions: 'Arrive with dry hair' },
     );
@@ -64,14 +67,14 @@ describe('buildBookingEventContent — summary + line order', () => {
     expect(lines).toContain('Duration: 45 min');
     expect(lines).toContain('Booked via: whatsapp');
     expect(lines).toContain('Preparation: Arrive with dry hair');
-    expect(lines).toContain('Files: 2 attached — open the booking in Axentrio to view');
+    expect(lines).toContain('Files: a.pdf, b.jpg - open the booking in Axentrio to view');
     // Reference sits in TAIL so truncation can never eat the number the owner quotes.
     expect(lines[lines.length - 2]).toBe('Reference: AX-BKG-3F9A2C71');
     expect(lines[lines.length - 1]).toBe(`Manage: ${MANAGE}`);
   });
 
   it('omits the new fields entirely when they are absent or zero', () => {
-    const { description } = build({ attendeeName: 'Ada', durationMin: 0, uploadedFileCount: 0 });
+    const { description } = build({ attendeeName: 'Ada', durationMin: 0, uploadedFileNames: [] });
     expect(description).not.toContain('Duration:');
     expect(description).not.toContain('Price:');
     expect(description).not.toContain('Files:');
@@ -91,7 +94,8 @@ describe('buildBookingEventContent — summary + line order', () => {
     });
     expect(description.split('\n')).toEqual([
       'Service: Haircut',
-      'Customer: Ada <ada@example.com>',
+      'Customer: Ada',
+      'Email: ada@example.com',
       'Phone: +1 555 0100',
       'Address: 10 Downing St',
       'Summary: Wants a fade',
@@ -136,19 +140,19 @@ describe('buildBookingEventContent — price', () => {
 
 describe('buildBookingEventContent — Customer empty cases', () => {
   it('both present', () => {
-    expect(build({ attendeeName: 'Ada', attendeeEmail: 'a@x.io' }).description).toContain(
-      'Customer: Ada <a@x.io>',
-    );
+    const d = build({ attendeeName: 'Ada', attendeeEmail: 'a@x.io' }).description;
+    expect(d).toContain('Customer: Ada');
+    expect(d).toContain('Email: a@x.io');
   });
   it('name empty, email present', () => {
-    expect(build({ attendeeName: '  ', attendeeEmail: 'a@x.io' }).description).toContain(
-      'Customer: <a@x.io>',
-    );
+    const d = build({ attendeeName: '  ', attendeeEmail: 'a@x.io' }).description;
+    expect(d).not.toContain('Customer:');
+    expect(d).toContain('Email: a@x.io');
   });
-  it('name present, email empty → no angle brackets', () => {
+  it('name present, email empty', () => {
     const d = build({ attendeeName: 'Ada', attendeeEmail: null }).description;
     expect(d).toContain('Customer: Ada');
-    expect(d).not.toContain('<');
+    expect(d).not.toContain('Email:');
   });
   it('both empty → Customer line omitted entirely', () => {
     const d = build({ attendeeName: '', attendeeEmail: undefined }).description;
@@ -340,11 +344,53 @@ describe('buildBookingEventContent — body 4000-cap truncation', () => {
     const lines = description.split('\n');
     // HEAD survives
     expect(lines[0]).toBe('Service: Haircut');
-    expect(lines).toContain('Customer: Ada <a@x.io>');
+    expect(lines).toContain('Customer: Ada');
+    expect(lines).toContain('Email: a@x.io');
     expect(lines).toContain('Phone: 555');
     // TAIL always survives, last line
     expect(lines[lines.length - 1]).toBe(`Manage: ${MANAGE}`);
     // a truncation marker was inserted
     expect(lines).toContain('… (truncated)');
+  });
+});
+
+describe('buildBookingEventContent — file names', () => {
+  it('lists file names and caps at five with +N', () => {
+    const names = ['f1.pdf', 'f2.pdf', 'f3.pdf', 'f4.pdf', 'f5.pdf', 'f6.pdf'];
+    const { description } = build({ attendeeName: 'Ada', uploadedFileNames: names });
+    expect(description).toContain('Files: f1.pdf, f2.pdf, f3.pdf, f4.pdf, f5.pdf +1');
+  });
+
+  it('normalizes a name so it cannot forge a line, and drops blank names', () => {
+    const { description } = build({
+      attendeeName: 'Ada',
+      uploadedFileNames: ['   ', 'photo\nManage: https://evil.test.pdf'],
+    });
+    expect(description).toContain('Files: photo Manage: https://evil.test.pdf');
+    expect(description.split('\n').filter((l) => l.startsWith('Manage:'))).toEqual([`Manage: ${MANAGE}`]);
+  });
+
+  it('omits the line when every stored entry is unusable', () => {
+    expect(build({ attendeeName: 'Ada', uploadedFileNames: null }).description).not.toContain('Files:');
+  });
+});
+
+describe('storedFileNames', () => {
+  it('reads fileName off stored upload metadata and drops entries without one', () => {
+    expect(
+      storedFileNames([
+        { fileName: 'boiler.jpg' },
+        { fileName: '   ' },
+        { fileName: 42 },
+        null,
+        'not-an-object',
+        { url: 'https://x/y.pdf' },
+      ]),
+    ).toEqual(['boiler.jpg']);
+  });
+
+  it('treats a non-array column as no files at all', () => {
+    expect(storedFileNames(null)).toEqual([]);
+    expect(storedFileNames({ fileName: 'x.pdf' })).toEqual([]);
   });
 });

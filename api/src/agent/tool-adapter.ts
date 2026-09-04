@@ -16,6 +16,12 @@ export interface ToolContext {
   specialtyTerms?: string[];
   /** False when a human already owns the session. Absent = treat as bot-owned. */
   botOwned?: boolean;
+  /**
+   * A time the customer named was refused this run by the notice/horizon policy, so the
+   * named-hour match in check_availability must stand down: the hour is a clock-only
+   * match and the date behind it is the refused one. Absent = false.
+   */
+  namedTimeRefused?: boolean;
 }
 
 export interface ToolResult {
@@ -84,6 +90,9 @@ export interface ToolResult {
     serviceId?: string;
     serviceName?: string;
     locationMode?: string;
+    /** Echo of the part-of-day filter. `matched: false` means `slots` is the WHOLE day, so no
+     *  chip may be drawn from it - the model has been told to ask before offering another part. */
+    clockWindow?: { from: string; to: string; matched: boolean };
     travel?: {
       groupingPilot?: boolean;
       grouped?: { savedMinutes: number };

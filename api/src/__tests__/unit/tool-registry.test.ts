@@ -21,6 +21,7 @@ vi.mock('../../booking/booking.service', () => ({
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
   updateBooking: vi.fn(),
+  peekCustomerEmailRequired: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../../webhooks/webhook.emitter', () => ({

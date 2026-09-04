@@ -449,16 +449,56 @@ jobs:
       github.ref == 'refs/heads/main' &&
       vars.PROD_VPS_LIVE == 'true' &&
       inputs.prod_tag != ''
+    concurrency:
+      group: ${{ github.repository }}-prod-vps
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://api.axentrio.com
+      url: https://app.axentrio.com
     permissions:
       contents: read
       packages: read
     steps:
+      - name: Resolve deploy sha
+        id: sha
+        env:
+          TAG: ${{ inputs.prod_tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "invalid prod_tag: must match sha-<40 hex>" >&2
+            exit 1
+          fi
+          echo "sha=${TAG#sha-}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v5
-      - name: Sync infra and deploy prod api
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+
+      - name: Build prod portal
+        working-directory: portal
+        env:
+          VITE_API_URL: https://api.axentrio.com/api/v1
+          VITE_WS_URL: https://api.axentrio.com
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.PROD_CLERK_PUBLISHABLE_KEY }}
+          VITE_SENTRY_DSN: ${{ secrets.PROD_PORTAL_SENTRY_DSN }}
+          VITE_FEATURE_COMPOSABLE_TEMPLATES: "true"
+        run: |
+          if [ -z "${VITE_CLERK_PUBLISHABLE_KEY}" ]; then
+            echo "PROD_CLERK_PUBLISHABLE_KEY is empty" >&2
+            exit 1
+          fi
+          npm ci
+          npm run build
+          printf '%s\n' "${{ steps.sha.outputs.sha }}" > dist/commit.txt
+
+      - name: Sync infra and portal, deploy prod api
         env:
           HOST: ${{ secrets.PROD_HOST }}
           SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
@@ -467,17 +507,17 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ ! "$TAG" =~ ^sha-[0-9a-f]{40}$ ]]; then
-            echo "invalid prod_tag: must match sha-<40 hex>" >&2
-            exit 1
-          fi
           # shellcheck source=../scripts/vps-ssh-setup.sh
           source .github/scripts/vps-ssh-setup.sh
-          rsync -az -e "$AXENTRIO_SSH" \
-            --exclude 'cloud-init.yml' \
-            --exclude 'env.*.example' \
-            --exclude 'render-user-data.sh' \
-            infra/vps/ "deploy@${HOST}:/opt/axentrio/"
+          $AXENTRIO_SSH "deploy@${HOST}" "mkdir -p /opt/axentrio/incoming/prod"
+          rsync -az --delete -e "$AXENTRIO_SSH" \
+            infra/vps/Caddyfile.prod \
+            infra/vps/compose.prod.yml \
+            infra/vps/deploy.sh \
+            infra/vps/apply-prod.sh \
+            "deploy@${HOST}:/opt/axentrio/incoming/prod/"
+          rsync -az --delete -e "$AXENTRIO_SSH" \
+            portal/dist/ "deploy@${HOST}:/opt/axentrio/incoming/prod/portal/"
           TAG_Q=$(printf '%q' "$TAG")
           printf '%s\n' "$GHCR_TOKEN" | $AXENTRIO_SSH "deploy@${HOST}" \
-            "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/deploy.sh ${TAG_Q} compose.prod.yml api"
+            "docker login ghcr.io -u ${GHCR_USER} --password-stdin && /opt/axentrio/incoming/prod/apply-prod.sh ${TAG_Q}"

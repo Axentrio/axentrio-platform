@@ -14,6 +14,7 @@ volumes:
   n8n-pg-data:
   caddy-data:
   caddy-config:
+  clamav-data:
 
 services:
   api:
@@ -58,6 +59,22 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - axentrio
+
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    environment:
+      CLAMD_CONF_StreamMaxLength: 26M
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      start_period: 300s
+      retries: 3
     networks:
       - axentrio
 
@@ -122,6 +139,7 @@ services:
       - caddy-data:/data
       - caddy-config:/config
       - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - ./portal-prod:/srv/portal-prod:ro
     depends_on:
       - api
       - n8n

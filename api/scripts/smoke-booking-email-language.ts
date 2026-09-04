@@ -1,7 +1,8 @@
 /**
  * Local smoke test for booking email / manage-page i18n.
  *
- * Usage:
+ * Usage (against prod VPS env):
+ *   PROD_SSH_HOST=deploy@<prod-ip> api/scripts/prod-env.sh npx tsx scripts/smoke-booking-email-language.ts
  *   cd api && npm run smoke:booking-i18n
  *
  * Env:

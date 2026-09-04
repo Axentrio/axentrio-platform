@@ -11,3 +11,12 @@ api.axentrio.com {
 ops.axentrio.com {
 	reverse_proxy n8n:5678
 }
+
+app.axentrio.com {
+	root * /srv/portal-prod
+	encode gzip
+	try_files {path} /index.html
+	file_server
+	header /index.html Cache-Control "no-cache"
+	header /meta-oauth-complete.html Cache-Control "no-cache"
+}

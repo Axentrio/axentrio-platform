@@ -3,7 +3,7 @@
  * calendar body updates via updateBooking → refreshCalendarMirror (items 4 & 6).
  *
  * Usage:
- *   cd api && railway run npx tsx scripts/smoke-calendar-mirror-update.ts
+ *   cd api && PROD_SSH_HOST=deploy@<prod-ip> scripts/prod-env.sh npx tsx scripts/smoke-calendar-mirror-update.ts
  */
 import 'reflect-metadata';
 import crypto from 'crypto';
@@ -298,15 +298,5 @@ main()
   .then(async () => {
     await AppDataSource.destroy().catch(() => undefined);
     getRedisClient()?.disconnect();
-    process.exit(0);
-  })
-  .catch(async (err) => {
-    if (err instanceof BookingError) {
-      console.error('BookingError', err.code, err.message);
-    } else {
-      logger.error('[smoke-calendar-mirror-update] failed', { err });
-    }
-    await AppDataSource.destroy().catch(() => undefined);
-    getRedisClient()?.disconnect();
-    process.exit(1);
-  });
+
+[Showing lines 1-300 of 313. Use :301 to continue]

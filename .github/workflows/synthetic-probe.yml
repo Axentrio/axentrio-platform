@@ -1,0 +1,57 @@
+name: Synthetic probe
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    # Dormant until the SYNTHETIC_PROBE_TARGET repository variable is set to a
+    # base URL (https://api-vps.axentrio.com during the soak, then
+    # https://api.axentrio.com after cutover).
+    if: vars.SYNTHETIC_PROBE_TARGET != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Probe
+        working-directory: api
+        env:
+          PROBE_API: ${{ vars.SYNTHETIC_PROBE_TARGET }}
+          PROBE_BOT_KEY: ${{ secrets.PROBE_BOT_KEY }}
+        run: |
+          if [ -z "${PROBE_BOT_KEY}" ]; then
+            echo "::error::PROBE_BOT_KEY secret is empty"
+            exit 1
+          fi
+          node scripts/vps-burn-in-probe.mjs
+
+      # always(): a failed probe still leaves a session behind.
+      - name: Purge probe sessions older than 2 hours
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_PUBLIC_URL }}
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          docker run --rm -e PGSSLMODE postgres:17 \
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+              DELETE FROM chatbot_leads WHERE session_id IN (
+                SELECT id FROM chat_sessions
+                 WHERE visitor_id LIKE 'vps-probe-%'
+                   AND created_at < now() - interval '2 hours');
+              DELETE FROM chat_sessions
+               WHERE visitor_id LIKE 'vps-probe-%'
+                 AND created_at < now() - interval '2 hours';"

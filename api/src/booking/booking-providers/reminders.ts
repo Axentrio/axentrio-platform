@@ -9,6 +9,7 @@
  * so reschedule/cancel can remove them.
  */
 import type { Job } from 'bull';
+import { MoreThan } from 'typeorm';
 import { addJob, removeJob } from '../../queue/message-queue';
 import { AppDataSource } from '../../database/data-source';
 import { Booking } from '../../database/entities/Booking';
@@ -130,4 +131,26 @@ export async function scheduleAndPersistReminders(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/**
+ * Re-create the delayed reminder jobs for every confirmed future booking.
+ *
+ * The jobs live only in Redis, so a Redis move, flush, or eviction drops them
+ * and nothing else notices. Bull ignores a duplicate `jobId` and the ids are
+ * deterministic, so running this on every boot is idempotent. The stored
+ * `reminder_job_ids` are recomputed from the same inputs, so they stay correct
+ * without a write.
+ */
+export async function reconcileBookingReminders(now: Date = new Date()): Promise<number> {
+  const rows = await AppDataSource.getRepository(Booking).find({
+    where: { status: 'confirmed', startUtc: MoreThan(now) },
+    select: ['id', 'startUtc', 'sequence'],
+  });
+  let restored = 0;
+  for (const booking of rows) {
+    const ids = await scheduleReminders(booking.id, booking.startUtc, booking.sequence, now);
+    restored += ids.length;
+  }
+  return restored;
 }

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { config } from './environment';
+import { BUILD_COMMIT } from '../utils/build-info';
 
 export function initSentry(): void {
   const dsn = process.env.SENTRY_DSN;
@@ -11,7 +12,7 @@ export function initSentry(): void {
   Sentry.init({
     dsn,
     environment: process.env.SENTRY_ENVIRONMENT || config.server.env,
-    release: process.env.RAILWAY_GIT_COMMIT_SHA || undefined,
+    release: BUILD_COMMIT === 'unknown' ? undefined : BUILD_COMMIT,
     sendDefaultPii: false,
     tracesSampleRate: config.server.isProduction ? 0.2 : 1.0,
     integrations: [

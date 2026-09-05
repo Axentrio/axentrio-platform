@@ -445,6 +445,19 @@ function groupingNote(travel: TravelFilterSummary | undefined): Record<string, s
  *  of the sentence that says what they are for. */
 const MOVE_TARGET_CAP = 12;
 
+async function rescheduleAllowedForHeld(
+  sessionId: string,
+  alreadyHeld: AvailabilityResult['alreadyHeld'],
+): Promise<boolean> {
+  if (alreadyHeld?.length !== 1) return true;
+  try {
+    const mode = await peekCustomerChange(sessionId, alreadyHeld[0].bookingId, 'reschedule');
+    return mode !== 'not_allowed';
+  } catch {
+    return false;
+  }
+}
+
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
   moveTargets: Array<{ start: string; end: string }>,
@@ -731,21 +744,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      let rescheduleAllowed = true;
-      if (result.alreadyHeld?.length === 1) {
-        try {
-          const mode = await peekCustomerChange(
-            ctx.sessionId,
-            result.alreadyHeld[0].bookingId,
-            'reschedule',
-          );
-          rescheduleAllowed = mode !== 'not_allowed';
-        } catch {
-          // Policy miss must not fail the diary read. No moveTargets, no
-          // "call reschedule_booking" — the hold note still ships.
-          rescheduleAllowed = false;
-        }
-      }
+      const rescheduleAllowed = await rescheduleAllowedForHeld(ctx.sessionId, result.alreadyHeld);
       const moveSlots = rescheduleAllowed
         ? await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx)
         : [];

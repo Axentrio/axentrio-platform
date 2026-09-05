@@ -11,7 +11,13 @@ const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 const mockUpdateBooking = vi.fn();
 const mockPeekCustomerEmailRequired = vi.fn(async (_sessionId?: string, _serviceId?: string) => false);
-const mockPeekCustomerChange = vi.fn(async () => 'auto' as const);
+const mockPeekCustomerChange = vi.fn(
+  async (
+    _sessionId?: string,
+    _bookingId?: string,
+    _kind?: 'reschedule' | 'cancel',
+  ): Promise<'auto' | 'request' | 'not_allowed'> => 'auto',
+);
 
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
@@ -35,7 +41,8 @@ vi.mock('../../booking/booking.service', () => ({
   updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
   peekCustomerEmailRequired: (sessionId: string, serviceId?: string) =>
     mockPeekCustomerEmailRequired(sessionId, serviceId),
-  peekCustomerChange: (...args: unknown[]) => mockPeekCustomerChange(...args),
+  peekCustomerChange: (sessionId: string, bookingId: string, kind: 'reschedule' | 'cancel') =>
+    mockPeekCustomerChange(sessionId, bookingId, kind),
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;

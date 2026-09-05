@@ -110,6 +110,10 @@ export interface ListBookingsResult {
     endTime: string | undefined;
     attendee: { name?: string; email?: string };
     status: string;
+    serviceName?: string;
+    /** Effective customer-change policy (cutoff already applied). */
+    reschedule?: 'auto' | 'request' | 'not_allowed';
+    cancel?: 'auto' | 'request' | 'not_allowed';
   }>;
 }
 

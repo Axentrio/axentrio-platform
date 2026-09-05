@@ -360,6 +360,14 @@ describe('customer change policy — catalog line and rules', () => {
     expect(p).toMatch(/NOT yet confirmed/i);
   });
 
+  it('tells the model not_allowed is immediate, no confirmation dance', () => {
+    const p = buildServicesSection([svc({ cancelMode: 'not_allowed' })])!;
+    expect(p).toMatch(/list_bookings/);
+    expect(p).toMatch(/tell them immediately/i);
+    expect(p).toMatch(/do not ask whether to proceed/i);
+    expect(p).toMatch(/CHANGE_NOT_ALLOWED/);
+  });
+
   it('does not treat requested:true as a confirmed clock', () => {
     const p = buildServicesSection([svc()])!;
     expect(p).toMatch(/WITHOUT "requested": true/);
@@ -382,6 +390,13 @@ describe('after a booking exists — extra info vs reschedule vs price', () => {
     expect(p).toMatch(/Changing the appointment address: that is a reschedule/);
     expect(p).toMatch(/never invent a time/);
     expect(p).toMatch(/The original appointment stays until they confirm/);
+  });
+
+  it('does not tell the model to reschedule when the catalog forbids it', () => {
+    const p = buildServicesSection([svc({ rescheduleMode: 'not_allowed' })])!;
+    expect(p).toMatch(/follow that appointment's reschedule:/);
+    expect(p).toMatch(/not_allowed means refuse/);
+    expect(line(p)).toContain('reschedule: not_allowed');
   });
 
   it('quotes listed prices and only offers a human if they keep insisting', () => {
@@ -408,6 +423,7 @@ describe('check_availability — the empty result carries its own instruction', 
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const tool = new CheckAvailabilityTool();
@@ -1001,6 +1017,7 @@ describe('check_availability — a range the policy ruled out is not an empty di
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     // Imported dynamically because `vi.doMock` is not hoisted: a static import would bind the
     // real booking.service before the mock above is registered.
@@ -1111,6 +1128,7 @@ describe('check_availability — a service at its daily cap is not a request', (
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1199,6 +1217,7 @@ describe('check_availability — a time the caller already holds is not unavaila
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
       checkMoveAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1237,6 +1256,77 @@ describe('check_availability — a time the caller already holds is not unavaila
     ]);
   });
 
+  it('does not offer moveTargets when that appointment cannot be rescheduled', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-08T07:30:00.000Z', end: '2026-09-08T08:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+      ],
+    }));
+    const checkMoveAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-08T07:30:00.000Z', end: '2026-09-08T08:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+    }));
+    const peekCustomerChange = vi.fn(async () => 'not_allowed');
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+      checkMoveAvailability,
+      peekCustomerChange,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08' },
+      { sessionId: 'cs-1' } as never,
+    );
+    const data = res.data as { moveTargets?: unknown[]; guidance?: string };
+    expect(data.moveTargets).toBeUndefined();
+    expect(checkMoveAvailability).not.toHaveBeenCalled();
+    expect(data.guidance).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(data.guidance).toMatch(/do not call reschedule_booking/i);
+    expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+  });
+
+  it('a policy peek miss still ships the hold note, without moveTargets', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-08T07:30:00.000Z', end: '2026-09-08T08:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      alreadyHeld: [
+        { bookingId: 'bk-mine', start: '2026-09-08T07:00:00.000Z', end: '2026-09-08T08:00:00.000Z' },
+      ],
+    }));
+    const checkMoveAvailability = vi.fn();
+    const peekCustomerChange = vi.fn(async () => {
+      throw Object.assign(new Error('Booking not found'), { code: 'BOOKING_NOT_FOUND' });
+    });
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+      checkMoveAvailability,
+      peekCustomerChange,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08' },
+      { sessionId: 'cs-1' } as never,
+    );
+    expect(res.success).toBe(true);
+    const data = res.data as { moveTargets?: unknown[]; guidance?: string; alreadyHeld?: unknown };
+    expect(data.alreadyHeld).toBeDefined();
+    expect(data.moveTargets).toBeUndefined();
+    expect(checkMoveAvailability).not.toHaveBeenCalled();
+    expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+  });
+
   it('caps moveTargets and says the list is not exhaustive', async () => {
     vi.resetModules();
     const manySlots = Array.from({ length: 20 }, (_, i) => ({
@@ -1257,6 +1347,7 @@ describe('check_availability — a time the caller already holds is not unavaila
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
       checkMoveAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1283,6 +1374,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1326,6 +1418,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1360,6 +1453,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(
@@ -1389,6 +1483,7 @@ describe('check_availability — a time the caller already holds is not unavaila
     vi.doMock('../../booking/booking.service', async (orig) => ({
       ...(await orig<Record<string, unknown>>()),
       checkAvailability,
+      peekCustomerChange: async () => 'auto',
     }));
     const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
     const res = await new CheckAvailabilityTool().execute(

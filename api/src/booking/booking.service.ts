@@ -233,6 +233,24 @@ export async function peekCustomerEmailRequired(
 }
 
 /**
+ * Effective customer-change policy for this appointment (cutoff applied).
+ * CHANGE_NOT_ALLOWED must beat CONFIRMATION_REQUIRED: otherwise the model
+ * asks "shall I cancel?", the customer says yes, and only then hears they
+ * cannot. A `request` policy still confirms — that write notifies the owner.
+ *
+ * Missing/unowned ids throw BOOKING_NOT_FOUND — never default to `request`.
+ */
+export async function peekCustomerChange(
+  sessionId: string,
+  bookingId: string,
+  kind: 'reschedule' | 'cancel',
+): Promise<CustomerChangeMode> {
+  const ctx = await resolveContext(sessionId);
+  return internalProvider.peekCustomerChange(ctx, bookingId, kind);
+}
+
+
+/**
  * Capture an appointment request (the agent's `request_appointment` fallback).
  * Internal-only — `requestAppointment` is not on the `BookingProvider` interface,
  * so we go straight to the in-house provider (mirrors the admin functions below).

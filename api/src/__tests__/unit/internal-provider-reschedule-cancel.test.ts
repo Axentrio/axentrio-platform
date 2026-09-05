@@ -825,6 +825,53 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(call[1]).toContain('psid-1'); // scoped by the stable visitor id, not the session
   });
 
+  it('lists the effective cancel and reschedule policy on each booking', async () => {
+    bookingQuery.mockResolvedValueOnce([
+      {
+        id: 'bk-1',
+        start_utc: new Date('2026-06-10T07:00:00Z'),
+        end_utc: new Date('2026-06-10T07:30:00Z'),
+        attendee_name: 'Ada',
+        attendee_email: 'ada@example.com',
+        status: 'confirmed',
+        service_name: 'Intro call',
+        reschedule_mode: 'request',
+        reschedule_until_min: null,
+        cancel_mode: 'not_allowed',
+        cancel_until_min: null,
+      },
+    ]);
+    const res = await provider.listBookings(ctx, 'ada@example.com');
+    expect(res.bookings[0]).toMatchObject({
+      id: 'bk-1',
+      serviceName: 'Intro call',
+      reschedule: 'request',
+      cancel: 'not_allowed',
+    });
+    expect(String(bookingQuery.mock.calls.at(-1)![0])).toMatch(/LEFT JOIN chatbot_service_types/);
+  });
+
+  it('listBookings applies cutoff so a passed window reads as not_allowed', async () => {
+    const start = new Date(Date.now() + 60 * 60 * 1000);
+    bookingQuery.mockResolvedValueOnce([
+      {
+        id: 'bk-1',
+        start_utc: start,
+        end_utc: new Date(start.getTime() + 30 * 60 * 1000),
+        attendee_name: 'Ada',
+        attendee_email: 'ada@example.com',
+        status: 'confirmed',
+        reschedule_mode: 'auto',
+        reschedule_until_min: 24 * 60,
+        cancel_mode: 'auto',
+        cancel_until_min: 24 * 60,
+      },
+    ]);
+    const res = await provider.listBookings(ctx);
+    expect(res.bookings[0].cancel).toBe('not_allowed');
+    expect(res.bookings[0].reschedule).toBe('not_allowed');
+  });
+
   it('looks up a booking by the SANITIZED address, so a capitalised retype still finds it', async () => {
     // Writes store the sanitized address, so an exact-match lookup on the raw argument would
     // miss. The SQL also lowercases the column, because rows written before that gate exists
@@ -1281,6 +1328,18 @@ describe('InternalProvider customer change policy', () => {
     });
     expect(bookingQuery.mock.calls.some((c) => String(c[0]).includes('INSERT'))).toBe(false);
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('UPDATE chatbot_bookings'))).toBe(false);
+  });
+
+  it('peekCustomerChange reads not_allowed off the Service', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'not_allowed' });
+    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).resolves.toBe('not_allowed');
+  });
+
+  it('peekCustomerChange throws BOOKING_NOT_FOUND instead of defaulting to request', async () => {
+    bookingFindOne.mockResolvedValue(null);
+    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).rejects.toMatchObject({
+      code: 'BOOKING_NOT_FOUND',
+    });
   });
 
   it('request leaves the original confirmed and returns requested: true', async () => {

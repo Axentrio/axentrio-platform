@@ -6,6 +6,7 @@ const mockSessionFindOne = vi.fn();
 const mockTenantFindOne = vi.fn();
 const mockServiceFindOne = vi.fn();
 const mockServiceFind = vi.fn();
+const mockBookingFindOne = vi.fn();
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
@@ -14,6 +15,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'ChatSession') return { findOne: mockSessionFindOne };
       if (name === 'Tenant') return { findOne: mockTenantFindOne };
       if (name === 'ServiceType') return { findOne: mockServiceFindOne, find: mockServiceFind };
+      if (name === 'Booking') return { findOne: mockBookingFindOne };
       return {};
     }),
   },
@@ -50,6 +52,7 @@ const internalMethods = vi.hoisted(() => ({
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
   updateBooking: vi.fn(),
+  peekCustomerChange: vi.fn(),
 }));
 vi.mock('../../booking/booking-providers/internal.provider', () => ({
   // Regular function (not an arrow) so `new InternalProvider()` returns the stub.
@@ -71,6 +74,7 @@ import {
   adminAcceptRequest,
   adminAvailability,
   peekCustomerEmailRequired,
+  peekCustomerChange,
 } from '../../booking/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -393,5 +397,31 @@ describe('peekCustomerEmailRequired', () => {
   it('returns true when the sole bookable service needs email and serviceId is omitted', async () => {
     mockServiceFind.mockResolvedValue([{ id: VALID_UUID, customerEmailRequired: true }]);
     await expect(peekCustomerEmailRequired(VALID_UUID)).resolves.toBe(true);
+  });
+});
+
+describe('peekCustomerChange', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupValidContext();
+  });
+
+  it('routes to the provider', async () => {
+    internalMethods.peekCustomerChange.mockResolvedValue('not_allowed');
+    await expect(peekCustomerChange(VALID_UUID, VALID_UUID, 'reschedule')).resolves.toBe('not_allowed');
+    expect(internalMethods.peekCustomerChange).toHaveBeenCalledWith(
+      expect.objectContaining({ tenant: expect.objectContaining({ id: TENANT_ID }) }),
+      VALID_UUID,
+      'reschedule',
+    );
+  });
+
+  it('does not swallow BOOKING_NOT_FOUND as request', async () => {
+    internalMethods.peekCustomerChange.mockRejectedValue(
+      new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404),
+    );
+    await expect(peekCustomerChange(VALID_UUID, VALID_UUID, 'reschedule')).rejects.toMatchObject({
+      code: 'BOOKING_NOT_FOUND',
+    });
   });
 });

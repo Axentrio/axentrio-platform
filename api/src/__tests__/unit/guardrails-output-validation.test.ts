@@ -169,6 +169,9 @@ describe("guardrails · validateOutput — checks run state", () => {
       "I've confirmed your booking.",
       "Your booking has been submitted.",
       "Ik heb je afspraak geboekt.",
+      "Uw wijziging is bevestigd. Uw afspraak staat nu op maandag 7 september 2026 om 14:00.",
+      "I've rescheduled your appointment.",
+      "Your appointment has been moved.",
     ]) {
       const result = validateOutput(text, context);
       expect(result.violations.map((v) => v.family)).toContain(
@@ -217,6 +220,8 @@ describe("guardrails · validateOutput — checks run state", () => {
       "I'll proceed with checking that for you.",
       "I'll go ahead and request your phone number.",
       "Je afspraak is bevestigd.",
+      "Uw afspraak staat nog op vrijdag 4 september om 15:00.",
+      "Uw afspraak staat nu op vrijdag 4 september om 15:00.",
       // Review round 2 — availability statements, reminders, lead/handoff
       // requests and Dutch non-booking confirmations must PASS.
       "I've confirmed your booking is available.",

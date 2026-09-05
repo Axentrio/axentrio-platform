@@ -11,8 +11,10 @@ import {
   cancelBooking,
   updateBooking,
   peekCustomerEmailRequired,
+  peekCustomerChange,
   BookingError,
 } from '../../booking/booking.service';
+import { customerChangeNotAllowedError } from '../../booking/customer-change-policy';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
@@ -168,6 +170,15 @@ async function rejectMissingRequiredEmail(
 function toolError(err: unknown, fallback: string): { error: string; errorSafeForModel: boolean } {
   if (err instanceof BookingError) return { error: `${err.code}: ${err.message}`, errorSafeForModel: true };
   return { error: err instanceof Error ? err.message : fallback, errorSafeForModel: false };
+}
+
+/**
+ * CHANGE_NOT_ALLOWED before CONFIRMATION_REQUIRED. Asking "shall I cancel?"
+ * then refusing after two yeses is the bug this helper exists to stop.
+ */
+function changeNotAllowedResult(action: 'reschedule' | 'cancel'): ToolResult {
+  const err = customerChangeNotAllowedError(undefined, action);
+  return { success: false, error: `${err.code}: ${err.message}`, errorSafeForModel: true };
 }
 
 /**
@@ -437,8 +448,17 @@ const MOVE_TARGET_CAP = 12;
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
   moveTargets: Array<{ start: string; end: string }>,
+  rescheduleAllowed = true,
 ): Record<string, unknown> {
   if (!held?.length) return {};
+  if (!rescheduleAllowed) {
+    return {
+      alreadyHeld: held,
+      suggestedAction: 'confirm_existing',
+      guidance:
+        'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here.',
+    };
+  }
   const capped = moveTargets.length > MOVE_TARGET_CAP;
   const targets = capped ? moveTargets.slice(0, MOVE_TARGET_CAP) : moveTargets;
   const otherSlots = targets.length > 0;
@@ -711,8 +731,25 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      const moveSlots = await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx);
-      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone));
+      let rescheduleAllowed = true;
+      if (result.alreadyHeld?.length === 1) {
+        try {
+          const mode = await peekCustomerChange(
+            ctx.sessionId,
+            result.alreadyHeld[0].bookingId,
+            'reschedule',
+          );
+          rescheduleAllowed = mode !== 'not_allowed';
+        } catch {
+          // Policy miss must not fail the diary read. No moveTargets, no
+          // "call reschedule_booking" — the hold note still ships.
+          rescheduleAllowed = false;
+        }
+      }
+      const moveSlots = rescheduleAllowed
+        ? await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx)
+        : [];
+      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone), rescheduleAllowed);
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
@@ -1316,7 +1353,7 @@ export class RequestAppointmentTool implements ToolAdapter {
 
 export class ListBookingsTool implements ToolAdapter {
   name = 'list_bookings';
-  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case.';
+  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancel or reschedule is not_allowed, tell the customer immediately they cannot do that here — do not ask whether to proceed and do not call the matching tool.';
   parameters = {
     type: 'object',
     properties: {
@@ -1336,7 +1373,19 @@ export class ListBookingsTool implements ToolAdapter {
         ctx.sessionId,
         typeof args.attendeeEmail === 'string' ? args.attendeeEmail : undefined,
       );
-      return { success: true, data: result };
+      const cannotReschedule = result.bookings.some((b) => b.reschedule === 'not_allowed');
+      const cannotCancel = result.bookings.some((b) => b.cancel === 'not_allowed');
+      const guidance = [
+        cannotReschedule
+          ? 'An appointment in this list cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.'
+          : '',
+        cannotCancel
+          ? 'An appointment in this list cannot be cancelled (CHANGE_NOT_ALLOWED). Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot cancel that appointment here.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return { success: true, data: { ...result, ...(guidance ? { guidance } : {}) } };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to list bookings') };
     }
@@ -1346,7 +1395,7 @@ export class ListBookingsTool implements ToolAdapter {
 export class RescheduleBookingTool implements ToolAdapter {
   name = 'reschedule_booking';
   description =
-    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file.';
+    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file. If it returns CHANGE_NOT_ALLOWED, tell them they cannot reschedule here — do not ask for confirmation.';
   parameters = {
     type: 'object',
     properties: {
@@ -1371,6 +1420,9 @@ export class RescheduleBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      const bookingId = args.bookingId as string;
+      const mode = await peekCustomerChange(ctx.sessionId, bookingId, 'reschedule');
+      if (mode === 'not_allowed') return changeNotAllowedResult('reschedule');
       const gate = await refuseUnlessRescheduleConfirmed(args, ctx);
       if (gate.refusal) return gate.refusal;
       // The gate's address, not the caller's: the confirming call is often the one that drops it,
@@ -1381,7 +1433,7 @@ export class RescheduleBookingTool implements ToolAdapter {
       const result = await rescheduleBooking(
         'agent',
         ctx.sessionId,
-        args.bookingId as string,
+        bookingId,
         args.newStartTime as string,
         customerAddress ? { customerAddress } : undefined,
       );
@@ -1394,7 +1446,7 @@ export class RescheduleBookingTool implements ToolAdapter {
 
 export class CancelBookingTool implements ToolAdapter {
   name = 'cancel_booking';
-  description = 'Cancel an existing booking.';
+  description = 'Cancel an existing booking. If it returns CHANGE_NOT_ALLOWED, tell them they cannot cancel here — do not ask for confirmation.';
   parameters = {
     type: 'object',
     properties: {
@@ -1413,12 +1465,17 @@ export class CancelBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      const bookingId = args.bookingId as string;
+      const mode = await peekCustomerChange(ctx.sessionId, bookingId, 'cancel');
+      if (mode === 'not_allowed') return changeNotAllowedResult('cancel');
+      // Auto executes the cancel; request only captures an owner-approval row.
+      // Both still need an explicit yes — a single "annuleer het" must not fire.
       const needsConfirm = await refuseUnlessCancelConfirmed(args, ctx);
       if (needsConfirm) return needsConfirm;
       const result = await cancelBooking(
         'agent',
         ctx.sessionId,
-        args.bookingId as string,
+        bookingId,
         args.reason as string | undefined
       );
       return { success: true, data: result };

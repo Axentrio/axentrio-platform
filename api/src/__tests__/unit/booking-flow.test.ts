@@ -46,6 +46,7 @@ vi.mock('../../booking/booking.service', () => ({
   cancelBooking: vi.fn(),
   updateBooking: vi.fn(),
   peekCustomerEmailRequired: vi.fn().mockResolvedValue(false),
+  peekCustomerChange: vi.fn().mockResolvedValue('auto'),
 }));
 
 // ── Mock RAG service ────────────────────────────────────────────────

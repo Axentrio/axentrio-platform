@@ -11,6 +11,7 @@ const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 const mockUpdateBooking = vi.fn();
 const mockPeekCustomerEmailRequired = vi.fn(async (_sessionId?: string, _serviceId?: string) => false);
+const mockPeekCustomerChange = vi.fn(async () => 'auto' as const);
 
 
 vi.mock('../../webhooks/webhook.emitter', () => ({
@@ -34,6 +35,7 @@ vi.mock('../../booking/booking.service', () => ({
   updateBooking: (...args: unknown[]) => mockUpdateBooking(...args),
   peekCustomerEmailRequired: (sessionId: string, serviceId?: string) =>
     mockPeekCustomerEmailRequired(sessionId, serviceId),
+  peekCustomerChange: (...args: unknown[]) => mockPeekCustomerChange(...args),
   BookingError: class BookingError extends Error {
     code: string;
     statusCode: number;
@@ -1307,6 +1309,25 @@ describe('ListBookingsTool', () => {
     expect(result.success).toBe(true);
     expect(mockListBookings).toHaveBeenCalledWith('agent', 'sess-3', undefined);
   });
+
+  it('tells the model when a listed booking cannot be cancelled', async () => {
+    const tool = new ListBookingsTool();
+    mockListBookings.mockResolvedValue({
+      bookings: [
+        { id: 'bk-1', status: 'confirmed', cancel: 'not_allowed', reschedule: 'request' },
+      ],
+    });
+
+    const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(
+      expect.objectContaining({
+        guidance: expect.stringMatching(/cannot be cancelled[\s\S]*CHANGE_NOT_ALLOWED/),
+      }),
+    );
+  });
+
 });
 
 describe('RescheduleBookingTool', () => {
@@ -1357,6 +1378,90 @@ describe('RescheduleBookingTool', () => {
       customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen',
     });
   });
+
+  it('a request-policy move still waits for an explicit yes', async () => {
+    const tool = new RescheduleBookingTool();
+    mockPeekCustomerChange.mockResolvedValueOnce('request');
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-reschedule',
+      conversationHistory: [{ role: 'user', content: 'passtraat 248B, 9100 Sint-Niklaas' }],
+    });
+
+    const result = await tool.execute(
+      {
+        bookingId: 'bk-orig',
+        newStartTime: '2026-09-07T15:00:00',
+        customerAddress: 'Passtraat 248B, 9100 Sint-Niklaas',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+  });
+
+  it('refuses a not_allowed move on the first call, without confirmation', async () => {
+    const tool = new RescheduleBookingTool();
+    mockPeekCustomerChange.mockResolvedValueOnce('not_allowed');
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-na',
+      conversationHistory: [{ role: 'user', content: 'verzet naar 15:00' }],
+    });
+
+    const result = await tool.execute(
+      { bookingId: 'bk-orig', newStartTime: '2026-09-07T15:00:00' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+  });
+
+  it('still waits for a yes when the Service auto-moves', async () => {
+    const tool = new RescheduleBookingTool();
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-auto',
+      conversationHistory: [{ role: 'user', content: 'passtraat 248B, 9100 Sint-Niklaas' }],
+    });
+
+    const result = await tool.execute(
+      {
+        bookingId: 'bk-orig',
+        newStartTime: '2026-09-07T15:00:00',
+        customerAddress: 'Passtraat 248B, 9100 Sint-Niklaas',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+  });
+
+  it('refuses not_allowed before asking the customer to confirm a move', async () => {
+    // Screenshot: reschedule Not allowed, the bot asked for a new time, then
+    // said the change was confirmed while the calendar stayed on 4 Sep.
+    const tool = new RescheduleBookingTool();
+    mockPeekCustomerChange.mockResolvedValueOnce('not_allowed');
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-forbidden',
+      conversationHistory: [{ role: 'user', content: 'ik wil graag mijn afspraak wijzigen' }],
+    });
+
+    const result = await tool.execute(
+      { bookingId: 'bk-orig', newStartTime: '2026-09-07T14:00:00' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(result.error).not.toMatch(/MOVE_PENDING/);
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+  });
 });
 
 describe('CancelBookingTool', () => {
@@ -1376,6 +1481,37 @@ describe('CancelBookingTool', () => {
 
     expect(result.success).toBe(true);
     expect(mockCancelBooking).toHaveBeenCalledWith('agent', 'sess-5', 'bk-4', 'Not needed');
+  });
+
+  it('a request-policy cancel still waits for an explicit yes', async () => {
+    mockPeekCustomerChange.mockResolvedValueOnce('request');
+    const tool = new CancelBookingTool();
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-cancel',
+      conversationHistory: [{ role: 'user', content: 'ik wil mijn afspraak annuleren' }],
+    });
+
+    const result = await tool.execute({ bookingId: 'bk-orig' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCancelBooking).not.toHaveBeenCalled();
+  });
+
+  it('refuses a not_allowed cancel on the first call, without confirmation', async () => {
+    mockPeekCustomerChange.mockResolvedValueOnce('not_allowed');
+    const tool = new CancelBookingTool();
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-cancel',
+      conversationHistory: [{ role: 'user', content: 'of nee annuleer het maar gewoon' }],
+    });
+
+    const result = await tool.execute({ bookingId: 'bk-orig' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCancelBooking).not.toHaveBeenCalled();
   });
 });
 

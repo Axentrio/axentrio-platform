@@ -304,6 +304,19 @@ describe('confirmation keys do not cross kinds', () => {
     expect(store.has('booking:confirm-reschedule:sess-confirm')).toBe(true);
   });
 
+  it('forbids claiming a request was submitted before the write', async () => {
+    // Screenshot: "Ik leg de verplaatsing ter bevestiging voor" after CONFIRMATION_REQUIRED;
+    // Requests stayed empty because nothing was captured.
+    const refused = await refuseUnlessRescheduleConfirmed(
+      { bookingId: 'bk-1', newStartTime: '2026-09-07T15:00:00' },
+      toolCtx([{ role: 'user', content: 'passtraat 248B, 9100 Sint-Niklaas' }]),
+    );
+    expect(refused.refusal?.error).toMatch(CONFIRMATION_REQUIRED);
+    expect(refused.refusal?.error).toMatch(/nothing was captured/i);
+    expect(refused.refusal?.error).toMatch(/do not say you submitted a request/i);
+    expect(refused.refusal?.error).toMatch(/present it to the owner/i);
+  });
+
   it('a pending reschedule does not satisfy a create yes', async () => {
     const first = await refuseUnlessRescheduleConfirmed(
       { bookingId: 'bk-1', newStartTime: '2026-06-10T10:00:00' },

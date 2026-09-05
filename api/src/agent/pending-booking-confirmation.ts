@@ -453,7 +453,8 @@ export async function refuseUnlessRescheduleConfirmed(
     refusal: {
       success: false,
       error:
-        `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Send a short summary ` +
+        `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was moved. Nothing was captured — ` +
+        `do not say you submitted a request or will present it to the owner. Send a short summary ` +
         `of the existing appointment, the new time${addressBit}, then wait for an explicit yes. Call reschedule_booking ` +
         `again only after they confirm this same move. Do not pick a different time than the one they named.`,
       errorSafeForModel: true,
@@ -528,7 +529,8 @@ export async function refuseUnlessCancelConfirmed(
   return {
     success: false,
     error:
-      `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was cancelled. Confirm which ` +
+      `${CONFIRMATION_REQUIRED}: Do not tell the customer the appointment was cancelled. Nothing was captured — ` +
+      `do not say you submitted a request or will present it to the owner. Confirm which ` +
       `appointment they mean, then wait for an explicit yes. Call cancel_booking again only after they confirm.`,
     errorSafeForModel: true,
     data: { needsConfirmation: true, bookingId },

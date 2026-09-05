@@ -28,6 +28,8 @@ import {
   resolveCustomerChange,
   CHANGE_REQUEST_LOCK_CLASS,
   DEFAULT_CUSTOMER_CHANGE_MODE,
+  customerChangeNotAllowedError,
+  type CustomerChangeMode,
 } from '../customer-change-policy';
 import { logger } from '../../utils/logger';
 import {
@@ -3027,8 +3029,11 @@ export class InternalProvider implements BookingProvider {
       ? 'AND (LOWER(TRIM(b.attendee_email)) = $4 OR b.attendee_email IS NULL)'
       : '';
     const sessionEmailClause = filterByEmail
-      ? 'AND (LOWER(TRIM(attendee_email)) = $4 OR attendee_email IS NULL)'
+      ? 'AND (LOWER(TRIM(b.attendee_email)) = $4 OR b.attendee_email IS NULL)'
       : '';
+    const listedColumns = `b.id, b.start_utc, b.end_utc, b.attendee_name, b.attendee_email, b.status,
+       st.name AS service_name,
+       st.reschedule_mode, st.reschedule_until_min, st.cancel_mode, st.cancel_until_min`;
     const rows: Array<{
       id: string;
       start_utc: Date;
@@ -3036,11 +3041,17 @@ export class InternalProvider implements BookingProvider {
       attendee_name: string | null;
       attendee_email: string | null;
       status: string;
+      service_name: string | null;
+      reschedule_mode: CustomerChangeMode | null;
+      reschedule_until_min: number | null;
+      cancel_mode: CustomerChangeMode | null;
+      cancel_until_min: number | null;
     }> = visitor
       ? await AppDataSource.getRepository(Booking).query(
-          `SELECT b.id, b.start_utc, b.end_utc, b.attendee_name, b.attendee_email, b.status
+          `SELECT ${listedColumns}
              FROM chatbot_bookings b
              JOIN chat_sessions s ON s.id = b.session_id
+             LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
             WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
               AND s.visitor_id = $3 ${visitorEmailClause}
             ORDER BY b.start_utc ASC`,
@@ -3049,23 +3060,38 @@ export class InternalProvider implements BookingProvider {
             : [ctx.tenant.id, ctx.bot.id, visitor],
         )
       : await AppDataSource.getRepository(Booking).query(
-          `SELECT id, start_utc, end_utc, attendee_name, attendee_email, status
-             FROM chatbot_bookings
-            WHERE tenant_id = $1 AND bot_id = $2 AND status = 'confirmed'
-              AND session_id = $3 ${sessionEmailClause}
-            ORDER BY start_utc ASC`,
+          `SELECT ${listedColumns}
+             FROM chatbot_bookings b
+             LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
+            WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
+              AND b.session_id = $3 ${sessionEmailClause}
+            ORDER BY b.start_utc ASC`,
           filterByEmail
             ? [ctx.tenant.id, ctx.bot.id, ctx.session.id, email]
             : [ctx.tenant.id, ctx.bot.id, ctx.session.id],
         );
     return {
-      bookings: rows.map((b) => ({
-        id: b.id,
-        startTime: new Date(b.start_utc).toISOString(),
-        endTime: new Date(b.end_utc).toISOString(),
-        attendee: { name: b.attendee_name ?? undefined, email: b.attendee_email ?? undefined },
-        status: b.status,
-      })),
+      bookings: rows.map((b) => {
+        const start = new Date(b.start_utc);
+        return {
+          id: b.id,
+          startTime: start.toISOString(),
+          endTime: new Date(b.end_utc).toISOString(),
+          attendee: { name: b.attendee_name ?? undefined, email: b.attendee_email ?? undefined },
+          status: b.status,
+          serviceName: b.service_name ?? undefined,
+          reschedule: resolveCustomerChange(
+            b.reschedule_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
+            start,
+            b.reschedule_until_min,
+          ),
+          cancel: resolveCustomerChange(
+            b.cancel_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
+            start,
+            b.cancel_until_min,
+          ),
+        };
+      }),
     };
   }
 
@@ -3401,6 +3427,24 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
+   * Effective customer-change mode for this appointment. Uses `loadOwned` so a
+   * missing or foreign id is BOOKING_NOT_FOUND, never a silent `request` default
+   * that would skip auto-confirm and then 404 on the write.
+   */
+  async peekCustomerChange(
+    ctx: BookingContext,
+    bookingId: string,
+    kind: 'reschedule' | 'cancel',
+  ): Promise<CustomerChangeMode> {
+    const booking = await this.loadOwned(ctx, bookingId);
+    const service = await this.serviceForBooking(booking);
+    const mode =
+      (kind === 'cancel' ? service.cancelMode : service.rescheduleMode) ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+    const untilMin = kind === 'cancel' ? service.cancelUntilMin : service.rescheduleUntilMin;
+    return resolveCustomerChange(mode, booking.startUtc, untilMin);
+  }
+
+  /**
    * A live appointment the SAME customer already holds for the SAME service (#72).
    *
    * The reason this exists is a pause. The pause gate is create-shaped: it tells the model to
@@ -3464,16 +3508,7 @@ export class InternalProvider implements BookingProvider {
   }
 
   private refuseCustomerChange(serviceName: string, action: 'reschedule' | 'cancel'): never {
-    const verb = action === 'reschedule' ? 'reschedule' : 'cancel';
-    throw new BookingError(
-      `"${serviceName}" does not allow customers to ${verb} through the booking system. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
-      'CHANGE_NOT_ALLOWED',
-      403,
-      { action },
-      action === 'reschedule'
-        ? 'This appointment cannot be rescheduled online. Please contact the business directly.'
-        : 'This appointment cannot be cancelled online. Please contact the business directly.',
-    );
+    throw customerChangeNotAllowedError(serviceName, action);
   }
 
   private async withChangeRequestLock<T>(

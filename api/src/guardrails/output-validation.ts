@@ -64,6 +64,15 @@ export function claimsBookingDone(text: string): boolean {
     // open zijn" false-positive (review FP round 2).
     /\bik heb (?:je|uw|het|de|een)?\s?(?:afspraak|reservering|boeking)?\s?(?:geboekt|gereserveerd)\b/,
     /\bik heb (?:je|uw|het|de|een)?\s?(?:afspraak|reservering|boeking)\s?(?:gepland|ingepland|bevestigd)\b/,
+    // Live 2026-09: reschedule set to not_allowed, the model still said
+    // "Uw wijziging is bevestigd" while the diary never moved.
+    // `Je afspraak is bevestigd` and `afspraak staat nu op` stay out — the
+    // first is a prior confirmation the bot may quote; the second is how it
+    // tells the customer the original appointment still stands.
+    /\b(?:je|uw) wijziging is bevestigd\b/,
+    /\byour (?:change|reschedule) (?:is|has been) confirmed\b/,
+    /\bi(?:'ve| have) (?:successfully )?(?:rescheduled|moved) (?:your )?(?:appointment|booking)\b/,
+    /\byour appointment has been (?:moved|rescheduled)\b/,
   ].some((re) => re.test(t));
 }
 

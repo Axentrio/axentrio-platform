@@ -11,6 +11,7 @@
  * `not_allowed` to `request` or `auto`.
  */
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
+import { BookingError } from './booking-providers/types';
 
 export type { CustomerChangeMode };
 
@@ -89,4 +90,22 @@ export function catalogChangeClause(
   const resolved = mode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
   const cutoff = resolved === 'not_allowed' ? null : formatChangeCutoff(untilMin);
   return cutoff ? `${label}: ${resolved} ${cutoff}` : `${label}: ${resolved}`;
+}
+
+/** Same refusal the write path and the agent confirmation gate must raise. */
+export function customerChangeNotAllowedError(
+  serviceName: string | undefined,
+  action: 'reschedule' | 'cancel',
+): BookingError {
+  const verb = action === 'reschedule' ? 'reschedule' : 'cancel';
+  const who = serviceName ? `"${serviceName}"` : 'This appointment';
+  return new BookingError(
+    `${who} does not allow customers to ${verb} through the booking system. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
+    'CHANGE_NOT_ALLOWED',
+    403,
+    { action },
+    action === 'reschedule'
+      ? 'This appointment cannot be rescheduled online. Please contact the business directly.'
+      : 'This appointment cannot be cancelled online. Please contact the business directly.',
+  );
 }

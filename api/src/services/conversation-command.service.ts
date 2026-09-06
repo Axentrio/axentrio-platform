@@ -52,6 +52,7 @@ import { logger } from '../utils/logger';
 import {
   clearConversationResetState,
   clearIdentityScratch,
+  releaseResetBookingSideEffects,
   ResetScratchClearError,
 } from './conversation-reset-state';
 
@@ -188,6 +189,9 @@ export interface ResetResult {
   transcriptSessionIds?: string[];
   /** True only after Redis DEL of session-keyed tool state succeeded. */
   scratchCleared?: boolean;
+  cancelledBookingIds?: string[];
+  reminderJobIds?: string[];
+  calendarCancels?: Array<{ bookingId: string; tenantId: string; botId: string }>;
 }
 
 export interface TransferResult {
@@ -1073,7 +1077,8 @@ export const conversationCommands = {
    * and delete this customer's message transcripts on this channel (this
    * chat and earlier chats). Other channels keep their logs. Close alone
    * leaves remembered preferred times in the next prompt.
-   * Confirmed calendar bookings are not cancelled.
+   * Live bookings on the wiped chats are cancelled so the next turn is not
+   * alreadyHeld and the slot is free on the internal diary.
    *
    * Redis scratch is cleared AFTER the DB commit. Missing Redis or a DEL that
    * still fails after retries throws 503 `reset_scratch_incomplete` so Reset is
@@ -1112,7 +1117,14 @@ export const conversationCommands = {
         conversation,
         sessionIds: cleared.sessionIds,
         transcriptSessionIds: cleared.transcriptSessionIds,
+        cancelledBookingIds: cleared.cancelledBookingIds,
+        reminderJobIds: cleared.reminderJobIds,
+        calendarCancels: cleared.calendarCancels,
       };
+    });
+    await releaseResetBookingSideEffects({
+      reminderJobIds: result.reminderJobIds ?? [],
+      calendarCancels: result.calendarCancels ?? [],
     });
     try {
       const scratchCleared = await clearIdentityScratch(result.sessionIds ?? [sessionId]);

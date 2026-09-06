@@ -325,11 +325,11 @@ router.post(
 /**
  * POST /chats/:sessionId/reset — super-admin testing reset. Closes the
  * conversation (next inbound starts a new session) and clears this identity's
- * customer-memory, draft booking/tool scratch, intake, and Redis session state.
- * Confirmed calendar bookings are not cancelled. Missing Redis or a Redis that
- * cannot drop booking:confirm / booking:offered / gr:loop returns 503
- * reset_scratch_incomplete so the operator can retry. The 503 still fans out
- * session:closed + conversation:upsert because the DB close already committed.
+ * customer-memory, draft booking/tool scratch, intake, Redis session state,
+ * and live bookings (so the next chat is not alreadyHeld). Missing Redis or a
+ * Redis that cannot drop booking:confirm / booking:offered / gr:loop returns
+ * 503 reset_scratch_incomplete so the operator can retry. The 503 still fans
+ * out session:closed + conversation:upsert because the DB close already committed.
  */
 async function emitResetClosedFanout(tenantId: string, sessionId: string): Promise<void> {
   emitToSession(tenantId, sessionId, "session:closed", {

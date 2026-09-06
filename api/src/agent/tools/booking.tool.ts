@@ -502,13 +502,11 @@ function mergeBlockedReschedule(
   if (!blocked.length || holdAlreadyExplained) return named;
   const cutoff = blocked.find((b) => b.rescheduleCutoff)?.rescheduleCutoff;
   const blockedGuidance = cutoff
-    ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human. Times in this result are only for a new appointment, never a move of the existing one.`
-    : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here. Times in this result are only for a new appointment, never a move of the existing one.';
-  const { guidance: namedGuidance, ...rest } = named;
+    ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.`
+    : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.';
   return {
     cannotReschedule: blocked,
-    guidance: [blockedGuidance, namedGuidance].filter(Boolean).join(' '),
-    ...rest,
+    guidance: blockedGuidance,
   };
 }
 

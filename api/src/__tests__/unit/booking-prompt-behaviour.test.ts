@@ -1356,7 +1356,6 @@ describe('check_availability — a time the caller already holds is not unavaila
     expect(data.guidance).toMatch(/1 hour before the appointment/);
     expect(data.guidance).toMatch(/not possible to reschedule 1 hour before the appointment/);
     expect(data.guidance).toMatch(/do not call reschedule_booking/i);
-    expect(data.guidance).toMatch(/never a move of the existing one/);
     expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
     expect(Object.keys(data)[0]).toBe('cannotReschedule');
     expect(Object.keys(data)).toEqual(['cannotReschedule', 'guidance']);

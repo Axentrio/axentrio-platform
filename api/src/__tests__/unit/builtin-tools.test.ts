@@ -11,12 +11,14 @@ const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 const mockUpdateBooking = vi.fn();
 const mockPeekCustomerEmailRequired = vi.fn(async (_sessionId?: string, _serviceId?: string) => false);
+type PeekMode = 'auto' | 'request' | 'not_allowed';
+type PeekResult = PeekMode | { mode: PeekMode; policy: PeekMode; untilMin: number | null };
 const mockPeekCustomerChange = vi.fn(
   async (
     _sessionId?: string,
     _bookingId?: string,
     _kind?: 'reschedule' | 'cancel',
-  ): Promise<'auto' | 'request' | 'not_allowed'> => 'auto',
+  ): Promise<PeekResult> => 'auto',
 );
 
 
@@ -1352,11 +1354,12 @@ describe('ListBookingsTool', () => {
     const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
 
     expect(result.success).toBe(true);
-    expect(String(result.data?.guidance)).toMatch(/inside the cutoff/);
-    expect(String(result.data?.guidance)).toMatch(/name the cutoff/);
-    expect(String(result.data?.guidance)).toMatch(/do not tell them to contact the business/i);
-    expect(String(result.data?.guidance)).toMatch(/keep insisting after you have explained the cutoff/);
-    expect(String(result.data?.guidance)).not.toMatch(/Politely explain they cannot cancel that appointment here/);
+    const guidance = (result.data as { guidance?: string } | undefined)?.guidance ?? '';
+    expect(guidance).toMatch(/inside the cutoff/);
+    expect(guidance).toMatch(/name the cutoff/);
+    expect(guidance).toMatch(/do not tell them to contact the business/i);
+    expect(guidance).toMatch(/keep insisting after you have explained the cutoff/);
+    expect(guidance).not.toMatch(/Politely explain they cannot cancel that appointment here/);
   });
 
 

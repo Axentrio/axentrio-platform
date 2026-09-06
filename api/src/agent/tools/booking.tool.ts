@@ -481,6 +481,163 @@ async function rescheduleAllowedForHeld(
   }
 }
 
+async function heldPolicyFromAvailability(
+  sessionId: string,
+  result: Pick<AvailabilityResult, 'alreadyHeld' | 'cannotReschedule'>,
+): Promise<{ allowed: boolean; cutoff: string | null }> {
+  const blocked = result.cannotReschedule ?? [];
+  const heldHit =
+    result.alreadyHeld?.length === 1
+      ? blocked.find((b) => b.bookingId === result.alreadyHeld![0].bookingId)
+      : undefined;
+  if (heldHit) return { allowed: false, cutoff: heldHit.rescheduleCutoff ?? null };
+  return rescheduleAllowedForHeld(sessionId, result.alreadyHeld);
+}
+
+function mergeBlockedReschedule(
+  named: Record<string, unknown>,
+  blocked: NonNullable<AvailabilityResult['cannotReschedule']>,
+  holdAlreadyExplained: boolean,
+): Record<string, unknown> {
+  if (!blocked.length || holdAlreadyExplained) return named;
+  const cutoff = blocked.find((b) => b.rescheduleCutoff)?.rescheduleCutoff;
+  const blockedGuidance = cutoff
+    ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human. Times in this result are only for a new appointment, never a move of the existing one.`
+    : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here. Times in this result are only for a new appointment, never a move of the existing one.';
+  const { guidance: namedGuidance, ...rest } = named;
+  return {
+    cannotReschedule: blocked,
+    guidance: [blockedGuidance, namedGuidance].filter(Boolean).join(' '),
+    ...rest,
+  };
+}
+
+
+function heldNoteAvailabilityResult(
+  ctx: ToolContext,
+  heldNote: Record<string, unknown>,
+  moveSlots: Array<{ start: string; end: string }>,
+  zone: string,
+  result: AvailabilityResult,
+  groupedNote: Record<string, string>,
+  chosen: TurnAddress,
+  measurement: Record<string, unknown>,
+  availability: Record<string, unknown>,
+  affordance: Record<string, unknown>,
+  replyFact: Record<string, unknown>,
+): ToolResult | null {
+  if (!heldNote.guidance) return null;
+  if (moveSlots.length > 0) {
+    void rememberOfferedSlots(
+      ctx.sessionId,
+      moveSlots.map((s) => s.start),
+      zone,
+    );
+  }
+  return {
+    success: true,
+    ...measurement,
+    ...availability,
+    ...affordance,
+    ...replyFact,
+    data: {
+      ...heldNote,
+      timezone: zone,
+      serviceId: result.serviceId,
+      serviceName: result.serviceName,
+      ...groupedNote,
+      ...addressEcho(chosen.address),
+    },
+  };
+}
+
+function finishAvailabilityAfterHold(
+  ctx: ToolContext,
+  utcSlots: AvailabilitySlots,
+  zone: string,
+  result: AvailabilityModel,
+  emptyRange: AvailabilityResult['emptyRange'],
+  groupedNote: Record<string, string>,
+  chosen: TurnAddress,
+  measurement: Record<string, unknown>,
+  availability: Record<string, unknown>,
+  affordance: Record<string, unknown>,
+  replyFact: Record<string, unknown>,
+  modelResult: Record<string, unknown>,
+  withNamedTime: (data: Record<string, unknown>) => Record<string, unknown>,
+): ToolResult {
+  if (utcSlots.length > 0) {
+    void rememberOfferedSlots(
+      ctx.sessionId,
+      utcSlots.map((s) => s.start),
+      zone,
+    );
+  }
+  const travel = result.travel;
+  if (travel && travel.requestableSlots.length > 0) {
+    return {
+      success: true,
+      ...measurement,
+      ...availability,
+      ...affordance,
+      ...replyFact,
+      data: withNamedTime({
+        ...modelResult,
+        ...groupedNote,
+        ...addressEcho(chosen.address),
+        suggestedAction: 'request_appointment',
+        guidance: [windowNote(result, utcSlots, true).guidance, travelGuidance(travel)].filter(Boolean).join(' '),
+      }),
+    };
+  }
+  const outOfWindow = emptyRange;
+  if (outOfWindow) {
+    const retry = retryRange(outOfWindow.reason, outOfWindow.boundary, zone);
+    return {
+      success: true,
+      ...measurement,
+      ...availability,
+      ...affordance,
+      ...replyFact,
+      data: withNamedTime({
+        ...modelResult,
+        ...groupedNote,
+        ...addressEcho(chosen.address),
+        noSlotsInRange: true,
+        suggestedAction: 'check_availability',
+        guidance: outOfWindowGuidance(outOfWindow, retry),
+      }),
+    };
+  }
+  if (utcSlots.length === 0) {
+    return {
+      success: true,
+      ...measurement,
+      ...availability,
+      ...affordance,
+      ...replyFact,
+      data: withNamedTime({
+        ...modelResult,
+        ...groupedNote,
+        ...addressEcho(chosen.address),
+        noSlotsInRange: true,
+        suggestedAction: 'request_appointment',
+        guidance:
+          'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked, and it does NOT mean a listed auto-book service is unavailable. Do not turn the customer away and do not hand off. If the chosen service flags "needs phone" and you have no number yet, ask for it, keep the date they named, and do not capture a request. Otherwise ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
+      }),
+    };
+  }
+  return {
+    success: true,
+    data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address), ...windowNote(result, utcSlots) }),
+    ...measurement,
+    ...availability,
+    ...affordance,
+    ...replyFact,
+  };
+}
+
+
 function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
   moveTargets: Array<{ start: string; end: string }>,
@@ -770,13 +927,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
       const blocked = result.cannotReschedule ?? [];
-      const heldHit =
-        result.alreadyHeld?.length === 1
-          ? blocked.find((b) => b.bookingId === result.alreadyHeld![0].bookingId)
-          : undefined;
-      const heldPolicy = heldHit
-        ? { allowed: false as const, cutoff: heldHit.rescheduleCutoff ?? null }
-        : await rescheduleAllowedForHeld(ctx.sessionId, result.alreadyHeld);
+      const heldPolicy = await heldPolicyFromAvailability(ctx.sessionId, result);
       const rescheduleAllowed = heldPolicy.allowed;
       const moveSlots = rescheduleAllowed
         ? await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx)
@@ -791,54 +942,29 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
       const heldClocks = localClockTimes(result.alreadyHeld ?? [], zone) ?? [];
-      const withNamedTime = (data: Record<string, unknown>) => {
-        const named = {
-          ...data,
-          ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
-        };
-        if (!blocked.length || heldNote.guidance) return named;
-        const cutoff = blocked.find((b) => b.rescheduleCutoff)?.rescheduleCutoff;
-        const blockedGuidance = cutoff
-          ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human. Times in this result are only for a new appointment, never a move of the existing one.`
-          : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here. Times in this result are only for a new appointment, never a move of the existing one.';
-        const { guidance: namedGuidance, ...rest } = named;
-        return {
-          cannotReschedule: blocked,
-          guidance: [blockedGuidance, namedGuidance].filter(Boolean).join(' '),
-          ...rest,
-        };
-      };
-      if (heldNote.guidance) {
-        // Live WaterFix 2026-09-01: alreadyHeld and confirm_existing were in the
-        // model copy (1321 chars, not truncated) and the model still said the
-        // time was unavailable because slots was in the same payload. The hold
-        // note is the whole payload - free times only ride along as moveTargets,
-        // named by guidance for reschedule_booking. Do not run namedTimeGuidance here.
-        // moveTargets are offers the reschedule gate later measures a chip or a named
-        // instant against, so they are recorded like every other offered slot.
-        if (moveSlots.length > 0) {
-          void rememberOfferedSlots(
-            ctx.sessionId,
-            moveSlots.map((s) => s.start),
-            zone,
-          );
-        }
-        return {
-          success: true,
-          ...measurement,
-          ...availability,
-          ...affordance,
-          ...replyFact,
-          data: {
-            ...heldNote,
-            timezone: zone,
-            serviceId: result.serviceId,
-            serviceName: result.serviceName,
-            ...groupedNote,
-            ...addressEcho(chosen.address),
+      const withNamedTime = (data: Record<string, unknown>) =>
+        mergeBlockedReschedule(
+          {
+            ...data,
+            ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
           },
-        };
-      }
+          blocked,
+          !!heldNote.guidance,
+        );
+      const heldReturn = heldNoteAvailabilityResult(
+        ctx,
+        heldNote,
+        moveSlots,
+        zone,
+        result,
+        groupedNote,
+        chosen,
+        measurement,
+        availability,
+        affordance,
+        replyFact,
+      );
+      if (heldReturn) return heldReturn;
       // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time
       // the model constructed from the customer's words (strip the Z). That judgement needs the
       // exact strings this call returned, which may be turns behind the booking.

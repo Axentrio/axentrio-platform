@@ -520,9 +520,32 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId,
     });
     const live = await this.liveBookingsForCaller(ctx);
+    const holds = this.liveAvailabilityHolds(live, service, rangeStart, rangeEnd);
+    return {
+      slots: travel.slots,
+      timezone: rule.timezone,
+      serviceId: service.id,
+      serviceName: service.name,
+      // #80 (LP3): WHO TRAVELS for this service, as it stood when the slots were offered.
+      // Resolved here rather than joined later, because a Service's mode can change and the
+      // baseline is about what was true at the moment of the offer.
+      locationMode: resolveServiceLocationMode(service),
+      travel: travel.summary,
+      ...(emptyRange ? { emptyRange } : {}),
+      ...(travel.grouping ? { grouping: travel.grouping } : {}),
+      ...holds,
+      ...(clockWindow ? { clockWindow: { ...clockWindow, matched: windowMatched } } : {}),
+    };
+  }
+
+  private liveAvailabilityHolds(
+    live: Booking[],
+    service: { id: string; rescheduleMode?: CustomerChangeMode | null; rescheduleUntilMin?: number | null },
+    rangeStart: Date | string,
+    rangeEnd: Date | string,
+  ): Pick<AvailabilityResult, 'alreadyHeld' | 'cannotReschedule'> {
     const liveSame = live.filter(
-      (b) =>
-        (b.status === 'confirmed' || b.status === 'pending') && b.eventTypeId === service.id,
+      (b) => (b.status === 'confirmed' || b.status === 'pending') && b.eventTypeId === service.id,
     );
     const rangeStartMs = new Date(rangeStart).getTime();
     const rangeEndMs = new Date(rangeEnd).getTime();
@@ -549,17 +572,6 @@ export class InternalProvider implements BookingProvider {
       ];
     });
     return {
-      slots: travel.slots,
-      timezone: rule.timezone,
-      serviceId: service.id,
-      serviceName: service.name,
-      // #80 (LP3): WHO TRAVELS for this service, as it stood when the slots were offered.
-      // Resolved here rather than joined later, because a Service's mode can change and the
-      // baseline is about what was true at the moment of the offer.
-      locationMode: resolveServiceLocationMode(service),
-      travel: travel.summary,
-      ...(emptyRange ? { emptyRange } : {}),
-      ...(travel.grouping ? { grouping: travel.grouping } : {}),
       ...(held.length
         ? {
             alreadyHeld: held.map((b) => ({
@@ -570,9 +582,9 @@ export class InternalProvider implements BookingProvider {
           }
         : {}),
       ...(cannotReschedule.length ? { cannotReschedule } : {}),
-      ...(clockWindow ? { clockWindow: { ...clockWindow, matched: windowMatched } } : {}),
     };
   }
+
 
   /**
    * Keep the slots the owner can actually reach; hand back the ones nobody can vouch for.

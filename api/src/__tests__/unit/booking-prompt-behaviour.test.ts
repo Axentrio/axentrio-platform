@@ -1303,6 +1303,9 @@ describe('check_availability — a time the caller already holds is not unavaila
     );
     const data = res.data as { moveTargets?: unknown[]; guidance?: string };
     expect(data.moveTargets).toBeUndefined();
+    expect(data.slots).toBeUndefined();
+    expect(res.availability).toBeUndefined();
+    expect(res.affordance).toBeUndefined();
     expect(checkMoveAvailability).not.toHaveBeenCalled();
     expect(data.guidance).toMatch(/CHANGE_NOT_ALLOWED/);
     expect(data.guidance).toMatch(/do not call reschedule_booking/i);
@@ -1333,7 +1336,12 @@ describe('check_availability — a time the caller already holds is not unavaila
       { startDate: '2026-09-04', endDate: '2026-09-04' },
       { sessionId: 'cs-1' } as never,
     );
-    const data = res.data as { cannotReschedule?: unknown; guidance?: string; moveTargets?: unknown };
+    const data = res.data as {
+      cannotReschedule?: unknown;
+      guidance?: string;
+      moveTargets?: unknown;
+      slots?: unknown;
+    };
     expect(data.cannotReschedule).toEqual([
       {
         bookingId: 'bk-today',
@@ -1342,11 +1350,16 @@ describe('check_availability — a time the caller already holds is not unavaila
       },
     ]);
     expect(data.moveTargets).toBeUndefined();
+    expect(data.slots).toBeUndefined();
+    expect(res.availability).toBeUndefined();
+    expect(res.affordance).toBeUndefined();
     expect(data.guidance).toMatch(/1 hour before the appointment/);
     expect(data.guidance).toMatch(/not possible to reschedule 1 hour before the appointment/);
+    expect(data.guidance).toMatch(/do not call reschedule_booking/i);
     expect(data.guidance).toMatch(/never a move of the existing one/);
     expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
     expect(Object.keys(data)[0]).toBe('cannotReschedule');
+    expect(Object.keys(data)).toEqual(['cannotReschedule', 'guidance']);
   });
 
   it('a policy peek miss still ships the hold note, without moveTargets', async () => {

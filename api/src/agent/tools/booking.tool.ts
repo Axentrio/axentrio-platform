@@ -512,6 +512,19 @@ function mergeBlockedReschedule(
   };
 }
 
+/** Cutoff / not_allowed on a live booking outside this range: refuse, ship no times. */
+function blockedRescheduleResult(
+  blocked: NonNullable<AvailabilityResult['cannotReschedule']>,
+  alreadyHeld: AvailabilityResult['alreadyHeld'],
+): ToolResult | null {
+  if (!blocked.length || alreadyHeld?.length) return null;
+  return {
+    success: true,
+    data: mergeBlockedReschedule({}, blocked, false),
+  };
+}
+
+
 
 function heldNoteAvailabilityResult(
   ctx: ToolContext,
@@ -525,9 +538,10 @@ function heldNoteAvailabilityResult(
   availability: Record<string, unknown>,
   affordance: Record<string, unknown>,
   replyFact: Record<string, unknown>,
+  includeTimes: boolean,
 ): ToolResult | null {
   if (!heldNote.guidance) return null;
-  if (moveSlots.length > 0) {
+  if (includeTimes && moveSlots.length > 0) {
     void rememberOfferedSlots(
       ctx.sessionId,
       moveSlots.map((s) => s.start),
@@ -537,8 +551,8 @@ function heldNoteAvailabilityResult(
   return {
     success: true,
     ...measurement,
-    ...availability,
-    ...affordance,
+    ...(includeTimes ? availability : {}),
+    ...(includeTimes ? affordance : {}),
     ...replyFact,
     data: {
       ...heldNote,
@@ -927,6 +941,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
       const blocked = result.cannotReschedule ?? [];
+      const blockedOnly = blockedRescheduleResult(blocked, result.alreadyHeld);
+      if (blockedOnly) return blockedOnly;
       const heldPolicy = await heldPolicyFromAvailability(ctx.sessionId, result);
       const rescheduleAllowed = heldPolicy.allowed;
       const moveSlots = rescheduleAllowed
@@ -963,6 +979,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         availability,
         affordance,
         replyFact,
+        rescheduleAllowed,
       );
       if (heldReturn) return heldReturn;
       return finishAvailabilityAfterHold(

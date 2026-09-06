@@ -12,6 +12,7 @@ import type { OfferScoring } from '../travel/score-offer';
 import type { ChatSession } from '../../database/entities/ChatSession';
 import type { Tenant } from '../../database/entities/Tenant';
 import type { Bot, BotSettings } from '../../database/entities/Bot';
+import type { BookingActorKind } from '../../database/entities/BookingLog';
 
 export class BookingError extends Error {
   constructor(
@@ -56,6 +57,10 @@ export class BookingError extends Error {
   }
 }
 
+
+/** Who performed a Booking mutation. Stored on `booking_logs`, never inferred from session. */
+export type { BookingActorKind };
+
 /** Provider-agnostic context resolved once by the dispatcher per request. */
 export interface BookingContext {
   session: ChatSession;
@@ -96,6 +101,13 @@ export interface BookingContext {
    * are true; scheduler-admin and inbound calendar sync are false.
    */
   subjectToCustomerChangePolicy?: boolean;
+  /**
+   * Who is performing this mutation. Set at every dispatcher. `session` stays the
+   * customer conversation; this is who actually wrote. Omit only on reads.
+   */
+  actorKind?: BookingActorKind;
+  /** Clerk user id when `actorKind` is `scheduler-admin`. */
+  actorId?: string;
 }
 
 export interface BookingSlot {

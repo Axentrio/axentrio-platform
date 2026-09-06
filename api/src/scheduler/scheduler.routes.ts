@@ -63,6 +63,7 @@ router.post('/presets/:key/apply', requireRole('admin'), asyncHandler(ctrl.apply
 // Bookings management (internal provider). Reads for admin/supervisor/agent;
 // mutations admin-only.
 router.get('/bookings', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listBookings));
+router.get('/bookings/:id/log', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listBookingLogs));
 router.get('/availability', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getBookingAvailability));
 router.post('/bookings/:id/cancel', requireRole('admin'), asyncHandler(ctrl.cancelBooking));
 router.post('/bookings/:id/reschedule', requireRole('admin'), asyncHandler(ctrl.rescheduleBooking));

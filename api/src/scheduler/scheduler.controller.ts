@@ -46,6 +46,7 @@ import {
 import type { Repository, EntityManager } from 'typeorm';
 import {
   adminListBookings,
+  adminListBookingLogs,
   adminAvailability,
   adminCancelBooking,
   adminRescheduleBooking,
@@ -1004,6 +1005,17 @@ export async function listBookings(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function listBookingLogs(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  try {
+    sendSuccess(res, await adminListBookingLogs('scheduler-admin', tenantId, req.params.id));
+  } catch (err) {
+    asApiError(err);
+  }
+}
+
+
 /**
  * Which Agent owns this booking, if it is one of the tenant's.
  *
@@ -1056,7 +1068,7 @@ export async function cancelBooking(req: Request, res: Response): Promise<void> 
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { reason } = cancelBookingBodySchema.parse(req.body ?? {});
   try {
-    sendSuccess(res, await adminCancelBooking('scheduler-admin', tenantId, req.params.id, reason));
+    sendSuccess(res, await adminCancelBooking('scheduler-admin', tenantId, req.params.id, reason, (req as { userId?: string }).userId));
   } catch (err) {
     asApiError(err);
   }
@@ -1067,7 +1079,7 @@ export async function rescheduleBooking(req: Request, res: Response): Promise<vo
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { newStartTime } = rescheduleBookingBodySchema.parse(req.body);
   try {
-    sendSuccess(res, await adminRescheduleBooking('scheduler-admin', tenantId, req.params.id, newStartTime));
+    sendSuccess(res, await adminRescheduleBooking('scheduler-admin', tenantId, req.params.id, newStartTime, (req as { userId?: string }).userId));
   } catch (err) {
     asApiError(err);
   }
@@ -1081,7 +1093,7 @@ export async function acceptRequest(req: Request, res: Response): Promise<void> 
     // #72: an explicit second click, never a default. The owner sees which appointment this
     // would duplicate before they can send this.
     const allowDuplicate = (req.body as { allowDuplicate?: unknown } | undefined)?.allowDuplicate === true;
-    sendSuccess(res, await adminAcceptRequest('scheduler-admin', tenantId, req.params.id, { allowDuplicate }));
+    sendSuccess(res, await adminAcceptRequest('scheduler-admin', tenantId, req.params.id, { allowDuplicate }, (req as { userId?: string }).userId));
   } catch (err) {
     asApiError(err);
   }
@@ -1093,7 +1105,7 @@ export async function declineRequest(req: Request, res: Response): Promise<void>
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { reason } = cancelBookingBodySchema.parse(req.body ?? {});
   try {
-    sendSuccess(res, await adminDeclineRequest('scheduler-admin', tenantId, req.params.id, reason));
+    sendSuccess(res, await adminDeclineRequest('scheduler-admin', tenantId, req.params.id, reason, (req as { userId?: string }).userId));
   } catch (err) {
     asApiError(err);
   }

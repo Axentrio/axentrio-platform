@@ -1,8 +1,8 @@
 /**
  * Superadmin reset must wipe conversation-scoped stores that leak into the
  * next inbound from the same visitor. Close is not enough: customer memory,
- * pending confirmation, offered slots, address bindings, and lead extraction
- * all survive a new ChatSession id. Confirmed calendar bookings stay.
+ * pending confirmation, offered slots, address bindings, lead extraction,
+ * and live bookings (alreadyHeld) all survive a new ChatSession id.
  */
 import { randomUUID } from 'crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -45,6 +45,12 @@ vi.mock('../../channels/outbound-router', () => ({
   routeOutboundMessage: vi.fn().mockResolvedValue({ success: true }),
   routeTypingIndicator: vi.fn().mockResolvedValue(undefined),
   sendChannelTypingIndicator: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../booking/booking-providers/calendar-sync', () => ({
+  syncCalendarCancel: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../booking/booking-providers/reminders', () => ({
+  cancelReminders: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { AppDataSource } from '../../database/data-source';
@@ -133,7 +139,7 @@ async function seedBooking(input: {
   tenantId: string;
   botId: string;
   sessionId: string;
-  status: 'confirmed' | 'request_created';
+  status: 'confirmed' | 'request_created' | 'pending';
   reminderJobIds?: string[];
 }): Promise<string> {
   const id = randomUUID();
@@ -498,11 +504,12 @@ describe('Superadmin conversation reset', () => {
     const confirmed = bookingRows.find((row: { id: string }) => row.id === confirmedId);
     const requested = bookingRows.find((row: { id: string }) => row.id === requestId);
     expect(confirmed).toMatchObject({
-      status: 'confirmed',
+      status: 'cancelled',
       intake_answers: INTAKE,
     });
     expect(new Date(confirmed.start_utc).toISOString()).toBe(SLOT_UTC.toISOString());
-    expect(requested).toMatchObject({ status: 'request_created' });
+    expect(requested).toMatchObject({ status: 'cancelled' });
+    expect(reset.cancelledBookingIds).toEqual(expect.arrayContaining([confirmedId, requestId]));
 
     const afterConv = await convRepo.findOneByOrFail({ id: conv.id });
     expect(afterConv.preferredAt).toBeNull();
@@ -521,12 +528,26 @@ describe('Superadmin conversation reset', () => {
     expect(afterSession[0].metadata).not.toHaveProperty('leadCallback');
   });
 
-  it('leaves a confirmed booking intact after reset', async () => {
+  it('cancels live bookings so the next chat is not alreadyHeld', async () => {
     const tenant = await createTestTenant();
     const bot = await createTestAnchorBot(tenant);
     const session = await createTestSession(tenant.id, {
       botId: bot.id,
       visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+    });
+    const sibling = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'closed',
+    });
+    const other = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: '32475126099',
       channel: 'whatsapp',
       source: 'whatsapp',
       status: 'bot',
@@ -538,6 +559,18 @@ describe('Superadmin conversation reset', () => {
       status: 'confirmed',
       reminderJobIds: ['job-keep-1'],
     });
+    const siblingId = await seedBooking({
+      tenantId: tenant.id,
+      botId: bot.id,
+      sessionId: sibling.id,
+      status: 'pending',
+    });
+    const otherId = await seedBooking({
+      tenantId: tenant.id,
+      botId: bot.id,
+      sessionId: other.id,
+      status: 'confirmed',
+    });
 
     const agent = await resetActor(tenant.id);
     await conversationCommands.resetConversation(
@@ -548,21 +581,31 @@ describe('Superadmin conversation reset', () => {
     );
 
     const row = await AppDataSource.query(
-      `SELECT status, start_utc, intake_answers, ai_summary,
-              reminder_job_ids, attendee_email, customer_phone, session_id
-         FROM chatbot_bookings
-        WHERE id = $1`,
-      [confirmedId],
+      `SELECT id, status FROM chatbot_bookings WHERE id = ANY($1::uuid[])`,
+      [[confirmedId, siblingId, otherId]],
     );
-    expect(row).toHaveLength(1);
-    expect(row[0].status).toBe('confirmed');
-    expect(new Date(row[0].start_utc).toISOString()).toBe(SLOT_UTC.toISOString());
-    expect(row[0].intake_answers).toEqual(INTAKE);
-    expect(row[0].ai_summary).toBe(`Customer wants ${SLOT_TEXT}`);
-    expect(row[0].attendee_email).toBe(ATTENDEE_EMAIL);
-    expect(row[0].customer_phone).toBe(VISITOR);
-    expect(row[0].session_id).toBe(session.id);
-    expect(row[0].reminder_job_ids).toEqual(['job-keep-1']);
+    const byId = Object.fromEntries(row.map((r: { id: string; status: string }) => [r.id, r.status]));
+    expect(byId[confirmedId]).toBe('cancelled');
+    expect(byId[siblingId]).toBe('cancelled');
+    expect(byId[otherId]).toBe('confirmed');
+
+    const second = await createTestSession(tenant.id, {
+      botId: bot.id,
+      visitorId: VISITOR,
+      channel: 'whatsapp',
+      source: 'whatsapp',
+      status: 'bot',
+    });
+    const held = await AppDataSource.query(
+      `SELECT b.id
+         FROM chatbot_bookings b
+         JOIN chat_sessions s ON s.id = b.session_id
+        WHERE s.visitor_id = $1 AND s.bot_id = $2
+          AND b.status IN ('confirmed', 'pending')
+          AND b.end_utc > now()`,
+      [second.visitorId, bot.id],
+    );
+    expect(held).toEqual([]);
   });
 
   it('does not let a late memory extract rewrite the preferred time after reset', async () => {

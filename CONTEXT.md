@@ -141,7 +141,7 @@ Padding a Service reserves around its own bookings for prep and cleanup, set per
 _Avoid_: padding, break, gap (say which), travel time as a name for a Buffer (**Travel Time** is its own term — a Buffer is never it).
 
 **Minimum Gap**:
-Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. One of the three **Capacity Ceilings**, and the one that scopes to the **Itinerary Key** rather than the Agent, because it is a claim about one person's day. Where the platform can estimate the drive between two consecutive appointments, the clearance between two consecutive Bookings is that drive plus the Minimum Gap, so the gap is the owner's safety margin on top of every drive. Additive with **Buffer**, which the **Blocked Range** already contains.
+Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. It also holds around events already on the connected calendar. One of the three **Capacity Ceilings**, and the one that scopes to the **Itinerary Key** rather than the Agent, because it is a claim about one person's day. Where the platform can estimate the drive between two consecutive appointments, the clearance between two consecutive Bookings is that drive plus the Minimum Gap, so the gap is the owner's safety margin on top of every drive. Additive with **Buffer**, which the **Blocked Range** already contains.
 _Avoid_: travel time as a name for the gap (the gap is the safety margin on top of every drive, not the drive itself), padding, buffer (a Buffer is per-Service), minGap.
 
 **Travel Time**:

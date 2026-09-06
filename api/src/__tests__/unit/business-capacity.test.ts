@@ -83,7 +83,7 @@ describe('slot engine — business day ceilings', () => {
 });
 
 describe('slot engine — minimum gap via busy inflation', () => {
-  // The gap is implemented by padding OUR bookings in the caller, so the engine sees it as
+  // The gap is implemented by padding busy intervals in the caller, so the engine sees it as
   // an ordinary busy interval. These assert the arithmetic the caller relies on.
   const booked = { start: new Date('2026-06-10T09:00:00Z'), end: new Date('2026-06-10T10:00:00Z') };
   const pad = (iv: BusyInterval, min: number) => ({

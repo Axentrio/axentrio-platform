@@ -140,9 +140,9 @@ Inheritable fields (buffers, min notice, horizon): Service → Business Default 
 
 Capacity Ceiling (max bookings/day, max booked minutes/day, Minimum Gap) always applies. Stricter of Service vs business wins. `null` or `0` on a ceiling is unlimited, never "no bookings".
 
-Buffer is per-Service prep/cleanup. Minimum Gap is business-wide clearance around every appointment. Additive.
+Buffer is per-Service prep/cleanup. Minimum Gap is business-wide clearance around every occupied diary interval — Axentrio bookings and events already on the connected calendar. Additive.
 
-Pinned: `service-timing.ts`; `CONTEXT.md` Ceiling vs Default.
+Pinned: `service-timing.ts`; `loadAllBusy` in `busy.ts`; `CONTEXT.md` Ceiling vs Default.
 
 ---
 

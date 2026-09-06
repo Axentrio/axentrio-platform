@@ -457,6 +457,51 @@ describe('InternalProvider.createBooking', () => {
     getGoogleBusyForBot.mockResolvedValue(null);
   });
 
+  it('applies the business minimum gap after an external calendar event', async () => {
+    // QA: Auto-book, 30 min service, 30 min interval, 30 min gap. External event
+    // 10:00–10:30 local must refuse 10:30; earliest valid start is 11:00. loadAllBusy
+    // used to pad OUR bookings only, so the slot engine treated 10:30 as free.
+    ruleFindOne.mockResolvedValue({
+      ...RULE,
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
+    });
+    bookingSettingsFindOne.mockResolvedValue({ minGapMin: 30 } as any);
+    getGoogleBusyForBot.mockResolvedValue([
+      { start: new Date('2026-06-10T08:00:00Z'), end: new Date('2026-06-10T08:30:00Z') },
+    ]);
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    const starts = res.slots.map((s: { start: string }) => s.start);
+    expect(starts).toContain('2026-06-10T07:00:00.000Z'); // 09:00 — 30m clear before 10:00
+    expect(starts).not.toContain('2026-06-10T07:30:00.000Z'); // 09:30 — lands on the gap
+    expect(starts).not.toContain('2026-06-10T08:00:00.000Z'); // 10:00 — overlaps the event
+    expect(starts).not.toContain('2026-06-10T08:30:00.000Z'); // 10:30 — zero gap after
+    expect(starts).toContain('2026-06-10T09:00:00.000Z'); // 11:00 — earliest valid start
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
+  it('still drops the own mirror when a minimum gap pads external busy', async () => {
+    // Filter is on the raw interval. Padding first would miss the match and keep the
+    // inflated mirror, so a nearby reschedule target would look busy against itself.
+    ruleFindOne.mockResolvedValue({
+      ...RULE,
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
+    });
+    bookingSettingsFindOne.mockResolvedValue({ minGapMin: 30 } as any);
+    getGoogleBusyForBot.mockResolvedValue([
+      { start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T08:00:00Z') },
+    ]);
+    bookingFindOne.mockResolvedValueOnce({
+      id: 'bk-mine',
+      startUtc: new Date('2026-06-10T07:00:00Z'),
+      endUtc: new Date('2026-06-10T08:00:00Z'),
+    });
+    const excluded = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', undefined, undefined, 'bk-mine');
+    const starts = excluded.slots.map((s: { start: string }) => s.start);
+    expect(starts).toContain('2026-06-10T07:00:00.000Z');
+    expect(starts).toContain('2026-06-10T07:30:00.000Z');
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
   it('#36/#4 WhatsApp: captures +<wa_id> from the session as the contact phone when none is given', async () => {
     const waCtx = { ...ctx, session: { id: 'sess-1', channel: 'whatsapp', visitorId: '31470123456' } };
     const res = await provider.createBooking(waCtx, 'idem-wa', OFFERED_START, {

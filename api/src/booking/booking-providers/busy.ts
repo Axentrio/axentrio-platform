@@ -83,18 +83,7 @@ export async function loadAllBusy(
   excludeExternalInterval?: { start: Date; end: Date }
 ): Promise<BusyInterval[]> {
   let internal = await loadBusy(itineraryKey, rangeStartIso, rangeEndIso, excludeId);
-  // Business minimum gap: pad OUR bookings only. Padding the owner's personal calendar
-  // events too would quietly refuse slots around their dentist appointment, which is not
-  // what "minimum time between bookings" asks for. Applied on this side ONLY — the engine
-  // already expands the candidate by its own buffers, and doing both would double it.
   const { minGapMin } = await loadBusinessRules(ctx.bot.id);
-  if (minGapMin > 0) {
-    const gapMs = minGapMin * 60_000;
-    internal = internal.map((iv) => ({
-      start: new Date(iv.start.getTime() - gapMs),
-      end: new Date(iv.end.getTime() + gapMs),
-    }));
-  }
   let external: BusyInterval[] | null = null;
   try {
     const provider = await resolveCalendarProvider(ctx.bot.id);
@@ -115,6 +104,7 @@ export async function loadAllBusy(
   // On reschedule the booking's OWN mirrored external event sits at its old time;
   // drop it (exact raw start/end match — the mirror carries no buffer) so a nearby
   // move doesn't conflict with itself. excludeId only covers the internal copy.
+  // Filter BEFORE padding: the match is on the raw interval the provider returned.
   if (external && excludeExternalInterval) {
     const xs = Math.floor(excludeExternalInterval.start.getTime() / 1000);
     const xe = Math.floor(excludeExternalInterval.end.getTime() / 1000);
@@ -122,6 +112,20 @@ export async function loadAllBusy(
       (iv) =>
         !(Math.floor(iv.start.getTime() / 1000) === xs && Math.floor(iv.end.getTime() / 1000) === xe)
     );
+  }
+  // Minimum Gap is clearance around every occupied diary interval — our bookings
+  // AND the owner's connected-calendar events. Applied on this side ONLY: the
+  // engine already expands the candidate by its own buffers, and doing both
+  // would double it. Pad after the self-exclude so a reschedule still matches
+  // the raw mirror.
+  if (minGapMin > 0) {
+    const gapMs = minGapMin * 60_000;
+    const pad = (iv: BusyInterval): BusyInterval => ({
+      start: new Date(iv.start.getTime() - gapMs),
+      end: new Date(iv.end.getTime() + gapMs),
+    });
+    internal = internal.map(pad);
+    if (external) external = external.map(pad);
   }
   return external ? [...internal, ...external] : internal;
 }

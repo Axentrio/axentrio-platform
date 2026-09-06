@@ -139,7 +139,7 @@ export function customerChangeNotAllowedError(
     );
   }
   return new BookingError(
-    `${who} does not allow customers to ${verb} through the booking system. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
+    `${who} does not allow customers to ${verb} through the booking system. There is no cutoff and no number of days. Do not invent a deadline. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
     'CHANGE_NOT_ALLOWED',
     403,
     { action },

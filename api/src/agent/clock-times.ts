@@ -24,9 +24,8 @@ export interface ClockTime {
 export function parseClockTimes(text: string): ClockTime[] {
   // `9:00`, `09:30`, `1:30 PM`, `13.00`, and — since 2026-08-13 — `9 AM` and `9a.m.`.
   // The meridiem alternatives are deliberately symmetric — `a.m.` / `a.m` OR `am`, never `am.`.
-  const found = [...text.matchAll(/\b(\d{1,2})(?:([:.])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)];
-  const times: ClockTime[] = [];
-  for (const m of found) {
+  const hits: Array<{ index: number; time: ClockTime }> = [];
+  for (const m of text.matchAll(/\b(\d{1,2})(?:([:.])(\d{2}))?\s*([ap]\.m\.?|[ap]m)?/gi)) {
     const suffix = (m[4] ?? '').toLowerCase().replace(/\./g, '');
     const hasMinutes = m[3] !== undefined;
     if (!hasMinutes && !suffix) continue; // a bare number is not a time
@@ -35,16 +34,37 @@ export function parseClockTimes(text: string): ClockTime[] {
     if (hour > 23 || minute > 59) continue;
     if (suffix === 'pm' && hour < 12) hour += 12;
     if (suffix === 'am' && hour === 12) hour = 0;
-    times.push({
-      written: m[0].trim(),
-      key: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
-      ambiguous: suffix === '',
-      hour,
-      minute,
-      dotted: m[2] === '.',
+    hits.push({
+      index: m.index ?? 0,
+      time: {
+        written: m[0].trim(),
+        key: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+        ambiguous: suffix === '',
+        hour,
+        minute,
+        dotted: m[2] === '.',
+      },
     });
   }
-  return times;
+  // Words, not digits. "later at midnight" on a 24/7 diary is 00:00 — and after 00:00 that
+  // is the next calendar day, which a same-day slot walk cannot see.
+  for (const re of [/\bmiddernacht\b/gi, /\bmid[\s-]?night\b/gi, /\bminuit\b/gi]) {
+    for (const m of text.matchAll(re)) {
+      hits.push({
+        index: m.index ?? 0,
+        time: {
+          written: m[0],
+          key: '00:00',
+          ambiguous: false,
+          hour: 0,
+          minute: 0,
+          dotted: false,
+        },
+      });
+    }
+  }
+  hits.sort((a, b) => a.index - b.index);
+  return hits.map((h) => h.time);
 }
 
 /**
@@ -72,6 +92,35 @@ export function latestCustomerTimeText(
   }
   return '';
 }
+
+/**
+ * Midnight after 00:00 is 00:00 of the NEXT calendar day.
+ *
+ * A same-day availability read cannot contain that hour: today's 00:00 is already past,
+ * and 24:00 is an end, not a start. Returns that next day when they named midnight
+ * with no calendar date, `startDate` is business-local today, and the current offer has
+ * no 00:00. A missing 00:00 on a future date means that night is busy or closed — not
+ * the wrong day.
+ */
+export function upcomingMidnightDate(
+  startDate: string,
+  endDate: string,
+  offeredLocal: readonly string[],
+  customerText: string,
+  timezone: string,
+  now: Date,
+): string | null {
+  if (startDate !== endDate) return null;
+  const keys = new Set(parseClockTimes(customerText).map((t) => t.key));
+  if (keys.size !== 1 || !keys.has('00:00')) return null;
+  const year = Number(startDate.slice(0, 4));
+  if (!Number.isFinite(year) || parseCalendarDates(customerText, year).length > 0) return null;
+  if (offeredLocal.includes('00:00')) return null;
+  const today = DateTime.fromJSDate(now).setZone(timezone);
+  if (!today.isValid || startDate !== today.toFormat('yyyy-MM-dd')) return null;
+  return today.plus({ days: 1 }).toFormat('yyyy-MM-dd');
+}
+
 
 
 function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {

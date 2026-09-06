@@ -805,6 +805,28 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'CANCEL', sequence: 1 });
   });
 
+  it('records the portal actor on cancel, keeping the customer session on the log', async () => {
+    const adminCtx = {
+      ...ctx,
+      isAdmin: true,
+      actorKind: 'scheduler-admin',
+      actorId: 'user-clerk-1',
+      subjectToCustomerChangePolicy: false,
+    };
+    await provider.cancelBooking(adminCtx as typeof ctx, 'bk-1', 'owner cancelled');
+    expect(logCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'cancelled',
+        sessionId: 'sess-1',
+        calBookingId: 'bk-1',
+        actorKind: 'scheduler-admin',
+        actorId: 'user-clerk-1',
+        notes: 'owner cancelled',
+      }),
+    );
+  });
+
+
   it('is idempotent when cancelling an already-cancelled booking', async () => {
     bookingFindOne.mockResolvedValue({ ...confirmedBooking(), status: 'cancelled' });
     const res = await provider.cancelBooking(ctx, 'bk-1');

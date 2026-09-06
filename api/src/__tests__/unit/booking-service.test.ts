@@ -7,6 +7,7 @@ const mockTenantFindOne = vi.fn();
 const mockServiceFindOne = vi.fn();
 const mockServiceFind = vi.fn();
 const mockBookingFindOne = vi.fn();
+const mockLogFind = vi.fn();
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
@@ -16,6 +17,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'Tenant') return { findOne: mockTenantFindOne };
       if (name === 'ServiceType') return { findOne: mockServiceFindOne, find: mockServiceFind };
       if (name === 'Booking') return { findOne: mockBookingFindOne };
+      if (name === 'BookingLog') return { find: mockLogFind };
       return {};
     }),
   },
@@ -27,9 +29,11 @@ vi.mock('../../utils/logger', () => ({
 
 const mockGetBotConfigForSession = vi.fn();
 const mockGetAnchorBotConfig = vi.fn();
+const mockGetOwnedBot = vi.fn();
 vi.mock('../../services/bot-config.service', () => ({
   getBotConfigForSession: (...args: unknown[]) => mockGetBotConfigForSession(...args),
   getAnchorBotConfig: (...args: unknown[]) => mockGetAnchorBotConfig(...args),
+  getOwnedBot: (...args: unknown[]) => mockGetOwnedBot(...args),
 }));
 
 // The service-boundary gate (D7) resolves entitlements; stub it here so these
@@ -73,6 +77,8 @@ import {
   adminCancelBooking,
   adminAcceptRequest,
   adminAvailability,
+  adminListBookingLogs,
+  externalCancelBooking,
   peekCustomerEmailRequired,
   peekCustomerChange,
 } from '../../booking/booking.service';
@@ -274,7 +280,7 @@ describe('Booking Service (internal dispatcher)', () => {
       await cancelBooking('agent', VALID_UUID, 'b-1', 'No reason');
 
       expect(internalMethods.cancelBooking).toHaveBeenCalledWith(
-        expect.any(Object),
+        expect.objectContaining({ actorKind: 'agent' }),
         'b-1',
         'No reason',
       );
@@ -425,3 +431,73 @@ describe('peekCustomerChange', () => {
     });
   });
 });
+
+describe('booking mutation actor', () => {
+  const bookingRow = {
+    id: 'b-1',
+    tenantId: TENANT_ID,
+    botId: 'bot-anchor',
+    provider: 'internal',
+    sessionId: VALID_UUID,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupValidContext();
+    mockBookingFindOne.mockResolvedValue(bookingRow);
+    mockGetOwnedBot.mockResolvedValue({ id: 'bot-anchor', tenantId: TENANT_ID, settings: {} });
+    mockRequireFeature.mockResolvedValue(undefined);
+    internalMethods.cancelBooking.mockResolvedValue({ success: true, cancelled: true });
+  });
+
+  it('passes portal actorId through adminCancelBooking', async () => {
+    await adminCancelBooking('scheduler-admin', TENANT_ID, 'b-1', 'owner', 'clerk-user-1');
+    expect(internalMethods.cancelBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ actorKind: 'scheduler-admin', actorId: 'clerk-user-1' }),
+      'b-1',
+      'owner',
+    );
+  });
+
+  it('stamps inbound-sync on externalCancelBooking', async () => {
+    await externalCancelBooking(TENANT_ID, 'b-1', 'deleted in calendar');
+    expect(internalMethods.cancelBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ actorKind: 'inbound-sync' }),
+      'b-1',
+      'deleted in calendar',
+    );
+  });
+
+  it('lists mutation logs for a tenant-owned booking', async () => {
+    const at = new Date('2026-06-05T00:00:00.000Z');
+    mockLogFind.mockResolvedValue([
+      {
+        id: 'log-1',
+        eventType: 'cancelled',
+        actorKind: 'scheduler-admin',
+        actorId: 'clerk-user-1',
+        sessionId: VALID_UUID,
+        createdAt: at,
+        startTime: at,
+        endTime: at,
+        notes: 'owner',
+      },
+    ]);
+    await expect(adminListBookingLogs('scheduler-admin', TENANT_ID, 'b-1')).resolves.toEqual({
+      logs: [
+        {
+          id: 'log-1',
+          eventType: 'cancelled',
+          actorKind: 'scheduler-admin',
+          actorId: 'clerk-user-1',
+          sessionId: VALID_UUID,
+          createdAt: at.toISOString(),
+          startTime: at.toISOString(),
+          endTime: at.toISOString(),
+          notes: 'owner',
+        },
+      ],
+    });
+  });
+});
+

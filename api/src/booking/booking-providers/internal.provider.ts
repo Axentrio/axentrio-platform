@@ -1604,20 +1604,13 @@ export class InternalProvider implements BookingProvider {
     }
 
     // 5. Audit log (parity with CalcomProvider).
-    const logRepo = AppDataSource.getRepository(BookingLog);
-    await logRepo.save(
-      logRepo.create({
-        tenantId: ctx.tenant.id,
-        sessionId: ctx.session.id,
-        idempotencyKey,
-        calBookingId: bookingId,
-        eventType: 'created',
-        attendeeName: customer.name,
-        attendeeEmail: customer.email,
-        startTime: start,
-        endTime: end,
-        notes,
-      })
+    await this.writeLog(
+      ctx,
+      'created',
+      { id: bookingId, attendeeName: customer.name, attendeeEmail: customer.email },
+      start,
+      end,
+      { notes, idempotencyKey },
     );
 
     logger.info('[Booking] Internal booking created', {
@@ -2309,28 +2302,19 @@ export class InternalProvider implements BookingProvider {
 
     // Audit log is best-effort — a log failure must not abort the request (the row is
     // already committed) nor block the single "exactly once per new row" notification below.
-    try {
-      const logRepo = AppDataSource.getRepository(BookingLog);
-      await logRepo.save(
-        logRepo.create({
-          tenantId: ctx.tenant.id,
-          sessionId: ctx.session.id,
-          idempotencyKey,
-          calBookingId: bookingId,
-          eventType: 'created',
-          attendeeName: customer.name,
-          attendeeEmail: customer.email,
-          startTime: start,
-          endTime: end,
-          notes,
-        })
-      );
-    } catch (err) {
+    await this.writeLog(
+      ctx,
+      'created',
+      { id: bookingId, attendeeName: customer.name, attendeeEmail: customer.email },
+      start,
+      end,
+      { notes, idempotencyKey },
+    ).catch((err: unknown) => {
       logger.warn('[Booking] request audit log failed (non-fatal)', {
         bookingId,
         error: err instanceof Error ? err.message : String(err),
       });
-    }
+    });
 
     logger.info('[Booking] Internal request captured', { bookingId, botId: ctx.bot.id, service: service.name });
 
@@ -3029,7 +3013,7 @@ export class InternalProvider implements BookingProvider {
           reason,
         );
         if (!closed) return { success: true, cancelled: true };
-        await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason).catch(
+        await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, { notes: reason }).catch(
           () => undefined,
         );
         return { success: true, cancelled: true };
@@ -3046,7 +3030,7 @@ export class InternalProvider implements BookingProvider {
       // Lost a race / already handled — idempotent success.
       return { success: true, cancelled: true };
     }
-    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason).catch(() => undefined);
+    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, { notes: reason }).catch(() => undefined);
     return { success: true, cancelled: true };
   }
 
@@ -4676,7 +4660,7 @@ export class InternalProvider implements BookingProvider {
     if (!opts?.skipCloseChangeRequests) {
       await this.closeOpenChangeRequests(bookingId, ctx.tenant.id, 'declined');
     }
-    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason);
+    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, { notes: reason });
 
     const langs = await this.audienceLanguages(ctx, booking);
     await sendBookingEmail({
@@ -4767,24 +4751,27 @@ export class InternalProvider implements BookingProvider {
   private async writeLog(
     ctx: BookingContext,
     eventType: 'rescheduled' | 'cancelled' | 'created' | 'updated',
-    booking: Booking,
+    booking: { id: string; attendeeName?: string | null; attendeeEmail?: string | null },
     start: Date,
     end: Date,
-    reason?: string
+    extra?: { notes?: string; idempotencyKey?: string },
   ): Promise<void> {
     const logRepo = AppDataSource.getRepository(BookingLog);
     await logRepo.save(
       logRepo.create({
         tenantId: ctx.tenant.id,
         sessionId: ctx.session.id,
+        idempotencyKey: extra?.idempotencyKey,
         calBookingId: booking.id,
         eventType,
         attendeeName: booking.attendeeName ?? undefined,
         attendeeEmail: booking.attendeeEmail ?? undefined,
         startTime: start,
         endTime: end,
-        notes: reason,
-      })
+        notes: extra?.notes,
+        actorKind: ctx.actorKind ?? null,
+        actorId: ctx.actorId ?? null,
+      }),
     );
   }
 }

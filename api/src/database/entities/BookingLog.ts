@@ -10,6 +10,14 @@ import {
 } from 'typeorm';
 import { Tenant } from './Tenant';
 
+export type BookingActorKind =
+  | 'agent'
+  | 'internal-n8n'
+  | 'scheduler-admin'
+  | 'public-manage'
+  | 'inbound-sync';
+
+
 @Entity('booking_logs')
 @Index(['tenantId', 'createdAt'])
 @Index(['tenantId', 'attendeeEmail'])
@@ -52,6 +60,18 @@ export class BookingLog {
 
   @Column({ type: 'text', nullable: true })
   notes?: string;
+
+  /**
+   * Who performed this mutation. Null on rows written before actor was stored.
+   * Distinct from `sessionId`, which is the customer conversation the Booking
+   * was created in — owner and inbound-sync cancel reuse that session.
+   */
+  @Column({ type: 'varchar', length: 32, nullable: true, name: 'actor_kind' })
+  actorKind?: BookingActorKind | null;
+
+  /** Clerk user id for `scheduler-admin`. Null for agent / n8n / manage-link / inbound. */
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'actor_id' })
+  actorId?: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

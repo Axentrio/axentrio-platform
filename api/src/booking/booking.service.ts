@@ -14,6 +14,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
+import { BookingLog } from '../database/entities/BookingLog';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
 import { serviceNeedsCustomerAddress } from './service-location';
@@ -25,7 +26,7 @@ import {
   getOwnedBot,
   getOwnedBotConfig,
 } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, type ClockWindow } from './booking-providers/types';
+import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, type ClockWindow, type BookingActorKind } from './booking-providers/types';
 import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { findBookableService } from './booking-providers/find-bookable-service';
@@ -71,6 +72,18 @@ const internalProvider = new InternalProvider();
  */
 export type PublicManageCaller = { kind: 'public-manage'; verifiedBookingId: string };
 export type BookingCaller = 'agent' | 'internal-n8n' | 'scheduler-admin' | PublicManageCaller;
+
+function callerKind(caller: BookingCaller): Exclude<BookingActorKind, 'inbound-sync'> {
+  return typeof caller === 'object' ? caller.kind : caller;
+}
+
+/** Stamp who is writing. `session` stays the customer conversation. */
+function applyCaller(ctx: BookingContext, caller: BookingCaller, actorId?: string): void {
+  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
+  ctx.actorKind = callerKind(caller);
+  if (actorId) ctx.actorId = actorId;
+}
+
 
 async function enforceBookingsFeature(
   tenantId: string,
@@ -210,6 +223,7 @@ export async function createBooking(
   extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
+  applyCaller(ctx, caller);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await internalProvider.createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
@@ -269,6 +283,7 @@ export async function requestBooking(
   extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
+  applyCaller(ctx, caller);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
@@ -341,7 +356,7 @@ export async function rescheduleBooking(
   opts?: { customerAddress?: string },
 ) {
   const ctx = await resolveContext(sessionId);
-  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
+  applyCaller(ctx, caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return opts
     ? internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, opts)
@@ -354,6 +369,7 @@ export async function updateBooking(
   patch: UpdateBookingPatch,
 ) {
   const ctx = await resolveContext(sessionId);
+  applyCaller(ctx, caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, patch.bookingId ? { manageableBookingId: patch.bookingId } : undefined);
   const result = await internalProvider.updateBooking(ctx, patch);
   if (patch.attendeeName || patch.attendeeEmail || patch.customerPhone) {
@@ -369,7 +385,7 @@ export async function updateBooking(
 
 export async function cancelBooking(caller: BookingCaller, sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
-  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
+  applyCaller(ctx, caller);
   await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
@@ -506,9 +522,9 @@ async function buildAdminContext(tenantId: string, booking: Booking): Promise<Bo
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
   const bot = await getOwnedBot(booking.botId, tenantId);
-  // Reuse the booking's originating session for audit-log parity. If the row
-  // was purged, synthesize a minimal session (booking_logs.session_id is a
-  // plain uuid column, not a FK to chat_sessions).
+  // session_id on booking_logs is the customer conversation the appointment was
+  // created in (or a synthetic uuid if that session is gone). Who mutated is
+  // ctx.actorKind / ctx.actorId — never inferred from this session.
   let session = booking.sessionId
     ? await AppDataSource.getRepository(ChatSession).findOne({ where: { id: booking.sessionId } })
     : null;
@@ -817,19 +833,59 @@ async function loadAdminBooking(tenantId: string, bookingId: string): Promise<Bo
   return booking;
 }
 
-export async function adminCancelBooking(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {
+/** Mutation history for one Booking. `actorKind` is null on rows written before actor was stored. */
+export async function adminListBookingLogs(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string,
+) {
+  await enforceBookingsFeature(tenantId, caller);
+  await loadAdminBooking(tenantId, bookingId);
+  const rows = await AppDataSource.getRepository(BookingLog).find({
+    where: { tenantId, calBookingId: bookingId },
+    order: { createdAt: 'DESC' },
+  });
+  return {
+    logs: rows.map((r) => ({
+      id: r.id,
+      eventType: r.eventType,
+      actorKind: r.actorKind ?? null,
+      actorId: r.actorId ?? null,
+      sessionId: r.sessionId,
+      createdAt: r.createdAt.toISOString(),
+      startTime: r.startTime?.toISOString() ?? null,
+      endTime: r.endTime?.toISOString() ?? null,
+      notes: r.notes ?? null,
+    })),
+  };
+}
+
+
+export async function adminCancelBooking(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string,
+  reason?: string,
+  actorId?: string,
+) {
   await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
-  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
+  applyCaller(ctx, caller, actorId);
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
 
-export async function adminRescheduleBooking(caller: BookingCaller, tenantId: string, bookingId: string, newStartTime: string) {
+export async function adminRescheduleBooking(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string,
+  newStartTime: string,
+  actorId?: string,
+) {
   await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
-  ctx.subjectToCustomerChangePolicy = subjectToCustomerChangePolicy(caller);
+  applyCaller(ctx, caller, actorId);
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
@@ -844,6 +900,7 @@ export async function externalRescheduleBooking(
 ) {
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  ctx.actorKind = 'inbound-sync';
   const start = new Date(newStartTime);
   const end = new Date(start.getTime() + durationMin * 60_000);
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime, {
@@ -855,6 +912,7 @@ export async function externalRescheduleBooking(
 export async function externalCancelBooking(tenantId: string, bookingId: string, reason: string) {
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  ctx.actorKind = 'inbound-sync';
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
 
@@ -863,21 +921,30 @@ export async function adminAcceptRequest(
   tenantId: string,
   bookingId: string,
   /** #72: the owner has been shown the appointment this would duplicate and wants it anyway. */
-  options?: { allowDuplicate?: boolean }
+  options?: { allowDuplicate?: boolean },
+  actorId?: string,
 ) {
   // Owner action — never public-manage-exempt (D8 is cancel/reschedule only),
   // so no bookingId is passed to the gate.
   await enforceBookingsFeature(tenantId, caller);
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  applyCaller(ctx, caller, actorId);
   return internalProvider.acceptRequest(ctx, bookingId, options);
 }
 
-export async function adminDeclineRequest(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {
+export async function adminDeclineRequest(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string,
+  reason?: string,
+  actorId?: string,
+) {
   // Owner action — never public-manage-exempt (D8 is cancel/reschedule only).
   await enforceBookingsFeature(tenantId, caller);
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
+  applyCaller(ctx, caller, actorId);
   return internalProvider.declineRequest(ctx, bookingId, reason);
 }
 

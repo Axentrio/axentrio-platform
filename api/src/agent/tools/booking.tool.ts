@@ -36,7 +36,7 @@ import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
-import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
+import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn, upcomingMidnightDate } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
 import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, refuseCreateWhileMovePending, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
@@ -831,6 +831,45 @@ function outOfWindowGuidance(
   );
 }
 
+/**
+ * "Later at midnight" on today's diary is 00:00 tomorrow. Keep `first` unless
+ * that next day actually offers 00:00 — an empty or closed tomorrow must not
+ * swallow tonight's remaining times.
+ */
+async function withUpcomingMidnight(
+  first: AvailabilityResult,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+  chosen: TurnAddress,
+  locationChoice: 'business' | 'customer' | undefined,
+): Promise<AvailabilityResult> {
+  const zone = first.timezone ?? 'UTC';
+  const rolled = upcomingMidnightDate(
+    args.startDate as string,
+    args.endDate as string,
+    localClockTimes(Array.isArray(first.slots) ? first.slots : [], zone) ?? [],
+    lastCustomerText(ctx),
+    zone,
+    new Date(),
+  );
+  if (!rolled) return first;
+  const retry = await checkAvailability(
+    'agent',
+    ctx.sessionId,
+    rolled,
+    rolled,
+    args.serviceId as string | undefined,
+    args.durationMin as number | undefined,
+    chosen.address,
+    locationChoice,
+    args.customerPhone as string | undefined,
+    undefined,
+  );
+  const clocks = localClockTimes(Array.isArray(retry.slots) ? retry.slots : [], retry.timezone ?? zone) ?? [];
+  return clocks.includes('00:00') ? retry : first;
+}
+
+
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
   description = 'Check available appointment slots for a given date range and service.';
@@ -901,7 +940,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const locationChoice = locationChoiceArg(args.locationChoice);
       const window = clockWindowArg(args, ctx);
       if (window && 'success' in window) return window;
-      const full = await checkAvailability(
+      const first = await checkAvailability(
         'agent',
         ctx.sessionId,
         args.startDate as string,
@@ -913,6 +952,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.customerPhone as string | undefined,
         window,
       );
+      const full = await withUpcomingMidnight(first, args, ctx, chosen, locationChoice);
+
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
       // scoring left on it teaches a model that is meant to be unaware of any ranking AND competes

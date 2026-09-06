@@ -125,7 +125,8 @@ describe('customerChangeNotAllowedError', () => {
   it('keeps the generic refusal when the Service forbids the action outright', () => {
     const err = customerChangeNotAllowedError(undefined, 'cancel');
     expect(err.message).toMatch(/cannot cancel this appointment here/);
-    expect(err.message).not.toMatch(/cutoff/);
+    expect(err.message).toMatch(/Do not invent a deadline/);
+    expect(err.message).not.toMatch(/the cutoff is/);
     expect(err.details).toEqual({ action: 'cancel' });
   });
 

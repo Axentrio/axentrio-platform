@@ -90,8 +90,9 @@ export interface ToolResult {
     serviceId?: string;
     serviceName?: string;
     locationMode?: string;
-    /** Echo of the part-of-day filter. `matched: false` means `slots` is the WHOLE day, so no
-     *  chip may be drawn from it - the model has been told to ask before offering another part. */
+    /** Echo of the part-of-day filter. `matched: false` means `slots` is the WHOLE day.
+     *  Day-part misses still suppress chips (namiddag must not become morning). An exact-time
+     *  miss does not: those slots are the Auto-book alternatives. */
     clockWindow?: { from: string; to: string; matched: boolean };
     travel?: {
       groupingPilot?: boolean;

@@ -1716,6 +1716,100 @@ describe('AgentService', () => {
     expect(execute.mock.calls[0][1].namedTimeRefused).toBe(true);
   });
 
+  it('offers Auto-book chips when the named time is outside hours, not a guess-again fallback', async () => {
+    // Live WhatsApp 2026-09-06: Auto-book, 09:00–17:00 Brussels, asked for Monday 7 Sept 08:30.
+    // The engine had 09:00 / 09:30 / 10:00 that day. A 30-minute clock window around 08:30
+    // matched nothing, chips were suppressed, and the invented-time guard shipped
+    // "tell me which time suits you" — asking the customer to guess times the diary already knew.
+    const slots = [
+      { start: '2026-09-07T07:00:00.000Z', end: '2026-09-07T07:30:00.000Z' },
+      { start: '2026-09-07T07:30:00.000Z', end: '2026-09-07T08:00:00.000Z' },
+      { start: '2026-09-07T08:00:00.000Z', end: '2026-09-07T08:30:00.000Z' },
+    ];
+    const clockWindow = { from: '08:30', to: '09:00', matched: false };
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels', clockWindow },
+        availability: { slots, timezone: 'Europe/Brussels', clockWindow },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-07', endDate: '2026-09-07', earliestTime: '08:30', latestTime: '09:00' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Ik kan 08:30 niet bevestigen.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ik wil maandag 7 september 2026 om 08:30 een Booking test boeken. Tom Test, 0470 00 00 01, achraflamranim@gmail.com.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toHaveLength(3);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/09:00/);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/09:30/);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/10:00/);
+      expect(result.content).not.toMatch(/tell me which time suits you/i);
+    }
+  });
+
+  it('still withholds chips when a day-part window misses, so namiddag does not become morning', async () => {
+    const slots = [{ start: '2026-09-07T07:00:00.000Z', end: '2026-09-07T07:30:00.000Z' }];
+    const clockWindow = { from: '12:00', to: '18:00', matched: false };
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels', clockWindow },
+        availability: { slots, timezone: 'Europe/Brussels', clockWindow },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-07', endDate: '2026-09-07', earliestTime: '12:00', latestTime: '18:00' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Die namiddag is vol. Zal ik een andere dag voor de namiddag bekijken?',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'maandag 7 september, ergens in de namiddag',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeUndefined();
+    }
+  });
+
   it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {
     // TWO failures guarded at once, and both are silent. Scoring vocabulary in the tool message
     // teaches a model that is meant to be unaware any ranking happened - it can start telling a

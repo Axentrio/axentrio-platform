@@ -368,6 +368,16 @@ describe('customer change policy — catalog line and rules', () => {
     expect(p).toMatch(/CHANGE_NOT_ALLOWED/);
   });
 
+  it('names a cutoff as the reason and only hands off after insistence', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/naming the cutoff/);
+    expect(p).toMatch(/1 hour before/);
+    expect(p).toMatch(/keep insisting after you have explained the cutoff/);
+    expect(p).toMatch(/Do not tell them to contact the business on that first refusal/);
+    expect(p).toMatch(/call escalate_to_human/);
+  });
+
+
   it('does not treat requested:true as a confirmed clock', () => {
     const p = buildServicesSection([svc()])!;
     expect(p).toMatch(/WITHOUT "requested": true/);
@@ -383,6 +393,12 @@ describe('after a booking exists — extra info vs reschedule vs price', () => {
     expect(p).toMatch(/Call update_booking/);
     expect(p).toMatch(/Do not escalate to a human for that/);
     expect(p).toMatch(/call update_booking so the new file is added/);
+  });
+
+  it('tells the model not to compute a catalog cutoff itself', () => {
+    const p = buildServicesSection([svc({ rescheduleMode: 'auto', rescheduleUntilMin: 60 })])!;
+    expect(p).toMatch(/Do not compute a catalog cutoff/);
+    expect(p).toMatch(/list_bookings and check_availability apply it/);
   });
 
   it('sends address and time changes through confirmed reschedule, never an invented time', () => {
@@ -1291,6 +1307,46 @@ describe('check_availability — a time the caller already holds is not unavaila
     expect(data.guidance).toMatch(/CHANGE_NOT_ALLOWED/);
     expect(data.guidance).toMatch(/do not call reschedule_booking/i);
     expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+  });
+
+  it('names a cutoff on a live appointment even when that day is not the asked range', async () => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [{ start: '2026-09-04T13:00:00.000Z', end: '2026-09-04T13:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Cut',
+      cannotReschedule: [
+        {
+          bookingId: 'bk-today',
+          start: '2026-09-03T20:00:00.000Z',
+          rescheduleCutoff: '1 hour before the appointment',
+        },
+      ],
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-04', endDate: '2026-09-04' },
+      { sessionId: 'cs-1' } as never,
+    );
+    const data = res.data as { cannotReschedule?: unknown; guidance?: string; moveTargets?: unknown };
+    expect(data.cannotReschedule).toEqual([
+      {
+        bookingId: 'bk-today',
+        start: '2026-09-03T20:00:00.000Z',
+        rescheduleCutoff: '1 hour before the appointment',
+      },
+    ]);
+    expect(data.moveTargets).toBeUndefined();
+    expect(data.guidance).toMatch(/1 hour before the appointment/);
+    expect(data.guidance).toMatch(/not possible to reschedule 1 hour before the appointment/);
+    expect(data.guidance).toMatch(/never a move of the existing one/);
+    expect(data.guidance).not.toMatch(/call reschedule_booking with the alreadyHeld bookingId/);
+    expect(Object.keys(data)[0]).toBe('cannotReschedule');
   });
 
   it('a policy peek miss still ships the hold note, without moveTargets', async () => {

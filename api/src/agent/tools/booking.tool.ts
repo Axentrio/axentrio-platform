@@ -14,7 +14,7 @@ import {
   peekCustomerChange,
   BookingError,
 } from '../../booking/booking.service';
-import { customerChangeNotAllowedError } from '../../booking/customer-change-policy';
+import { customerChangeNotAllowedError, spokenChangeCutoff } from '../../booking/customer-change-policy';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
@@ -176,9 +176,29 @@ function toolError(err: unknown, fallback: string): { error: string; errorSafeFo
  * CHANGE_NOT_ALLOWED before CONFIRMATION_REQUIRED. Asking "shall I cancel?"
  * then refusing after two yeses is the bug this helper exists to stop.
  */
-function changeNotAllowedResult(action: 'reschedule' | 'cancel'): ToolResult {
-  const err = customerChangeNotAllowedError(undefined, action);
+function changeNotAllowedResult(action: 'reschedule' | 'cancel', untilMin?: number | null): ToolResult {
+  const err = customerChangeNotAllowedError(undefined, action, untilMin);
   return { success: false, error: `${err.code}: ${err.message}`, errorSafeForModel: true };
+}
+
+function asChangePeek(peek: unknown): { mode: string; policy: string; untilMin: number | null } {
+  if (typeof peek === 'string') {
+    const mode = peek === 'auto' || peek === 'request' || peek === 'not_allowed' ? peek : 'request';
+    return { mode, policy: mode, untilMin: null };
+  }
+  if (peek && typeof peek === 'object' && 'mode' in peek) {
+    const p = peek as { mode: unknown; policy?: unknown; untilMin?: unknown };
+    const mode = p.mode === 'auto' || p.mode === 'request' || p.mode === 'not_allowed' ? p.mode : 'request';
+    const policy =
+      p.policy === 'auto' || p.policy === 'request' || p.policy === 'not_allowed' ? p.policy : mode;
+    return { mode, policy, untilMin: typeof p.untilMin === 'number' ? p.untilMin : null };
+  }
+  return { mode: 'request', policy: 'request', untilMin: null };
+}
+
+function cutoffUntilMin(peek: { mode: string; policy: string; untilMin: number | null }): number | null {
+  if (peek.mode !== 'not_allowed' || peek.policy === 'not_allowed') return null;
+  return peek.untilMin;
 }
 
 /**
@@ -448,13 +468,16 @@ const MOVE_TARGET_CAP = 12;
 async function rescheduleAllowedForHeld(
   sessionId: string,
   alreadyHeld: AvailabilityResult['alreadyHeld'],
-): Promise<boolean> {
-  if (alreadyHeld?.length !== 1) return true;
+): Promise<{ allowed: boolean; cutoff: string | null }> {
+  if (alreadyHeld?.length !== 1) return { allowed: true, cutoff: null };
   try {
-    const mode = await peekCustomerChange(sessionId, alreadyHeld[0].bookingId, 'reschedule');
-    return mode !== 'not_allowed';
+    const peek = asChangePeek(await peekCustomerChange(sessionId, alreadyHeld[0].bookingId, 'reschedule'));
+    return {
+      allowed: peek.mode !== 'not_allowed',
+      cutoff: spokenChangeCutoff(cutoffUntilMin(peek)),
+    };
   } catch {
-    return false;
+    return { allowed: false, cutoff: null };
   }
 }
 
@@ -462,14 +485,16 @@ function alreadyHeldNote(
   held: AvailabilityResult['alreadyHeld'],
   moveTargets: Array<{ start: string; end: string }>,
   rescheduleAllowed = true,
+  cutoff?: string | null,
 ): Record<string, unknown> {
   if (!held?.length) return {};
   if (!rescheduleAllowed) {
     return {
       alreadyHeld: held,
       suggestedAction: 'confirm_existing',
-      guidance:
-        'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here.',
+      guidance: cutoff
+        ? `The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.`
+        : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here.',
     };
   }
   const capped = moveTargets.length > MOVE_TARGET_CAP;
@@ -744,19 +769,45 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       const groupedNote = groupingNote(result.travel);
       const zone = result.timezone ?? 'UTC';
-      const rescheduleAllowed = await rescheduleAllowedForHeld(ctx.sessionId, result.alreadyHeld);
+      const blocked = result.cannotReschedule ?? [];
+      const heldHit =
+        result.alreadyHeld?.length === 1
+          ? blocked.find((b) => b.bookingId === result.alreadyHeld![0].bookingId)
+          : undefined;
+      const heldPolicy = heldHit
+        ? { allowed: false as const, cutoff: heldHit.rescheduleCutoff ?? null }
+        : await rescheduleAllowedForHeld(ctx.sessionId, result.alreadyHeld);
+      const rescheduleAllowed = heldPolicy.allowed;
       const moveSlots = rescheduleAllowed
         ? await slotsForMove(utcSlots, result.alreadyHeld, args, chosen, locationChoice, window, ctx)
         : [];
-      const heldNote = alreadyHeldNote(result.alreadyHeld, wallClockSlots(moveSlots, zone), rescheduleAllowed);
+      const heldNote = alreadyHeldNote(
+        result.alreadyHeld,
+        wallClockSlots(moveSlots, zone),
+        rescheduleAllowed,
+        heldPolicy.cutoff,
+      );
       const modelResult = modelFacingResult(result, utcSlots, zone);
       const availability = availabilityFacts(result, utcSlots, zone);
       const offeredClocks = offeredClockTimes(utcSlots, result.travel, zone);
       const heldClocks = localClockTimes(result.alreadyHeld ?? [], zone) ?? [];
-      const withNamedTime = (data: Record<string, unknown>) => ({
-        ...data,
-        ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
-      });
+      const withNamedTime = (data: Record<string, unknown>) => {
+        const named = {
+          ...data,
+          ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
+        };
+        if (!blocked.length || heldNote.guidance) return named;
+        const cutoff = blocked.find((b) => b.rescheduleCutoff)?.rescheduleCutoff;
+        const blockedGuidance = cutoff
+          ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human. Times in this result are only for a new appointment, never a move of the existing one.`
+          : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here. Times in this result are only for a new appointment, never a move of the existing one.';
+        const { guidance: namedGuidance, ...rest } = named;
+        return {
+          cannotReschedule: blocked,
+          guidance: [blockedGuidance, namedGuidance].filter(Boolean).join(' '),
+          ...rest,
+        };
+      };
       if (heldNote.guidance) {
         // Live WaterFix 2026-09-01: alreadyHeld and confirm_existing were in the
         // model copy (1321 chars, not truncated) and the model still said the
@@ -1350,9 +1401,42 @@ export class RequestAppointmentTool implements ToolAdapter {
   }
 }
 
+function listedChangeGuidance(
+  bookings: Array<{
+    cancel?: string;
+    reschedule?: string;
+    cancelCutoff?: string;
+    rescheduleCutoff?: string;
+  }>,
+): string {
+  const parts: string[] = [];
+  if (bookings.some((b) => b.rescheduleCutoff)) {
+    parts.push(
+      'An appointment in this list cannot be rescheduled because it is inside the cutoff (rescheduleCutoff). Tell the customer plainly it is not possible to reschedule that close to the appointment — name the cutoff. Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.',
+    );
+  }
+  if (bookings.some((b) => b.reschedule === 'not_allowed' && !b.rescheduleCutoff)) {
+    parts.push(
+      'An appointment in this list cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.',
+    );
+  }
+  if (bookings.some((b) => b.cancelCutoff)) {
+    parts.push(
+      'An appointment in this list cannot be cancelled because it is inside the cutoff (cancelCutoff). Tell the customer plainly it is not possible to cancel that close to the appointment — name the cutoff. Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.',
+    );
+  }
+  if (bookings.some((b) => b.cancel === 'not_allowed' && !b.cancelCutoff)) {
+    parts.push(
+      'An appointment in this list cannot be cancelled (CHANGE_NOT_ALLOWED). Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot cancel that appointment here.',
+    );
+  }
+  return parts.join(' ');
+}
+
+
 export class ListBookingsTool implements ToolAdapter {
   name = 'list_bookings';
-  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancel or reschedule is not_allowed, tell the customer immediately they cannot do that here — do not ask whether to proceed and do not call the matching tool.';
+  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancelCutoff or rescheduleCutoff is set, tell them immediately it is not possible that close to the appointment, naming the cutoff — do not ask whether to proceed, do not tell them to contact the business, and do not call escalate_to_human unless they keep insisting after that. If cancel or reschedule is not_allowed with no cutoff, tell them immediately they cannot do that here — do not ask whether to proceed and do not call the matching tool.';
   parameters = {
     type: 'object',
     properties: {
@@ -1372,18 +1456,7 @@ export class ListBookingsTool implements ToolAdapter {
         ctx.sessionId,
         typeof args.attendeeEmail === 'string' ? args.attendeeEmail : undefined,
       );
-      const cannotReschedule = result.bookings.some((b) => b.reschedule === 'not_allowed');
-      const cannotCancel = result.bookings.some((b) => b.cancel === 'not_allowed');
-      const guidance = [
-        cannotReschedule
-          ? 'An appointment in this list cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.'
-          : '',
-        cannotCancel
-          ? 'An appointment in this list cannot be cancelled (CHANGE_NOT_ALLOWED). Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot cancel that appointment here.'
-          : '',
-      ]
-        .filter(Boolean)
-        .join(' ');
+      const guidance = listedChangeGuidance(result.bookings);
       return { success: true, data: { ...result, ...(guidance ? { guidance } : {}) } };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to list bookings') };
@@ -1394,7 +1467,7 @@ export class ListBookingsTool implements ToolAdapter {
 export class RescheduleBookingTool implements ToolAdapter {
   name = 'reschedule_booking';
   description =
-    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file. If it returns CHANGE_NOT_ALLOWED, tell them they cannot reschedule here — do not ask for confirmation.';
+    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to reschedule that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot reschedule here — do not ask for confirmation.';
   parameters = {
     type: 'object',
     properties: {
@@ -1420,15 +1493,17 @@ export class RescheduleBookingTool implements ToolAdapter {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const bookingId = args.bookingId as string;
-      const mode = await peekCustomerChange(ctx.sessionId, bookingId, 'reschedule');
-      if (mode === 'not_allowed') return changeNotAllowedResult('reschedule');
-      const gate = await refuseUnlessRescheduleConfirmed(args, ctx);
-      if (gate.refusal) return gate.refusal;
-      // The gate's address, not the caller's: the confirming call is often the one that drops it,
-      // and the customer agreed to a summary naming that door. Falling back to `args` here would
-      // move the job to the address the row already held.
-      const customerAddress =
-        gate.customerAddress ?? (typeof args.customerAddress === 'string' ? args.customerAddress : undefined);
+      const peek = asChangePeek(await peekCustomerChange(ctx.sessionId, bookingId, 'reschedule'));
+      if (peek.mode === 'not_allowed') return changeNotAllowedResult('reschedule', cutoffUntilMin(peek));
+      let customerAddress =
+        typeof args.customerAddress === 'string' ? args.customerAddress : undefined;
+      // `request` writes a Request for the owner on this call. Waiting for a second
+      // customer yes is how Requests stayed empty after "ik leg de verplaatsing ter bevestiging voor".
+      if (peek.mode === 'auto') {
+        const gate = await refuseUnlessRescheduleConfirmed(args, ctx);
+        if (gate.refusal) return gate.refusal;
+        customerAddress = gate.customerAddress ?? customerAddress;
+      }
       const result = await rescheduleBooking(
         'agent',
         ctx.sessionId,
@@ -1445,7 +1520,7 @@ export class RescheduleBookingTool implements ToolAdapter {
 
 export class CancelBookingTool implements ToolAdapter {
   name = 'cancel_booking';
-  description = 'Cancel an existing booking. If it returns CHANGE_NOT_ALLOWED, tell them they cannot cancel here — do not ask for confirmation.';
+  description = 'Cancel an existing booking. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to cancel that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot cancel here — do not ask for confirmation.';
   parameters = {
     type: 'object',
     properties: {
@@ -1465,12 +1540,12 @@ export class CancelBookingTool implements ToolAdapter {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const bookingId = args.bookingId as string;
-      const mode = await peekCustomerChange(ctx.sessionId, bookingId, 'cancel');
-      if (mode === 'not_allowed') return changeNotAllowedResult('cancel');
-      // Auto executes the cancel; request only captures an owner-approval row.
-      // Both still need an explicit yes — a single "annuleer het" must not fire.
-      const needsConfirm = await refuseUnlessCancelConfirmed(args, ctx);
-      if (needsConfirm) return needsConfirm;
+      const peek = asChangePeek(await peekCustomerChange(ctx.sessionId, bookingId, 'cancel'));
+      if (peek.mode === 'not_allowed') return changeNotAllowedResult('cancel', cutoffUntilMin(peek));
+      if (peek.mode === 'auto') {
+        const needsConfirm = await refuseUnlessCancelConfirmed(args, ctx);
+        if (needsConfirm) return needsConfirm;
+      }
       const result = await cancelBooking(
         'agent',
         ctx.sessionId,

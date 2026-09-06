@@ -29,7 +29,9 @@ import {
   CHANGE_REQUEST_LOCK_CLASS,
   DEFAULT_CUSTOMER_CHANGE_MODE,
   customerChangeNotAllowedError,
+  spokenChangeCutoff,
   type CustomerChangeMode,
+  type CustomerChangePeek,
 } from '../customer-change-policy';
 import { logger } from '../../utils/logger';
 import {
@@ -517,11 +519,34 @@ export class InternalProvider implements BookingProvider {
       locationChoice,
       excludeBookingId,
     });
-    const held = (await this.liveBookingsForCaller(ctx)).filter((b) => {
-      if (b.status !== 'confirmed' && b.status !== 'pending') return false;
-      if (b.eventTypeId !== service.id) return false;
-      const start = b.startUtc.getTime();
-      return start >= new Date(rangeStart).getTime() && start < new Date(rangeEnd).getTime();
+    const live = await this.liveBookingsForCaller(ctx);
+    const liveSame = live.filter(
+      (b) =>
+        (b.status === 'confirmed' || b.status === 'pending') && b.eventTypeId === service.id,
+    );
+    const rangeStartMs = new Date(rangeStart).getTime();
+    const rangeEndMs = new Date(rangeEnd).getTime();
+    const held = liveSame.filter((b) => {
+      const start = new Date(b.startUtc).getTime();
+      return start >= rangeStartMs && start < rangeEndMs;
+    });
+    const reschedulePolicy = service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+    const cannotReschedule = liveSame.flatMap((b) => {
+      const start = new Date(b.startUtc);
+      if (resolveCustomerChange(reschedulePolicy, start, service.rescheduleUntilMin) !== 'not_allowed') {
+        return [];
+      }
+      const rescheduleCutoff =
+        reschedulePolicy !== 'not_allowed'
+          ? spokenChangeCutoff(service.rescheduleUntilMin) ?? undefined
+          : undefined;
+      return [
+        {
+          bookingId: b.id,
+          start: start.toISOString(),
+          ...(rescheduleCutoff ? { rescheduleCutoff } : {}),
+        },
+      ];
     });
     return {
       slots: travel.slots,
@@ -539,11 +564,12 @@ export class InternalProvider implements BookingProvider {
         ? {
             alreadyHeld: held.map((b) => ({
               bookingId: b.id,
-              start: b.startUtc.toISOString(),
-              end: b.endUtc.toISOString(),
+              start: new Date(b.startUtc).toISOString(),
+              end: new Date(b.endUtc).toISOString(),
             })),
           }
         : {}),
+      ...(cannotReschedule.length ? { cannotReschedule } : {}),
       ...(clockWindow ? { clockWindow: { ...clockWindow, matched: windowMatched } } : {}),
     };
   }
@@ -3073,6 +3099,18 @@ export class InternalProvider implements BookingProvider {
     return {
       bookings: rows.map((b) => {
         const start = new Date(b.start_utc);
+        const reschedulePolicy = b.reschedule_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+        const cancelPolicy = b.cancel_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+        const reschedule = resolveCustomerChange(reschedulePolicy, start, b.reschedule_until_min);
+        const cancel = resolveCustomerChange(cancelPolicy, start, b.cancel_until_min);
+        const rescheduleCutoff =
+          reschedulePolicy !== 'not_allowed' && reschedule === 'not_allowed'
+            ? spokenChangeCutoff(b.reschedule_until_min) ?? undefined
+            : undefined;
+        const cancelCutoff =
+          cancelPolicy !== 'not_allowed' && cancel === 'not_allowed'
+            ? spokenChangeCutoff(b.cancel_until_min) ?? undefined
+            : undefined;
         return {
           id: b.id,
           startTime: start.toISOString(),
@@ -3080,16 +3118,10 @@ export class InternalProvider implements BookingProvider {
           attendee: { name: b.attendee_name ?? undefined, email: b.attendee_email ?? undefined },
           status: b.status,
           serviceName: b.service_name ?? undefined,
-          reschedule: resolveCustomerChange(
-            b.reschedule_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
-            start,
-            b.reschedule_until_min,
-          ),
-          cancel: resolveCustomerChange(
-            b.cancel_mode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
-            start,
-            b.cancel_until_min,
-          ),
+          reschedule,
+          cancel,
+          ...(rescheduleCutoff ? { rescheduleCutoff } : {}),
+          ...(cancelCutoff ? { cancelCutoff } : {}),
         };
       }),
     };
@@ -3427,7 +3459,8 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
-   * Effective customer-change mode for this appointment. Uses `loadOwned` so a
+   * Effective customer-change mode for this appointment, plus the Service's own
+   * policy and cutoff so a refusal can name the duration. Uses `loadOwned` so a
    * missing or foreign id is BOOKING_NOT_FOUND, never a silent `request` default
    * that would skip auto-confirm and then 404 on the write.
    */
@@ -3435,13 +3468,17 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     bookingId: string,
     kind: 'reschedule' | 'cancel',
-  ): Promise<CustomerChangeMode> {
+  ): Promise<CustomerChangePeek> {
     const booking = await this.loadOwned(ctx, bookingId);
     const service = await this.serviceForBooking(booking);
-    const mode =
+    const policy =
       (kind === 'cancel' ? service.cancelMode : service.rescheduleMode) ?? DEFAULT_CUSTOMER_CHANGE_MODE;
-    const untilMin = kind === 'cancel' ? service.cancelUntilMin : service.rescheduleUntilMin;
-    return resolveCustomerChange(mode, booking.startUtc, untilMin);
+    const untilMin = (kind === 'cancel' ? service.cancelUntilMin : service.rescheduleUntilMin) ?? null;
+    return {
+      mode: resolveCustomerChange(policy, booking.startUtc, untilMin),
+      policy,
+      untilMin,
+    };
   }
 
   /**
@@ -3507,8 +3544,17 @@ export class InternalProvider implements BookingProvider {
     return !!owning?.visitorId && owning.visitorId === visitor;
   }
 
-  private refuseCustomerChange(serviceName: string, action: 'reschedule' | 'cancel'): never {
-    throw customerChangeNotAllowedError(serviceName, action);
+  private refuseCustomerChange(
+    serviceName: string,
+    action: 'reschedule' | 'cancel',
+    policy: CustomerChangeMode,
+    untilMin: number | null | undefined,
+  ): never {
+    throw customerChangeNotAllowedError(
+      serviceName,
+      action,
+      policy === 'not_allowed' ? null : untilMin ?? null,
+    );
   }
 
   private async withChangeRequestLock<T>(
@@ -4150,12 +4196,10 @@ export class InternalProvider implements BookingProvider {
     newAddress: string | null | undefined,
   ): Promise<RescheduleResult | null> {
     if (!ctx.subjectToCustomerChangePolicy) return null;
-    const decision = resolveCustomerChange(
-      service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
-      booking.startUtc,
-      service.rescheduleUntilMin,
-    );
-    if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule');
+    const policy = service.rescheduleMode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+    const untilMin = service.rescheduleUntilMin;
+    const decision = resolveCustomerChange(policy, booking.startUtc, untilMin);
+    if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule', policy, untilMin);
     if (decision !== 'request') return null;
     return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, timezone, newAddress);
   }
@@ -4585,12 +4629,10 @@ export class InternalProvider implements BookingProvider {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.serviceForBooking(booking);
     if (ctx.subjectToCustomerChangePolicy) {
-      const decision = resolveCustomerChange(
-        service.cancelMode ?? DEFAULT_CUSTOMER_CHANGE_MODE,
-        booking.startUtc,
-        service.cancelUntilMin,
-      );
-      if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'cancel');
+      const policy = service.cancelMode ?? DEFAULT_CUSTOMER_CHANGE_MODE;
+      const untilMin = service.cancelUntilMin;
+      const decision = resolveCustomerChange(policy, booking.startUtc, untilMin);
+      if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'cancel', policy, untilMin);
       if (decision === 'request') {
         return this.createChangeRequest(
           ctx,

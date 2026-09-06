@@ -1335,6 +1335,31 @@ describe('ListBookingsTool', () => {
     );
   });
 
+  it('tells the model when cancel is blocked by a cutoff, not by policy', async () => {
+    const tool = new ListBookingsTool();
+    mockListBookings.mockResolvedValue({
+      bookings: [
+        {
+          id: 'bk-1',
+          status: 'confirmed',
+          cancel: 'not_allowed',
+          cancelCutoff: '1 hour before the appointment',
+          reschedule: 'auto',
+        },
+      ],
+    });
+
+    const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
+
+    expect(result.success).toBe(true);
+    expect(String(result.data?.guidance)).toMatch(/inside the cutoff/);
+    expect(String(result.data?.guidance)).toMatch(/name the cutoff/);
+    expect(String(result.data?.guidance)).toMatch(/do not tell them to contact the business/i);
+    expect(String(result.data?.guidance)).toMatch(/keep insisting after you have explained the cutoff/);
+    expect(String(result.data?.guidance)).not.toMatch(/Politely explain they cannot cancel that appointment here/);
+  });
+
+
 });
 
 describe('RescheduleBookingTool', () => {
@@ -1386,12 +1411,20 @@ describe('RescheduleBookingTool', () => {
     });
   });
 
-  it('a request-policy move still waits for an explicit yes', async () => {
+  it('captures a request-policy move on the first call, without a second yes', async () => {
+    // Screenshot: customer named 7 Sep 15:00 and Passtraat 248B; the bot said it would
+    // present the move for confirmation; Requests stayed empty. CONFIRMATION_REQUIRED
+    // must not block a change Request — the original appointment still stands.
     const tool = new RescheduleBookingTool();
     mockPeekCustomerChange.mockResolvedValueOnce('request');
     const ctx = makeCtx({
       sessionId: 'sess-sv-reschedule',
       conversationHistory: [{ role: 'user', content: 'passtraat 248B, 9100 Sint-Niklaas' }],
+    });
+    mockRescheduleBooking.mockResolvedValue({
+      success: true,
+      requested: true,
+      booking: { id: 'req-1', startTime: '2026-09-07T13:00:00.000Z' },
     });
 
     const result = await tool.execute(
@@ -1403,9 +1436,15 @@ describe('RescheduleBookingTool', () => {
       ctx,
     );
 
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
-    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(mockRescheduleBooking).toHaveBeenCalledWith(
+      'agent',
+      'sess-sv-reschedule',
+      'bk-orig',
+      '2026-09-07T15:00:00',
+      { customerAddress: 'Passtraat 248B, 9100 Sint-Niklaas' },
+    );
+    expect(result.data).toMatchObject({ requested: true });
   });
 
   it('refuses a not_allowed move on the first call, without confirmation', async () => {
@@ -1469,6 +1508,31 @@ describe('RescheduleBookingTool', () => {
     expect(result.error).not.toMatch(/MOVE_PENDING/);
     expect(mockRescheduleBooking).not.toHaveBeenCalled();
   });
+
+  it('names the cutoff on a last-minute auto reschedule and does not confirm', async () => {
+    const tool = new RescheduleBookingTool();
+    mockPeekCustomerChange.mockResolvedValueOnce({
+      mode: 'not_allowed',
+      policy: 'auto',
+      untilMin: 60,
+    });
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-cutoff',
+      conversationHistory: [{ role: 'user', content: 'verzet naar vrijdag 15:00' }],
+    });
+
+    const result = await tool.execute(
+      { bookingId: 'bk-orig', newStartTime: '2026-09-04T15:00:00' },
+      ctx,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).toMatch(/1 hour before the appointment/);
+    expect(result.error).toMatch(/it is not possible to reschedule 1 hour before the appointment/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockRescheduleBooking).not.toHaveBeenCalled();
+  });
 });
 
 describe('CancelBookingTool', () => {
@@ -1490,19 +1554,19 @@ describe('CancelBookingTool', () => {
     expect(mockCancelBooking).toHaveBeenCalledWith('agent', 'sess-5', 'bk-4', 'Not needed');
   });
 
-  it('a request-policy cancel still waits for an explicit yes', async () => {
+  it('captures a request-policy cancel on the first call, without a second yes', async () => {
     mockPeekCustomerChange.mockResolvedValueOnce('request');
     const tool = new CancelBookingTool();
     const ctx = makeCtx({
       sessionId: 'sess-sv-cancel',
       conversationHistory: [{ role: 'user', content: 'ik wil mijn afspraak annuleren' }],
     });
+    mockCancelBooking.mockResolvedValue({ success: true, requested: true, cancelled: false });
 
     const result = await tool.execute({ bookingId: 'bk-orig' }, ctx);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/CONFIRMATION_REQUIRED/);
-    expect(mockCancelBooking).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(mockCancelBooking).toHaveBeenCalledWith('agent', 'sess-sv-cancel', 'bk-orig', undefined);
   });
 
   it('refuses a not_allowed cancel on the first call, without confirmation', async () => {
@@ -1520,6 +1584,31 @@ describe('CancelBookingTool', () => {
     expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
     expect(mockCancelBooking).not.toHaveBeenCalled();
   });
+
+  it('names the cutoff on a last-minute auto cancel and does not hand off yet', async () => {
+    mockPeekCustomerChange.mockResolvedValueOnce({
+      mode: 'not_allowed',
+      policy: 'auto',
+      untilMin: 60,
+    });
+    const tool = new CancelBookingTool();
+    const ctx = makeCtx({
+      sessionId: 'sess-sv-cutoff',
+      conversationHistory: [{ role: 'user', content: 'annuleer mijn afspraak van 22 uur' }],
+    });
+
+    const result = await tool.execute({ bookingId: 'bk-orig' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).toMatch(/1 hour before the appointment/);
+    expect(result.error).toMatch(/it is not possible to cancel 1 hour before the appointment/);
+    expect(result.error).toMatch(/do not tell them to contact the business/i);
+    expect(result.error).toMatch(/do not call escalate_to_human on this first refusal/);
+    expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(mockCancelBooking).not.toHaveBeenCalled();
+  });
+
 });
 
 describe('UpdateBookingTool', () => {

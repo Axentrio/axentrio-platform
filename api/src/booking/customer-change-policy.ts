@@ -52,7 +52,9 @@ export function resolveCustomerChange(
 ): CustomerChangeMode {
   if (policy === 'not_allowed') return 'not_allowed';
   if (untilMin == null) return policy;
-  const cutoffMs = startUtc.getTime() - untilMin * 60_000;
+  const startMs = startUtc instanceof Date ? startUtc.getTime() : new Date(startUtc).getTime();
+  if (!Number.isFinite(startMs)) return policy;
+  const cutoffMs = startMs - untilMin * 60_000;
   if (now.getTime() > cutoffMs) return 'not_allowed';
   return policy;
 }
@@ -82,6 +84,31 @@ export function formatChangeCutoff(untilMin: number | null | undefined): string 
   return `until ${untilMin}min before`;
 }
 
+/** What the model should say out loud for a cutoff duration. */
+export function spokenChangeCutoff(untilMin: number | null | undefined): string | null {
+  if (untilMin == null) return null;
+  if (untilMin === 0) return 'after the appointment has started';
+  if (untilMin % 1440 === 0) {
+    const days = untilMin / 1440;
+    return days === 1 ? '1 day before the appointment' : `${days} days before the appointment`;
+  }
+  if (untilMin % 60 === 0) {
+    const hours = untilMin / 60;
+    return hours === 1 ? '1 hour before the appointment' : `${hours} hours before the appointment`;
+  }
+  return `${untilMin} minutes before the appointment`;
+}
+
+/**
+ * Effective customer-change answer plus the Service's own mode and cutoff, so a
+ * refusal can name the duration instead of sounding like the action is forbidden outright.
+ */
+export type CustomerChangePeek = {
+  mode: CustomerChangeMode;
+  policy: CustomerChangeMode;
+  untilMin: number | null;
+};
+
 export function catalogChangeClause(
   label: 'reschedule' | 'cancel',
   mode: CustomerChangeMode | null | undefined,
@@ -96,9 +123,21 @@ export function catalogChangeClause(
 export function customerChangeNotAllowedError(
   serviceName: string | undefined,
   action: 'reschedule' | 'cancel',
+  untilMin?: number | null,
 ): BookingError {
   const verb = action === 'reschedule' ? 'reschedule' : 'cancel';
+  const past = action === 'reschedule' ? 'rescheduled' : 'cancelled';
   const who = serviceName ? `"${serviceName}"` : 'This appointment';
+  const spoken = spokenChangeCutoff(untilMin);
+  if (spoken) {
+    return new BookingError(
+      `${who} cannot be ${past} this close to the start — the cutoff is ${spoken}. Tell the customer plainly it is not possible to ${verb} ${spoken}. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.`,
+      'CHANGE_NOT_ALLOWED',
+      403,
+      { action, reason: 'cutoff', untilMin },
+      `This appointment cannot be ${past} online this close to the start (${spoken}). Please contact the business directly.`,
+    );
+  }
   return new BookingError(
     `${who} does not allow customers to ${verb} through the booking system. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
     'CHANGE_NOT_ALLOWED',

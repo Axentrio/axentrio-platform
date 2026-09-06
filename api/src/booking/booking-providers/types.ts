@@ -114,6 +114,10 @@ export interface ListBookingsResult {
     /** Effective customer-change policy (cutoff already applied). */
     reschedule?: 'auto' | 'request' | 'not_allowed';
     cancel?: 'auto' | 'request' | 'not_allowed';
+    /** Spoken cutoff that blocked reschedule, e.g. "1 hour before the appointment". */
+    rescheduleCutoff?: string;
+    /** Spoken cutoff that blocked cancel, e.g. "1 hour before the appointment". */
+    cancelCutoff?: string;
   }>;
 }
 
@@ -262,6 +266,13 @@ export interface AvailabilityResult {
    * A later check_availability must not let the model tell the customer those times are unavailable.
    */
   alreadyHeld?: Array<{ bookingId: string; start: string; end: string }>;
+  /**
+   * Live appointments of this service the caller holds whose reschedule cutoff
+   * has passed — any day, not just the asked range. alreadyHeld is in-range
+   * only, so a Friday check would otherwise hide that today's appointment
+   * cannot be moved.
+   */
+  cannotReschedule?: Array<{ bookingId: string; start: string; rescheduleCutoff?: string }>;
   /**
    * Echo of the window the call was filtered by. `matched: false` means the range HAD free
    * slots but none inside the window, and `slots` then holds the unfiltered list so the model

@@ -870,6 +870,8 @@ describe('InternalProvider reschedule / cancel / list', () => {
     const res = await provider.listBookings(ctx);
     expect(res.bookings[0].cancel).toBe('not_allowed');
     expect(res.bookings[0].reschedule).toBe('not_allowed');
+    expect(res.bookings[0].cancelCutoff).toBe('1 day before the appointment');
+    expect(res.bookings[0].rescheduleCutoff).toBe('1 day before the appointment');
   });
 
   it('looks up a booking by the SANITIZED address, so a capitalised retype still finds it', async () => {
@@ -1332,7 +1334,11 @@ describe('InternalProvider customer change policy', () => {
 
   it('peekCustomerChange reads not_allowed off the Service', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'not_allowed' });
-    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).resolves.toBe('not_allowed');
+    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).resolves.toEqual({
+      mode: 'not_allowed',
+      policy: 'not_allowed',
+      untilMin: null,
+    });
   });
 
   it('peekCustomerChange throws BOOKING_NOT_FOUND instead of defaulting to request', async () => {
@@ -1340,6 +1346,35 @@ describe('InternalProvider customer change policy', () => {
     await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).rejects.toMatchObject({
       code: 'BOOKING_NOT_FOUND',
     });
+  });
+
+  it('peekCustomerChange keeps policy and untilMin when cutoff demotes auto', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, cancelMode: 'auto', cancelUntilMin: 10 * 24 * 60 });
+    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'cancel')).resolves.toEqual({
+      mode: 'not_allowed',
+      policy: 'auto',
+      untilMin: 10 * 24 * 60,
+    });
+  });
+
+  it('peekCustomerChange demotes auto reschedule inside a 1h cutoff', async () => {
+    vi.setSystemTime(new Date('2026-06-10T06:30:00Z'));
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'auto', rescheduleUntilMin: 60 });
+    await expect(provider.peekCustomerChange(customerCtx, 'bk-1', 'reschedule')).resolves.toEqual({
+      mode: 'not_allowed',
+      policy: 'auto',
+      untilMin: 60,
+    });
+  });
+
+  it('cutoff demotes auto reschedule to not_allowed without writing', async () => {
+    vi.setSystemTime(new Date('2026-06-10T06:30:00Z'));
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, rescheduleMode: 'auto', rescheduleUntilMin: 60 });
+    await expect(provider.rescheduleBooking(customerCtx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'CHANGE_NOT_ALLOWED',
+      details: { action: 'reschedule', reason: 'cutoff', untilMin: 60 },
+    });
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('UPDATE chatbot_bookings'))).toBe(false);
   });
 
   it('request leaves the original confirmed and returns requested: true', async () => {
@@ -1355,6 +1390,8 @@ describe('InternalProvider customer change policy', () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, cancelMode: 'auto', cancelUntilMin: 10 * 24 * 60 });
     await expect(provider.cancelBooking(customerCtx, 'bk-1')).rejects.toMatchObject({
       code: 'CHANGE_NOT_ALLOWED',
+      message: expect.stringMatching(/10 days before the appointment/),
+      details: { action: 'cancel', reason: 'cutoff', untilMin: 10 * 24 * 60 },
     });
   });
 

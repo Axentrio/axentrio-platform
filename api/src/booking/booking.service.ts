@@ -29,7 +29,7 @@ import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, t
 import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { findBookableService } from './booking-providers/find-bookable-service';
-import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE } from './customer-change-policy';
+import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE, type CustomerChangePeek } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
 import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
@@ -233,10 +233,11 @@ export async function peekCustomerEmailRequired(
 }
 
 /**
- * Effective customer-change policy for this appointment (cutoff applied).
+ * Effective customer-change policy for this appointment (cutoff applied), plus
+ * the Service's own mode and cutoff so CHANGE_NOT_ALLOWED can name the duration.
  * CHANGE_NOT_ALLOWED must beat CONFIRMATION_REQUIRED: otherwise the model
  * asks "shall I cancel?", the customer says yes, and only then hears they
- * cannot. A `request` policy still confirms — that write notifies the owner.
+ * cannot. A `request` policy captures on this call — the original stays put.
  *
  * Missing/unowned ids throw BOOKING_NOT_FOUND — never default to `request`.
  */
@@ -244,7 +245,7 @@ export async function peekCustomerChange(
   sessionId: string,
   bookingId: string,
   kind: 'reschedule' | 'cancel',
-): Promise<CustomerChangeMode> {
+): Promise<CustomerChangePeek> {
   const ctx = await resolveContext(sessionId);
   return internalProvider.peekCustomerChange(ctx, bookingId, kind);
 }

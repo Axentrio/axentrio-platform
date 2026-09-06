@@ -15,8 +15,10 @@ import {
   collapseAppointmentSpans,
   latestCustomerTimeText,
   namesSingleOfferedTime,
+  parseClockTimes,
   unofferedSingleTimeIn,
   unofferedTimesIn,
+  upcomingMidnightDate,
 } from '../../agent/clock-times';
 
 const OFFERED = ['09:00', '09:30', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00'];
@@ -155,6 +157,61 @@ describe('namesSingleOfferedTime — the customer already chose an offered hour'
 
   it('is false when no clock time is named', () => {
     expect(namesSingleOfferedTime('when can I book?', OFFERED_MORNING)).toBe(false);
+  });
+});
+
+describe('midnight as a named clock', () => {
+  const TZ = 'Europe/Brussels';
+  const EVENING = new Date('2026-09-06T20:29:00.000Z'); // 22:29 Brussels
+
+  it('reads midnight / middernacht / minuit as 00:00', () => {
+    expect(parseClockTimes('later at midnight').map((t) => t.key)).toEqual(['00:00']);
+    expect(parseClockTimes('afspraak om middernacht').map((t) => t.key)).toEqual(['00:00']);
+    expect(parseClockTimes('rendez-vous à minuit').map((t) => t.key)).toEqual(['00:00']);
+  });
+
+  it('treats midnight as the one named offered time when 00:00 is in the list', () => {
+    expect(namesSingleOfferedTime('later at midnight', ['00:00', '00:30'])).toBe(true);
+  });
+
+  it('rolls an unnamed midnight onto the next calendar day when today has no 00:00', () => {
+    // 22:29, always-open, same-day read: remaining starts are 22:30 / 23:00 / 23:30.
+    // Midnight is 00:00 of the next calendar day — today's 00:00 is already past.
+    expect(
+      upcomingMidnightDate(
+        '2026-09-06',
+        '2026-09-06',
+        ['22:30', '23:00', '23:30'],
+        'hey, i would like an appointment for later at midnight',
+        TZ,
+        EVENING,
+      ),
+    ).toBe('2026-09-07');
+  });
+
+  it('does not roll when 00:00 is already on the queried day', () => {
+    expect(
+      upcomingMidnightDate('2026-09-06', '2026-09-06', ['00:00', '00:30'], 'later at midnight', TZ, EVENING),
+    ).toBeNull();
+  });
+
+  it('does not roll a future date whose 00:00 is simply busy', () => {
+    expect(
+      upcomingMidnightDate('2026-09-12', '2026-09-12', ['22:30', '23:00'], 'later at midnight', TZ, EVENING),
+    ).toBeNull();
+  });
+
+  it('does not roll when they named a calendar date', () => {
+    expect(
+      upcomingMidnightDate(
+        '2026-09-06',
+        '2026-09-06',
+        ['22:30'],
+        'midnight on 12 October 2026',
+        TZ,
+        EVENING,
+      ),
+    ).toBeNull();
   });
 });
 

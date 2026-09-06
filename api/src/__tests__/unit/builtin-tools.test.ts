@@ -732,6 +732,112 @@ describe('CheckAvailabilityTool', () => {
     expect(data.guidance).toMatch(/never tell the customer it is available/i);
   });
 
+  it('rolls later-at-midnight onto the next day when today has no 00:00', async () => {
+    // Live WhatsApp, always-open 24/7: asked at 22:29 for midnight. Same-day read returned
+    // 22:30 / 23:00 / 23:30 and the bot said midnight was unavailable today. Midnight is
+    // 00:00 of the next calendar day.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T20:29:00.000Z'));
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability
+      .mockResolvedValueOnce({
+        slots: [
+          { start: '2026-09-06T20:30:00.000Z', end: '2026-09-06T21:00:00.000Z' },
+          { start: '2026-09-06T21:00:00.000Z', end: '2026-09-06T21:30:00.000Z' },
+          { start: '2026-09-06T21:30:00.000Z', end: '2026-09-06T22:00:00.000Z' },
+        ],
+        timezone: 'Europe/Brussels',
+      })
+      .mockResolvedValueOnce({
+        slots: [
+          { start: '2026-09-06T22:00:00.000Z', end: '2026-09-06T22:30:00.000Z' },
+        ],
+        timezone: 'Europe/Brussels',
+      });
+
+    const result = await tool.execute(
+      { startDate: '2026-09-06', endDate: '2026-09-06' },
+      makeCtx({
+        conversationHistory: [
+          {
+            role: 'user',
+            content:
+              'hey, i would like an appointment for later at midnight for name Achraf with email adres achraflamranim@gmail.com',
+          },
+        ],
+      }),
+    );
+
+    expect(mockCheckAvailability).toHaveBeenCalledTimes(2);
+    expect(mockCheckAvailability.mock.calls[1][2]).toBe('2026-09-07');
+    expect(mockCheckAvailability.mock.calls[1][3]).toBe('2026-09-07');
+    expect(mockCheckAvailability.mock.calls[1].at(-1)).toBeUndefined();
+    const data = result.data as { requestedTimeAvailable?: boolean };
+    expect(data.requestedTimeAvailable).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('keeps tonight when tomorrow has no 00:00', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T20:29:00.000Z'));
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability
+      .mockResolvedValueOnce({
+        slots: [
+          { start: '2026-09-06T20:30:00.000Z', end: '2026-09-06T21:00:00.000Z' },
+          { start: '2026-09-06T21:00:00.000Z', end: '2026-09-06T21:30:00.000Z' },
+          { start: '2026-09-06T21:30:00.000Z', end: '2026-09-06T22:00:00.000Z' },
+        ],
+        timezone: 'Europe/Brussels',
+      })
+      .mockResolvedValueOnce({
+        slots: [{ start: '2026-09-06T22:30:00.000Z', end: '2026-09-06T23:00:00.000Z' }],
+        timezone: 'Europe/Brussels',
+      });
+
+    const result = await tool.execute(
+      { startDate: '2026-09-06', endDate: '2026-09-06' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'later at midnight' }],
+      }),
+    );
+
+    expect(mockCheckAvailability).toHaveBeenCalledTimes(2);
+    const data = result.data as {
+      requestedTimeAvailable?: boolean;
+      requestedTimeUnavailable?: string;
+      slots: Array<{ start: string }>;
+    };
+    expect(data.requestedTimeAvailable).toBeUndefined();
+    expect(data.requestedTimeUnavailable).toBe('midnight');
+    expect(data.slots.map((s) => s.start)).toEqual([
+      '2026-09-06T22:30:00',
+      '2026-09-06T23:00:00',
+      '2026-09-06T23:30:00',
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('does not roll midnight on a future date whose 00:00 is missing', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-06T20:29:00.000Z'));
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-12T20:30:00.000Z', end: '2026-09-12T21:00:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+
+    await tool.execute(
+      { startDate: '2026-09-12', endDate: '2026-09-12' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'later at midnight' }],
+      }),
+    );
+
+    expect(mockCheckAvailability).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
 
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {
     // `data` is serialised into the tool message verbatim and truncated at 4000 characters. Left

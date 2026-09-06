@@ -109,6 +109,24 @@ describe('checking before capturing a request', () => {
 });
 
 /**
+ * A time before opening on an otherwise bookable Auto-book day is not a request.
+ *
+ * Live WhatsApp 2026-09-06: Auto-book, Monday 09:00–17:00, asked for 08:30. Valid
+ * 09:00 / 09:30 / 10:00 sat on that same day. The Availability rule told the model
+ * that out-of-hours is the request path, so it refused 08:30 and asked the customer
+ * to guess instead of offering the times the diary already had.
+ */
+describe('a time outside hours on an Auto-book day is not a request', () => {
+  it('tells the model to check that date and offer the times, never to capture a request', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/named time outside the opening hours is NOT that case/i);
+    expect(p).toMatch(/Stay in the auto-book flow/i);
+    expect(p).toMatch(/Do NOT capture a request, and do not ask them to guess another time, while that call has times/i);
+    expect(p).not.toMatch(/correct path for out-of-hours, after-hours, and emergency requests/i);
+  });
+});
+
+/**
  * The catalog line for a service, isolated from the rules below it.
  *
  * Rule 7 quotes BOTH cues ("choose length", "AI-estimated") as examples, so asserting
@@ -1301,7 +1319,7 @@ describe('check_availability — a time the caller already holds is not unavaila
       { startDate: '2026-09-08', endDate: '2026-09-08' },
       { sessionId: 'cs-1' } as never,
     );
-    const data = res.data as { moveTargets?: unknown[]; guidance?: string };
+    const data = res.data as { moveTargets?: unknown[]; guidance?: string; slots?: unknown };
     expect(data.moveTargets).toBeUndefined();
     expect(data.slots).toBeUndefined();
     expect(res.availability).toBeUndefined();

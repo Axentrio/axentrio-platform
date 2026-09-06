@@ -443,6 +443,40 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '24:00' });
   });
 
+  it('drops a 30-minute window around an exact named time, so the rest of the day is offered', async () => {
+    // Live: Auto-book 09:00–17:00, asked for 08:30. The model probed 08:30–09:00, matched
+    // nothing, and chips were suppressed while 09:00 sat on the same day.
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-07T07:00:00.000Z', end: '2026-09-07T07:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute(
+      { startDate: '2026-09-07', endDate: '2026-09-07', earliestTime: '08:30', latestTime: '09:00' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil maandag 7 september 2026 om 08:30 een Booking test boeken.' },
+        ],
+      }),
+    );
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toBeUndefined();
+  });
+
+  it('still forwards a day-part window when they asked for the afternoon', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-07T10:00:00.000Z', end: '2026-09-07T10:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute(
+      { startDate: '2026-09-07', endDate: '2026-09-07', earliestTime: '12:00', latestTime: '18:00' },
+      makeCtx({
+        conversationHistory: [{ role: 'user', content: 'maandag 7 september, ergens in de namiddag' }],
+      }),
+    );
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toEqual({ from: '12:00', to: '18:00' });
+  });
+
   it('accepts a day-part word as a clock window', async () => {
     const tool = new CheckAvailabilityTool();
     mockCheckAvailability.mockResolvedValue({
@@ -697,6 +731,7 @@ describe('CheckAvailabilityTool', () => {
     expect(data.requestedTimeUnavailable).toBe('10:00');
     expect(data.guidance).toMatch(/never tell the customer it is available/i);
   });
+
 
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {
     // `data` is serialised into the tool message verbatim and truncated at 4000 characters. Left

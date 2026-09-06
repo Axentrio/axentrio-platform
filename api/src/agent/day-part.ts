@@ -26,6 +26,18 @@ export function dayPartWindow(text: string): ClockWindow | null {
   return null;
 }
 
+/**
+ * A window the customer named as a part of day, not as one clock time.
+ *
+ * Unmatched day-part windows must not draw morning chips for "namiddag". A 30-minute
+ * probe around 08:30 is not a day part: that miss should still offer the rest of the day.
+ */
+export function isDayPartClockWindow(w: ClockWindow): boolean {
+  if (Object.values(DAY_PART_WINDOWS).some((d) => d.from === w.from && d.to === w.to)) return true;
+  // Schema: afternoon = earliestTime "12:00" with latest omitted → 12:00–24:00.
+  return w.from === '12:00' && w.to === '24:00';
+}
+
 /** Walk recent customer texts newest-first; a named clock time cancels a day-part preference. */
 export function inferDayPartWindow(customerTextsNewestFirst: string[]): ClockWindow | null {
   for (const text of customerTextsNewestFirst.slice(0, 8)) {

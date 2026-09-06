@@ -158,8 +158,8 @@ const fmtWindows = (wins: TimeWindow[]): string =>
  * the configured hours instead of guessing or relying on the knowledge base.
  * Returns null when there's nothing reliable to state (business-hours mode with
  * no days enabled) — the bot then falls back to kb_search for hours. These hours
- * tell the bot WHEN the business is open; they never block it from helping or
- * capturing an out-of-hours request (see the fallback rule in SERVICES).
+ * tell the bot WHEN the business is open. A time before open on a bookable day is
+ * a reason to offer later Auto-book times, not to capture a request (see AVAILABILITY_RULE).
  */
 /** Bounded so a business with a year of holidays can't crowd out the rest of the prompt. */
 const MAX_OVERRIDE_LINES = 8;
@@ -440,6 +440,16 @@ const CHECK_BEFORE_REQUEST_RULE = `- Check before you capture: ALWAYS call check
 
 
 /**
+ * Empty diary → request. A time before open on an otherwise bookable Auto-book day is not
+ * empty: check that date and offer the times. Live WhatsApp 2026-09-06: 08:30 refused
+ * on a 09:00–17:00 Monday while 09:00 sat free, because this bullet used to send
+ * out-of-hours to request_appointment.
+ */
+const AVAILABILITY_RULE =
+  '- Availability: if check_availability returns no available times, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. A named time outside the opening hours is NOT that case: call check_availability for the date they named, do not pass earliestTime or latestTime for an exact clock time, refuse the hour they asked for, and offer the times that call returns. Stay in the auto-book flow. Do NOT capture a request, and do not ask them to guess another time, while that call has times. Opening hours never stop you from helping. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.';
+
+
+/**
  * Phone-call Auto-book must stay in the booking flow when the number is missing.
  *
  * Address-first (travel) is a different rule: the times themselves depend on where the
@@ -604,7 +614,7 @@ Then follow these rules IN ORDER:
 1. If their request matches NO service in the catalog below, tell them you don't offer that and briefly say what you DO offer — do not ask them to specify a service you don't have. If the request is ambiguous between two or more services you DO offer, ask a disambiguating question first. Either way, do not confirm or capture a booking until you know which listed service they mean. Never guess.
 2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
 3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation. For a request-only service, do NOT call check_availability or present specific bookable time slots — instead ask the customer for their preferred date/time in their own words and pass it as preferredTime. Availability checks and tappable slots are only for auto-book services.${catalogNumberedRules(flags)}
-${catalogRuleLines(flags, travelTimeActive)}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.
+${catalogRuleLines(flags, travelTimeActive)}${AVAILABILITY_RULE}
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80", "free"); NEVER invent or guess a number. The price shown on a service line is the FINAL price and may already include a discount — quote it exactly, even if it is €0 for a service listed under Discounts below. You may tell the customer a service is free or costs €0 ONLY when that service's line shows "free", or when it is the discounted final price of a service listed under Discounts. A service whose price is not shown has no price to quote — do not infer that it is free. Never mention, invent, imply, or deny a discount, promotion, or special offer for a service unless it is listed under Discounts below. You cannot change a booked price. If the customer keeps insisting on a different price after you have stated the listed price twice, ask whether they would like a human. If they say yes, call escalate_to_human. If they do not, do not escalate. Asking whether they would like a human is not a handoff: do not call escalate_to_human until they explicitly agree to a human (yes / please / ja / connect me). A further demand for a different price - including "no, I want it for X" - is not agreement. Restate the listed price and do not escalate.${

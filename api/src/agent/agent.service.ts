@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
 import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { isDayPartClockWindow } from './day-part';
 import { resolveBotLanguage, slotChipQuickReply } from '../config/bot-language';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
@@ -259,7 +260,7 @@ interface PendingAvailability {
   /** #80: carried so the offer record can name the service and its mode without a later join. */
   serviceId?: string;
   locationMode?: string;
-  /** Echo of the part-of-day filter. Suppress chips when matched is false. */
+  /** Echo of the part-of-day filter. Unmatched day-part windows suppress chips; a miss around an exact clock does not. */
   clockWindow?: { from: string; to: string; matched: boolean };
   /** The service the slots are for — embedded in the chip so a tap books the
    *  right service when the bot offers more than one. */
@@ -289,7 +290,7 @@ function buildSlotQuickReplies(
   language: ReturnType<typeof resolveBotLanguage>,
 ): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
-  if (av.clockWindow && !av.clockWindow.matched) return undefined;
+  if (av.clockWindow && !av.clockWindow.matched && isDayPartClockWindow(av.clockWindow)) return undefined;
   return av.slots.slice(0, 8).map((s) =>
     slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
   );

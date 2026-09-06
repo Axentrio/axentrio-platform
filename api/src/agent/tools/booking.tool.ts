@@ -36,7 +36,7 @@ import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
-import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, unofferedSingleTimeIn } from '../clock-times';
+import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
 import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, refuseCreateWhileMovePending, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
@@ -391,6 +391,29 @@ function invalidClockWindowResult(from: string, to: string): ToolResult | null {
   return null;
 }
 
+function clockMinutes(hhmm: string): number {
+  if (hhmm === '24:00') return 24 * 60;
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * The schema says omit earliestTime/latestTime when they named an exact clock. A 30-minute
+ * window around that clock matches nothing before open, and the unmatched-window path used
+ * to hide the rest of the day's Auto-book times.
+ */
+function isExactNamedTimeProbe(window: ClockWindow, ctx: ToolContext): boolean {
+  const said = lastCustomerText(ctx);
+  if (dayPartWindow(said)) return false;
+  const named = parseClockTimes(said);
+  if (named.length !== 1) return false;
+  const fromM = clockMinutes(window.from);
+  const toM = clockMinutes(window.to);
+  if (!(toM > fromM) || toM - fromM > 120) return false;
+  const clockM = clockMinutes(named[0].key);
+  return clockM >= fromM && clockM < toM;
+}
+
 /** Both bounds optional; an absent bound is the edge of the day. Returns undefined when neither is given. */
 function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockWindow | undefined | ToolResult {
   const from = typeof args.earliestTime === 'string' ? args.earliestTime.trim() : '';
@@ -405,7 +428,8 @@ function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockW
   if (toDayPart) return toDayPart;
   const invalid = invalidClockWindowResult(from, to);
   if (invalid) return invalid;
-  return { from: from || '00:00', to: to || '24:00' };
+  const window = { from: from || '00:00', to: to || '24:00' };
+  return isExactNamedTimeProbe(window, ctx) ? undefined : window;
 }
 
 /**
@@ -913,6 +937,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.customerPhone as string | undefined,
         window,
       );
+
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
       // scoring left on it teaches a model that is meant to be unaware of any ranking AND competes

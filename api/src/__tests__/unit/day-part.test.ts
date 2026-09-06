@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dayPartWindow, inferDayPartWindow } from '../../agent/day-part';
+import { dayPartWindow, inferDayPartWindow, isDayPartClockWindow } from '../../agent/day-part';
 
 describe('dayPartWindow', () => {
   it('maps Dutch afternoon phrases', () => {
@@ -30,5 +30,19 @@ describe('inferDayPartWindow', () => {
 
   it('returns null when a named clock time is newer than a day part', () => {
     expect(inferDayPartWindow(['om 10:00 graag', 'in de namiddag'])).toBeNull();
+  });
+});
+
+describe('isDayPartClockWindow', () => {
+  it('recognises the named day parts and the afternoon-onward schema shorthand', () => {
+    expect(isDayPartClockWindow({ from: '00:00', to: '12:00' })).toBe(true);
+    expect(isDayPartClockWindow({ from: '12:00', to: '18:00' })).toBe(true);
+    expect(isDayPartClockWindow({ from: '17:00', to: '24:00' })).toBe(true);
+    expect(isDayPartClockWindow({ from: '12:00', to: '24:00' })).toBe(true);
+  });
+
+  it('does not treat a 30-minute probe around a named clock as a day part', () => {
+    expect(isDayPartClockWindow({ from: '08:30', to: '09:00' })).toBe(false);
+    expect(isDayPartClockWindow({ from: '08:00', to: '09:00' })).toBe(false);
   });
 });

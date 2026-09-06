@@ -354,6 +354,55 @@ export class InternalProvider implements BookingProvider {
     return (await this.hasConnectedCalendar(ctx.bot.id)) && (await isCalendarSyncAllowed(ctx.tenant.id));
   }
 
+  private async assertAvailabilityOfferable(
+    ctx: BookingContext,
+    service: ResolvedService,
+    excludeBookingId: string | undefined,
+    contact: {
+      customerAddress?: string;
+      locationChoice?: 'business' | 'customer';
+      customerPhone?: string;
+    },
+  ): Promise<void> {
+    if (service.bookingMode === 'request') {
+      throw new BookingError(
+        `"${service.name}" is request-only and has no bookable time slots. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment.`,
+        'REQUEST_ONLY_SERVICE',
+        400
+      );
+    }
+    if (!ctx.isAdmin && !excludeBookingId) {
+      assertRequiredPhone(service, { customerPhone: contact.customerPhone }, ctx.session);
+      assertRequiredAddress(service, {
+        customerAddress: contact.customerAddress,
+        locationChoice: contact.locationChoice,
+      });
+    }
+    if (!ctx.isAdmin) {
+      const { bookingsPaused } = await loadBusinessRules(ctx.bot.id);
+      if (bookingsPaused) {
+        throw new BookingError(
+          `This business has paused NEW online bookings. Do not offer specific times and do not say they are fully booked or closed — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm. EXCEPTION: if this customer already has an appointment and wants to MOVE it, that is not a new booking — call reschedule_booking with their preferred time, which still works while bookings are paused. Never answer a reschedule with request_appointment: it leaves the original appointment standing and the business ends up with two.`,
+          'BOOKINGS_PAUSED',
+          409
+        );
+      }
+    }
+    if (await this.canAutoConfirm(ctx)) return;
+    const calendarHealthy = await this.hasConnectedCalendar(ctx.bot.id);
+    throw calendarHealthy
+      ? new BookingError(
+          `Online appointments can't be auto-confirmed because calendar sync is disabled on this plan. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+          'CALENDAR_SYNC_DISABLED',
+          409
+        )
+      : new BookingError(
+          `Online appointments can't be auto-confirmed because this business has no connected calendar. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+          'CALENDAR_NOT_CONNECTED',
+          409
+        );
+  }
+
   async checkAvailability(
     ctx: BookingContext,
     startDate: string,
@@ -386,57 +435,11 @@ export class InternalProvider implements BookingProvider {
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot);
     const service = await this.resolveService(ctx.bot.id, serviceId);
-    // Request-only services aren't booked against the calendar — there are no
-    // bookable slots to offer. Hard-stop here so the agent can't present times or
-    // run an availability check for them (a prompt nudge alone wasn't enough).
-    if (service.bookingMode === 'request') {
-      throw new BookingError(
-        `"${service.name}" is request-only and has no bookable time slots. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment.`,
-        'REQUEST_ONLY_SERVICE',
-        400
-      );
-    }
-    // Agent path only. The owner filling their diary, and a customer moving an
-    // existing booking, already have a number or do not need one to see times.
-    if (!ctx.isAdmin && !excludeBookingId) {
-      assertRequiredPhone(service, { customerPhone }, ctx.session);
-      assertRequiredAddress(service, { customerAddress, locationChoice });
-    }
-    // A paused business still HELPS — it just stops auto-confirming. Same fork, same
-    // capture-don't-refuse machinery as a missing calendar, because the customer's
-    // experience should be identical: their preferred time is taken down and confirmed
-    // later. Admin/portal callers are exempt: adminAvailability shares this method, and an
-    // owner must still be able to see and fill their own diary while paused.
-    if (!ctx.isAdmin) {
-      const { bookingsPaused } = await loadBusinessRules(ctx.bot.id);
-      if (bookingsPaused) {
-        throw new BookingError(
-          `This business has paused NEW online bookings. Do not offer specific times and do not say they are fully booked or closed — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm. EXCEPTION: if this customer already has an appointment and wants to MOVE it, that is not a new booking — call reschedule_booking with their preferred time, which still works while bookings are paused. Never answer a reschedule with request_appointment: it leaves the original appointment standing and the business ends up with two.`,
-          'BOOKINGS_PAUSED',
-          409
-        );
-      }
-    }
-    if (!(await this.canAutoConfirm(ctx))) {
-      // Distinguish the two reasons so the bot's guidance is accurate: a healthy
-      // calendar with sync OFF (entitlement) is CALENDAR_SYNC_DISABLED; otherwise
-      // (no/dead calendar) CALENDAR_NOT_CONNECTED. Both capture a request — no
-      // bookable slots are offered because the booking can't reach the owner's
-      // external calendar. Mirrors readiness willAutoConfirm.
-      // canAutoConfirm failed; a still-healthy calendar means the blocker is sync.
-      const calendarHealthy = await this.hasConnectedCalendar(ctx.bot.id);
-      throw calendarHealthy
-        ? new BookingError(
-            `Online appointments can't be auto-confirmed because calendar sync is disabled on this plan. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
-            'CALENDAR_SYNC_DISABLED',
-            409
-          )
-        : new BookingError(
-            `Online appointments can't be auto-confirmed because this business has no connected calendar. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
-            'CALENDAR_NOT_CONNECTED',
-            409
-          );
-    }
+    await this.assertAvailabilityOfferable(ctx, service, excludeBookingId, {
+      customerAddress,
+      locationChoice,
+      customerPhone,
+    });
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
     // Resolved once and passed down, like every other booking path: the diary this
     // availability is being computed for is a fact about the request, not something each

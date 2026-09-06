@@ -965,105 +965,21 @@ export class CheckAvailabilityTool implements ToolAdapter {
         replyFact,
       );
       if (heldReturn) return heldReturn;
-      // The booking tools later need to tell a verbatim slot instant (keep the Z) from a time
-      // the model constructed from the customer's words (strip the Z). That judgement needs the
-      // exact strings this call returned, which may be turns behind the booking.
-      if (utcSlots.length > 0) {
-        void rememberOfferedSlots(
-          ctx.sessionId,
-          utcSlots.map((s) => s.start),
-          zone,
-        );
-      }
-      // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
-      // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
-      // empty-slots branch below it would be read out as "no times in this range", which turns
-      // a list of perfectly askable times into a dead end.
-      const travel = result?.travel;
-      if (travel && travel.requestableSlots.length > 0) {
-        return {
-          success: true,
-          ...measurement,
-          ...availability,
-          ...affordance,
-          ...replyFact,
-          data: withNamedTime({
-            ...modelResult,
-            ...groupedNote,
-            ...addressEcho(chosen.address),
-            suggestedAction: 'request_appointment',
-            guidance: [windowNote(result, utcSlots, true).guidance, travelGuidance(travel)].filter(Boolean).join(' '),
-          }),
-        };
-      }
-      // THE RANGE WAS OUT OF BOUNDS, WHICH IS NOT AN EMPTY DIARY. Checked before the empty
-      // branch below because it is a strictly better-informed version of it: both see no slots,
-      // and only this one knows the business would have taken the customer on another day.
-      //
-      // Two live reports, one cause. An auto-book service with 1440 minutes of notice was asked
-      // for the next morning, and one with a 14-day horizon was asked for the fifteenth day.
-      // The engine refused both correctly, the branch below then advised a manual request, and
-      // the bot offered to send the appointment for someone to confirm by hand - on a service
-      // whose owner had chosen automatic booking, with bookable times sitting one day away. The
-      // second report notes the customer had to ask a second time before the bot would name
-      // them. Naming a DESTINATION here is what makes the retry land somewhere different: told
-      // only "nothing in this range", a model re-checks the same day and gets the same nothing.
-      //
-      // A RANGE, never the bound itself. The bound is `now + notice` or `now + horizon`, which is
-      // a policy instant and not an opening time: on a Wednesday-only 09:00-17:00 diary the notice
-      // bound fell on a Friday at 20:26, and the first bookable slot was the following Wednesday.
-      // Stated out loud that is a time the business cannot take, coming from the server, which the
-      // model trusts over its own guess.
-      const outOfWindow = emptyRange;
-      if (outOfWindow) {
-        const retry = retryRange(outOfWindow.reason, outOfWindow.boundary, zone);
-        return {
-          success: true,
-          ...measurement,
-          ...availability,
-          ...affordance,
-          ...replyFact,
-          data: withNamedTime({
-            ...modelResult,
-            ...groupedNote,
-            ...addressEcho(chosen.address),
-            noSlotsInRange: true,
-            suggestedAction: 'check_availability',
-            guidance: outOfWindowGuidance(outOfWindow, retry),
-          }),
-        };
-      }
-      // An empty slot list is the single most consequential result this tool returns, and
-      // until now the ONLY thing telling the model what to do about it was a prompt rule.
-      // Prose is the right place for the wording; it is the wrong place for the decision.
-      // A model that reads `slots: []` and concludes "they're fully booked" has just told a
-      // customer to go elsewhere — the actual answer is always to capture a request.
-      if (Array.isArray(result?.slots) && result.slots.length === 0) {
-        return {
-          success: true,
-          ...measurement,
-          ...availability,
-          ...affordance,
-          ...replyFact,
-          data: withNamedTime({
-            ...modelResult,
-            ...groupedNote,
-            ...addressEcho(chosen.address),
-            noSlotsInRange: true,
-            suggestedAction: 'request_appointment',
-            guidance:
-              'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked, and it does NOT mean a listed auto-book service is unavailable. Do not turn the customer away and do not hand off. If the chosen service flags "needs phone" and you have no number yet, ask for it, keep the date they named, and do not capture a request. Otherwise ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
-          }),
-        };
-      }
-      return {
-        success: true,
-        data: withNamedTime({ ...modelResult, ...groupedNote, ...addressEcho(chosen.address), ...windowNote(result, utcSlots) }),
-        ...measurement,
-        ...availability,
-        ...affordance,
-        ...replyFact,
-      };
+      return finishAvailabilityAfterHold(
+        ctx,
+        utcSlots,
+        zone,
+        result,
+        emptyRange,
+        groupedNote,
+        chosen,
+        measurement,
+        availability,
+        affordance,
+        replyFact,
+        modelResult,
+        withNamedTime,
+      );
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }

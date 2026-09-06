@@ -428,11 +428,11 @@ describe('ServicesSection — online bookable', () => {
 });
 
 /**
- * `customerEmailRequired` starts OFF, here and on the server. The flag first shipped with a
- * `DEFAULT true` migration, which turned every existing service of every tenant into an
- * email-required service in one deploy and left bots refusing to book for customers nobody had
- * asked for an email. The owner now ticks it for the services whose calendar invite has to
- * reach someone, so a payload without the field is a service that never chose it.
+ * `customerEmailRequired` starts ON for a new Service, here and on the server.
+ * The ICS calendar invite is addressed to the customer email, so an owner who
+ * never opens the toggle still requires one. Existing rows keep the stored
+ * flag: omitted on read is treated as off (the optional-default rollback), and
+ * a name-only PUT must not resurrect it.
  */
 describe('ServicesSection — required customer email', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -472,16 +472,16 @@ describe('ServicesSection — required customer email', () => {
     return await screen.findByLabelText(/required email address for the calendar invite/i);
   };
 
-  it('defaults a new service to not requiring the email', async () => {
+  it('defaults a new service to requiring the email', async () => {
     const box = await openNew();
-    expect(box).not.toBeChecked();
-    expect(await submit()).toMatchObject({ customerEmailRequired: false });
+    expect(box).toBeChecked();
+    expect(await submit()).toMatchObject({ customerEmailRequired: true });
   });
 
-  it('sends true once the owner turns it on', async () => {
+  it('sends false once the owner turns it off', async () => {
     const box = await openNew();
     fireEvent.click(box);
-    expect(await submit()).toMatchObject({ customerEmailRequired: true });
+    expect(await submit()).toMatchObject({ customerEmailRequired: false });
   });
 
   it('hydrates an existing service that requires the email as on', async () => {

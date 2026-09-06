@@ -243,7 +243,11 @@ export const serviceInputSchema = z.object({
   customerAddressRequired: z.boolean().default(false),
   customerChoosesLocation: z.boolean().default(false),
   fileUploadRequired: z.boolean().default(false),
-  customerEmailRequired: z.boolean().default(false),
+  // Default true: the ICS invite is addressed to the customer email, so a
+  // Service whose owner never opened the toggle requires one. `serviceUpdateSchema`
+  // is `.partial()`, which suppresses the default, so a partial PUT still
+  // leaves a stored `false` alone.
+  customerEmailRequired: z.boolean().default(true),
   preparationInstructions: z.string().max(2000).nullable().optional(),
   locationType: writableLocationType.default('custom'),
   sortOrder: z.number().int().min(0).default(0),

@@ -581,14 +581,14 @@ describe('customerEmailRequired round-trip', () => {
     etFindOne.mockResolvedValue(null);
   });
 
-  it('defaults to off when a create omits the key', async () => {
-    // A new flag starts off. The owner ticks it for the services whose calendar invite has to
-    // reach someone; a catalog that never asked for an email keeps booking without one.
+  it('defaults to on when a create omits the key', async () => {
+    // The ICS invite is addressed to the customer email, so a Service whose
+    // owner never opened the toggle still requires one.
     await createService(
       { tenantId: 'ten-1', body: { name: 'Cut', durationMin: 30 } } as any,
       res,
     );
-    expect(etSave.mock.calls[0][0].customerEmailRequired).toBe(false);
+    expect(etSave.mock.calls[0][0].customerEmailRequired).toBe(true);
   });
 
   it('persists false when the owner unticks it on update', async () => {

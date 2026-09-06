@@ -145,7 +145,9 @@ const BLANK: FormState = {
   customerChoosesLocation: false,
   customerLocationRequired: false,
   fileUploadRequired: false,
-  customerEmailRequired: false,
+  // Matches the server default: the ICS invite is addressed to this email, so
+  // a Service whose owner never opens the toggle still requires one.
+  customerEmailRequired: true,
   maxBookingsPerDay: '',
   intakeQuestions: [],
 };
@@ -233,7 +235,8 @@ function formFromService(s: Service): FormState {
     customerLocationRequired: !!s.customerLocationRequired,
     ...locationTypeSideEffects(s.locationType),
     fileUploadRequired: !!s.fileUploadRequired,
-    // `!== false`, not `!!`: an API payload that omits the field must hydrate ON.
+    // Explicit true only. An omitted payload is a catalog that never chose the
+    // flag (the optional-default rollback), not a default-on service.
     customerEmailRequired: s.customerEmailRequired === true,
     maxBookingsPerDay: numStr(s.maxBookingsPerDay),
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.

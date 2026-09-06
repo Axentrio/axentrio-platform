@@ -242,8 +242,9 @@ export class ServiceType {
   fileUploadRequired!: boolean;
 
   /**
-   * The customer email is what the ICS calendar invite is addressed to, so it
-   * defaults to required; false lets a service book without one.
+   * The customer email is what the ICS calendar invite is addressed to.
+   * New services require it via the create schema; stored rows keep their
+   * value. false lets a service book without one.
    */
   @Column({ type: 'boolean', name: 'customer_email_required', default: false })
   customerEmailRequired!: boolean;

@@ -122,7 +122,7 @@ describe('POST /files/upload audit', () => {
     expect(action).toBe('UPLOAD_URL_REQUESTED');
     expect(entityType).toBe('upload');
     expect(entityId).toBe(FILE_SESSION_ID); // service-generated UUID
-    expect(tenantId).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc'); // actor's tenant (only for upload — preview/download use file's)
+    expect(tenantId).toBe(FILE_TENANT_ID); // effective tenant (req.tenantId from resolveTenantContext)
     expect(meta).toMatchObject({
       fileName: 'x.pdf',
       fileSize: 1024,

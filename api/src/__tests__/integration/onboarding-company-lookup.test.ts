@@ -38,7 +38,13 @@ vi.mock('../../integrations/company-lookup/company-lookup.service', () => ({
 
 /** Redis absent ⇒ the budget fails open, which is the documented behaviour. */
 const redis = vi.hoisted(() => ({ client: null as unknown }));
-vi.mock('../../config/redis', () => ({ getRedisClient: () => redis.client }));
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () => redis.client,
+  // Rate-limit middleware requires BOTH a client and isRedisAvailable(). The
+  // lookup-budget stub is not a live Redis; claiming it is throws inside
+  // RateLimiterRedis and 500s the two cases that install a client.
+  isRedisAvailable: () => false,
+}));
 
 import request from 'supertest';
 import { app } from '../../server';

@@ -18,12 +18,15 @@ const st = vi.hoisted(() => ({
 const errs = vi.hoisted(() => {
   class BotPausedError extends Error {}
   class BotNotFoundError extends Error {}
-  return { BotPausedError, BotNotFoundError };
+  class BotOriginNotAllowedError extends Error {}
+  return { BotPausedError, BotNotFoundError, BotOriginNotAllowedError };
 });
 
 vi.mock('../../services/bot-resolution.service', () => ({
   BotPausedError: errs.BotPausedError,
   BotNotFoundError: errs.BotNotFoundError,
+  BotOriginNotAllowedError: errs.BotOriginNotAllowedError,
+  assertOriginAllowed: () => {},
   resolveBotKeyStrict: async () => {
     if (st.resolveError) throw st.resolveError;
     return st.resolveResult;
@@ -33,6 +36,7 @@ vi.mock('../../services/bot-resolution.service', () => ({
 vi.mock('../../middleware/rate-limit.middleware', () => ({
   placesRateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
   widgetRateLimiter: (_req: any, _res: any, next: any) => next(),
+  widgetKeyInitRateLimiter: (_req: any, _res: any, next: any) => next(),
   simpleRateLimit: () => (_req: any, _res: any, next: any) => next(),
 }));
 

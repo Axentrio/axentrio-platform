@@ -43,7 +43,7 @@ function findConfigHandler() {
 const handler = findConfigHandler();
 
 const makeReq = (apiKey: string) =>
-  ({ query: { apiKey } } as unknown as Request);
+  ({ query: { apiKey }, headers: {} } as unknown as Request);
 
 const makeRes = () => {
   const calls: any[] = [];
@@ -83,18 +83,22 @@ function mockResolvedBotAndTenant(
   scripted.tenant = tenant;
   // First call (Bot lookup by publicKey)
   mockFindOne.mockResolvedValueOnce(bot);
-  // Second call (Tenant lookup by apiKey) — only fires if bot is null
-  mockFindOne.mockResolvedValueOnce(tenant);
-  // Third call (anchor Bot lookup) — fires when tenant matched
-  mockFindOne.mockResolvedValueOnce({
-    id: 'anchor-bot-id',
-    name: 'Anchor',
-    status: 'active',
-    isDefault: true,
-    publicKey: tenant?.apiKey,
-    tenant,
-    settings: anchorSettings,
-  });
+  if (!bot) {
+    // Second call (Bot lookup by previousPublicKey) — miss, fall through to tenant.
+    mockFindOne.mockResolvedValueOnce(null);
+    // Third call (Tenant lookup by apiKey)
+    mockFindOne.mockResolvedValueOnce(tenant);
+    // Fourth call (anchor Bot lookup)
+    mockFindOne.mockResolvedValueOnce({
+      id: 'anchor-bot-id',
+      name: 'Anchor',
+      status: 'active',
+      isDefault: true,
+      publicKey: tenant?.apiKey,
+      tenant,
+      settings: anchorSettings,
+    });
+  }
 }
 
 describe('GET /widget/config — appearance block', () => {

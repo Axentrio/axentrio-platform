@@ -17,7 +17,9 @@ export function originMatches(patterns: string[], origin: string | undefined): b
     return false;
   }
   const host = url.hostname.toLowerCase();
-  const port = url.port;
+  const port =
+    url.port ||
+    (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '');
   for (const raw of patterns) {
     const pattern = raw.trim().toLowerCase();
     if (!pattern) continue;

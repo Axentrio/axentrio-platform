@@ -26,7 +26,15 @@ export async function generateGapRecommendations(
   now = new Date(),
 ): Promise<void> {
   const gapRepo = AppDataSource.getRepository(Gap);
-  const gaps = await gapRepo.find({ where: { tenantId } });
+  // Bounded read: only MAX_RECOMMENDATIONS_PER_RUN gaps can be acted on per run
+  // anyway, and the newest-seen gaps are the ones worth an action. The cap is far
+  // above a real tenant's topic count — it exists so this can never load a whole
+  // table into the process.
+  const gaps = await gapRepo.find({
+    where: { tenantId },
+    order: { lastSeenAt: "DESC" },
+    take: 500,
+  });
   let attempts = 0;
 
   for (const gap of gaps) {

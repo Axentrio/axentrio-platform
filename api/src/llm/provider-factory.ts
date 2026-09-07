@@ -9,6 +9,10 @@ import { DEFAULT_PROVIDER } from './defaults';
 import { recordLlmUsage } from './usage-recorder';
 import type { LlmCallPath } from './pricing';
 
+// Bounded LRU: keyed by provider + API-key hash, so a tenant-per-key deployment
+// would otherwise grow this map forever. Map iteration order is insertion order,
+// so the first key is the least recently used.
+const PROVIDER_CACHE_MAX = 32;
 const providerCache = new Map<string, LLMProvider>();
 
 export function getProvider(opts: {
@@ -63,12 +67,21 @@ function getBaseProvider(
   const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
   const cacheKey = `${provider}:${keyHash}`;
   const cached = providerCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // Mark as most recently used.
+    providerCache.delete(cacheKey);
+    providerCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const instance = provider === 'openai'
     ? new OpenAIProvider(apiKey)
     : new AnthropicProvider(apiKey);
 
   providerCache.set(cacheKey, instance);
+  if (providerCache.size > PROVIDER_CACHE_MAX) {
+    const oldest = providerCache.keys().next();
+    if (!oldest.done) providerCache.delete(oldest.value);
+  }
   return instance;
 }

@@ -297,6 +297,15 @@ export function CopilotDrawerProvider({ children }: { children: ReactNode }) {
     }
   }, [isOpen]);
 
+  // Unmount → abort whatever is still streaming.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    },
+    [],
+  );
+
   // Escape key closes the drawer (in addition to the Close button).
   useEffect(() => {
     if (!isOpen) return;

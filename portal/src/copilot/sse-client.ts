@@ -128,7 +128,13 @@ export async function* streamCopilotMessages(
       }
     }
   } finally {
-    // Ensure the reader is released even on consumer break.
+    // Cancel first so an abandoned stream (consumer break / unmount) tears the
+    // body down instead of leaving the fetch response buffered, then release.
+    try {
+      await reader.cancel();
+    } catch {
+      /* already cancelled or errored */
+    }
     try {
       reader.releaseLock();
     } catch {

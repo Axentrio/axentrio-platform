@@ -55,6 +55,14 @@ import type {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
+/**
+ * Poll rate for the list/detail queries while the socket IS connected. The
+ * live feed owns freshness then, so this is only the safety net for a
+ * connected-but-deaf socket — 6x fewer requests than the live rate, which the
+ * Inbox used to fire every 5s for the whole session.
+ */
+const DEAF_SOCKET_REFETCH_MS = 30_000;
+
 interface ChatListResponse {
   data: Chat[];
   meta?: { total: number; totalPages: number };
@@ -260,14 +268,17 @@ export function useChatsQuery(
   options: UseChatsQueryOptions = {},
 ): UseChatsQueryReturn {
   const { filters } = options;
+  const { isConnected } = useSocket();
 
   const opts = chatOptions.list(filters);
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     ...opts,
-    // Sockets patch the list for instant updates, but polling ALWAYS runs as
-    // the safety net: a socket can be connected-but-deaf (room/adapter issues),
-    // which used to freeze the list until a tab change or reload.
-    refetchInterval: LIVE_QUERY_REFETCH_MS,
+    // While the socket is down the list is fed by polling alone, so poll at
+    // the live rate. While it is UP the feed patches the cache on every
+    // event and a 5s poll was pure waste — keep only the slow net for the
+    // connected-but-deaf socket (room/adapter issues), which used to freeze
+    // the list until a tab change or reload.
+    refetchInterval: isConnected ? DEAF_SOCKET_REFETCH_MS : LIVE_QUERY_REFETCH_MS,
   });
 
   const rawData = data as ChatListResponse | undefined;
@@ -461,6 +472,7 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     joinChat,
     leaveChat,
     sendTyping: socketSendTyping,
+    isConnected,
   } = useSocket();
 
   // Local ephemeral state for typing indicators
@@ -477,10 +489,11 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     refetch: detailRefetch,
   } = useQuery({
     ...chatOptions.detail(chatId),
-    // Sockets patch the open thread for instant updates, but polling ALWAYS
-    // runs as the safety net: a socket can be connected-but-deaf, which used
-    // to freeze the open pane until a reselect or a reload.
-    refetchInterval: LIVE_QUERY_REFETCH_MS,
+    // Live events patch the open thread while the socket is up, so the poll
+    // drops to the slow deaf-socket net there (a connected-but-deaf socket
+    // used to freeze the open pane until a reselect or a reload) and only
+    // runs at the live rate while the socket is down.
+    refetchInterval: isConnected ? DEAF_SOCKET_REFETCH_MS : LIVE_QUERY_REFETCH_MS,
     refetchIntervalInBackground: false,
   });
   const raw = detailData as ChatDetailResponse | undefined;

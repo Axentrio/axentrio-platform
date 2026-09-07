@@ -133,6 +133,8 @@ export function createGraphWebhookRouter(config: GraphWebhookConfig): Router {
     // 3. Normalize and dispatch (one payload may target multiple connections)
     const eventLogRepo = AppDataSource.getRepository(WebhookEventLog);
     const queue = getChannelInboundQueue();
+    let inlineChain = Promise.resolve();
+
 
     for (const { event, recipientId, channel } of config.normalize(payload)) {
       try {
@@ -182,13 +184,21 @@ export function createGraphWebhookRouter(config: GraphWebhookConfig): Router {
             removeOnFail: 500,
           });
         } else {
-          await processInboundEvent(event, connection);
+          // Queue never started: run off the HTTP thread but serialize events
+          // in this payload so two messages from the same customer cannot interleave.
+          inlineChain = inlineChain.then(() =>
+            processInboundEvent(event, connection).catch((err) => {
+              logger.error(`${tag} Inline processing of ${channel} event failed`, sanitizeGraphError(err));
+            }),
+          );
         }
       } catch (error: any) {
         if (error?.code === '23505') continue; // Duplicate dedupe key
         logger.error(`${tag} Error processing ${channel} event`, sanitizeGraphError(error));
       }
     }
+    void inlineChain;
+
 
     // 4. Return 200 fast (Graph requires a quick ack)
     return res.status(200).json({ ok: true });

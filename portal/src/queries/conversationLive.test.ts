@@ -23,6 +23,7 @@ import {
   applyMessageCreated,
   applyCommandConversation,
   findCachedChat,
+  DETAIL_MESSAGES_MAX,
   mergeDefined,
   mergeLiveTail,
   normalizeChatStatus,
@@ -239,6 +240,43 @@ describe('applyConversationUpsert — list variants', () => {
     expect(qc.getQueryData<ChatListCacheEntry>(listKey(PAGE2))?.meta?.total).toBe(21);
   });
 
+  it('caps a variant at its page size — live inserts never grow the cached list without bound', () => {
+    const LIMITED = { status: 'bot', limit: '20' };
+    const seeded = Array.from({ length: 20 }, (_, i) =>
+      makeChat({
+        id: `seed-${i}`,
+        sessionId: `seed-${i}`,
+        lastActivityAt: `2026-08-14T0${i < 10 ? '0' : '1'}:00:00.000Z`,
+      }),
+    );
+    qc.setQueryData(listKey(LIMITED), { data: seeded, meta: { total: 200, totalPages: 10 } });
+    qc.setQueryData(listKey(ALL_PARAMS), { data: [...seeded] });
+
+    // 50 brand-new conversations, each newer than the last.
+    for (let i = 0; i < 50; i++) {
+      applyConversationUpsert(
+        qc,
+        upsert(
+          makeSummary({
+            id: `live-${i}`,
+            sessionId: `live-${i}`,
+            status: 'bot',
+            lastActivityAt: `2026-08-15T10:${String(i).padStart(2, '0')}:00.000Z`,
+          }),
+        ),
+      );
+    }
+
+    // Both variants hold one page, newest first — the older rows fell off.
+    expect(listData(qc, LIMITED)).toHaveLength(20);
+    expect(listData(qc, LIMITED)[0].id).toBe('live-49');
+    expect(listData(qc, LIMITED).map((c) => c.id)).not.toContain('seed-0');
+    // No `limit` param: the default page size still bounds it.
+    expect(listData(qc, ALL_PARAMS)).toHaveLength(20);
+    // The row count on the server still grew — only the cached window is capped.
+    expect(qc.getQueryData<ChatListCacheEntry>(listKey(LIMITED))?.meta?.total).toBe(250);
+  });
+
   it('never INSERTS into a variant filtered on a dimension the payload omits', () => {
     const TENANT_PARAMS = { tenantId: 't1' };
     const AGENT_PARAMS = { assignedAgentId: 'ag-1' };
@@ -431,6 +469,20 @@ describe('applyMessageCreated', () => {
     const detail = qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!;
     expect(detail.messages).toHaveLength(1);
     expect(detail.messages![0]).toMatchObject({ id: 'm-new', sender: 'user', content: 'inbound hello' });
+  });
+
+  it('keeps only the newest DETAIL_MESSAGES_MAX — a long-lived tab never grows the thread without bound', () => {
+    qc.setQueryData(queryKeys.chats.detail('c1'), { ...makeChat(), messages: [] });
+
+    for (let i = 0; i < 300; i++) {
+      applyMessageCreated(qc, messageEvent({ id: `m-${i}`, content: `msg ${i}` }));
+    }
+
+    const messages = qc.getQueryData<ChatDetailCacheEntry>(queryKeys.chats.detail('c1'))!.messages!;
+    expect(messages).toHaveLength(DETAIL_MESSAGES_MAX);
+    // The window slid: the oldest 100 are gone, the newest is still last.
+    expect(messages[0].id).toBe(`m-${300 - DETAIL_MESSAGES_MAX}`);
+    expect(messages[messages.length - 1].id).toBe('m-299');
   });
 
   it('updates the list row preview + re-sorts the UNSELECTED thread on a new message', () => {

@@ -43,15 +43,24 @@ export interface BillingState {
   events: BillingHistoryEntry[];
 }
 
+/** Stripe confirmation lag: poll fast only while a plan change is unconfirmed. */
+const BILLING_PENDING_REFETCH_MS = 5_000;
+/** Steady state: nothing is in flight, a slow refresh is enough. */
+const BILLING_IDLE_REFETCH_MS = 30_000;
+
 const billingOptions = {
   state: () =>
     queryOptions({
       queryKey: queryKeys.billing.state(),
       queryFn: () => api.get<BillingState>('/billing/state'),
-      // Stripe webhooks propagate asynchronously — poll while the user is
-      // looking at the page so they see the result of Subscribe / Cancel /
-      // ChangePlan land within a few seconds without a manual refresh.
-      refetchInterval: 5000,
+      // Stripe webhooks propagate asynchronously, so a requested plan change
+      // lands seconds after the mutation resolves — poll fast only for that
+      // window (`pendingPlanId` is set until the webhook confirms). A flat 5s
+      // poll ran for the whole session on every open Billing tab.
+      refetchInterval: (query) =>
+        query.state.data?.pendingPlanId
+          ? BILLING_PENDING_REFETCH_MS
+          : BILLING_IDLE_REFETCH_MS,
       staleTime: 0,
     }),
 };

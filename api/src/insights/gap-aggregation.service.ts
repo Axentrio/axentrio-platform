@@ -29,12 +29,21 @@ interface TopicWindowStats {
   firstUnsatisfiedAt: Date | null;
 }
 
+/** The only four Judgment columns the window stats read. The full row carries the
+ *  model's reasoning and diagnostics jsonb, which this sweep never looks at. */
+type JudgmentWindowRow = Pick<Judgment, 'canonicalTopicId' | 'visitorId' | 'satisfied' | 'sessionStartedAt'>;
+
+/** Safety cap on one tenant's 7-day window. Ordered newest-first, so if a tenant
+ *  ever exceeds it the sweep works off the most recent evidence rather than
+ *  loading an unbounded result set into the process. */
+const WINDOW_ROW_CAP = 5000;
+
 function hasQualifyingPain(stats: TopicWindowStats | undefined): boolean {
   return (stats?.unsatisfiedVisitors.size ?? 0) >= QUALIFYING_VISITORS;
 }
 
 /** Window stats per canonical topic. */
-function collectTopicWindowStats(judgments: Judgment[]): Map<string, TopicWindowStats> {
+function collectTopicWindowStats(judgments: JudgmentWindowRow[]): Map<string, TopicWindowStats> {
   const byTopic = new Map<string, TopicWindowStats>();
   for (const j of judgments) {
     const topicId = j.canonicalTopicId as string;
@@ -131,13 +140,19 @@ export async function aggregateGaps(tenantId: string, now: Date): Promise<void> 
 
   const windowStart = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  const judgments = await judgmentRepo
+  const judgments: JudgmentWindowRow[] = await judgmentRepo
     .createQueryBuilder('j')
+    .select('j.canonical_topic_id', 'canonicalTopicId')
+    .addSelect('j.visitor_id', 'visitorId')
+    .addSelect('j.satisfied', 'satisfied')
+    .addSelect('j.session_started_at', 'sessionStartedAt')
     .where('j.tenant_id = :tenantId', { tenantId })
     .andWhere('j.session_started_at >= :windowStart', { windowStart })
     .andWhere('j.had_question = true')
     .andWhere('j.canonical_topic_id IS NOT NULL')
-    .getMany();
+    .orderBy('j.session_started_at', 'DESC')
+    .limit(WINDOW_ROW_CAP)
+    .getRawMany();
 
   const byTopic = collectTopicWindowStats(judgments);
 

@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, MessageSquare, Clock, User, ShieldAlert, History } from 'lucide-react';
 import { useChatsQuery, useChatThread } from '../queries/useChatQueries';
+import { LIST_ROWS_MAX } from '../queries/conversationLive';
 import { ChatStatusBadge } from './StatusBadge';
 import { ChannelBadge } from './ChannelBadge';
 import { TenantSelector } from './TenantSelector';
@@ -118,6 +119,10 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
       status: statusFilter === 'all' ? undefined : statusFilter,
       tenantId: tenantFilter,
       search: debouncedSearch || undefined,
+      // Explicit page size (same value the server defaults to) so the live
+      // cache patches know how many rows this variant may hold — live inserts
+      // are capped to it instead of growing the cached page for ever.
+      limit: LIST_ROWS_MAX,
     },
   });
 

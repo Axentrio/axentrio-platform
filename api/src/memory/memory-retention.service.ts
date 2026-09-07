@@ -22,7 +22,8 @@ export async function sweepCustomerMemory(): Promise<{ deleted: number }> {
   return { deleted };
 }
 
-export function startCustomerMemoryRetentionSweep(): void {
+/** Returns its handles so the caller can unref/clear them on shutdown. */
+export function startCustomerMemoryRetentionSweep(): NodeJS.Timeout[] {
   const run = () => {
     sweepCustomerMemory().catch((error) => {
       logger.error('[customer-memory] sweep failed', {
@@ -30,8 +31,7 @@ export function startCustomerMemoryRetentionSweep(): void {
       });
     });
   };
-  setTimeout(run, 90_000);
-  setInterval(run, 24 * 60 * 60 * 1000);
+  return [setTimeout(run, 90_000), setInterval(run, 24 * 60 * 60 * 1000)];
 }
 
 export async function sweepStuckMemoryRuns(): Promise<{ released: number; exhausted: number }> {
@@ -57,7 +57,8 @@ export async function sweepStuckMemoryRuns(): Promise<{ released: number; exhaus
   return { released, exhausted };
 }
 
-export function startStuckMemoryRunWatcher(): void {
+/** Returns its handles so the caller can unref/clear them on shutdown. */
+export function startStuckMemoryRunWatcher(): NodeJS.Timeout[] {
   const run = () => {
     sweepStuckMemoryRuns().catch((error) => {
       logger.error('[customer-memory] sweep failed', {
@@ -65,6 +66,5 @@ export function startStuckMemoryRunWatcher(): void {
       });
     });
   };
-  setTimeout(run, 120_000);
-  setInterval(run, 15 * 60 * 1000);
+  return [setTimeout(run, 120_000), setInterval(run, 15 * 60 * 1000)];
 }

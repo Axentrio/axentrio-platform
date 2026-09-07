@@ -306,13 +306,28 @@ export function SocialStep({ submit }: StepProps) {
     connectWhatsApp.isPending ||
     completeWhatsAppEs.isPending;
 
+  const metaOAuthAbortRef = React.useRef<AbortController | null>(null);
+
+  // Unmount → cancel the popup watcher (interval + message listener).
+  React.useEffect(
+    () => () => {
+      metaOAuthAbortRef.current?.abort();
+      metaOAuthAbortRef.current = null;
+    },
+    [],
+  );
+
   const startMetaOAuth = async () => {
     const url = await metaOAuthUrl.mutateAsync({
       display: "popup",
       returnPath: "/setup",
     });
     if (!url) return;
-    const result = await openMetaOAuthPopup(url);
+    metaOAuthAbortRef.current?.abort();
+    const ac = new AbortController();
+    metaOAuthAbortRef.current = ac;
+    const result = await openMetaOAuthPopup(url, { signal: ac.signal });
+    if (metaOAuthAbortRef.current === ac) metaOAuthAbortRef.current = null;
     if (result.status === "navigated") return;
     if (result.status === "ok") {
       setSearchParams({ meta_setup: result.sessionToken });

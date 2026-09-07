@@ -30,7 +30,9 @@ describe('originMatches', () => {
 
   it('treats default http/https ports as omitted on the Origin', () => {
     expect(originMatches(['example.com:443'], 'https://example.com')).toBe(true);
+    expect(originMatches(['example.com:443'], 'https://example.com:443')).toBe(true);
     expect(originMatches(['example.com:80'], 'http://example.com')).toBe(true);
+    expect(originMatches(['localhost:80'], 'http://localhost')).toBe(true);
     expect(originMatches(['example.com:443'], 'http://example.com')).toBe(false);
   });
 

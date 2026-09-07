@@ -86,11 +86,15 @@ import { ConversationCommand } from './entities/ConversationCommand';
 import { StorageConnection } from './entities/StorageConnection';
 import { StorageImportJob } from './entities/StorageImportJob';
 
-/** Per-session statement timeout, in ms. Non-numeric input falls back to the default
- *  rather than reaching libpq: a malformed `options` string fails EVERY connection. */
-const statementTimeoutMs = /^\d+$/.test(process.env.DB_STATEMENT_TIMEOUT_MS ?? '')
-  ? Number(process.env.DB_STATEMENT_TIMEOUT_MS)
-  : 15_000;
+/** Optional per-session statement timeout (ms). Unset = Postgres default (no
+ *  timeout). `0` also means no timeout. Only applied when the env var is an
+ *  explicit non-negative integer so migrations and long analytics jobs are not
+ *  killed by a silent 15s default. */
+const rawStatementTimeoutMs = process.env.DB_STATEMENT_TIMEOUT_MS;
+const statementTimeoutMs =
+  rawStatementTimeoutMs !== undefined && /^\d+$/.test(rawStatementTimeoutMs)
+    ? Number(rawStatementTimeoutMs)
+    : undefined;
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -196,13 +200,13 @@ export const AppDataSource = new DataSource({
     max: config.database.poolSize,
     connectionTimeoutMillis: config.database.connectionTimeout,
     idleTimeoutMillis: 30000,
-    // Every session gets a statement timeout: without one a single pathological
-    // query (a missing index on a large tenant, a lock wait) holds a pool slot of
-    // `max` forever and the API runs out of connections. 15 s is well above any
-    // request-path query here and below the client timeouts.
-    // A migration that legitimately needs longer sets DB_STATEMENT_TIMEOUT_MS=0
-    // for that boot (0 = no timeout, Postgres' own default).
-    options: `-c timezone=UTC -c statement_timeout=${statementTimeoutMs}`,
+    // timezone is always set. statement_timeout only when DB_STATEMENT_TIMEOUT_MS
+    // is an explicit integer > 0 — a 15s default would abort migrations and
+    // large exports.
+    options:
+      statementTimeoutMs && statementTimeoutMs > 0
+        ? `-c timezone=UTC -c statement_timeout=${statementTimeoutMs}`
+        : `-c timezone=UTC`,
   },
 
   // Logging

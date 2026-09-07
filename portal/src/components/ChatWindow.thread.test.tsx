@@ -33,6 +33,11 @@ vi.mock('@websocket/notificationSound', () => ({
   }),
 }));
 
+vi.mock('./ChatAttachments', () => ({
+  MessageAttachment: () => null,
+  AttachButton: () => null,
+}));
+
 vi.mock('./CannedResponsePicker', () => ({
   SlashCommandDropdown: () => null,
   CannedResponsePickerButton: () => null,

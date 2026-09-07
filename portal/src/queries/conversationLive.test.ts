@@ -498,6 +498,27 @@ describe('applyMessageCreated', () => {
     expect(rows[0].lastActivityAt).toBe('2026-08-14T12:00:00.000Z');
   });
 
+  it('uses attachment fileName for the list preview when content is empty', () => {
+    qc.setQueryData(listKey(ALL_PARAMS), { data: [makeChat({ id: 'c1' })] });
+
+    applyMessageCreated(
+      qc,
+      messageEvent({
+        type: 'image',
+        content: '',
+        senderType: 'agent',
+        sender: 'agent',
+        metadata: {
+          uploadSessionId: 'upload-1',
+          fileName: 'smoke.png',
+          fileType: 'image/png',
+        },
+      }),
+    );
+
+    expect(listData(qc, ALL_PARAMS)[0].lastMessage).toBe('smoke.png');
+  });
+
   it('reconciles the operator optimistic bubble by clientMessageId IDENTITY (metadata on the wire)', () => {
     qc.setQueryData(queryKeys.chats.detail('c1'), {
       ...makeChat(),

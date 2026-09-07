@@ -12,11 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { openFileDownload } from '../services/fileService';
 import { CHAT_ATTACHMENT_MIME_TYPES } from '../queries/useChatAttachment';
+import { messageHasAttachment } from '../queries/attachmentMetadata';
 
 export const MessageAttachment: React.FC<{ message: Message }> = ({ message }) => {
   const { t } = useTranslation();
   const uploadSessionId = message.uploadSessionId;
-  const isImage = message.type === 'image';
+  const isImage =
+    message.type === 'image' ||
+    (!!message.fileType && message.fileType.startsWith('image/'));
 
   const preview = useQuery({
     queryKey: queryKeys.files.preview(uploadSessionId ?? ''),
@@ -24,6 +27,10 @@ export const MessageAttachment: React.FC<{ message: Message }> = ({ message }) =
     enabled: isImage && !!uploadSessionId,
     staleTime: 50 * 60_000,
   });
+
+  if (!messageHasAttachment(message)) {
+    return <p className="text-sm whitespace-pre-wrap">{message.content}</p>;
+  }
 
   if (isImage && uploadSessionId && preview.data?.previewUrl) {
     return (
@@ -47,10 +54,9 @@ export const MessageAttachment: React.FC<{ message: Message }> = ({ message }) =
 
   if (isImage && message.fileUrl) {
     return (
-      <img
-        src={message.fileUrl}
-        alt={message.fileName || t('inbox.window.message.image')}
-        className="max-w-48 max-h-48 rounded-lg object-cover"
+      <ImageAttachmentPreview
+        previewUrl={message.fileUrl}
+        fileName={message.fileName}
       />
     );
   }
@@ -74,6 +80,7 @@ function ImageAttachmentPreview({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const label = fileName || t('inbox.window.message.image');
   return (
     <>
       <button
@@ -84,16 +91,19 @@ function ImageAttachmentPreview({
       >
         <img
           src={previewUrl}
-          alt={fileName || t('inbox.window.message.image')}
-          className="max-w-48 max-h-48 object-cover"
+          alt={label}
+          className="min-h-32 min-w-32 max-w-48 max-h-48 object-contain bg-surface-3"
         />
       </button>
+      {fileName && (
+        <p className="mt-1 max-w-48 truncate text-xs text-text-muted">{fileName}</p>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl p-2">
-          <DialogTitle className="sr-only">{fileName || t('inbox.window.message.image')}</DialogTitle>
+          <DialogTitle className="sr-only">{label}</DialogTitle>
           <img
             src={previewUrl}
-            alt={fileName || t('inbox.window.message.image')}
+            alt={label}
             className="max-h-[80vh] w-full object-contain"
           />
         </DialogContent>

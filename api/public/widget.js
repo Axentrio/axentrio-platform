@@ -2128,7 +2128,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           const file = await this._attachmentFromPayload(data.type, data.metadata);
           this.addMessage({
             id: data.id || utils.generateId(),
-            text: data.content,
+            text: data.content || '',
+            type: data.type,
+            metadata: data.metadata,
             sender: 'bot',
             timestamp: new Date(data.timestamp || data.createdAt),
             file,
@@ -2264,7 +2266,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
 
         for (const msg of data) {
-          if (!msg || shownIds.has(msg.id)) continue;
+          if (!msg) continue;
+          const existing = this.messages.find((m) => m.id === msg.id);
+          if (existing) {
+            // Cached transcript rows may have been saved before attachment metadata
+            // was persisted — merge server facts so we can hydrate on reconnect.
+            if (msg.type) existing.type = msg.type;
+            if (msg.metadata) existing.metadata = msg.metadata;
+            continue;
+          }
           const ts = new Date(msg.createdAt).getTime();
           // Only backfill messages newer than what we've already shown — avoids
           // re-adding the greeting and previously-seen history.
@@ -2274,7 +2284,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           const file = await this._attachmentFromPayload(msg.type, msg.metadata);
           this.addMessage({
             id: msg.id,
-            text: msg.content,
+            text: msg.content || '',
+            type: msg.type,
+            metadata: msg.metadata,
             sender: senderType === 'user' ? 'user' : 'bot',
             timestamp: new Date(msg.createdAt),
             file,
@@ -2287,6 +2299,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             affordance: msg.metadata && msg.metadata.affordance ? msg.metadata.affordance : undefined,
           });
         }
+
+        await this._rehydrateAttachmentMessages();
       } catch (err) {
         this.log('History sync failed:', err && err.message);
       }
@@ -2508,7 +2522,89 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       return file;
     }
 
-    async openWidgetFile(sessionId) {
+    _bindFileLinkHandlers(root) {
+      if (!root) return;
+      root.querySelectorAll('.cb-message__file--link[data-upload-session]').forEach((el) => {
+        const sessionId = el.getAttribute('data-upload-session');
+        if (!sessionId) return;
+        const open = () => this.openWidgetFile(sessionId);
+        el.addEventListener('click', open);
+        el.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            open();
+          }
+        });
+      });
+    }
+
+    _renderFileContent(file) {
+      if (!file) return '';
+      const sessionAttr = file.sessionId
+        ? ` data-upload-session="${utils.escapeAttr(file.sessionId)}"`
+        : '';
+      if (file.url && file.type.startsWith('image/')) {
+        return `<img class="cb-message__image" src="${utils.escapeAttr(file.url)}" alt="${utils.escapeAttr(file.name)}" loading="lazy">`;
+      }
+      if (file.sessionId && file.type.startsWith('image/')) {
+        return `<div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
+              <div class="cb-message__file-icon">${ICONS.file}</div>
+              <div class="cb-message__file-info">
+                <div class="cb-message__file-name">${utils.escapeHtml(file.name)}</div>
+                <div class="cb-message__file-size">${utils.formatFileSize(file.size)}</div>
+              </div>
+            </div>`;
+      }
+      return `
+            <div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
+              <div class="cb-message__file-icon">${ICONS.file}</div>
+              <div class="cb-message__file-info">
+                <div class="cb-message__file-name">${utils.escapeHtml(file.name)}</div>
+                <div class="cb-message__file-size">${utils.formatFileSize(file.size)}</div>
+              </div>
+            </div>
+          `;
+    }
+
+    async _rehydrateAttachmentMessages() {
+      if (!this.token || !this.messages.length) return;
+      let changed = false;
+      for (const message of this.messages) {
+        if (message.sender === 'user' || message.isGreeting) continue;
+        const type = message.type;
+        const metadata = message.metadata;
+        if (type !== 'image' && type !== 'file') continue;
+        if (!metadata || typeof metadata.uploadSessionId !== 'string') continue;
+        const wantsImage = type === 'image' || (message.file && message.file.type && message.file.type.startsWith('image/'));
+        if (message.file && message.file.url && wantsImage) continue;
+        if (message.file && !wantsImage) continue;
+        const file = await this._attachmentFromPayload(type, metadata);
+        if (!file) continue;
+        message.file = file;
+        changed = true;
+      }
+      if (changed) this._rerenderMessages();
+    }
+
+    _rerenderMessages() {
+      if (!this.messagesContainer) return;
+      while (this.messagesContainer.firstChild) {
+        this.messagesContainer.removeChild(this.messagesContainer.firstChild);
+      }
+      for (const message of this.messages) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = this.renderMessage(message);
+        const node = wrapper.firstElementChild;
+        if (node) {
+          this.messagesContainer.appendChild(node);
+          this._bindFileLinkHandlers(node);
+        }
+      }
+      this.scrollToBottom();
+      this._saveSession();
+    }
+
+        async openWidgetFile(sessionId) {
       if (!sessionId || !this.token) return;
       try {
         const res = await fetchWithTimeout(
@@ -2532,31 +2628,21 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       let content = '';
       
       if (message.file) {
-        const sessionAttr = message.file.sessionId
-          ? ` data-upload-session="${utils.escapeAttr(message.file.sessionId)}"`
-          : '';
-        if (message.file.url && message.file.type.startsWith('image/')) {
-          content = `<img class="cb-message__image" src="${utils.escapeAttr(message.file.url)}" alt="${utils.escapeAttr(message.file.name)}" loading="lazy">`;
-        } else if (message.file.sessionId && message.file.type.startsWith('image/')) {
-          content = `<div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
-              <div class="cb-message__file-icon">${ICONS.file}</div>
-              <div class="cb-message__file-info">
-                <div class="cb-message__file-name">${utils.escapeHtml(message.file.name)}</div>
-                <div class="cb-message__file-size">${utils.formatFileSize(message.file.size)}</div>
-              </div>
-            </div>`;
-        } else {
-          content = `
-            <div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
-              <div class="cb-message__file-icon">${ICONS.file}</div>
-              <div class="cb-message__file-info">
-                <div class="cb-message__file-name">${utils.escapeHtml(message.file.name)}</div>
-                <div class="cb-message__file-size">${utils.formatFileSize(message.file.size)}</div>
-              </div>
-            </div>
-          `;
-        }
-      } else {
+        content = this._renderFileContent(message.file);
+      } else if (
+        (message.type === 'image' || message.type === 'file') &&
+        message.metadata &&
+        typeof message.metadata.uploadSessionId === 'string'
+      ) {
+        content = this._renderFileContent({
+          sessionId: message.metadata.uploadSessionId,
+          name: typeof message.metadata.fileName === 'string' ? message.metadata.fileName : 'File',
+          size: typeof message.metadata.fileSize === 'number' ? message.metadata.fileSize : 0,
+          type: typeof message.metadata.fileType === 'string'
+            ? message.metadata.fileType
+            : (message.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+        });
+      } else if (message.text) {
         content = `<div class="cb-message__bubble">${utils.escapeHtml(message.text)}</div>`;
       }
 
@@ -2983,18 +3069,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.messagesContainer.appendChild(node);
 
       if (node) {
-        node.querySelectorAll('.cb-message__file--link[data-upload-session]').forEach((el) => {
-          const sessionId = el.getAttribute('data-upload-session');
-          if (!sessionId) return;
-          const open = () => this.openWidgetFile(sessionId);
-          el.addEventListener('click', open);
-          el.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter' || ev.key === ' ') {
-              ev.preventDefault();
-              open();
-            }
-          });
-        });
+        this._bindFileLinkHandlers(node);
       }
 
       this.scrollToBottom();

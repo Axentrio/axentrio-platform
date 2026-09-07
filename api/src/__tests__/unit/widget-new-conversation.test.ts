@@ -113,6 +113,13 @@ describe('widget.js — New conversation control', () => {
     expect(widgetSrc).toMatch(/payload\.exp \* 1000 <= Date\.now\(\)/);
   });
 
+  it('persists attachment type/metadata and rehydrates cached agent files after history sync', () => {
+    expect(widgetSrc).toMatch(/type:\s*data\.type/);
+    expect(widgetSrc).toMatch(/metadata:\s*data\.metadata/);
+    expect(widgetSrc).toMatch(/async _rehydrateAttachmentMessages\(\)/);
+    expect(widgetSrc).toMatch(/await this\._rehydrateAttachmentMessages\(\)/);
+  });
+
   it('guards the socket connect + init against a stale (superseded) epoch', () => {
     // _connectSocketIO and _initSession must bail when their epoch is stale.
     expect(widgetSrc).toMatch(/_connectSocketIO\(epoch\)/);

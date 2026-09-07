@@ -25,7 +25,7 @@
 
 import { useEffect, useRef } from 'react';
 import { QueryClient, useQueryClient } from '@tanstack/react-query';
-import { attachmentFieldsFromMetadata } from './attachmentMetadata';
+import { attachmentFieldsFromMetadata, messagePreviewText } from './attachmentMetadata';
 import { queryKeys } from './queryKeys';
 import { useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
@@ -595,7 +595,7 @@ export function applyMessageCreated(
       rememberLiveTail(sessionId, incoming);
       return seedChatDetail(sessionId, {
         messages: [incoming],
-        lastMessage: incoming.content.substring(0, 80),
+        lastMessage: messagePreviewText(incoming),
         lastMessageSender: incoming.sender,
         lastMessageAt: incoming.createdAt,
         lastActivityAt: incoming.createdAt,
@@ -645,7 +645,7 @@ export function applyMessageCreated(
   }
 
   const rowPatch: Partial<Chat> = {
-    lastMessage: incoming.content.substring(0, 80),
+    lastMessage: messagePreviewText(incoming),
     lastMessageSender: incoming.sender,
     lastMessageAt: incoming.createdAt,
     lastActivityAt: incoming.createdAt,

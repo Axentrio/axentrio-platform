@@ -31,6 +31,7 @@ import {
   ChatAttachmentUploadError,
   type ChatAttachmentDraft,
 } from '../queries/useChatAttachment';
+import { messageHasAttachment } from '../queries/attachmentMetadata';
 import { fileService } from '../services/fileService';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -90,10 +91,10 @@ const MessageSenderName: React.FC<{ message: Message; isAgent: boolean; isBot: b
 
 /** Bubble payload: text or attachment (signed URL fetched on read). */
 const MessageBody: React.FC<{ message: Message }> = ({ message }) => {
-  if (message.type === 'text') {
-    return <p className="text-sm whitespace-pre-wrap">{message.content}</p>;
+  if (messageHasAttachment(message)) {
+    return <MessageAttachment message={message} />;
   }
-  return <MessageAttachment message={message} />;
+  return <p className="text-sm whitespace-pre-wrap">{message.content}</p>;
 };
 
 /** Timestamp, or the pending / failed delivery line with its Retry. */
@@ -351,6 +352,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [attachmentDraft, setAttachmentDraft] = useState<ChatAttachmentDraft | null>(null);
+  const [pendingAttachmentFile, setPendingAttachmentFile] = useState<File | null>(null);
+  const [pendingAttachmentPreviewUrl, setPendingAttachmentPreviewUrl] = useState<string | null>(null);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
@@ -366,6 +369,28 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [expandedEarlier, setExpandedEarlier] = useState<Record<string, boolean>>({});
 
   useNotificationSound();
+
+  useEffect(() => {
+    return () => {
+      if (pendingAttachmentPreviewUrl) {
+        URL.revokeObjectURL(pendingAttachmentPreviewUrl);
+      }
+    };
+  }, [pendingAttachmentPreviewUrl]);
+
+  const clearPendingAttachmentPreview = () => {
+    setPendingAttachmentPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+    setPendingAttachmentFile(null);
+  };
+
+  const clearAttachmentDraft = () => {
+    setAttachmentDraft(null);
+    setAttachmentError(null);
+    clearPendingAttachmentPreview();
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -408,12 +433,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const handleFilePicked = async (file: File) => {
     setAttachmentError(null);
+    setAttachmentDraft(null);
+    clearPendingAttachmentPreview();
+    const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+    setPendingAttachmentFile(file);
+    setPendingAttachmentPreviewUrl(previewUrl);
     setIsUploadingAttachment(true);
     try {
       const draft = await uploadChatAttachment(chat.id, file);
       setAttachmentDraft(draft);
     } catch (err) {
       setAttachmentDraft(null);
+      clearPendingAttachmentPreview();
       setAttachmentError(attachmentErrorMessage(err));
     } finally {
       setIsUploadingAttachment(false);
@@ -452,6 +483,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       }
       setAttachmentDraft(null);
       setAttachmentError(null);
+      clearPendingAttachmentPreview();
     }
   };
 
@@ -596,24 +628,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {t('inbox.window.composer.sendTakesOver')}
           </p>
         )}
-        {attachmentDraft && (
+        {(attachmentDraft || pendingAttachmentFile || isUploadingAttachment) && (
           <div
             className="mb-2 flex items-center gap-2 rounded-xl border border-edge bg-surface-3 px-3 py-2 text-xs text-text-secondary"
             data-testid="attachment-chip"
           >
+            {pendingAttachmentPreviewUrl ? (
+              <img
+                src={pendingAttachmentPreviewUrl}
+                alt=""
+                className="h-10 w-10 flex-shrink-0 rounded-lg border border-edge object-cover bg-surface-2"
+              />
+            ) : null}
             <span className="flex-1 truncate">
-              {attachmentDraft.fileName} ({fileService.formatFileSize(attachmentDraft.fileSize)})
+              {attachmentDraft
+                ? `${attachmentDraft.fileName} (${fileService.formatFileSize(attachmentDraft.fileSize)})`
+                : pendingAttachmentFile
+                  ? `${pendingAttachmentFile.name} (${fileService.formatFileSize(pendingAttachmentFile.size)})`
+                  : t('inbox.window.attachment.uploading')}
             </span>
-            <button
-              type="button"
-              className="font-medium text-text-muted hover:text-text-primary"
-              onClick={() => {
-                setAttachmentDraft(null);
-                setAttachmentError(null);
-              }}
-            >
-              {t('inbox.window.attachment.remove')}
-            </button>
+            {isUploadingAttachment ? (
+              <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-text-muted" aria-hidden="true" />
+            ) : (
+              <button
+                type="button"
+                className="font-medium text-text-muted hover:text-text-primary"
+                onClick={clearAttachmentDraft}
+              >
+                {t('inbox.window.attachment.remove')}
+              </button>
+            )}
           </div>
         )}
         {attachmentError && (

@@ -362,6 +362,45 @@ describe('runCopilotTurn', () => {
     expect((lastEvent.data as { code: string }).code).toBe('aborted');
   });
 
+  it('signal already aborted before the turn starts → outcome=aborted, LLM never called', async () => {
+    // A drawer closed (or SSE socket dropped) between request parse and runCopilotTurn hands the
+    // turn an ALREADY-aborted signal. `addEventListener('abort', …)` never fires for one of those,
+    // so the turn used to stream a full answer, burn tokens and persist `success` for a client
+    // that had already gone away.
+    const ac = new AbortController();
+    ac.abort();
+    let streamCalls = 0;
+    const llm: CopilotLlmStream = {
+      async *stream() {
+        streamCalls++;
+        yield {
+          type: 'finalize',
+          finishReason: 'stop',
+          usage: { promptTokens: 10, completionTokens: 2 },
+        };
+      },
+    };
+    const sink = new BufferedSSESink();
+    const result = await runCopilotTurn({
+      dataSource: AppDataSource,
+      llm,
+      knowledge: makeStubKnowledge(),
+      toolRegistry: makeStubRegistry([]),
+      sink,
+      abortSignal: ac.signal,
+      tenantId,
+      userId,
+      message: 'pre-aborted turn test',
+    });
+
+    expect(streamCalls).toBe(0);
+    expect(result.outcome).toBe<CopilotMessageOutcome>('aborted');
+    expect(result.tokensOut).toBe(0);
+    const lastEvent = sink.events[sink.events.length - 1];
+    expect(lastEvent.event).toBe('error');
+    expect(lastEvent.data).toMatchObject({ code: 'aborted' });
+  });
+
   it('LLM provider error → outcome=error, partial content persisted, error event emitted', async () => {
     const llm = makeScriptedLlm([
       { tokens: ['some text'], throwError: new Error('simulated OpenAI 5xx') },

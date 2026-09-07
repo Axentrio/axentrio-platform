@@ -53,6 +53,8 @@ router.all('/channels/:channel/webhook', async (req: Request, res: Response) => 
 
   // Persist raw events for idempotency, then process
   const eventLogRepo = getRepository(WebhookEventLog);
+  let inlineChain = Promise.resolve();
+
 
   for (const event of events) {
     try {
@@ -77,13 +79,21 @@ router.all('/channels/:channel/webhook', async (req: Request, res: Response) => 
           jobId: event.dedupeKey, // Idempotent by dedupe key
         });
       } else {
-        await processInboundEvent(event, connection);
+        // Queue never started: ACK without awaiting, but chain events in this
+        // payload so two messages from the same customer cannot interleave.
+        inlineChain = inlineChain.then(() =>
+          processInboundEvent(event, connection).catch((err) => {
+            logger.error(`[channel-webhook] Inline processing of ${channel} event failed:`, err);
+          }),
+        );
       }
     } catch (error: any) {
       if (error?.code === '23505') continue; // Duplicate dedupe key
       logger.error(`[channel-webhook] Error processing ${channel} event:`, error);
     }
   }
+  void inlineChain;
+
 
   return res.status(200).json({ ok: true });
 });

@@ -6,6 +6,37 @@ import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 // Simple in-memory cache with TTL
 const profileCache = new Map<string, { displayName: string; avatarUrl?: string; expiresAt: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_CACHE_ENTRIES = 50_000;
+
+// The key is a Meta PSID/IGSID, so without a sweep the map grows by one entry
+// per distinct contact that ever messages the bot and never shrinks — the TTL
+// alone only ever evicts a key that is looked up again after it expired.
+function sweepProfileCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of profileCache) {
+    if (entry.expiresAt <= now) profileCache.delete(key);
+  }
+  // Hard cap for the pathological case (>50k contacts inside one TTL window):
+  // drop the entries closest to expiry first.
+  const excess = profileCache.size - MAX_CACHE_ENTRIES;
+  if (excess > 0) {
+    const byExpiry = [...profileCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+    for (const [key] of byExpiry.slice(0, excess)) profileCache.delete(key);
+  }
+}
+
+// Sweep expired entries every 60 seconds to prevent memory leak
+setInterval(sweepProfileCache, 60_000).unref(); // .unref() so it doesn't keep the process alive
+
+/** Test seam — observe cache growth. */
+export function __profileCacheSize(): number {
+  return profileCache.size;
+}
+
+/** Test seam — clear the in-memory cache between cases. */
+export function __resetProfileCache(): void {
+  profileCache.clear();
+}
 
 /**
  * Fetch profile info for a Meta user (Messenger PSID or Instagram IGSID).

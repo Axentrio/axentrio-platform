@@ -6,11 +6,14 @@ import { toast } from 'sonner';
 import { useTenantContextStore } from '../stores/tenantContextStore';
 import { useUiStore } from '../stores/uiStore';
 import { useSocket } from '../websocket/SocketContext';
+import { __resetConversationLiveState } from '../queries/conversationLive';
 
 /**
  * Query key prefixes that are tenant-scoped and must be flushed on switch.
  * Bookings live under `['scheduler','bookings',scope]` — omitting `scheduler`
  * left the previous tenant's appointments on screen after impersonation.
+ * Everything the portal caches per tenant belongs here; `admin` is the one
+ * deliberate omission (super-admin tenant directory, not tenant data).
  */
 export const TENANT_SCOPED_KEYS = [
   'tenants',
@@ -24,6 +27,17 @@ export const TENANT_SCOPED_KEYS = [
   'webhooks',
   'agents',
   'scheduler',
+  'leads',
+  'bots',
+  'copilot',
+  'insights',
+  'billing',
+  'entitlements',
+  'faq',
+  'onboarding',
+  'skills',
+  'automations',
+  'integrations',
 ] as const;
 
 export function useTenantSwitch() {
@@ -53,6 +67,11 @@ export function useTenantSwitch() {
       for (const key of TENANT_SCOPED_KEYS) {
         queryClient.removeQueries({ queryKey: [key] });
       }
+      // The live-conversation registries (applied revisions / ownership
+      // versions / live tails) are module-level and keyed by session id —
+      // without this they keep the previous tenant's sessions for the life of
+      // the tab, and a recycled revision number would gate a real event out.
+      __resetConversationLiveState();
       // Reconnect socket so server picks up new tenant context
       reconnect();
       // Redirect (default dashboard) to avoid 404s on tenant-scoped routes

@@ -13,7 +13,6 @@ import { Bot } from '../database/entities/Bot';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import type { ChannelConnection } from '../database/entities/ChannelConnection';
-import { MessageDelivery } from '../database/entities/MessageDelivery';
 import type { NormalizedEvent } from './types';
 import { isChannelEntitled } from './channel-entitlement';
 import { encrypt } from '../utils/encryption';
@@ -34,6 +33,13 @@ import { FB_GRAPH_API } from './meta/graph-api';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { trimmedName } from '../realtime/conversation-serializer';
 import { enqueueChatDocument } from '../services/chat-documents';
+
+/**
+ * Upper bound on the mids a single delivery/read receipt may touch. Meta sends
+ * the mids it has buffered; the normalizers slice to the same cap, and this is
+ * the guard for events that reached the queue before that slice existed.
+ */
+const MAX_RECEIPT_MESSAGE_IDS = 100;
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -414,30 +420,30 @@ async function broadcastInboundMessage(
 }
 
 /**
- * Handle delivery / read receipt events by updating MessageDelivery rows.
+ * Handle delivery / read receipt events by updating message_deliveries rows.
+ *
+ * One batched UPDATE per receipt: a Meta delivery webhook carries a whole batch
+ * of mids, and a findOne+save per mid turned one webhook into 2N round trips.
+ * Exported so the batching can be asserted.
  */
-async function handleReceiptEvent(
+export async function handleReceiptEvent(
   event: NormalizedEvent,
   connection: ChannelConnection,
 ): Promise<void> {
   if (!event.receipt) return;
 
-  const deliveryRepo = getRepository(MessageDelivery);
   const newStatus = event.receipt.status; // 'delivered' | 'read'
+  const platformMessageIds = event.receipt.messageIds.slice(0, MAX_RECEIPT_MESSAGE_IDS);
+  if (platformMessageIds.length === 0) return;
 
-  for (const platformMsgId of event.receipt.messageIds) {
-    const delivery = await deliveryRepo.findOne({
-      where: {
-        platformMessageId: platformMsgId,
-        channelConnectionId: connection.id,
-      },
-    });
-
-    if (delivery) {
-      delivery.status = newStatus;
-      await deliveryRepo.save(delivery);
-    }
-  }
+  // A late `delivered` receipt must not demote a row that a `read` receipt has
+  // already advanced — `read` is terminal for this table.
+  const noDemote = newStatus === 'delivered' ? ` AND "status" <> 'read'` : '';
+  await AppDataSource.query(
+    `UPDATE "message_deliveries" SET "status" = $1, "updatedAt" = now()` +
+      ` WHERE "channelConnectionId" = $2 AND "platformMessageId" = ANY($3::text[])${noDemote}`,
+    [newStatus, connection.id, platformMessageIds],
+  );
 }
 
 /**

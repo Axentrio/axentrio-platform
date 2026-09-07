@@ -130,8 +130,16 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
   // -----------------------------------------------------------------
   const turnAbort = new AbortController();
   const timeoutHandle = setTimeout(() => turnAbort.abort('agent_loop_exceeded'), HARD_TIMEOUT_MS);
+  timeoutHandle.unref(); // .unref() so a pending hard-timeout doesn't keep the process alive
   const onAbort = () => turnAbort.abort('aborted');
-  args.abortSignal.addEventListener('abort', onAbort, { once: true });
+  // The caller's signal may ALREADY be aborted (client closed the SSE socket
+  // between request parse and here) — addEventListener would never fire for it,
+  // so propagate the existing abort instead of starting an unabortable turn.
+  if (args.abortSignal.aborted) {
+    turnAbort.abort('aborted');
+  } else {
+    args.abortSignal.addEventListener('abort', onAbort, { once: true });
+  }
 
   const toolsCalled: CopilotToolCallSummary[] = [];
   let toolCallCount = 0;
@@ -146,7 +154,11 @@ export async function runCopilotTurn(args: RunCopilotTurnArgs): Promise<RunCopil
 
   try {
     iterationLoop: while (llmIterations < MAX_LLM_ITERATIONS) {
-      if (turnAbort.signal.aborted) break;
+      if (turnAbort.signal.aborted) {
+        outcome =
+          turnAbort.signal.reason === 'agent_loop_exceeded' ? 'agent_loop_exceeded' : 'aborted';
+        break;
+      }
       llmIterations++;
 
       const pendingToolCalls: CopilotLlmToolCall[] = [];

@@ -145,7 +145,14 @@ function toSearch(filters: LeadFilters, cursor: string | null): string {
  *
  * `filters` is part of the query KEY: without it, a filtered and an unfiltered page
  * would share one cache entry and the list would show stale rows after a filter change.
+ *
+ * Pages accumulate in the cache (and in the rendered table) for the life of the
+ * tab, so the UI stops offering "Load more" at LEADS_MAX_PAGES — see Leads.tsx.
+ * `maxPages` is deliberately NOT used: it would silently drop the FIRST page
+ * (the newest leads) and the route has no backwards cursor to refetch it with.
  */
+export const LEADS_MAX_PAGES = 20;
+
 export function useLeadsInfinite(filters: LeadFilters = {}) {
   return useInfiniteQuery({
     queryKey: queryKeys.leads.list(filters),

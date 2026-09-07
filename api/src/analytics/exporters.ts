@@ -24,6 +24,11 @@ interface DateRange {
   limit?: number;
 }
 
+/** The row cap every export route passes as `DateRange.limit`. Lives here, next to
+ *  the queries it bounds, so a second export surface cannot ship without one: an
+ *  uncapped export materializes the whole result set in memory before send. */
+export const EXPORT_MAX_ROWS = 10_000;
+
 export type ExportFormat = 'csv' | 'xlsx';
 
 export interface Exporter {
@@ -102,14 +107,18 @@ const exporters: Record<ExportDataset, Exporter> = {
   gaps: {
     filename: rangedFilename('gaps'),
     headers: ['topic', 'status', 'severity', 'occurrences', 'distinct_visitors', 'first_detected_at', 'last_seen_at', 'resolved_at'],
-    rows: async (tenantId, { from, to }) => {
+    rows: async (tenantId, { from, to, limit }) => {
+      // LIMIT in SQL for the same reason as `leads` below: the whole result set is
+      // held in memory before send, so the cap has to stop Postgres materializing it.
       const rows = await AppDataSource.query(
         `SELECT ct.topic, g.status, g.severity, g.occurrences, g.distinct_visitors AS dv,
                 g.first_detected_at AS fda, g.last_seen_at AS lsa, g.resolved_at AS ra
          FROM chatbot_gaps g
          LEFT JOIN chatbot_canonical_topics ct ON ct.id = g.canonical_topic_id
          WHERE g.tenant_id = $1 AND g.last_seen_at >= $2 AND g.last_seen_at < $3
-         ORDER BY g.last_seen_at DESC`, [tenantId, from, to]);
+         ORDER BY g.last_seen_at DESC
+         ${limit ? 'LIMIT $4' : ''}`,
+        limit ? [tenantId, from, to, limit] : [tenantId, from, to]);
       return rows.map((r: Record<string, unknown>) => [
         str(r.topic), str(r.status), str(r.severity), str(r.occurrences), str(r.dv),
         ts(r.fda), ts(r.lsa), ts(r.ra),

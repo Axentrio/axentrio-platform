@@ -226,8 +226,11 @@ export async function sweepExpiredCoordinates(
  * more often than that — so a deletion obligation hung on the interval alone could go months
  * without running while looking perfectly well scheduled. 90s of headroom so the first run
  * starts behind the boot traffic.
+ *
+ * Returns both handles — the schedule stays here, but the caller owns the process
+ * lifetime and has to be able to unref and clear them on shutdown.
  */
-export function startCoordinateExpirySweep(): void {
+export function startCoordinateExpirySweep(): NodeJS.Timeout[] {
   const run = () => {
     sweepExpiredCoordinates().catch((error) => {
       // Already logged with its running total inside; this is the last line of defence that
@@ -237,6 +240,5 @@ export function startCoordinateExpirySweep(): void {
       });
     });
   };
-  setTimeout(run, 90_000);
-  setInterval(run, SWEEP_INTERVAL_MS);
+  return [setTimeout(run, 90_000), setInterval(run, SWEEP_INTERVAL_MS)];
 }

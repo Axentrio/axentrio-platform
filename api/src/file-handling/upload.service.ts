@@ -90,6 +90,14 @@ export interface TenantQuota {
   lastResetDate: Date;
 }
 
+/** Stored form of a quota: the counters plus the last time we touched it. */
+type TrackedTenantQuota = TenantQuota & { lastAccessAt: number };
+
+/** How often idle tenant quotas are swept out of memory. */
+const QUOTA_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** A quota untouched for this long is dropped; it is re-created on next use. */
+const QUOTA_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 export interface UploadRequest {
   fileName: string;
   fileSize: number;
@@ -180,8 +188,10 @@ export class UploadService {
   // survive replica switches and deploys. See
   // `chatbot-platform/docs/widget-file-upload-status.md` codex #5 for the
   // original bug report this fixes.
-  private tenantQuotas: Map<string, TenantQuota> = new Map();
+  private tenantQuotas: Map<string, TrackedTenantQuota> = new Map();
   private chunkedSessions: Map<string, ChunkedUploadSession> = new Map();
+  private gdprTimer: NodeJS.Timeout | null = null;
+  private quotaSweepTimer: NodeJS.Timeout | null = null;
 
   constructor(config?: Partial<UploadConfig>) {
     this.config = { ...DEFAULT_UPLOAD_CONFIG, ...config };
@@ -195,6 +205,7 @@ export class UploadService {
 
     // Start GDPR cleanup scheduler
     this.startGDPRCleanupScheduler();
+    this.startQuotaSweeper();
   }
 
   /**
@@ -579,7 +590,7 @@ export class UploadService {
    */
   getTenantQuota(tenantId: string): TenantQuota {
     let quota = this.tenantQuotas.get(tenantId);
-    
+
     if (!quota) {
       quota = {
         tenantId,
@@ -588,6 +599,7 @@ export class UploadService {
         currentStorageBytes: 0,
         currentFilesThisMonth: 0,
         lastResetDate: new Date(),
+        lastAccessAt: Date.now(),
       };
       this.tenantQuotas.set(tenantId, quota);
     }
@@ -600,6 +612,7 @@ export class UploadService {
       quota.lastResetDate = now;
     }
 
+    quota.lastAccessAt = now.getTime();
     return quota;
   }
 
@@ -1154,9 +1167,45 @@ export class UploadService {
   private startGDPRCleanupScheduler(): void {
     const cleanupInterval = 24 * 60 * 60 * 1000; // 24 hours
 
-    setInterval(async () => {
+    // Handle kept so `stop()` can clear it; unref'd so a pending sweep never
+    // holds the process open on shutdown.
+    this.gdprTimer = setInterval(async () => {
       await this.performGDPRCleanup();
     }, cleanupInterval);
+    this.gdprTimer.unref();
+  }
+
+  /**
+   * Drop tenant quotas nothing has touched for 30 days. The counters are
+   * in-memory only (rebuilt on next use via `getTenantQuota`), so evicting an
+   * idle tenant costs nothing and stops the map growing for the life of the
+   * process on installations with many short-lived tenants.
+   */
+  private startQuotaSweeper(): void {
+    this.quotaSweepTimer = setInterval(() => {
+      const cutoff = Date.now() - QUOTA_IDLE_TTL_MS;
+      for (const [tenantId, quota] of this.tenantQuotas) {
+        if (quota.lastAccessAt < cutoff) {
+          this.tenantQuotas.delete(tenantId);
+        }
+      }
+    }, QUOTA_SWEEP_INTERVAL_MS);
+    this.quotaSweepTimer.unref();
+  }
+
+  /**
+   * Clear the background timers this instance owns. Called by
+   * `resetUploadService()` so a discarded singleton leaves nothing behind.
+   */
+  stop(): void {
+    if (this.gdprTimer) {
+      clearInterval(this.gdprTimer);
+      this.gdprTimer = null;
+    }
+    if (this.quotaSweepTimer) {
+      clearInterval(this.quotaSweepTimer);
+      this.quotaSweepTimer = null;
+    }
   }
 
   /**
@@ -1377,6 +1426,9 @@ export function getUploadService(config?: Partial<UploadConfig>): UploadService 
 }
 
 export function resetUploadService(): void {
+  // Clear the discarded instance's timers, otherwise every reset (tests, or a
+  // re-configuration) leaks a GDPR-cleanup and a quota-sweep interval.
+  uploadServiceInstance?.stop();
   uploadServiceInstance = null;
 }
 

@@ -16,6 +16,7 @@
  *  - applyMessageCreated: append to the detail cache deduped by message id
  *    (and reconcile the operator's optimistic bubble), patch the list rows'
  *    preview. Message appends are NEVER revision-gated — only summary patches.
+ *    The thread is capped at DETAIL_MESSAGES_MAX (newest-N window).
  *  - applyCommandConversation: fold a POST command response's reduced summary
  *    into the caches (drops the follow-up GET /chats/:id).
  *  - useLiveConversationSync: the single mount point that registers the
@@ -272,6 +273,15 @@ const appliedOwnershipVersions = new Map<string, number>();
 const liveTail = new Map<string, Message[]>();
 const LIVE_TAIL_MAX = 50;
 
+/**
+ * Hard cap on messages kept in the detail cache. GET /chats/:id returns the
+ * newest 50 (chat.routes.ts take(50)) and nothing prepends older pages, so the
+ * cache is only ever grown by live `message:created` appends — unbounded
+ * without this. A long-lived tab on a busy thread would hold every message it
+ * ever saw (and ChatWindow renders them all). Keep the newest N.
+ */
+export const DETAIL_MESSAGES_MAX = 200;
+
 /** Record an appended message; only the newest LIVE_TAIL_MAX per thread are kept. */
 function rememberLiveTail(sessionId: string, message: Message): void {
   const tail = liveTail.get(sessionId);
@@ -424,6 +434,20 @@ function withTotalDelta(entry: ChatListCacheEntry, rows: Chat[], delta: number):
   return next;
 }
 
+/**
+ * Hard cap on rows kept in a cached list variant. The server page size is 20
+ * (api/src/utils/pagination.ts DEFAULT_LIMIT) and only live INSERTS grow a
+ * variant past what was fetched — a long-lived Inbox tab on a busy tenant
+ * would otherwise hold (and render) every conversation it ever saw. The
+ * variant's own `limit` param wins when the caller asked for a page size.
+ */
+export const LIST_ROWS_MAX = 20;
+
+function capRows(params: ListParams, rows: Chat[]): Chat[] {
+  const limit = Number(params?.limit) || LIST_ROWS_MAX;
+  return rows.length > limit ? rows.slice(0, limit) : rows;
+}
+
 // ---------------------------------------------------------------------------
 // applyConversationUpsert
 // ---------------------------------------------------------------------------
@@ -506,7 +530,7 @@ export function applyConversationUpsert(
     // Row absent. A stale-ownership event must not place rows anywhere.
     if (ownershipStale || !matchesVariant(params, dto)) return;
     if (canInsertInto(params, dto)) {
-      const next = sortByActivityDesc([summaryToChatRow(dto), ...rows]);
+      const next = capRows(params, sortByActivityDesc([summaryToChatRow(dto), ...rows]));
       queryClient.setQueryData(key, withTotalDelta(entry, next, 1));
     } else if (hasOpaqueFilter(params)) {
       // The conversation MIGHT belong to this server-side-filtered variant —
@@ -596,7 +620,15 @@ export function applyMessageCreated(
     }
     changedThread = true;
     rememberLiveTail(sessionId, incoming);
-    return { ...old, messages: [...messages, incoming] };
+    const appended = [...messages, incoming];
+    return {
+      ...old,
+      // Newest-N window: the live stream is the only thing that grows this
+      // array, and nothing above the fold needs the dropped head (the GET
+      // snapshot is 50 rows and the live tail keeps at most LIVE_TAIL_MAX).
+      messages:
+        appended.length > DETAIL_MESSAGES_MAX ? appended.slice(-DETAIL_MESSAGES_MAX) : appended,
+    };
   });
 
   if (changedThread) rememberLiveTail(sessionId, incoming);
@@ -639,7 +671,8 @@ export function applyMessageCreated(
     // know status/tenant). ChatStream hides `messageCount===0 && !lastMessage`.
     if (!canInsertInto(params, insertDto)) return;
     const stub = summaryToChatRow({ ...insertDto, createdAt: incoming.createdAt });
-    queryClient.setQueryData(key, withTotalDelta(entry, sortByActivityDesc([stub, ...rows]), 1));
+    const next = capRows(params, sortByActivityDesc([stub, ...rows]));
+    queryClient.setQueryData(key, withTotalDelta(entry, next, 1));
   });
 
   return { isNew: changedThread };
@@ -713,7 +746,7 @@ export function applyCommandConversation(
       } else if (fullRow && canInsertInto(params, admissionDto)) {
         queryClient.setQueryData(
           key,
-          withTotalDelta(entry, sortByActivityDesc([fullRow, ...rows]), 1),
+          withTotalDelta(entry, capRows(params, sortByActivityDesc([fullRow, ...rows])), 1),
         );
       }
     } else if (index >= 0) {

@@ -21,7 +21,7 @@ import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { analyticsQuerySchema, analyticsExportQuerySchema } from '../schemas';
 import { getEntitlements } from '../billing/entitlements';
-import { getExporter, toCsv, EXPORT_DATASETS } from '../analytics/exporters';
+import { getExporter, toCsv, EXPORT_DATASETS, EXPORT_MAX_ROWS } from '../analytics/exporters';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -139,7 +139,22 @@ router.get(
     const from = req.query.from as string;
     const to = req.query.to as string;
 
+    // One aggregate pass, same shape as /dashboard above: four sequential
+    // COUNT clones each re-scanned the tenant's sessions for the same rows.
     const qb = sessionRepository.createQueryBuilder('session')
+      .select('COUNT(*)', 'total')
+      .addSelect("COUNT(*) FILTER (WHERE session.status = 'closed')", 'closed')
+      // Closed sessions resolved by a human agent — same definition as the
+      // dashboard endpoint (closed AND an agent was assigned).
+      .addSelect(
+        "COUNT(*) FILTER (WHERE session.status = 'closed' AND session.assigned_agent_id IS NOT NULL)",
+        'humanResolved',
+      )
+      // Average duration for closed sessions.
+      .addSelect(
+        "AVG(session.duration_seconds) FILTER (WHERE session.status = 'closed' AND session.duration_seconds IS NOT NULL)",
+        'avgDuration',
+      )
       .where('session.tenant_id = :tenantId', { tenantId });
 
     if (from) {
@@ -149,33 +164,17 @@ router.get(
       qb.andWhere('session.created_at <= :to', { to: new Date(to) });
     }
 
-    const total = await qb.getCount();
-
-    const closed = await qb.clone()
-      .andWhere('session.status = :status', { status: 'closed' })
-      .getCount();
-
-    // Closed sessions resolved by a human agent — same definition as the
-    // dashboard endpoint (closed AND an agent was assigned).
-    const humanResolved = await qb.clone()
-      .andWhere('session.status = :status', { status: 'closed' })
-      .andWhere('session.assigned_agent_id IS NOT NULL')
-      .getCount();
-
-    // Average duration for closed sessions
-    const avgResult = await qb.clone()
-      .select('AVG(session.duration_seconds)', 'avgDuration')
-      .andWhere('session.status = :status', { status: 'closed' })
-      .andWhere('session.duration_seconds IS NOT NULL')
-      .getRawOne();
+    const stats: RawStatRow = await qb.getRawOne();
+    const total = rawInt(stats?.total);
+    const closed = rawInt(stats?.closed);
 
     sendSuccess(res, {
       metrics: {
         total,
         closed,
         open: total - closed,
-        humanResolved,
-        avgDurationSeconds: Math.round(avgResult?.avgDuration || 0),
+        humanResolved: rawInt(stats?.humanResolved),
+        avgDurationSeconds: Math.round(parseFloat(stats?.avgDuration || '0')),
       },
     });
   })
@@ -543,11 +542,18 @@ router.get(
       req.query.from as string | undefined,
       req.query.to as string | undefined,
     );
-    const rows = await exporter.rows(tenantId, { from, to });
+    const rows = await exporter.rows(tenantId, { from, to, limit: EXPORT_MAX_ROWS });
+    const truncated = rows.length >= EXPORT_MAX_ROWS;
     const csv = toCsv(exporter.headers, rows);
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to })}"`);
+    // A capped export is incomplete data — say so on the wire rather than letting a
+    // short file pass as the whole range (same headers as /leads/export).
+    if (truncated) {
+      res.setHeader('X-Export-Truncated', 'true');
+      res.setHeader('X-Export-Row-Limit', String(EXPORT_MAX_ROWS));
+    }
     res.status(200).send(csv);
   })
 );

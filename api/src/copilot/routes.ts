@@ -139,6 +139,7 @@ router.post(
     const heartbeat = setInterval(() => {
       writeEvent(res, { event: 'heartbeat', data: {} });
     }, HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref(); // .unref() so it doesn't keep the process alive
 
     const sink: CopilotSSESink = {
       emit(event: CopilotSSEEvent) {

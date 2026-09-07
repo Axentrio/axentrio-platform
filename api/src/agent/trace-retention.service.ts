@@ -40,8 +40,11 @@ export async function sweepAgentTraces(): Promise<{ deleted: number }> {
  * so a deletion obligation hung on the interval alone can go months without running
  * while it looks perfectly well scheduled. 90s of headroom keeps the first run behind
  * the boot traffic.
+ *
+ * Returns both handles so the caller can unref them and clear them on shutdown —
+ * a timer this file kept to itself would hold the event loop open past SIGTERM.
  */
-export function startAgentTraceRetentionSweep(): void {
+export function startAgentTraceRetentionSweep(): NodeJS.Timeout[] {
   const run = () => {
     sweepAgentTraces().catch((error) => {
       logger.error('[trace-retention] sweep failed', {
@@ -49,6 +52,5 @@ export function startAgentTraceRetentionSweep(): void {
       });
     });
   };
-  setTimeout(run, 90_000);
-  setInterval(run, 24 * 60 * 60 * 1000);
+  return [setTimeout(run, 90_000), setInterval(run, 24 * 60 * 60 * 1000)];
 }

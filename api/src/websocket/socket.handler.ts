@@ -302,16 +302,24 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   const AUTH_TIMEOUT_MS = 3000;
 
   io.use(async (socket, next) => {
+    let authTimeout: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
-        authenticateSocket(socket as TenantSocket),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Authentication timeout')), AUTH_TIMEOUT_MS)
-        ),
-      ]);
+      // The loser of the race keeps its state: a timeout that fires after auth
+      // already won must not surface as an unhandled rejection, and the pending
+      // timer must not hold the event loop for AUTH_TIMEOUT_MS after a fast auth.
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        authTimeout = setTimeout(
+          () => reject(new Error('Authentication timeout')),
+          AUTH_TIMEOUT_MS
+        );
+      });
+      timeoutPromise.catch(() => {});
+      await Promise.race([authenticateSocket(socket as TenantSocket), timeoutPromise]);
       next();
     } catch (err) {
       next(err instanceof Error ? err : new Error('Authentication failed'));
+    } finally {
+      clearTimeout(authTimeout);
     }
   });
 

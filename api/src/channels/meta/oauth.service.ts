@@ -289,6 +289,15 @@ const PAGE_TOKEN_TTL_MS = 15 * 60 * 1000;
 const pageTokenKey = (pageId: string) => `meta:page_token:${pageId}`;
 const fallbackTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
+// Sweep expired fallback entries every 60 seconds to prevent memory leak.
+// The fallback path stays (Redis can be down); only stale tokens are dropped.
+setInterval(() => {
+  const now = Date.now();
+  for (const [pageId, cached] of fallbackTokenCache) {
+    if (cached.expiresAt < now) fallbackTokenCache.delete(pageId);
+  }
+}, 60_000).unref(); // .unref() so it doesn't keep the process alive
+
 async function cachePageToken(pageId: string, accessToken: string): Promise<void> {
   const redis = getRedisClient();
   if (redis) {

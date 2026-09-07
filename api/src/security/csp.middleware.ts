@@ -102,8 +102,11 @@ class NonceStore {
   private cleanupInterval: NodeJS.Timeout;
 
   constructor() {
-    // Clean expired nonces every 5 minutes
+    // Clean expired nonces every 5 minutes. `.unref()` so this sweep never
+    // holds the event loop open during shutdown (`destroy()` clears it when
+    // the store is torn down explicitly).
     this.cleanupInterval = setInterval(() => this.cleanup(), 5 * 60 * 1000);
+    this.cleanupInterval.unref();
   }
 
   generate(sessionId: string): string {

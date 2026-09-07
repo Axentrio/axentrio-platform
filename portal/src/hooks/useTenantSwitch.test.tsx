@@ -45,8 +45,26 @@ function seedTenantCaches(client: QueryClient) {
   });
   client.setQueryData(['scheduler', 'config', null], { timezone: 'Europe/Brussels' });
   client.setQueryData(['chats', 'list', {}], { chats: [{ id: 'c-wf' }] });
+  client.setQueryData(['leads', 'list', {}], { leads: [{ id: 'lead-wf' }] });
+  client.setQueryData(['bots', 'list'], { bots: [{ id: 'bot-wf' }] });
+  client.setQueryData(['billing', 'state'], { tier: 'pro' });
+  client.setQueryData(['entitlements'], { leadCapture: true });
+  client.setQueryData(['copilot', 'threads'], { threads: [{ id: 't-wf' }] });
+  client.setQueryData(['insights', 'gaps'], { gaps: [{ id: 'g-wf' }] });
   client.setQueryData(['admin', 'tenants', 'all'], { tenants: [{ name: 'must-survive' }] });
 }
+
+/** Every tenant-scoped cache seeded above, by its root prefix. */
+const SEEDED_TENANT_KEYS = [
+  ['scheduler', 'bookings', 'upcoming'],
+  ['chats', 'list', {}],
+  ['leads', 'list', {}],
+  ['bots', 'list'],
+  ['billing', 'state'],
+  ['entitlements'],
+  ['copilot', 'threads'],
+  ['insights', 'gaps'],
+] as const;
 
 describe('useTenantSwitch cache flush', () => {
   let client: QueryClient;
@@ -91,6 +109,27 @@ describe('useTenantSwitch cache flush', () => {
       tenants: [{ name: 'must-survive' }],
     });
     expect(reconnectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops every tenant-scoped cache — leads/bots/billing/entitlements/copilot/insights included', async () => {
+    const { result } = renderHook(() => useTenantSwitch(), { wrapper });
+
+    await act(async () => {
+      await result.current.switchTenant({
+        tenantId: '505b0f6a-2324-4a08-a8ea-be0062f07f5c',
+        tenantName: 'Smoke trial barber 0820',
+      });
+    });
+
+    for (const key of SEEDED_TENANT_KEYS) {
+      expect({ key, data: client.getQueryData(key as unknown as unknown[]) }).toEqual({
+        key,
+        data: undefined,
+      });
+    }
+    expect(client.getQueryData(['admin', 'tenants', 'all'])).toEqual({
+      tenants: [{ name: 'must-survive' }],
+    });
   });
 
   it('also drops scheduler bookings when exiting impersonation', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Loader2, Cloud, Unplug } from "lucide-react";
@@ -77,6 +77,24 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
+/** Same cap as openMetaOAuthPopup: never watch a popup forever. */
+const POPUP_WATCH_TIMEOUT_MS = 15 * 60 * 1000;
+
+interface GoogleConnectHandles {
+  timer: number;
+  cap: number;
+}
+
+interface OneDrivePickerHandles {
+  timer: number;
+  cap: number;
+  handler: (event: MessageEvent) => void;
+  onPortMessage: (event: MessageEvent) => void;
+  port: MessagePort | null;
+  /** Settles the pending picker promise so awaiters are not stranded. */
+  settle: () => void;
+}
+
 export default function CloudImportPanel({
   onImported,
 }: {
@@ -100,6 +118,40 @@ export default function CloudImportPanel({
   );
   const oneDriveConnect = useOneDriveConnectUrl();
 
+  const googlePollRef = useRef<GoogleConnectHandles | null>(null);
+  const oneDrivePickerRef = useRef<OneDrivePickerHandles | null>(null);
+
+  const stopGooglePoll = useCallback(() => {
+    const handles = googlePollRef.current;
+    if (!handles) return;
+    googlePollRef.current = null;
+    window.clearInterval(handles.timer);
+    window.clearTimeout(handles.cap);
+  }, []);
+
+  const stopOneDrivePicker = useCallback(() => {
+    const handles = oneDrivePickerRef.current;
+    if (!handles) return;
+    oneDrivePickerRef.current = null;
+    window.clearInterval(handles.timer);
+    window.clearTimeout(handles.cap);
+    window.removeEventListener("message", handles.handler);
+    if (handles.port) {
+      handles.port.removeEventListener("message", handles.onPortMessage);
+      handles.port.close();
+    }
+    handles.settle();
+  }, []);
+
+  // Unmount → drop every popup watcher (interval, listener, MessagePort).
+  useEffect(
+    () => () => {
+      stopGooglePoll();
+      stopOneDrivePicker();
+    },
+    [stopGooglePoll, stopOneDrivePicker],
+  );
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("storage") === "connected") {
@@ -114,6 +166,7 @@ export default function CloudImportPanel({
   }, [connections]);
 
   async function connectGoogle() {
+    stopGooglePoll();
     try {
       const { startUrl } = await connectUrl.mutateAsync();
       const popup = window.open(
@@ -126,11 +179,13 @@ export default function CloudImportPanel({
         return;
       }
       const timer = window.setInterval(() => {
-        if (!popup || popup.closed) {
-          window.clearInterval(timer);
+        if (popup.closed) {
+          stopGooglePoll();
           connections.refetch();
         }
       }, 800);
+      const cap = window.setTimeout(stopGooglePoll, POPUP_WATCH_TIMEOUT_MS);
+      googlePollRef.current = { timer, cap };
     } catch {
       toast.error(t("ai.knowledge.cloud.connectFailed"));
     }
@@ -237,6 +292,7 @@ export default function CloudImportPanel({
   );
 
   async function pickOneDriveFiles(conn: StorageConnection) {
+    stopOneDrivePicker();
     try {
       setBusy(true);
       const cfg = await api.get<{ clientId: string | null }>(
@@ -282,10 +338,9 @@ export default function CloudImportPanel({
             driveId?: string;
           }> = [],
         ) {
-          window.removeEventListener("message", handler);
-          window.clearInterval(timer);
           if (err) reject(err);
           else resolve({ files, pickerToken });
+          stopOneDrivePicker();
         }
         function onPortMessage(messageEvent: MessageEvent) {
           const payload = messageEvent.data || {};
@@ -380,6 +435,9 @@ export default function CloudImportPanel({
           ) {
             port = event.ports[0];
             if (!port) return;
+            if (oneDrivePickerRef.current) {
+              oneDrivePickerRef.current.port = port;
+            }
             port.addEventListener("message", onPortMessage);
             port.start();
             port.postMessage({ type: "activate" });
@@ -389,6 +447,23 @@ export default function CloudImportPanel({
         const timer = window.setInterval(() => {
           if (pickerWin.closed) finish(null, []);
         }, 800);
+        const cap = window.setTimeout(() => {
+          finish(new Error("picker-timeout"));
+          try {
+            if (!pickerWin.closed) pickerWin.close();
+          } catch {
+            /* ignore */
+          }
+        }, POPUP_WATCH_TIMEOUT_MS);
+        oneDrivePickerRef.current = {
+          timer,
+          cap,
+          handler,
+          onPortMessage,
+          port: null,
+          // Unmount teardown resolves with nothing so the awaiter unwinds.
+          settle: () => resolve({ files: [], pickerToken: "" }),
+        };
       });
       if (picked.files.length === 0) return;
       await startImport.mutateAsync({

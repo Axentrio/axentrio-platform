@@ -296,6 +296,7 @@ export async function coalesceProcessor(job: Job): Promise<void> {
   const heartbeat = setInterval(() => {
     redis.eval(REFRESH_LUA, 1, lockKey(sessionId), token, String(LOCK_TTL_MS)).catch(() => {});
   }, HEARTBEAT_MS);
+  heartbeat.unref(); // .unref() so it doesn't keep the process alive
 
   try {
     const session = await sessionRepository.findOne({ where: { id: sessionId } });

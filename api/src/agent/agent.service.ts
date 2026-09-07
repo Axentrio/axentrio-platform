@@ -1098,18 +1098,24 @@ export class AgentService {
     // {openingHours}/{services} sources: a bot that can't book must never quote a
     // booking availability rule it has no skill to use, nor advertise its services.
     const bookingActive = tools.some((t) => t.name === 'create_booking');
-    const moduleSections = await this.buildModuleSections({
-      tenant,
-      bot,
-      session,
-      activeModules: selection.activeModules,
-      selectedSkillIds: selection.selectedSkillIds,
-      composableEnabled: selection.composableEnabled,
-      bookingActive,
-    });
-    const customerName = await this.resolveCustomerName(session);
-    const booking = await this.loadBookingRuleContext(bot, tenant, effBotSettings, bookingActive);
-    const { serviceArea, venueLine } = await this.loadVenueContext(bot, tenant, effBotSettings);
+    // Four independent reads, one round-trip deep each. They only share
+    // `bookingActive` (resolved above, so the gating order is unchanged) — nothing
+    // here consumes another's result, so paying for them sequentially added their
+    // latencies together on every turn.
+    const [moduleSections, customerName, booking, { serviceArea, venueLine }] = await Promise.all([
+      this.buildModuleSections({
+        tenant,
+        bot,
+        session,
+        activeModules: selection.activeModules,
+        selectedSkillIds: selection.selectedSkillIds,
+        composableEnabled: selection.composableEnabled,
+        bookingActive,
+      }),
+      this.resolveCustomerName(session),
+      this.loadBookingRuleContext(bot, tenant, effBotSettings, bookingActive),
+      this.loadVenueContext(bot, tenant, effBotSettings),
+    ]);
     // Template body (layer 2) + effective tone/guardrails both come from the
     // one resolve above (effBotSettings carries the effective AI slice).
     // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
@@ -1152,10 +1158,14 @@ export class AgentService {
     if (process.env.SKILL_STATE_ENABLED !== 'false') {
       tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
     }
-    const proactiveAsk = await this.mayAskForContact(session, tools);
-    const kbContext = await this.prefetchKbContext({
-      message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
-    });
+    // Both read off the FINAL tool list and neither reads the other's result; the
+    // ask-state write still lands before the prompt is built below.
+    const [proactiveAsk, kbContext] = await Promise.all([
+      this.mayAskForContact(session, tools),
+      this.prefetchKbContext({
+        message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
+      }),
+    ]);
     // Currently outside opening hours: the composer adds the AVAILABILITY fact so
     // the bot keeps helping and never announces "closed" as a reason to disengage.
     const outsideBusinessHours = isOutsideBusinessHours(effBotSettings.businessHours, bot.businessTimezone);
@@ -1368,7 +1378,37 @@ export class AgentService {
       // {services} should advertise.
       const services = await AppDataSource.getRepository(ServiceType).find({
         where: { botId: bot.id, isActive: true, onlineBookable: true },
+        // Only the columns the gate + the placeholder formatters read: the row also
+        // carries intake questions and travel config, which this path never uses and
+        // which are the big JSON columns on the table.
+        select: {
+          id: true,
+          name: true,
+          bookingMode: true,
+          durationMode: true,
+          durationMin: true,
+          minDurationMin: true,
+          maxDurationMin: true,
+          priceDisplayType: true,
+          fixedPrice: true,
+          minPrice: true,
+          maxPrice: true,
+          priceNote: true,
+          discountEnabled: true,
+          discountType: true,
+          discountValue: true,
+          discountStartOn: true,
+          discountEndOn: true,
+          locationType: true,
+          customerAddressRequired: true,
+          customerChoosesLocation: true,
+          sortOrder: true,
+          createdAt: true,
+        },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
+        // A catalog longer than this cannot be quoted in a prompt anyway — the
+        // placeholder would blow the context window before it ran out of services.
+        take: 100,
       });
       bookingConfigured = isBookingConfigured(services, !!rule);
       bookingServices = formatServicesForPlaceholder(services, bookingTimezone, new Date());

@@ -33,6 +33,7 @@ import {
   useLeadsInfinite,
   useUpdateLeadStatus,
   useEraseLead,
+  LEADS_MAX_PAGES,
   type Lead,
   type LeadFilters,
 } from '../queries/useLeadsQueries';
@@ -837,18 +838,30 @@ export default function Leads() {
             </Table>
           </div>
 
-          {hasNextPage && (
-            <div className="flex justify-center">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fetchNextPage()}
-                disabled={isFetchingNextPage}
-              >
-                {isFetchingNextPage ? t('common.loading') : t('leads.loadMore')}
-              </Button>
-            </div>
-          )}
+          {hasNextPage &&
+            ((data?.pages.length ?? 0) < LEADS_MAX_PAGES ? (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                >
+                  {isFetchingNextPage ? t('common.loading') : t('leads.loadMore')}
+                </Button>
+              </div>
+            ) : (
+              // Every loaded page stays in memory (and in this table) for the life
+              // of the tab, so the list stops growing here — filtering is the way
+              // to reach older leads.
+              <p className="text-center text-xs text-text-muted">
+                {t('leads.loadMoreCapped', {
+                  defaultValue:
+                    'Showing the first {{count}} leads — use the filters or export to reach older ones.',
+                  count: allLeads.length,
+                })}
+              </p>
+            ))}
         </>
       )}
 

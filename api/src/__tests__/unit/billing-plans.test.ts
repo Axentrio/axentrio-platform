@@ -185,6 +185,15 @@ describe('entitlementsFor', () => {
     expect(pro.limits.monthlyTokens).toBe(PLANS.pro.limits.monthlyTokens);
   });
 
+  it('treats monthlyTokenLimit -1 as unlimited on Pro', () => {
+    const pro = entitlementsFor('pro', {
+      maxSessions: null,
+      dailyLlmCallLimit: null,
+      monthlyTokenLimit: -1,
+    });
+    expect(pro.limits.monthlyTokens).toBeNull();
+  });
+
   it('merges Enterprise override columns on top of plan defaults', () => {
     const ent = entitlementsFor('enterprise', {
       maxSessions: 2500,

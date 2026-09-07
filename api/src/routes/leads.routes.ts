@@ -24,6 +24,7 @@ import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import {
   getExporter,
+  EXPORT_MAX_ROWS,
   toCsv,
   toXlsx,
   INTERCHANGE_CSV,
@@ -514,7 +515,7 @@ router.get(
  * affects every clerk-authenticated route, not just this one; fixing it properly
  * is its own change. The role gate + row cap + audit are the real controls here.
  */
-const EXPORT_MAX_ROWS = 10_000;
+/** `EXPORT_MAX_ROWS` is shared with /analytics/export (analytics/exporters.ts). */
 const EXPORT_DEFAULT_WINDOW_DAYS = 365;
 
 /** Closed set, like the list filters above. An unrecognised `format` is a 400 rather

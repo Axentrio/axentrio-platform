@@ -51,6 +51,15 @@ vi.mock('../../services/chat-documents', () => ({
   hasPendingExtraction: vi.fn(async () => false),
   renderDocumentForContext: vi.fn(() => ''),
 }));
+vi.mock('../../booking/booking-providers/reminders', () => ({
+  cancelReminders: vi.fn(),
+}));
+vi.mock('../../booking/booking-providers/calendar-sync', () => ({
+  syncCalendarCancel: vi.fn(),
+}));
+vi.mock('../../file-handling/upload.service', () => ({
+  getUploadService: vi.fn(),
+}));
 
 
 // ── Imports (after mocks) ───────────────────────────────────────────────────

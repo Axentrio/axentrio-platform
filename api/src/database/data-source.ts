@@ -86,6 +86,16 @@ import { ConversationCommand } from './entities/ConversationCommand';
 import { StorageConnection } from './entities/StorageConnection';
 import { StorageImportJob } from './entities/StorageImportJob';
 
+/** Optional per-session statement timeout (ms). Unset = Postgres default (no
+ *  timeout). `0` also means no timeout. Only applied when the env var is an
+ *  explicit non-negative integer so migrations and long analytics jobs are not
+ *  killed by a silent 15s default. */
+const rawStatementTimeoutMs = process.env.DB_STATEMENT_TIMEOUT_MS;
+const statementTimeoutMs =
+  rawStatementTimeoutMs !== undefined && /^\d+$/.test(rawStatementTimeoutMs)
+    ? Number(rawStatementTimeoutMs)
+    : undefined;
+
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -190,7 +200,13 @@ export const AppDataSource = new DataSource({
     max: config.database.poolSize,
     connectionTimeoutMillis: config.database.connectionTimeout,
     idleTimeoutMillis: 30000,
-    options: '-c timezone=UTC',
+    // timezone is always set. statement_timeout only when DB_STATEMENT_TIMEOUT_MS
+    // is an explicit integer > 0 — a 15s default would abort migrations and
+    // large exports.
+    options:
+      statementTimeoutMs && statementTimeoutMs > 0
+        ? `-c timezone=UTC -c statement_timeout=${statementTimeoutMs}`
+        : `-c timezone=UTC`,
   },
 
   // Logging

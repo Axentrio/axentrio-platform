@@ -674,14 +674,16 @@ export async function runIntradayInsightsOnce(now = new Date()): Promise<void> {
 /**
  * Register the nightly 02:00 UTC pass plus an hourly Enterprise delta pass.
  * The shared DB lease prevents overlap across processes and manual/ops runs.
+ *
+ * Returns the tick handle so the caller can unref it and clear it on shutdown.
  */
-export function registerInsightsRefreshJob(): void {
+export function registerInsightsRefreshJob(): NodeJS.Timeout {
   let lastRunDay: string | null = null;
   let lastIntradayAt = Date.now();
   let running = false;
   let nightlyDue: { day: string; at: Date } | null = null;
 
-  setInterval(
+  const tick = setInterval(
     async () => {
       const now = new Date();
       const day = now.toISOString().slice(0, 10);
@@ -720,4 +722,5 @@ export function registerInsightsRefreshJob(): void {
   logger.info(
     `[insights-refresh] jobs registered (02:00 UTC + ${INTRADAY_REFRESH_MINUTES}m delta)`,
   );
+  return tick;
 }

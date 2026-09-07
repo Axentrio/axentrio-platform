@@ -49,10 +49,15 @@ function consumeStorage(): MetaOAuthPopupResult | null {
 
 export function openMetaOAuthPopup(
   url: string,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<MetaOAuthPopupResult> {
   if (typeof window === 'undefined') {
     return Promise.resolve({ status: 'error', error: 'unavailable' });
+  }
+
+  const signal = options?.signal;
+  if (signal?.aborted) {
+    return Promise.resolve({ status: 'cancelled' });
   }
 
   try {
@@ -81,6 +86,7 @@ export function openMetaOAuthPopup(
       if (settled) return;
       settled = true;
       window.removeEventListener('message', onMessage);
+      signal?.removeEventListener('abort', onAbort);
       window.clearInterval(poll);
       window.clearTimeout(timer);
       try {
@@ -91,6 +97,9 @@ export function openMetaOAuthPopup(
       resolve(result);
     };
 
+    // Caller unmounted / navigated away: stop polling and drop the listener.
+    const onAbort = () => finish({ status: 'cancelled' });
+
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const result = readPayload(event.data);
@@ -98,6 +107,7 @@ export function openMetaOAuthPopup(
     };
 
     window.addEventListener('message', onMessage);
+    signal?.addEventListener('abort', onAbort);
 
     const poll = window.setInterval(() => {
       const stored = consumeStorage();

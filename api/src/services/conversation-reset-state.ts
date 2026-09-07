@@ -1,7 +1,8 @@
 /**
  * Superadmin testing reset: wipe conversation-scoped stores that can leak
  * into the next inbound from the same visitor (memory, draft booking/tool
- * scratch, address, lead extraction). Confirmed calendar bookings stay.
+ * scratch, address, lead extraction) and cancel live bookings tied to those
+ * chats so check_availability does not return alreadyHeld / occupy the slot.
  *
  * Message transcripts are deleted for this Reset session and its STRICTLY
  * OLDER closed siblings on the same tenant + channel + visitor - the same
@@ -22,6 +23,9 @@ import {
 } from '../memory/memory-store';
 import { ApiError } from '../middleware/error-handler';
 import { logger } from '../utils/logger';
+import { cancelReminders } from '../booking/booking-providers/reminders';
+import { syncCalendarCancel } from '../booking/booking-providers/calendar-sync';
+import type { BookingContext } from '../booking/booking-providers/types';
 
 export const SCRATCH_CLEAR_ATTEMPTS = 3;
 export const SCRATCH_CLEAR_DELAY_MS = 25;
@@ -49,6 +53,9 @@ export interface ConversationResetClearance {
   transcriptSessionIds: string[];
   factsSuperseded: number;
   runsSkipped: number;
+  cancelledBookingIds: string[];
+  reminderJobIds: string[];
+  calendarCancels: Array<{ bookingId: string; tenantId: string; botId: string }>;
 }
 
 type Queryable = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
@@ -108,12 +115,26 @@ export async function clearIdentityScratch(sessionIds: string[]): Promise<boolea
 }
 
 /**
+ * Drop reminder jobs and mirrored calendar events for bookings cancelled
+ * during Reset. Best-effort; the Postgres cancel already committed.
+ */
+export async function releaseResetBookingSideEffects(input: {
+  reminderJobIds: string[];
+  calendarCancels: Array<{ bookingId: string; tenantId: string; botId: string }>;
+}): Promise<void> {
+  await cancelReminders(input.reminderJobIds).catch(() => undefined);
+  for (const row of input.calendarCancels) {
+    const ctx = { tenant: { id: row.tenantId }, bot: { id: row.botId } } as BookingContext;
+    await syncCalendarCancel(ctx, row.bookingId).catch(() => undefined);
+  }
+}
+
+/**
  * Transactional wipe for this visitor's conversation-scoped Postgres state.
  *
- * Does NOT SELECT or UPDATE chatbot_bookings. Confirmed (and other saved)
- * appointments stay in Postgres and on the calendar. Draft booking intent
- * lives in Redis (`booking:confirm`, `booking:offered`) and customer memory,
- * which Reset clears separately.
+ * Live chatbot_bookings on the wiped session ids are cancelled here so the
+ * next inbound is not alreadyHeld against the previous test appointment.
+ * Calendar delete / reminder job drop run after commit.
  *
  * Message rows are deleted for the Reset session and its strictly-older
  * closed siblings on this tenant + channel + visitor. Newer sessions, other
@@ -131,6 +152,7 @@ export async function clearConversationResetState(
   await clearLeadConversationState(manager, sessionIds);
   await clearSessionTempMetadata(manager, sessionIds);
   await clearChannelIdentityTranscripts(manager, transcriptSessionIds, session.id);
+  const bookings = await cancelIdentityBookings(manager, session);
 
   logger.info('[reset] conversation state cleared', {
     sessionId: session.id,
@@ -138,6 +160,7 @@ export async function clearConversationResetState(
     transcripts: transcriptSessionIds.length,
     factsSuperseded: memory.factsSuperseded,
     runsSkipped: memory.runsSkipped,
+    cancelledBookings: bookings.cancelledBookingIds.length,
   });
 
   return {
@@ -145,6 +168,9 @@ export async function clearConversationResetState(
     transcriptSessionIds,
     factsSuperseded: memory.factsSuperseded,
     runsSkipped: memory.runsSkipped,
+    cancelledBookingIds: bookings.cancelledBookingIds,
+    reminderJobIds: bookings.reminderJobIds,
+    calendarCancels: bookings.calendarCancels,
   };
 }
 
@@ -198,6 +224,76 @@ async function clearSessionTempMetadata(manager: Queryable, sessionIds: string[]
       WHERE id = ANY($1::uuid[])`,
     [sessionIds],
   );
+}
+
+const LIVE_BOOKING_STATUSES = ['confirmed', 'pending', 'request_created'] as const;
+
+async function cancelIdentityBookings(
+  manager: Queryable,
+  session: ChatSession,
+): Promise<{
+  cancelledBookingIds: string[];
+  reminderJobIds: string[];
+  calendarCancels: Array<{ bookingId: string; tenantId: string; botId: string }>;
+}> {
+  const empty = {
+    cancelledBookingIds: [] as string[],
+    reminderJobIds: [] as string[],
+    calendarCancels: [] as Array<{ bookingId: string; tenantId: string; botId: string }>,
+  };
+  const rows = (await manager.query(
+    session.visitorId
+      ? `SELECT b.id, b.tenant_id, b.bot_id, b.reminder_job_ids
+           FROM chatbot_bookings b
+          WHERE b.bot_id = $1
+            AND b.status = ANY($2::text[])
+            AND b.session_id IN (
+              SELECT s.id FROM chat_sessions s
+               WHERE s.visitor_id = $3 AND s.bot_id = $1
+            )
+          FOR UPDATE`
+      : `SELECT b.id, b.tenant_id, b.bot_id, b.reminder_job_ids
+           FROM chatbot_bookings b
+          WHERE b.session_id = $1
+            AND b.status = ANY($2::text[])
+          FOR UPDATE`,
+    session.visitorId
+      ? [session.botId, [...LIVE_BOOKING_STATUSES], session.visitorId]
+      : [session.id, [...LIVE_BOOKING_STATUSES]],
+  )) as Array<{
+    id: string;
+    tenant_id: string;
+    bot_id: string;
+    reminder_job_ids: string[] | null;
+  }>;
+  if (rows.length === 0) return empty;
+
+  const ids = rows.map((row) => row.id);
+  await manager.query(
+    `UPDATE chatbot_bookings
+        SET status = 'cancelled',
+            sequence = sequence + 1,
+            reminder_job_ids = '[]'::jsonb,
+            updated_at = now()
+      WHERE id = ANY($1::uuid[])`,
+    [ids],
+  );
+
+  const reminderJobIds: string[] = [];
+  for (const row of rows) {
+    for (const jobId of row.reminder_job_ids ?? []) {
+      if (typeof jobId === 'string' && jobId.length > 0) reminderJobIds.push(jobId);
+    }
+  }
+  return {
+    cancelledBookingIds: ids,
+    reminderJobIds,
+    calendarCancels: rows.map((row) => ({
+      bookingId: row.id,
+      tenantId: row.tenant_id,
+      botId: row.bot_id,
+    })),
+  };
 }
 
 /**

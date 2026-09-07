@@ -16,6 +16,7 @@ import {
   setTierManual,
 } from '../../billing/service';
 import { invalidateEntitlementsAndModules } from '../../modules';
+import { resetTokenUsage } from '../../billing/token-budget.service';
 import { User } from '../../database/entities/User';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { PendingInvite } from '../../database/entities/PendingInvite';
@@ -509,11 +510,17 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
   if (name) tenant.name = name;
   if (status) tenant.status = status;
   if (settings) tenant.settings = { ...tenant.settings, ...settings };
-
+  if (req.body.monthlyTokenLimit !== undefined) {
+    const v = req.body.monthlyTokenLimit;
+    if (v !== null && v !== -1 && (typeof v !== 'number' || !Number.isInteger(v) || v < 0)) {
+      throw new BadRequestError('monthlyTokenLimit must be a non-negative integer, -1 (unlimited), or null');
+    }
+    tenant.monthlyTokenLimit = v;
+  }
   await repo.save(tenant);
   // Entitlements resolve from status — any status write must drop the cache,
   // and (since status flips billable → all features) the module cache too.
-  if (status) await invalidateEntitlementsAndModules(tenant.id);
+  if (status || req.body.monthlyTokenLimit !== undefined) await invalidateEntitlementsAndModules(tenant.id);
   await logAudit(req.userId!, 'tenant.updated', 'tenant', tenant.id, tenant.id, { fields: Object.keys(req.body) });
 
   // Sync name change to Clerk
@@ -701,6 +708,15 @@ router.post('/tenants/:id/activate', asyncHandler(async (req: Request, res: Resp
   }
 
   sendSuccess(res, tenant);
+}));
+
+// POST /admin/tenants/:id/reset-token-usage — zero this period's LLM token counter.
+router.post('/tenants/:id/reset-token-usage', asyncHandler(async (req: Request, res: Response) => {
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: req.params.id } });
+  if (!tenant) throw new NotFoundError('Tenant not found');
+  await resetTokenUsage(tenant.id);
+  await logAudit(req.userId!, 'tenant.token_usage_reset', 'tenant', tenant.id, tenant.id);
+  sendSuccess(res, { reset: true });
 }));
 
 export default router;

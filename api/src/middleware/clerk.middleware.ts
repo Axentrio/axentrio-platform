@@ -59,6 +59,14 @@ interface CachedIds {
 const idCache = new Map<string, CachedIds>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Sweep expired entries every 60 seconds to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, cached] of idCache) {
+    if (now - cached.cachedAt >= CACHE_TTL_MS) idCache.delete(key);
+  }
+}, 60_000).unref(); // .unref() so it doesn't keep the process alive
+
 function getCached(orgId: string, userId: string): CachedIds | null {
   const key = `${orgId}:${userId}`;
   const cached = idCache.get(key);

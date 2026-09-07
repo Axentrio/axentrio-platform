@@ -9,13 +9,11 @@
  *
  * TWO KINDS OF STEP, and the difference matters:
  *
- *   REQUIRED   — language, company, documents. There is no way past these. A workspace
- *                without a knowledge document has a bot that cannot answer anything, so
- *                letting someone finish setup without one only defers the disappointment.
- *   OPTIONAL   — chatbot, social, bookings, leads. Skipping is a real answer: it SWITCHES
- *                THE FEATURE OFF rather than leaving it half-configured. A tenant who
- *                said "not now" to bookings should not have a booking surface quietly
- *                waiting to confuse them.
+ *   REQUIRED   — language, company, plan. There is no way past these.
+ *   OPTIONAL   — logo, chatbot, documents, social, bookings, leads. Skipping is a
+ *                real answer. For features, it SWITCHES THE FEATURE OFF rather than
+ *                leaving it half-configured. Documents is optional too: the assistant
+ *                will have nothing to answer from until they add knowledge later.
  *
  * GRANDFATHERING. Existing tenants are stamped complete by migration. Absent state means
  * a genuinely new workspace, so nobody who has been using the product for months is ever
@@ -42,7 +40,7 @@ export const ONBOARDING_STEPS = [
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /** Steps with no way past them. */
-export const REQUIRED_STEPS: readonly OnboardingStep[] = ['language', 'company', 'documents', 'plan'];
+export const REQUIRED_STEPS: readonly OnboardingStep[] = ['language', 'company', 'plan'];
 
 /**
  * Skipping these switches the matching features OFF, using the SAME tenant feature
@@ -185,6 +183,37 @@ export function restartOnboarding(state: OnboardingState): OnboardingState {
     company: state.company ?? null,
     steps: {},
   };
+}
+
+/**
+ * After a restart wipe, mark steps `done` where live evidence already exists.
+ *
+ * Writes `done` only — never `skipped` — so `applySkipEffects` does not run and
+ * working features stay on. Logo is not set here: Clerk's image is not on the tenant.
+ */
+export interface RestartEvidence {
+  aiEnabled: boolean;
+  documentCount: number;
+  planCovered: boolean;
+  calendarConnected: boolean;
+  leadCaptureOn: boolean;
+  hasChannelConnection: boolean;
+}
+
+export function hydrateRestartSteps(
+  state: OnboardingState,
+  evidence: RestartEvidence,
+): OnboardingState {
+  const steps: OnboardingState['steps'] = { ...state.steps };
+  if (state.language != null) steps.language = 'done';
+  if (state.company != null) steps.company = 'done';
+  if (evidence.aiEnabled) steps.chatbot = 'done';
+  if (evidence.documentCount > 0) steps.documents = 'done';
+  if (evidence.planCovered) steps.plan = 'done';
+  if (evidence.calendarConnected) steps.bookings = 'done';
+  if (evidence.leadCaptureOn) steps.leads = 'done';
+  if (evidence.hasChannelConnection) steps.social = 'done';
+  return { ...state, steps };
 }
 
 export type StepRejection = { ok: false; reason: string };

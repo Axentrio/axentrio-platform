@@ -1,10 +1,6 @@
 /**
- * Step 5 — knowledge.
- *
- * The one step that cannot be skipped for a reason the customer can feel: a workspace
- * with nothing to read has an assistant that cannot answer anything, so letting someone
- * finish setup without a document only defers the disappointment to their first real
- * conversation.
+ * Knowledge. Optional: skip and add documents later in AI Bot & Content.
+ * Continue still requires at least one document — Skip is the way past none.
  *
  * Reuses the product's own Add-document modal rather than a setup-only uploader, so what
  * they learn here is what they will use afterwards.

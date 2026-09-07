@@ -13,11 +13,13 @@ import {
   nextStep,
   requiresOnboarding,
   restartOnboarding,
+  hydrateRestartSteps,
   validateStepSubmission,
   ONBOARDING_STEPS,
   REQUIRED_STEPS,
   SKIP_DISABLES,
   type OnboardingState,
+  type RestartEvidence,
 } from '../../onboarding/onboarding-state';
 import { TENANT_TOGGLEABLE_FEATURES } from '../../billing/feature-toggles';
 
@@ -117,7 +119,7 @@ describe('required steps cannot be skipped', () => {
   });
 
   it('accepts a skip on the optional ones', () => {
-    for (const step of ['logo', 'chatbot', 'social', 'bookings', 'leads'] as const) {
+    for (const step of ['logo', 'chatbot', 'documents', 'social', 'bookings', 'leads'] as const) {
       expect(validateStepSubmission(step, 'skipped')).toEqual({ ok: true });
     }
   });
@@ -127,12 +129,10 @@ describe('required steps cannot be skipped', () => {
   });
 
   it('a skipped required step never counts as satisfied, even if stored', () => {
-    // Belt and braces: the route rejects it, but state that arrived some other way
-    // must not open the door either.
     const s = finished();
-    s.steps.documents = 'skipped';
+    s.steps.plan = 'skipped';
     expect(isComplete(s)).toBe(false);
-    expect(nextStep(s)).toBe('documents');
+    expect(nextStep(s)).toBe('plan');
   });
 });
 
@@ -224,5 +224,58 @@ describe('restartOnboarding — re-open the wizard without wiping the workspace'
     expect(restarted.steps).toEqual({});
     expect(restarted.language).toBe('fr');
     expect(nextStep(restarted)).toBe('language');
+  });
+});
+
+const noEvidence: RestartEvidence = {
+  aiEnabled: false,
+  documentCount: 0,
+  planCovered: false,
+  calendarConnected: false,
+  leadCaptureOn: false,
+  hasChannelConnection: false,
+};
+
+describe('hydrateRestartSteps — mark done from live evidence, never skipped', () => {
+  it('marks language and company done when their records exist', () => {
+    const wiped = restartOnboarding(finished());
+    const hydrated = hydrateRestartSteps(wiped, noEvidence);
+
+    expect(hydrated.steps.language).toBe('done');
+    expect(hydrated.steps.company).toBe('done');
+    expect(nextStep(hydrated)).toBe('logo');
+    expect(wiped.steps).toEqual({});
+  });
+
+  it('marks documents done only when the workspace has a document', () => {
+    const wiped = restartOnboarding(finished());
+    expect(hydrateRestartSteps(wiped, noEvidence).steps.documents).toBeUndefined();
+    expect(
+      hydrateRestartSteps(wiped, { ...noEvidence, documentCount: 1 }).steps.documents,
+    ).toBe('done');
+  });
+
+  it('marks plan done when planCovered', () => {
+    const wiped = restartOnboarding(finished());
+    expect(hydrateRestartSteps(wiped, noEvidence).steps.plan).toBeUndefined();
+    expect(
+      hydrateRestartSteps(wiped, { ...noEvidence, planCovered: true }).steps.plan,
+    ).toBe('done');
+  });
+
+  it('never writes skipped, so a required plan skip is still rejected', () => {
+    const hydrated = hydrateRestartSteps(restartOnboarding(finished()), {
+      ...noEvidence,
+      aiEnabled: true,
+      documentCount: 1,
+      calendarConnected: true,
+      leadCaptureOn: true,
+      hasChannelConnection: true,
+    });
+    hydrated.steps.logo = 'done';
+
+    expect(Object.values(hydrated.steps).every((outcome) => outcome === 'done')).toBe(true);
+    expect(nextStep(hydrated)).toBe('plan');
+    expect(validateStepSubmission('plan', 'skipped')).toMatchObject({ ok: false });
   });
 });

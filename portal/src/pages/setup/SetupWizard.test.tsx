@@ -15,11 +15,19 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 
-const { apiGet, apiPut, apiPost, apiPatch } = vi.hoisted(() => ({
+const { apiGet, apiPut, apiPost, apiPatch, clerkOrg } = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPut: vi.fn(),
   apiPost: vi.fn(),
   apiPatch: vi.fn(),
+  clerkOrg: {
+    current: { id: "org_1", name: "Test Org" } as {
+      id: string;
+      name: string;
+      hasImage?: boolean;
+      imageUrl?: string;
+    },
+  },
 }));
 // Only `api` is stubbed — extractApiErrorMessage stays real, because how a server
 // refusal turns into words the customer reads is part of what is under test.
@@ -36,7 +44,7 @@ vi.mock("@/services/apiClient", async (importOriginal) => ({
 
 vi.mock("@clerk/clerk-react", () => ({
   useOrganization: () => ({
-    organization: { id: "org_1", name: "Test Org" },
+    organization: clerkOrg.current,
     isLoaded: true,
   }),
   useOrganizationList: () => ({
@@ -122,6 +130,7 @@ function renderWizard(initialEntry = "/setup") {
 }
 
 beforeEach(() => {
+  clerkOrg.current = { id: "org_1", name: "Test Org" };
   apiGet.mockReset();
   apiPut.mockReset().mockResolvedValue(statusAt("company"));
   apiPost.mockReset();
@@ -187,15 +196,25 @@ describe("skipping", () => {
   });
 
   it("offers no way past a required step", async () => {
-    // documents is required because a workspace with nothing to read has an assistant
-    // that cannot answer anything.
-    apiGet.mockResolvedValue(statusAt("documents"));
+    apiGet.mockResolvedValue(statusAt("company"));
     renderWizard();
 
-    await screen.findByRole("heading", { name: /what should it know/i });
+    await screen.findByRole("heading", { name: /your company/i });
     expect(
       screen.queryByRole("button", { name: /not now/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lets documents be skipped", async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith("/knowledge/documents")
+        ? Promise.resolve([])
+        : Promise.resolve(statusAt("documents")),
+    );
+    renderWizard();
+    expect(
+      await screen.findByRole("button", { name: /not now/i }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -450,9 +469,65 @@ describe("the company step", () => {
   });
 });
 
+describe("the logo step", () => {
+  it("submits once when Clerk already has an image", async () => {
+    clerkOrg.current = {
+      id: "org_1",
+      name: "Test Org",
+      hasImage: true,
+      imageUrl: "https://img.clerk.test/logo.png",
+    };
+    apiGet.mockResolvedValue(statusAt("logo"));
+    renderWizard();
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+        step: "logo",
+        outcome: "done",
+      }),
+    );
+  });
+
+  it("does not auto-submit when revisiting an already-answered logo step", async () => {
+    clerkOrg.current = {
+      id: "org_1",
+      name: "Test Org",
+      hasImage: true,
+      imageUrl: "https://img.clerk.test/logo.png",
+    };
+    apiGet.mockResolvedValue({
+      state: {
+        version: 1,
+        language: "nl",
+        company: { vatNumber: "BE0400378485", name: "X" },
+        steps: { language: "done", company: "done", logo: "done" },
+      },
+      nextStep: "logo",
+      complete: false,
+    });
+    renderWizard();
+
+    expect(
+      await screen.findByRole("heading", { name: /add your logo/i }),
+    ).toBeInTheDocument();
+    expect(apiPut).not.toHaveBeenCalled();
+  });
+});
+
 describe("the plan step", () => {
   it("does not offer Free — it cannot run an Agent", async () => {
-    apiGet.mockResolvedValue(statusAt("plan"));
+    apiGet.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/billing/state"
+          ? {
+              tier: "free",
+              status: "none",
+              planId: "free",
+              hasStripeSubscription: false,
+            }
+          : statusAt("plan"),
+      ),
+    );
     renderWizard();
 
     expect(
@@ -466,7 +541,18 @@ describe("the plan step", () => {
   it("records the answer BEFORE leaving for Stripe", async () => {
     // Leaving for checkout with the final step unanswered would strand anyone who
     // abandons payment in a wizard they cannot get out of.
-    apiGet.mockResolvedValue(statusAt("plan"));
+    apiGet.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/billing/state"
+          ? {
+              tier: "free",
+              status: "none",
+              planId: "free",
+              hasStripeSubscription: false,
+            }
+          : statusAt("plan"),
+      ),
+    );
     apiPost.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
     renderWizard();
 
@@ -514,6 +600,35 @@ describe("the plan step", () => {
       Promise.resolve(
         url === "/billing/state"
           ? { tier: "essential", status: "active" }
+          : statusAt("plan"),
+      ),
+    );
+    renderWizard();
+
+    expect(
+      await screen.findByText(/your current plan is already active/i),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith("/onboarding/step", {
+        step: "plan",
+        outcome: "done",
+      }),
+    );
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it("does not start checkout when the workspace is already on Pro", async () => {
+    apiGet.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === "/billing/state"
+          ? {
+              tier: "pro",
+              status: "none",
+              planId: "free",
+              hasStripeSubscription: false,
+            }
           : statusAt("plan"),
       ),
     );

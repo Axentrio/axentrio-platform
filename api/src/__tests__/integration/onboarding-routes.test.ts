@@ -69,6 +69,7 @@ import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import { Bot } from '../../database/entities/Bot';
+import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { KnowledgeDocument } from '../../database/entities/KnowledgeDocument';
 import { ONBOARDING_STEPS, type OnboardingState } from '../../onboarding/onboarding-state';
@@ -187,14 +188,22 @@ describe('PUT /onboarding/step', () => {
   });
 
   it('refuses a skip on a required step', async () => {
-    // A workspace with no knowledge document has a bot that cannot answer anything.
+    await signedInTenant();
+    const res = await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({ step: 'plan', outcome: 'skipped' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/cannot be skipped/i);
+  });
+
+  it('accepts a skip on documents', async () => {
     await signedInTenant();
     const res = await request(app)
       .put('/api/v1/onboarding/step')
       .send({ step: 'documents', outcome: 'skipped' });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/cannot be skipped/i);
+    expect(res.status).toBe(200);
   });
 
   it('rejects a step name it does not know', async () => {
@@ -516,7 +525,7 @@ describe('POST /onboarding/complete', () => {
 });
 
 describe('POST /onboarding/restart', () => {
-  it('re-opens a finished workspace at language and keeps company facts', async () => {
+  it('re-opens a finished workspace at the first gap and keeps company facts', async () => {
     const tenant = await signedInTenant();
     await answerAllSteps(tenant.id);
     await request(app).post('/api/v1/onboarding/complete');
@@ -528,8 +537,12 @@ describe('POST /onboarding/restart', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({
       complete: false,
-      nextStep: 'language',
-      state: { language: 'nl', completedAt: null, steps: {} },
+      nextStep: 'logo',
+      state: {
+        language: 'nl',
+        completedAt: null,
+        steps: { language: 'done', company: 'done' },
+      },
     });
     expect(res.body.data.state.company).toMatchObject({
       vatNumber: 'BE0400378485',
@@ -567,6 +580,58 @@ describe('POST /onboarding/restart', () => {
     expect(res.body.data).toMatchObject({ complete: false, nextStep: 'language' });
     expect((await storedState(tenant.id)).grandfathered).toBeUndefined();
     expect((await reload(tenant.id)).featureToggles).toMatchObject({ bookings: true });
+  });
+
+  it('marks documents done when the workspace already has knowledge', async () => {
+    const tenant = await signedInTenant();
+    await giveTenantADocument(tenant.id);
+    await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({ step: 'language', outcome: 'done', language: 'nl' });
+    await request(app)
+      .put('/api/v1/onboarding/step')
+      .send({
+        step: 'company',
+        outcome: 'done',
+        company: { vatNumber: 'BE0400378485', name: 'Colruyt Group' },
+      });
+
+    const res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data.state.steps.documents).toBe('done');
+    expect(res.body.data.state.steps.language).toBe('done');
+    expect(res.body.data.state.steps.company).toBe('done');
+    expect(res.body.data.nextStep).toBe('logo');
+  });
+
+  it('marks social done only from an active channel row', async () => {
+    const tenant = await signedInTenant();
+    const channels = AppDataSource.getRepository(ChannelConnection);
+    await channels.save(
+      channels.create({
+        tenantId: tenant.id,
+        channel: 'messenger',
+        status: 'disconnected',
+        platformAccountId: `acct_off_${Date.now()}`,
+      }),
+    );
+
+    let res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data.state.steps.social).toBeUndefined();
+
+    await channels.save(
+      channels.create({
+        tenantId: tenant.id,
+        channel: 'whatsapp',
+        status: 'active',
+        platformAccountId: `acct_on_${Date.now()}`,
+      }),
+    );
+
+    res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data.state.steps.social).toBe('done');
   });
 
   it('is admin-only', async () => {

@@ -11,13 +11,23 @@ import { useOrganization } from '@clerk/clerk-react';
 import { ImagePlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import type { SetupStatus } from '@/queries/useOnboardingQueries';
 import type { StepProps } from './types';
 
-export function LogoStep({ submit }: StepProps) {
+export function LogoStep({ submit, status }: StepProps & { status: SetupStatus }) {
   const { t } = useTranslation();
   const { organization } = useOrganization();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
+
+  const autoSubmitted = React.useRef(false);
+  const unanswered = status.state.steps.logo == null;
+  React.useEffect(() => {
+    if (autoSubmitted.current || submit.isPending || uploading || !unanswered) return;
+    if (!organization?.hasImage) return;
+    autoSubmitted.current = true;
+    submit.mutate({ step: 'logo' });
+  }, [organization?.hasImage, submit, unanswered, uploading]);
 
   const upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -25,6 +35,7 @@ export function LogoStep({ submit }: StepProps) {
     setUploading(true);
     try {
       await organization.setLogo({ file });
+      autoSubmitted.current = true;
       submit.mutate({ step: 'logo' });
     } catch {
       toast.error(t('setup.steps.logo.uploadFailed'));

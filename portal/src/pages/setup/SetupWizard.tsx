@@ -48,7 +48,7 @@ import { WorkspaceStep } from './steps/WorkspaceStep';
  * Steps with no way past them. Mirrors REQUIRED_STEPS on the server, which is the
  * enforcing copy — this one only decides whether to draw a Skip button.
  */
-const REQUIRED: readonly SetupStep[] = ['language', 'company', 'documents', 'plan'];
+const REQUIRED: readonly SetupStep[] = ['language', 'company', 'plan'];
 
 /** Client-side first step: the Clerk organization the wizard runs against. Not in SETUP_STEPS
  *  because the server cannot see a workspace that does not exist yet. */
@@ -123,7 +123,7 @@ export default function SetupWizard() {
       case 'company':
         return <CompanyStep status={status!} submit={submitStep} />;
       case 'logo':
-        return <LogoStep submit={submitStep} />;
+        return <LogoStep status={status!} submit={submitStep} />;
       case 'documents':
         return <DocumentsStep submit={submitStep} />;
       case 'plan':

@@ -353,7 +353,7 @@
         "helper": "Wijzig antwoorden van de eerste setup, of doe de stappen opnieuw.",
         "button": "Setup opnieuw doen",
         "confirmTitle": "Setup opnieuw doen?",
-        "confirmBody": "Je doorloopt elke setupstap vanaf het begin. Je documenten, chats en facturatie blijven zoals ze zijn. Als je een functie overslaat in de setup, zet het platform die functie uit. Je team kan de portal niet gebruiken tot een beheerder de stappen afrondt.",
+        "confirmBody": "Antwoorden die we al hebben blijven bewaard en die stappen worden overgeslagen. Overslaan bij een stap die je nog niet hebt ingesteld zet die functie nog steeds uit. Documenten, chats en facturatie worden niet verwijderd. Je team kan de portal niet gebruiken tot een beheerder de stappen afrondt.",
         "confirm": "Start setup opnieuw",
         "cancel": "Huidige setup behouden",
         "failed": "Setup opnieuw starten is niet gelukt."
@@ -3059,7 +3059,7 @@
       },
       "documents": {
         "title": "Wat moet hij weten?",
-        "body": "Voeg minstens één document toe. Je assistent antwoordt op basis van wat je hier geeft — zonder iets om te lezen kan hij geen vragen over je zaak beantwoorden.",
+        "body": "Voeg een document toe zodat je assistent vragen over je zaak kan beantwoorden. Je kunt dit ook later doen.",
         "add": "Voeg je eerste document toe",
         "addAnother": "Nog een toevoegen",
         "examples": "Je diensten, prijzen, openingsuren of een lijst met veelgestelde vragen",
@@ -3068,7 +3068,8 @@
           "processing": "Wordt gelezen",
           "indexed": "Klaar",
           "failed": "Mislukt"
-        }
+        },
+        "skipConsequence": "De assistent heeft niets om uit te antwoorden tot je documenten toevoegt onder AI Bot & Content."
       },
       "social": {
         "title": "Berichtenkanalen",

@@ -353,7 +353,7 @@
         "helper": "Modifiez les réponses de la première configuration, ou recommencez les étapes.",
         "button": "Recommencer la configuration",
         "confirmTitle": "Recommencer la configuration ?",
-        "confirmBody": "Vous allez parcourir chaque étape de configuration depuis le début. Vos documents, conversations et facturation restent inchangés. Si vous ignorez une fonction dans la configuration, la plateforme désactive cette fonction. Votre équipe ne peut pas utiliser le portail tant qu'un administrateur n'a pas terminé les étapes.",
+        "confirmBody": "Les réponses que nous avons déjà sont conservées et ces étapes sont ignorées. Ignorer une étape que vous n'avez pas encore configurée désactive toujours cette fonction. Les documents, conversations et facturation ne sont pas supprimés. Votre équipe ne peut pas utiliser le portail tant qu'un administrateur n'a pas terminé les étapes.",
         "confirm": "Démarrer la configuration",
         "cancel": "Garder la configuration actuelle",
         "failed": "Impossible de recommencer la configuration."
@@ -3058,7 +3058,7 @@
       },
       "documents": {
         "title": "Que doit-il savoir ?",
-        "body": "Ajoutez au moins un document. Votre assistant répond à partir de ce que vous lui donnez ici — sans rien à lire, il ne peut pas répondre aux questions sur votre activité.",
+        "body": "Ajoutez un document pour que votre assistant puisse répondre aux questions sur votre activité. Vous pouvez aussi le faire plus tard.",
         "add": "Ajoutez votre premier document",
         "addAnother": "En ajouter un autre",
         "examples": "Vos services, tarifs, heures d'ouverture, ou une liste de questions fréquentes",
@@ -3067,7 +3067,8 @@
           "processing": "Lecture en cours",
           "indexed": "Prêt",
           "failed": "Échec"
-        }
+        },
+        "skipConsequence": "L'assistant n'aura rien à lire tant que vous n'ajouterez pas de documents dans AI Bot & Content."
       },
       "social": {
         "title": "Canaux de messagerie",

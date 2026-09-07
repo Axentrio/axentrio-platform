@@ -44,10 +44,11 @@ export function PlanStep({ submit }: StepProps) {
   const checkout = useStartCheckout();
   const [selected, setSelected] = React.useState<CheckoutablePlan | null>(null);
   const alreadyCovered =
+    billing?.hasStripeSubscription === true ||
     billing?.status === 'trialing' ||
     billing?.status === 'active' ||
-    billing?.status === 'past_due';
-
+    billing?.status === 'past_due' ||
+    (billing != null && billing.tier !== 'free');
   const buy = (planId: CheckoutablePlan) => {
     setSelected(planId);
     // Record the answer first: the redirect below leaves the app, and coming back to
@@ -66,6 +67,14 @@ export function PlanStep({ submit }: StepProps) {
   };
 
   const busy = billingLoading || submit.isPending || checkout.isPending;
+
+  if (billingLoading && !billing) {
+    return (
+      <div className="flex justify-center py-6">
+        <Loader2 className="h-5 w-5 animate-spin text-text-muted" />
+      </div>
+    );
+  }
 
   if (alreadyCovered) {
     const onTrial = billing?.status === 'trialing';

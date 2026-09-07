@@ -355,7 +355,7 @@
         "helper": "Change answers from first-run setup, or start the steps again.",
         "button": "Do setup again",
         "confirmTitle": "Do setup again?",
-        "confirmBody": "You will walk through every setup step from the start. Your documents, chats, and billing stay as they are. If you skip a feature in setup, the platform turns that feature off. Your team cannot use the portal until an admin finishes the steps.",
+        "confirmBody": "Answers we already have are kept and those steps are skipped. Skip on a step you have not set up still turns that feature off. Documents, chats, and billing are not deleted. Your team cannot use the portal until an admin finishes the steps.",
         "confirm": "Start setup again",
         "cancel": "Keep current setup",
         "failed": "Could not start setup again."
@@ -3097,7 +3097,7 @@
       },
       "documents": {
         "title": "What should it know?",
-        "body": "Add at least one document. Your assistant answers from what you give it here — without anything to read, it can't answer questions about your business.",
+        "body": "Add a document so your assistant can answer questions about your business. You can also do this later.",
         "add": "Add your first document",
         "addAnother": "Add another",
         "examples": "Your services, prices, opening hours, or a list of common questions",
@@ -3106,7 +3106,8 @@
           "processing": "Reading",
           "indexed": "Ready",
           "failed": "Failed"
-        }
+        },
+        "skipConsequence": "The assistant will have nothing to answer from until you add documents in AI Bot & Content."
       },
       "social": {
         "title": "Messaging channels",

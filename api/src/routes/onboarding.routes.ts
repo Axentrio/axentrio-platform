@@ -6,8 +6,8 @@
  *   GET  /status          what the wizard renders and what the routing guard reads.
  *   PUT  /step            record one answer and advance.
  *   POST /complete        finish, refused while anything required is outstanding.
- *   POST /restart         re-open the wizard from the first step, without wiping
- *                         documents, chats, or billing.
+ *   POST /restart         wipe outcomes, then mark evidenced steps done so Skip
+ *                         cannot turn working features off. Does not wipe data.
  *
  * The state itself is data on the tenant, not a table: it is written once during setup,
  * read on every page load, and never queried across tenants. The RULES live in
@@ -26,21 +26,26 @@ import { lookupCompanyByVat } from '../integrations/company-lookup/company-looku
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { KnowledgeDocument } from '../database/entities/KnowledgeDocument';
+import { CalendarCredential } from '../database/entities/CalendarCredential';
+import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { logAudit } from '../utils/audit';
 import { prefillAccountInformation } from '../account/account-information';
 import { getEntitlements } from '../billing/entitlements';
+import { getBillingState } from '../billing/service';
 import {
   emptyState,
   isComplete,
   nextStep,
   restartOnboarding,
+  hydrateRestartSteps,
   validateStepSubmission,
   SKIP_DISABLES,
   type OnboardingState,
   type OnboardingStep,
   type StepOutcome,
+  type RestartEvidence,
 } from '../onboarding/onboarding-state';
 
 const router = Router();
@@ -333,10 +338,12 @@ router.post(
 
 /**
  * POST /onboarding/restart
- * Re-open the wizard from the first step. Admin-only, same as the writes
- * above: this is what the routing guard reads, so a non-admin posting it
- * would lock their own team out of a product they cannot finish.
+ * Re-open the wizard. Admin-only, same as the writes above: this is what the
+ * routing guard reads, so a non-admin posting it would lock their own team out
+ * of a product they cannot finish.
  *
+ * Wipes step outcomes, then marks `done` wherever live evidence already exists
+ * so those screens are not shown and Skip cannot disable a working feature.
  * Does not delete documents, chats, or billing. Feature toggles stay as they
  * are until the customer answers a skip or done step again.
  */
@@ -346,14 +353,61 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.tenantId!;
     const previous = await loadState(tenantId);
-    const state = restartOnboarding(previous);
+    const state = hydrateRestartSteps(
+      restartOnboarding(previous),
+      await loadRestartEvidence(tenantId),
+    );
+
+    if (nextStep(state) === null) {
+      state.completedAt = new Date().toISOString();
+    }
+
     await saveState(tenantId, state);
     await logAudit(req.userId!, 'tenant.onboarding_restarted', 'tenant', tenantId, tenantId, {
       wasComplete: isComplete(previous),
       wasGrandfathered: previous.grandfathered === true,
     });
+    if (state.completedAt) {
+      await logAudit(req.userId!, 'tenant.onboarding_completed', 'tenant', tenantId, tenantId, {
+        language: state.language,
+        companyVerified: state.company?.verified ?? false,
+      });
+    }
     sendSuccess(res, { state, nextStep: nextStep(state), complete: isComplete(state) });
   }),
 );
+
+/**
+ * Live workspace facts used only by restart hydration. Never writes `skipped`.
+ */
+async function loadRestartEvidence(tenantId: string): Promise<RestartEvidence> {
+  const [tenant, billing, documentCount, calendarCount, channelCount, aiEnabled] =
+    await Promise.all([
+      AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } }),
+      getBillingState(tenantId),
+      AppDataSource.getRepository(KnowledgeDocument).count({ where: { tenantId } }),
+      AppDataSource.getRepository(CalendarCredential).count({
+        where: { tenantId, status: 'active' },
+      }),
+      AppDataSource.getRepository(ChannelConnection).count({
+        where: { tenantId, status: 'active' },
+      }),
+      getAnchorBotConfig(tenantId).then(({ settings }) => settings.ai?.enabled === true),
+    ]);
+
+  return {
+    aiEnabled,
+    documentCount,
+    planCovered:
+      billing.tier !== 'free' ||
+      billing.status === 'trialing' ||
+      billing.status === 'active' ||
+      billing.status === 'past_due' ||
+      billing.hasStripeSubscription === true,
+    calendarConnected: calendarCount > 0,
+    leadCaptureOn: tenant?.featureToggles?.leadCapture !== false,
+    hasChannelConnection: channelCount > 0,
+  };
+}
 
 export default router;

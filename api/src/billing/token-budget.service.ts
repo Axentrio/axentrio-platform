@@ -257,6 +257,16 @@ export async function recordTokenUsage(
   }
 }
 
+/** Zero this period's used tokens. Super-admin test reset; does not change allowance. */
+export async function resetTokenUsage(tenantId: string): Promise<void> {
+  await AppDataSource.query(
+    `UPDATE tenant_token_balance
+        SET period_used = 0, warned80_at = NULL, updated_at = now()
+      WHERE tenant_id = $1`,
+    [tenantId],
+  );
+}
+
 export async function creditTokenTopUp(
   tenantId: string,
   tokens: number,

@@ -1,0 +1,141 @@
+import type { BookingCopy } from './booking-copy';
+
+export const BOOKING_COPY_NL: BookingCopy = {
+  'customer.subject_confirmed': 'Bevestigd: {summary}',
+  'customer.subject_cancelled': 'Geannuleerd: {summary}',
+  'customer.lead_confirmed': 'Uw afspraak is bevestigd.',
+  'customer.lead_cancelled': 'Uw afspraak is geannuleerd.',
+  'customer.minutes': '{n} min',
+  'customer.location': 'Locatie: {location}',
+  'customer.before_heading': 'Voor uw afspraak:',
+  'customer.extra_info_heading': 'Extra informatie:',
+  'customer.invite_attached': 'Er is een agenda-uitnodiging bijgevoegd.',
+  'customer.manage_link': 'Deze afspraak verzetten of annuleren',
+  'customer.reminder_subject': 'Herinnering: {summary}',
+  'customer.reminder_lead': 'Herinnering: uw afspraak is {when}.',
+  'customer.reminder_tomorrow': 'morgen',
+  'customer.reminder_in_1_hour': 'over 1 uur',
+  'customer.reminder_manage_link': 'Verzetten of annuleren',
+
+  'ics.with': 'Met: {business}',
+  'ics.duration': 'Duur: {n} min',
+  'ics.price': 'Prijs: {price}',
+  'ics.join': 'Deelnemen aan de meeting: {url}',
+  'ics.before': 'Voor uw afspraak: {text}',
+  'ics.manage': 'Verzetten of annuleren: {url}',
+
+  'owner.subject_new': 'Nieuwe boeking: {summary}',
+  'owner.subject_cancelled': 'Geannuleerd: {summary}',
+  'owner.a_customer': 'Een klant',
+  'owner.booked': '{who} heeft een afspraak geboekt.',
+  'owner.cancelled': '{who} heeft de afspraak geannuleerd.',
+  'owner.where': 'Waar: {location}',
+  'owner.video_link_missing':
+    'Er is geen videovergaderlink aangemaakt voor deze boeking. Het gekoppelde agenda-account ondersteunt mogelijk geen online meetings — een persoonlijk Microsoft-account kan geen Teams hosten. Koppel een werk- of schoolaccount om videolinks toe te voegen.',
+  'owner.no_customer_email':
+    'Ze boekten via een berichtenkanaal en gaven geen e-mailadres, dus er is geen uitnodiging naar hen verstuurd.',
+  'owner.request_subject': 'Nieuw afspraakverzoek: {service}',
+  'owner.request_intro': 'U heeft een nieuw afspraakverzoek om te bekijken.',
+  'owner.request_preferred_time': 'Voorkeurstijdstip: {when}',
+  'owner.request_from': 'Van: {who}',
+  'owner.request_summary': 'Samenvatting: {text}',
+  'owner.request_notes': 'Notities: {text}',
+  'owner.original_heading': 'Origineel bericht van de klant:',
+  'owner.request_follow_up': 'Neem contact op met de klant om te bevestigen of af te wijzen.',
+  'owner.rejected_subject': 'Agendawijziging niet toegepast: {service}',
+  'owner.rejected_intro':
+    'We hebben de wijziging die u in uw agenda hebt gemaakt niet toegepast. Het evenement staat weer op het oorspronkelijke tijdstip.',
+  'owner.rejected_customer': 'Klant: {who}',
+  'owner.rejected_attempted': 'Geprobeerd tijdstip: {when}',
+  'owner.rejected_restored': 'Hersteld tijdstip: {when}',
+  'owner.rejected_footer': 'Verzet deze boeking via de Axentrio-boekingenpagina.',
+  'owner.reason_all_day': 'Een hele-dag-evenement heeft geen afspraaktijd.',
+  'owner.reason_end_before_start': 'De eindtijd ligt niet na de starttijd.',
+  'owner.reason_slot_unavailable':
+    'Dat tijdstip overlappt met een andere afspraak, of valt buiten uw boekingsuren.',
+  'owner.reason_travel_conflict':
+    'Dat tijdstip is niet bereikbaar vanuit de afspraken ernaast.',
+  'owner.reason_not_reschedulable': 'Die boeking kan niet meer gewijzigd worden.',
+  'owner.reason_default': 'Axentrio kon die wijziging niet toepassen.',
+  'owner.service_fallback': 'Afspraak',
+
+  'event.title': 'Boeking: {service}',
+  'event.title_with_name': 'Boeking: {service} - {who}',
+  'event.service': 'Dienst: {text}',
+  'event.customer': 'Klant: {name}',
+  'event.email': 'E-mail: {text}',
+  'event.phone': 'Telefoon: {text}',
+  'event.address': 'Adres: {text}',
+  'event.duration': 'Duur: {n} min',
+  'event.price': 'Prijs: {price}',
+  'event.booked_via': 'Geboekt via: {text}',
+  'event.summary': 'Samenvatting: {text}',
+  'event.notes': 'Notities: {text}',
+  'event.preparation': 'Voorbereiding: {text}',
+  'event.files': 'Bestanden: {names} - open de boeking in Axentrio om te bekijken',
+  'event.intake': 'Intake:',
+  'event.reference': 'Referentie: {ref}',
+  'event.manage': 'Beheren: {url}',
+  'event.truncated': '… (afgekapt)',
+
+  'manage.title_suffix': 'Axentrio',
+  'manage.error_title': 'Link niet beschikbaar',
+  'manage.error_heading': 'Deze link kan niet gebruikt worden',
+  'manage.err_invalid_link': 'Deze link is ongeldig of verlopen.',
+  'manage.err_BOOKINGS_PAUSED':
+    'Dit bedrijf heeft online wijzigingen aan boekingen voorlopig gepauzeerd. Neem rechtstreeks contact op om uw afspraak te verzetten.',
+  'manage.err_CALENDAR_NOT_CONNECTED':
+    'Dit bedrijf kan wijzigingen momenteel niet online bevestigen. Neem rechtstreeks contact op om uw afspraak te verzetten.',
+  'manage.err_CALENDAR_SYNC_DISABLED':
+    'Dit bedrijf kan wijzigingen momenteel niet online bevestigen. Neem rechtstreeks contact op om uw afspraak te verzetten.',
+  'manage.err_REQUEST_ONLY_SERVICE':
+    'Deze afspraak kan niet online verzet worden. Neem rechtstreeks contact op met het bedrijf.',
+  'manage.err_BOOKING_TEMPORARILY_UNAVAILABLE':
+    'We konden de beschikbare tijden nu niet laden. Probeer het over een paar minuten opnieuw.',
+  'manage.err_SERVICE_REQUIRED':
+    'We konden de beschikbare tijden voor deze afspraak niet laden. Neem rechtstreeks contact op met het bedrijf.',
+  'manage.err_SLOT_UNAVAILABLE': 'Dat tijdstip is net ingenomen. Kies een ander.',
+  'manage.err_BOOKING_NOT_FOUND': 'Deze afspraak kon niet meer gevonden worden.',
+  'manage.err_CHANGE_NOT_ALLOWED':
+    'Deze afspraak kan niet online gewijzigd worden. Neem rechtstreeks contact op met het bedrijf.',
+  'manage.err_CHANGE_REQUEST_OPEN':
+    'U heeft al een openstaand wijzigingsverzoek voor deze afspraak. Het bedrijf neemt contact met u op.',
+  'manage.not_found': 'We konden deze afspraak niet vinden.',
+  'manage.cancelled_title': 'Afspraak geannuleerd',
+  'manage.cancelled_body': 'Deze afspraak is geannuleerd.',
+  'manage.btn_request_reschedule': 'Verzetting aanvragen',
+  'manage.btn_reschedule': 'Verzetten',
+  'manage.btn_request_cancel': 'Annulering aanvragen',
+  'manage.btn_cancel': 'Afspraak annuleren',
+  'manage.not_changeable':
+    'Deze afspraak kan niet online gewijzigd worden. Neem rechtstreeks contact op met het bedrijf.',
+  'manage.manage_title': 'Afspraak beheren',
+  'manage.manage_intro': 'Beheer uw aankomende afspraak.',
+  'manage.cancel_requested_title': 'Annulering aangevraagd',
+  'manage.cancel_requested_body':
+    'We hebben een annuleringsverzoek naar het bedrijf gestuurd. Uw afspraak is <strong>nog niet geannuleerd</strong> — zij bevestigen nog.',
+  'manage.cancelled_confirmed_body':
+    'Uw afspraak is geannuleerd. Er is een bevestiging naar u gemaild.',
+  'manage.no_longer_reschedulable': 'Deze afspraak kan niet meer verzet worden.',
+  'manage.not_reschedulable_online':
+    'Deze afspraak kan niet online verzet worden. Neem rechtstreeks contact op met het bedrijf.',
+  'manage.no_times': 'Geen beschikbare tijden in de komende 30 dagen. Neem rechtstreeks contact met ons op.',
+  'manage.reschedule_title': 'Afspraak verzetten',
+  'manage.reschedule_heading': 'Verzetten',
+  'manage.pick_request': ' Kies een nieuw tijdstip om aan te vragen:',
+  'manage.pick': ' Kies een nieuw tijdstip:',
+  'manage.currently': ' — momenteel {when}.',
+  'manage.times_shown_in': 'Tijden weergegeven in {timezone}.',
+  'manage.requestable_intro_also': 'Deze tijden zijn mogelijk ook beschikbaar',
+  'manage.requestable_intro_still': 'Deze tijden zijn mogelijk nog beschikbaar',
+  'manage.requestable_tail':
+    ', maar het bedrijf moet ze bevestigen vanwege de verplaatsing. Neem contact op en vermeld welke u wilt:',
+  'manage.reschedule_requested_title': 'Verzetting aangevraagd',
+  'manage.reschedule_requested_body':
+    'We hebben het bedrijf gevraagd uw afspraak te verzetten naar:',
+  'manage.reschedule_not_confirmed':
+    'Dit is <strong>nog niet bevestigd</strong>. Uw oorspronkelijke afspraak blijft staan tot zij akkoord gaan.',
+  'manage.rescheduled_title': 'Afspraak verzet',
+  'manage.rescheduled_body': 'Uw afspraak is verzet naar:',
+  'manage.updated_invite': 'Er is een bijgewerkte uitnodiging naar u gemaild.',
+};

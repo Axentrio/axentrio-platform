@@ -240,7 +240,7 @@ export default function AdminGuardrails() {
               <TableBody>
                 {flagged.map((e) => (
                   <TableRow key={`${e.source}-${e.id}`}>
-                    <TableCell className="whitespace-nowrap text-xs text-text-muted">
+                    <TableCell className="whitespace-nowrap text-xs text-text-secondary">
                       {new Date(e.createdAt).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-sm">{tenantLabel(e.tenantId)}</TableCell>

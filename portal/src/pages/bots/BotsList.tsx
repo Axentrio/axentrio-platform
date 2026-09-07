@@ -282,7 +282,7 @@ export const BotsList: React.FC = () => {
                         <Badge variant="outline">{t('bots.default')}</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-text-muted">
+                    <TableCell className="text-text-secondary">
                       {formatDate(bot.createdAt)}
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>

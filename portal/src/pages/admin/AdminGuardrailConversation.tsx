@@ -66,7 +66,7 @@ export default function AdminGuardrailConversation() {
         <TableBody>
           {rows.map((r) => (
             <TableRow key={r.id}>
-              <TableCell className="whitespace-nowrap text-xs text-text-muted">{new Date(r.createdAt).toLocaleString()}</TableCell>
+              <TableCell className="whitespace-nowrap text-xs text-text-secondary">{new Date(r.createdAt).toLocaleString()}</TableCell>
               <TableCell>{catOf(r)}</TableCell>
               <TableCell className="max-w-xs truncate text-xs text-text-secondary">{(r.reasons ?? []).join('; ')}</TableCell>
               <TableCell>

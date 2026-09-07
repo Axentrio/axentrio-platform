@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dayPartWindow, inferDayPartWindow, isDayPartClockWindow } from '../../agent/day-part';
+import { dayPartWindow, inferDayPartWindow, isDayPartClockWindow, namedExactClock } from '../../agent/day-part';
 
 describe('dayPartWindow', () => {
   it('maps Dutch afternoon phrases', () => {
@@ -30,6 +30,14 @@ describe('inferDayPartWindow', () => {
 
   it('returns null when a named clock time is newer than a day part', () => {
     expect(inferDayPartWindow(['om 10:00 graag', 'in de namiddag'])).toBeNull();
+  });
+});
+
+describe('namedExactClock', () => {
+  it('is true for one named clock and false for a day-part phrase', () => {
+    expect(namedExactClock('Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken.')).toBe(true);
+    expect(namedExactClock('maandag 7 september, ergens in de namiddag')).toBe(false);
+    expect(namedExactClock('volgende week')).toBe(false);
   });
 });
 

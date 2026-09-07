@@ -462,6 +462,44 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability.mock.calls[0].at(-1)).toBeUndefined();
   });
 
+  it('drops a morning window when they named an exact clock, so a 12:00-open Tuesday still chips the afternoon', async () => {
+    // Live: Auto-book, Monday 09:00–17:00 / Tuesday 12:00–18:00, asked for Tuesday 8 Sept 2026
+    // 10:00. The model passed latestTime "12:00" (schema: morning = latestTime "12:00"). That
+    // window matches nothing on a day that opens at 12:00, unmatched day-part withheld chips,
+    // and the reply named 12:00 from opening hours with nothing tappable.
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08', latestTime: '12:00' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken. Tom Test, 0470 00 00 03, achraflamranim@gmail.com.' },
+        ],
+      }),
+    );
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toBeUndefined();
+  });
+
+  it('drops earliestTime "morning" the same way when they named 10:00', async () => {
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [{ start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' }],
+      timezone: 'Europe/Brussels',
+    });
+    await tool.execute(
+      { startDate: '2026-09-08', endDate: '2026-09-08', earliestTime: 'morning' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken.' },
+        ],
+      }),
+    );
+    expect(mockCheckAvailability.mock.calls[0].at(-1)).toBeUndefined();
+  });
+
   it('still forwards a day-part window when they asked for the afternoon', async () => {
     const tool = new CheckAvailabilityTool();
     mockCheckAvailability.mockResolvedValue({
@@ -837,6 +875,7 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
+
 
 
   it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {

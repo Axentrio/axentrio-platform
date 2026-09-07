@@ -30,7 +30,7 @@ import { logger } from '../../utils/logger';
 import { XSSProtectionService } from '../../security/xss-protection';
 import { autocompleteAddress } from '../../booking/travel/places.service';
 import { isCompleteCustomerAddress } from '../../booking/booking-providers/contact';
-import { dayPartWindow, inferDayPartWindow } from '../day-part';
+import { dayPartWindow, inferDayPartWindow, isDayPartClockWindow, namedExactClock } from '../day-part';
 import { normalizeLanguageCode } from '../../i18n/audience-language';
 import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
@@ -400,13 +400,14 @@ function clockMinutes(hhmm: string): number {
 /**
  * The schema says omit earliestTime/latestTime when they named an exact clock. A 30-minute
  * window around that clock matches nothing before open, and the unmatched-window path used
- * to hide the rest of the day's Auto-book times.
+ * to hide the rest of the day's Auto-book times. A morning window (00:00–12:00) does the
+ * same on a Tuesday that opens at 12:00: drop it too, so the afternoon chips.
  */
 function isExactNamedTimeProbe(window: ClockWindow, ctx: ToolContext): boolean {
   const said = lastCustomerText(ctx);
-  if (dayPartWindow(said)) return false;
+  if (!namedExactClock(said)) return false;
+  if (isDayPartClockWindow(window)) return true;
   const named = parseClockTimes(said);
-  if (named.length !== 1) return false;
   const fromM = clockMinutes(window.from);
   const toM = clockMinutes(window.to);
   if (!(toM > fromM) || toM - fromM > 120) return false;
@@ -423,9 +424,9 @@ function clockWindowArg(args: Record<string, unknown>, ctx: ToolContext): ClockW
     return inferred ?? undefined;
   }
   const fromDayPart = dayPartFromClockPhrase(from);
-  if (fromDayPart) return fromDayPart;
+  if (fromDayPart) return isExactNamedTimeProbe(fromDayPart, ctx) ? undefined : fromDayPart;
   const toDayPart = dayPartFromClockPhrase(to);
-  if (toDayPart) return toDayPart;
+  if (toDayPart) return isExactNamedTimeProbe(toDayPart, ctx) ? undefined : toDayPart;
   const invalid = invalidClockWindowResult(from, to);
   if (invalid) return invalid;
   const window = { from: from || '00:00', to: to || '24:00' };

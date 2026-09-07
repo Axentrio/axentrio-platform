@@ -1769,6 +1769,59 @@ describe('AgentService', () => {
     }
   });
 
+  it('offers Auto-book chips when a named clock misses a later-opening weekday', async () => {
+    // Live: Auto-book, Monday 09:00–17:00 / Tuesday 12:00–18:00 Brussels, asked for Tuesday
+    // 8 Sept 2026 10:00. Tuesday opens at 12:00 (10:00 UTC that day). The model treated 10:00
+    // as morning (00:00–12:00), that window matched nothing, chips were withheld, and the
+    // reply told them to pick from options that were never shown.
+    const slots = [
+      { start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' },
+      { start: '2026-09-08T10:30:00.000Z', end: '2026-09-08T11:00:00.000Z' },
+      { start: '2026-09-08T11:00:00.000Z', end: '2026-09-08T11:30:00.000Z' },
+    ];
+    const clockWindow = { from: '00:00', to: '12:00', matched: false };
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels', clockWindow },
+        availability: { slots, timezone: 'Europe/Brussels', clockWindow },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-08', endDate: '2026-09-08', latestTime: '12:00' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Dinsdag 8 september om 10:00 is helaas niet beschikbaar. Er zijn die dag wel andere tijden vanaf 12:00 beschikbaar; kies een tijd uit de beschikbare opties.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken. Tom Test, 0470 00 00 03, achraflamranim@gmail.com.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toHaveLength(3);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/12:00/);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/12:30/);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/13:00/);
+      expect(result.content).not.toMatch(/tell me which time suits you/i);
+    }
+  });
+
   it('still withholds chips when a day-part window misses, so namiddag does not become morning', async () => {
     const slots = [{ start: '2026-09-07T07:00:00.000Z', end: '2026-09-07T07:30:00.000Z' }];
     const clockWindow = { from: '12:00', to: '18:00', matched: false };
@@ -1808,6 +1861,65 @@ describe('AgentService', () => {
     if (result.type === 'response') {
       expect(result.quickReplies).toBeUndefined();
     }
+  });
+
+  it('checks the named date itself when a second refusal would ship with no times at all', async () => {
+    // Live report (BK): Auto-book, Monday 09:00–17:00 / Tuesday 12:00–18:00 Brussels, asked for
+    // Tuesday 8 Sept 2026 10:00. The model refused 10:00 and named 12:00 straight from the
+    // OPENING HOURS prompt block without ever calling check_availability. The claim guard nudges
+    // once; on the repeat it used to fall through, and with no availability there were no chips
+    // and no fallback either — the customer was told to pick from options that never existed.
+    const slots = [
+      { start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' },
+      { start: '2026-09-08T10:30:00.000Z', end: '2026-09-08T11:00:00.000Z' },
+      { start: '2026-09-08T11:00:00.000Z', end: '2026-09-08T11:30:00.000Z' },
+    ];
+    const execute = vi.fn().mockResolvedValue({
+      success: true,
+      data: { slots, timezone: 'Europe/Brussels' },
+      availability: { slots, timezone: 'Europe/Brussels' },
+    });
+    mockGetToolsForTenant.mockResolvedValueOnce([
+      {
+        name: 'check_availability',
+        description: 'Check slots',
+        parameters: { type: 'object', properties: {} },
+        hasSideEffects: false,
+        execute,
+      } as ToolAdapter,
+    ]);
+    const refusal = 'Dinsdag 8 september om 10:00 is helaas niet beschikbaar. Er zijn die dag tijden vanaf 12:00.';
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({ content: refusal, usage: { promptTokens: 50, completionTokens: 10 }, finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: refusal, usage: { promptTokens: 60, completionTokens: 10 }, finishReason: 'stop' })
+      .mockResolvedValueOnce({
+        content: 'Dinsdag 8 september kan om 12:00, 12:30 of 13:00.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken. Tom Test, 0470 00 00 03, achraflamranim@gmail.com.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    // The server-authored call: the customer's own date, and the WHOLE day (a window would
+    // re-create the very miss this exists to answer).
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0]).toEqual({ startDate: '2026-09-08', endDate: '2026-09-08' });
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toHaveLength(3);
+      const titles = result.quickReplies!.map((c) => c.title).join(' ');
+      expect(titles).toMatch(/12:00/);
+      expect(titles).toMatch(/12:30/);
+      expect(titles).toMatch(/13:00/);
+    }
+    const corrections = mockTraceSave.mock.calls.at(-1)?.[0]?.corrections;
+    expect(corrections).toContain('availability_unchecked_claim');
+    expect(corrections).toContain('availability_unchecked_claim_forced_check');
   });
 
   it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {

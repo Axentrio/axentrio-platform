@@ -12,7 +12,6 @@
  */
 
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { Bot } from '../database/entities/Bot';
@@ -44,6 +43,7 @@ import { getCapabilities, type ReadinessBotCtx, type ReadinessResult } from '../
 import { computeUnselectedEntitledSkills } from '../modules/skill-coverage';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { businessHoursToAvailability } from '../booking/sync-hours-from-bot';
+import { generatePublicKey, rotateBotKey, endKeyGrace } from '../services/bot-key-rotation.service';
 
 const router = Router();
 const botRepository = AppDataSource.getRepository(Bot);
@@ -59,8 +59,10 @@ function requireMutateRole(role: string | undefined): void {
   }
 }
 
-function generatePublicKey(): string {
-  return `bk_${crypto.randomBytes(24).toString('hex')}`;
+function previousKeyView(bot: Bot): { expiresAt: Date; lastUsedAt: Date | null } | null {
+  if (!bot.previousPublicKey || !bot.previousPublicKeyExpiresAt) return null;
+  if (bot.previousPublicKeyExpiresAt.getTime() <= Date.now()) return null;
+  return { expiresAt: bot.previousPublicKeyExpiresAt, lastUsedAt: bot.previousPublicKeyLastUsedAt };
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -78,6 +80,7 @@ function toListItem(bot: Bot) {
     status: bot.status,
     isDefault: bot.isDefault,
     publicKey: bot.publicKey,
+    previousKey: previousKeyView(bot),
     // Surfaced so the (relocated) onboarding checklist can read the default
     // bot's AI-enabled state without a second per-bot ai-settings fetch.
     aiEnabled: bot.settings?.ai?.enabled ?? false,
@@ -85,6 +88,7 @@ function toListItem(bot: Bot) {
     // bot actually calls itself without a second per-bot ai-settings fetch.
     // Empty when unset — the composer falls back to the tenant name at runtime.
     assistantName: bot.settings?.ai?.brandVoice?.name ?? '',
+    allowedOrigins: bot.settings?.widget?.allowedOrigins ?? [],
     createdAt: bot.createdAt,
     updatedAt: bot.updatedAt,
   };
@@ -327,8 +331,47 @@ router.get(
       where: { id: req.params.id, tenantId, deletedAt: IsNull() },
     });
     if (!bot) throw new NotFoundError('Bot not found');
-    sendSuccess(res, { publicKey: bot.publicKey, snippet: embedSnippet(bot.publicKey) });
+    sendSuccess(res, {
+      publicKey: bot.publicKey,
+      snippet: embedSnippet(bot.publicKey),
+      previousKey: previousKeyView(bot),
+      allowedOrigins: bot.settings?.widget?.allowedOrigins ?? [],
+    });
   })
+);
+
+/**
+ * POST /bots/:id/rotate-key — issue a new public key; old key stays valid for 30 days.
+ */
+router.post(
+  '/:id/rotate-key',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId;
+    requireMutateRole((req as ProvisionedRequest).userRole);
+    const botId = req.params.id;
+    if (!tenantId || !botId) throw new NotFoundError('Bot not found');
+    const result = await rotateBotKey(tenantId, botId);
+    sendSuccess(res, {
+      publicKey: result.publicKey,
+      snippet: embedSnippet(result.publicKey),
+      previousPublicKeyExpiresAt: result.previousPublicKeyExpiresAt,
+    });
+  }),
+);
+
+/**
+ * POST /bots/:id/end-key-grace — revoke the previous key immediately.
+ */
+router.post(
+  '/:id/end-key-grace',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId;
+    requireMutateRole((req as ProvisionedRequest).userRole);
+    const botId = req.params.id;
+    if (!tenantId || !botId) throw new NotFoundError('Bot not found');
+    await endKeyGrace(tenantId, botId);
+    sendSuccess(res, { ok: true });
+  }),
 );
 
 /**
@@ -342,12 +385,13 @@ router.patch(
     const authReq = req as ProvisionedRequest;
     requireMutateRole(authReq.userRole);
     const tenantId = authReq.tenantId!;
-    const { name, assistantName, status, businessHours, quotedAddress } = req.body as {
+    const { name, assistantName, status, businessHours, quotedAddress, allowedOrigins } = req.body as {
       name?: string;
       assistantName?: string;
       status?: 'active' | 'paused';
       businessHours?: NonNullable<Bot['settings']>['businessHours'];
       quotedAddress?: NonNullable<Bot['settings']>['quotedAddress'];
+      allowedOrigins?: string[];
     };
 
     // Activation (paused → active) must re-check the quota: a tenant could have
@@ -422,6 +466,12 @@ router.patch(
         bot.settings = {
           ...(bot.settings ?? {}),
           quotedAddress,
+        };
+      }
+      if (allowedOrigins !== undefined) {
+        bot.settings = {
+          ...(bot.settings ?? {}),
+          widget: { ...(bot.settings?.widget ?? {}), allowedOrigins },
         };
       }
       return repo.save(bot);

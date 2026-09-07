@@ -29,7 +29,6 @@ export {
   rateLimit,
   rateLimitByIp,
   rateLimitByTenant,
-  rateLimitWidget,
   checkSocketRateLimit,
 } from './rate-limit.middleware';
 

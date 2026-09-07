@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Bot, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useBotAiSettings, useBotEmbed, useBotKnowledge } from '@/queries/useBotsQueries';
+import { useBotAiSettings, useBotEmbed, useBotKnowledge, type BotPreviousKey } from '@/queries/useBotsQueries';
 import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -88,9 +88,11 @@ const BotEditorBody: React.FC<{
   hasError: boolean;
   aiEnabled: boolean;
   publicKey?: string;
+  previousKey?: BotPreviousKey | null;
+  allowedOrigins?: string[];
   onGoToKnowledge: () => void;
   onTestChat: () => void;
-}> = ({ botId, isAdmin, isLoading, hasError, aiEnabled, publicKey, onGoToKnowledge, onTestChat }) => {
+}> = ({ botId, isAdmin, isLoading, hasError, aiEnabled, publicKey, previousKey, allowedOrigins, onGoToKnowledge, onTestChat }) => {
   const { t } = useTranslation();
   return (
     <div className="px-4 md:px-6 py-6">
@@ -109,6 +111,9 @@ const BotEditorBody: React.FC<{
               <EmbedWidgetCard
                 enabled={aiEnabled}
                 publicKey={publicKey}
+                botId={botId}
+                previousKey={previousKey}
+                allowedOrigins={allowedOrigins}
                 onTestChat={onTestChat}
               />
             </div>
@@ -167,6 +172,8 @@ const BotEditor: React.FC = () => {
         hasError={!!error}
         aiEnabled={aiEnabled}
         publicKey={embed?.publicKey}
+        previousKey={embed?.previousKey}
+        allowedOrigins={embed?.allowedOrigins}
         onGoToKnowledge={goToKnowledge}
         onTestChat={openTestChat}
       />

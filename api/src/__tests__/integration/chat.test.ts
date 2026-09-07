@@ -58,7 +58,6 @@ import {
   createTestSession,
   createTestParticipant,
   createTestMessage,
-  createTestAnchorBot,
 } from '../helpers/factories';
 
 describe('Chat Lifecycle', () => {
@@ -264,23 +263,6 @@ describe('Chat Lifecycle', () => {
 
       const fresh = await AppDataSource.getRepository(ChatSession).findOneBy({ id: s.id });
       expect(fresh?.tags).toEqual(['Urgent', 'Toegang']);
-    });
-  });
-
-  describe('POST /api/v1/auth/widget', () => {
-    it('should return a token for valid apiKey', async () => {
-      const tenant = await createTestTenant();
-      // Anchor bot required so resolveBotKey can resolve the legacy
-      // tenant.apiKey to a bot.
-      await createTestAnchorBot(tenant);
-
-      const res = await request(app)
-        .post('/api/v1/auth/widget')
-        .send({ apiKey: tenant.apiKey });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.token).toBeDefined();
-      expect(res.body.data.session.id).toBeDefined();
     });
   });
 

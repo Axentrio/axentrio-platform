@@ -37,10 +37,14 @@ import {
   resolveBotKeyStrict,
   BotPausedError,
   BotNotFoundError,
+  BotOriginNotAllowedError,
+  assertOriginAllowed,
+  type ResolvedBot,
 } from '../services/bot-resolution.service';
 import { encrypt } from '../utils/encryption';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { pendingHandoffSocketPayload } from '../realtime/pending-handoff-payload';
+import { recordOriginDenial } from '../services/widget-abuse.service';
 
 // Per-session mutex to serialise message saves and prevent race conditions
 // on messageCount increments and session updates.
@@ -112,6 +116,20 @@ async function authenticateWidgetToken(socket: TenantSocket, widgetToken: string
   if (socket.handshake.query?.apiKey) {
     try {
       const resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
+      try {
+        assertOriginAllowed(resolved.bot, socket.handshake.headers.origin);
+      } catch (originErr) {
+        if (originErr instanceof BotOriginNotAllowedError) {
+          void recordOriginDenial(resolved.bot, resolved.tenant.id, socket.handshake.headers.origin).catch(
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : String(err);
+              logger.warn('Failed to record origin denial', { botId: resolved.bot.id, error: message });
+            },
+          );
+          throw authError('Authentication error: origin not allowed', 'WIDGET_ORIGIN_DENIED');
+        }
+        throw originErr;
+      }
       if (resolved.tenant.id !== payload.tenantId) {
         throw authError('Authentication error: apiKey/token tenant mismatch', 'WIDGET_TOKEN_INVALID');
       }
@@ -217,9 +235,23 @@ export async function applySocketTenantContext(
  * the socket (#16b's natural wiring for websocket).
  */
 async function authenticateApiKey(socket: TenantSocket, apiKey: string): Promise<void> {
-  let resolved;
+  let resolved: ResolvedBot;
   try {
     resolved = await resolveBotKeyStrict(apiKey);
+    try {
+      assertOriginAllowed(resolved.bot, socket.handshake.headers.origin);
+    } catch (originErr) {
+      if (originErr instanceof BotOriginNotAllowedError) {
+        void recordOriginDenial(resolved.bot, resolved.tenant.id, socket.handshake.headers.origin).catch(
+          (err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn('Failed to record origin denial', { botId: resolved.bot.id, error: message });
+          },
+        );
+        throw new Error('Authentication error: origin not allowed');
+      }
+      throw originErr;
+    }
   } catch (err) {
     if (err instanceof BotPausedError) {
       throw new Error('Authentication error: Bot is paused');

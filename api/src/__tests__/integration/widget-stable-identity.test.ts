@@ -207,65 +207,6 @@ describe('S1 - session usable is all-or-nothing; greeting is idempotent + self-h
   });
 });
 
-describe('POST /auth/widget - the guarded legacy creator (review fix B1)', () => {
-  const authWidget = (body: Record<string, unknown>) =>
-    request(app).post('/api/v1/auth/widget').send(body);
-
-  it('two concurrent calls for one userId converge on exactly ONE session - no 500', async () => {
-    const { tenant, bot } = await makeAiTenant();
-    const userId = `auth-race-${crypto.randomBytes(4).toString('hex')}`;
-
-    const [a, b] = await Promise.all([
-      authWidget({ apiKey: bot.publicKey, userId }),
-      authWidget({ apiKey: bot.publicKey, userId }),
-    ]);
-    expect(a.status).toBe(200);
-    expect(b.status).toBe(200);
-    expect(a.body.data.session.id).toBe(b.body.data.session.id);
-    expect(await openSessions(tenant.id, userId)).toHaveLength(1);
-  });
-
-  it('a returning userId resolves its open BOT-state session instead of duplicating', async () => {
-    const { tenant, bot } = await makeAiTenant(); // AI on => sessions live in 'bot'
-    const userId = `auth-return-${crypto.randomBytes(4).toString('hex')}`;
-
-    const first = await authWidget({ apiKey: bot.publicKey, userId });
-    const second = await authWidget({ apiKey: bot.publicKey, userId });
-    expect(second.status).toBe(200);
-    expect(second.body.data.session.id).toBe(first.body.data.session.id);
-    expect(await openSessions(tenant.id, userId)).toHaveLength(1);
-  });
-
-  it('anonymous callers get a UNIQUE identity per call - never a shared session, never a 500', async () => {
-    const { bot } = await makeAiTenant();
-    const a = await authWidget({ apiKey: bot.publicKey });
-    const b = await authWidget({ apiKey: bot.publicKey });
-    expect(a.status).toBe(200);
-    expect(b.status).toBe(200);
-    // Sharing one 'anonymous' identity would hand visitor B visitor A's
-    // transcript; distinct sessions preserve the legacy per-call behavior.
-    expect(a.body.data.session.id).not.toBe(b.body.data.session.id);
-  });
-
-  it('resumes a provided sessionId in ANY non-closed state (the active-only filter is dead)', async () => {
-    const { tenant, bot } = await makeAiTenant();
-    const userId = `auth-resume-${crypto.randomBytes(4).toString('hex')}`;
-    const first = await authWidget({ apiKey: bot.publicKey, userId });
-    const sessionId = first.body.data.session.id as string;
-    expect(first.body.data.session.status).toBe('bot'); // NOT 'active'
-
-    const again = await authWidget({ apiKey: bot.publicKey, sessionId, userId });
-    expect(again.status).toBe(200);
-    expect(again.body.data.session.id).toBe(sessionId);
-    expect(await openSessions(tenant.id, userId)).toHaveLength(1);
-  });
-
-  it('rejects a control-character userId with a client error (S3)', async () => {
-    const { bot } = await makeAiTenant();
-    const res = await authWidget({ apiKey: bot.publicKey, userId: 'bad\u0000user' });
-    expect(res.status).toBe(422);
-  });
-});
 
 describe('the one-non-closed-session invariant (partial unique index)', () => {
   it('the schema rejects a second open widget session for the same identity', async () => {

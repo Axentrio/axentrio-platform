@@ -489,7 +489,33 @@
         "statusActive": "Active",
         "statusInactive": "Off",
         "snippetLabel": "Embed snippet",
-        "installGuide": "Install guide"
+        "installGuide": "Install guide",
+        "allowedOrigins": {
+          "label": "Allowed websites",
+          "placeholder": "example.com\n*.example.com",
+          "helper": "One per line. `*.example.com` also covers example.com. Leave empty to allow every website.",
+          "invalid": "Use a hostname like example.com or *.example.com",
+          "save": "Save",
+          "saved": "Allowed websites saved",
+          "saveFailed": "Failed to save allowed websites"
+        },
+        "rotate": {
+          "button": "Rotate key",
+          "confirmTitle": "Rotate embed key?",
+          "confirmDescription": "A new key is issued immediately. The previous key stays valid for 30 days so existing websites keep working. Rotating again while a grace window is active invalidates the older key immediately.",
+          "confirmAction": "Rotate key",
+          "graceBanner": "Previous key still valid until {{date}}.",
+          "graceNeverUsed": "The old key has not been used since rotation — safe to end early.",
+          "graceLastUsed": "Last used {{date}}.",
+          "endEarly": "End early",
+          "endEarlyConfirmTitle": "End previous key now?",
+          "endEarlyConfirmDescription": "Websites still using the old embed snippet will stop working immediately.",
+          "endEarlyConfirmAction": "End previous key",
+          "rotated": "Embed key rotated",
+          "rotateFailed": "Failed to rotate embed key",
+          "ended": "Previous key revoked",
+          "endFailed": "Failed to revoke previous key"
+        }
       }
     },
     "integrations": {

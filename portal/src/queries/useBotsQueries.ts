@@ -25,6 +25,10 @@ import type { SkillReadinessResponse } from "@contracts/skill-readiness";
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 export type BotStatus = "active" | "paused";
+export type BotPreviousKey = {
+  expiresAt: string;
+  lastUsedAt: string | null;
+};
 
 export interface BotListItem {
   id: string;
@@ -32,12 +36,14 @@ export interface BotListItem {
   status: BotStatus;
   isDefault: boolean;
   publicKey: string;
+  previousKey?: BotPreviousKey | null;
   /** The bot's AI-enabled state (for the onboarding checklist on the list). */
   aiEnabled: boolean;
   /** What the bot calls ITSELF to customers (settings.ai.brandVoice.name) — the
    *  source of "You are <name>" and every template's {botName}. Distinct from
    *  `name`, which is the operator-facing label in this list. */
   assistantName: string;
+  allowedOrigins?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +57,8 @@ export interface BotsListResponse {
 export interface BotEmbedResponse {
   snippet: string;
   publicKey?: string;
+  previousKey?: BotPreviousKey | null;
+  allowedOrigins?: string[];
 }
 
 export type WeekDay =
@@ -179,11 +187,15 @@ export function useUpdateBot() {
       status?: BotStatus;
       businessHours?: Omit<BusinessHours, "timezone">;
       quotedAddress?: QuotedAddress;
+      allowedOrigins?: string[];
     }) => api.patch<BotListItem>(`/bots/${id}`, patch),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
       queryClient.invalidateQueries({
         queryKey: queryKeys.bots.detail(vars.id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.bots.embed(vars.id),
       });
     },
   });
@@ -211,6 +223,33 @@ export function usePauseAllBots() {
     mutationFn: () => api.post<PauseAllBotsResponse>("/bots/pause-all"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.all() });
+    },
+  });
+}
+
+export function useRotateBotKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (botId: string) =>
+      api.post<{ publicKey: string; snippet: string; previousPublicKeyExpiresAt: string }>(
+        `/bots/${botId}/rotate-key`,
+      ),
+    onSuccess: (_data, botId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.embed(botId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.detail(botId) });
+    },
+  });
+}
+
+export function useEndKeyGrace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (botId: string) => api.post<{ ok: true }>(`/bots/${botId}/end-key-grace`),
+    onSuccess: (_data, botId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.all() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.embed(botId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.detail(botId) });
     },
   });
 }

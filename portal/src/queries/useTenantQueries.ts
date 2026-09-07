@@ -68,17 +68,6 @@ export function useUpdateTenant() {
   });
 }
 
-export function useRotateApiKey() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.post('/tenants/me/api-key/rotate'),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
-      toast.success('API key rotated');
-    },
-  });
-}
-
 export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({

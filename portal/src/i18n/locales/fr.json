@@ -482,7 +482,33 @@
         "title": "Intégrer le widget",
         "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture",
         "copied": "Copié dans le presse-papiers",
-        "copyTitle": "Copier l'extrait"
+        "copyTitle": "Copier l'extrait",
+        "allowedOrigins": {
+          "label": "Sites autorisés",
+          "placeholder": "example.com\n*.example.com",
+          "helper": "Un par ligne. `*.example.com` couvre aussi example.com. Laissez vide pour autoriser tous les sites.",
+          "invalid": "Utilisez un nom d'hôte comme example.com ou *.example.com",
+          "save": "Enregistrer",
+          "saved": "Sites autorisés enregistrés",
+          "saveFailed": "Échec de l'enregistrement"
+        },
+        "rotate": {
+          "button": "Régénérer la clé",
+          "confirmTitle": "Régénérer la clé d'intégration ?",
+          "confirmDescription": "Une nouvelle clé est émise immédiatement. L'ancienne reste valable 30 jours pour que les sites existants continuent de fonctionner. Une nouvelle rotation pendant cette période invalide immédiatement la plus ancienne.",
+          "confirmAction": "Régénérer la clé",
+          "graceBanner": "Ancienne clé encore valable jusqu'au {{date}}.",
+          "graceNeverUsed": "L'ancienne clé n'a pas été utilisée depuis la rotation — vous pouvez l'arrêter maintenant.",
+          "graceLastUsed": "Dernière utilisation {{date}}.",
+          "endEarly": "Arrêter maintenant",
+          "endEarlyConfirmTitle": "Arrêter l'ancienne clé maintenant ?",
+          "endEarlyConfirmDescription": "Les sites qui utilisent encore l'ancien extrait cesseront de fonctionner immédiatement.",
+          "endEarlyConfirmAction": "Arrêter l'ancienne clé",
+          "rotated": "Clé d'intégration régénérée",
+          "rotateFailed": "Échec de la régénération de la clé",
+          "ended": "Ancienne clé révoquée",
+          "endFailed": "Échec de la révocation de l'ancienne clé"
+        }
       }
     },
     "integrations": {

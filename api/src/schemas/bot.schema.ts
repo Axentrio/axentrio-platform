@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { dateOverride } from './scheduler.schema';
+import { ORIGIN_PATTERN_RE } from '../security/widget-origin';
 
 export const createBotSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255),
@@ -62,6 +63,16 @@ export const updateBotSchema = z
           .optional(),
       })
       .optional(),
+    allowedOrigins: z
+      .array(
+        z
+          .string()
+          .trim()
+          .toLowerCase()
+          .regex(ORIGIN_PATTERN_RE, 'Use a hostname like example.com or *.example.com'),
+      )
+      .max(50)
+      .optional(),
   })
   .refine(
     (v) =>
@@ -69,6 +80,10 @@ export const updateBotSchema = z
       v.assistantName !== undefined ||
       v.status !== undefined ||
       v.businessHours !== undefined ||
-      v.quotedAddress !== undefined,
-    { message: 'Provide at least one of: name, assistantName, status, businessHours, quotedAddress' },
+      v.quotedAddress !== undefined ||
+      v.allowedOrigins !== undefined,
+    {
+      message:
+        'Provide at least one of: name, assistantName, status, businessHours, quotedAddress, allowedOrigins',
+    },
   );

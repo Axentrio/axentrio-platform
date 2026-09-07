@@ -38,6 +38,7 @@ import { validate } from '../../middleware/validate';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import { createTenantSchema } from '../../schemas';
 import { ensureAnchorBot } from '../../services/bot-config.service';
+import { rotateBotKey } from '../../services/bot-key-rotation.service';
 import { config } from '../../config/environment';
 
 const router = Router();
@@ -225,17 +226,12 @@ router.get('/tenants/:id/api-key/reveal', asyncHandler(async (req: Request, res:
 
 // POST /admin/tenants/:id/api-key/rotate — rotate API key for a tenant
 router.post('/tenants/:id/api-key/rotate', asyncHandler(async (req: Request, res: Response) => {
-  const repo = AppDataSource.getRepository(Tenant);
-  const tenant = await repo.findOne({ where: { id: req.params.id } });
-
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: req.params.id } });
   if (!tenant) throw new NotFoundError('Tenant not found');
-
-  tenant.apiKey = `ak_${crypto.randomUUID().replace(/-/g, '')}`;
-  await repo.save(tenant);
-
+  const anchor = await ensureAnchorBot(tenant.id);
+  const rotated = await rotateBotKey(tenant.id, anchor.id);
   await logAudit(req.userId!, 'apikey.rotated', 'tenant', tenant.id, tenant.id);
-
-  sendSuccess(res, { apiKey: tenant.apiKey });
+  sendSuccess(res, { apiKey: rotated.publicKey, previousPublicKeyExpiresAt: rotated.previousPublicKeyExpiresAt });
 }));
 
 // GET /admin/tenants/:id — tenant details with users, invites, API key

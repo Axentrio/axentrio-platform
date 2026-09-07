@@ -66,4 +66,5 @@ describe('updateWidgetAppearanceSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
 });

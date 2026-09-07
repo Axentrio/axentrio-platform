@@ -44,6 +44,11 @@ export interface BotSettings {
     avatarUrl?: string | null;
     launcherPosition?: 'bottom-right' | 'bottom-left';
     launcherLabel?: string | null;
+    /**
+     * Hostname patterns this bot's public key is valid from.
+     * Empty / omitted = allow every website. `*.example.com` also covers the apex.
+     */
+    allowedOrigins?: string[];
   };
   features?: {
     handoffEnabled: boolean;
@@ -171,6 +176,10 @@ export interface BotSettings {
 @Index(['tenantId'], { unique: true, where: '"is_default" = true AND "deleted_at" IS NULL' })
 // Composite-unique to support a future composite FK from the join table.
 @Index(['tenantId', 'id'], { unique: true })
+@Index('uq_chatbot_bots_previous_public_key', ['previousPublicKey'], {
+  unique: true,
+  where: '"previous_public_key" IS NOT NULL',
+})
 export class Bot {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -182,12 +191,22 @@ export class Bot {
   name!: string;
 
   /**
-   * Stable, globally-unique key the widget embeds with. For the anchor bot
-   * this equals the legacy `Tenant.apiKey`. New bots get a `bk_<random>` key.
+   * Key the widget embeds with. For the anchor bot this equals the legacy
+   * `Tenant.apiKey`. New bots get a `bk_<random>` key. Rotation moves the
+   * current value to `previousPublicKey` for a grace window.
    * The unique index spans soft-deleted rows too, so a freed key is never recycled.
    */
   @Column({ type: 'varchar', length: 255, unique: true, name: 'public_key' })
   publicKey!: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'previous_public_key' })
+  previousPublicKey!: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'previous_public_key_expires_at' })
+  previousPublicKeyExpiresAt!: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'previous_public_key_last_used_at' })
+  previousPublicKeyLastUsedAt!: Date | null;
 
   @Column({
     type: 'enum',

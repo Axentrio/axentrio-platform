@@ -21,12 +21,14 @@ import request from "supertest";
 import { app } from "../../server";
 import { AppDataSource } from "../../database/data-source";
 import { AvailabilityRule } from "../../database/entities/AvailabilityRule";
+import { Bot } from "../../database/entities/Bot";
 import { Tenant } from "../../database/entities/Tenant";
 import {
   createTestTenant,
   createTestUser,
   createTestAnchorBot,
 } from "../helpers/factories";
+import { resolveBotKey } from "../../services/bot-resolution.service";
 
 describe("Tenant Management", () => {
   let tenantId: string;
@@ -157,6 +159,14 @@ describe("Tenant Management", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.apiKey).toBeDefined();
       expect(typeof res.body.data.apiKey).toBe("string");
+
+      const resolved = await resolveBotKey(res.body.data.apiKey);
+      expect(resolved).not.toBeNull();
+      expect(resolved!.isAnchorViaLegacyKey).toBe(true);
+      const anchor = await AppDataSource.getRepository(Bot).findOneByOrFail({
+        id: resolved!.bot.id,
+      });
+      expect(anchor.publicKey).toBe(res.body.data.apiKey);
     });
   });
 

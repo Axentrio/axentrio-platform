@@ -4,30 +4,19 @@
  * Webhook URL, Connection Health, Inbound Endpoint, Webhook Secret, and Delivery
  * Log cards were removed because that path no longer exists; every AI bot is
  * answered by the in-house platform agent.)
+ *
+ * Widget embed-key rotation lives on the bot Deploy card, not here. This card
+ * only shows the tenant's current key for copy.
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Key, Copy, RotateCw } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { api } from '@services/apiClient';
+import { Key, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTenantSettings } from '../../queries/useTenantQueries';
-import { queryKeys } from '../../queries/queryKeys';
-import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/components/ui/alert-dialog';
 import { EventWebhooksCard } from './EventWebhooksCard';
 
 function maskSecret(value: string | undefined): string {
@@ -47,31 +36,10 @@ async function copyToClipboard(text: string, successMessage: string, errorMessag
 
 export const IntegrationTab: React.FC = () => {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-
-  // Tenant data
   const { data: tenantData } = useTenantSettings();
-
-  const [isRotatingKey, setIsRotatingKey] = useState(false);
-  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
-
-  const handleRotateApiKey = async () => {
-    setIsRotatingKey(true);
-    try {
-      await api.post('/tenants/me/api-key/rotate');
-      queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
-      toast.success(t('settings.integrations.apiKey.rotated'));
-    } catch {
-      toast.error(t('settings.integrations.apiKey.rotateFailed'));
-    } finally {
-      setIsRotatingKey(false);
-      setShowRotateConfirm(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
-      {/* API Key */}
       <Card variant="glass">
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
@@ -96,51 +64,11 @@ export const IntegrationTab: React.FC = () => {
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setShowRotateConfirm(true)}
-                  disabled={isRotatingKey}
-                  title={t('settings.integrations.apiKey.rotateTooltip')}
-                >
-                  <RotateCw className={cn("w-4 h-4", isRotatingKey && "animate-spin")} />
-                </Button>
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
-
-      {/* Rotate API Key Confirmation Dialog */}
-      <AlertDialog open={showRotateConfirm} onOpenChange={setShowRotateConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.integrations.apiKey.rotateConfirm.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('settings.integrations.apiKey.rotateConfirm.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleRotateApiKey}
-              disabled={isRotatingKey}
-              className={cn(
-                "bg-red-600 text-white hover:bg-red-500",
-                isRotatingKey && "opacity-50 pointer-events-none"
-              )}
-            >
-              {isRotatingKey ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              ) : (
-                <RotateCw className="w-4 h-4" />
-              )}
-              {t('settings.integrations.apiKey.rotateConfirm.action')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      {/* Enterprise: outbound lead events. Renders nothing when not entitled. */}
       <EventWebhooksCard />
     </div>
   );

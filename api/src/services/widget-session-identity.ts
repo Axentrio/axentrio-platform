@@ -5,9 +5,8 @@
  * widget session, enforced by the partial unique index
  * uq_chat_sessions_widget_open (migration 1791500000000). EVERY public path
  * that can create a widget ChatSession row must go through these helpers under
- * the identity advisory lock: /widget/init, /widget/new-conversation, and the
- * legacy /auth/widget creator. A creator that bypasses this module turns the
- * unique index into a public 500 (that was exactly the /auth/widget bug).
+ * the identity advisory lock: /widget/init and /widget/new-conversation.
+ * A creator that bypasses this module turns the unique index into a public 500.
  */
 
 import type { Request } from 'express';
@@ -43,7 +42,7 @@ export const WIDGET_IDENTITY_LOCK_CLASS = 0x42505234;
  * non-string, empty, oversized, or control-character value (NUL breaks
  * Postgres text literals outright) must be a 422, never a DB error 500.
  * Applied on every endpoint that accepts a client-supplied identity:
- * /widget/init (visitorId) and /auth/widget (userId).
+ * /widget/init (visitorId).
  */
 export function assertValidVisitorId(visitorId: unknown): asserts visitorId is string {
   if (
@@ -114,8 +113,7 @@ export async function resolveOpenWidgetSession(
  * COUNT(*) behind the tenants row lock), then the insert the unique index
  * watches, then the visitor Participant row IN THE SAME transaction - a
  * session without its participant is not usable, so "session exists" must be
- * all-or-nothing (review fix S1). Used by /widget/init, /widget/new-conversation
- * and /auth/widget.
+ * all-or-nothing (review fix S1). Used by /widget/init and /widget/new-conversation.
  */
 export async function createWidgetSessionInTx(
   manager: EntityManager,

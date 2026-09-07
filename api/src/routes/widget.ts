@@ -10,11 +10,11 @@ import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { assertUploadEnabledForSession } from '../file-handling/widget-upload-gate';
-import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
+import { resolveBotKeyStrict, BotPausedError, BotNotFoundError, BotOriginNotAllowedError, assertOriginAllowed } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { ApiError } from '../middleware/error-handler';
-import { widgetRateLimiter } from '../middleware/rate-limit.middleware';
+import { widgetRateLimiter, widgetKeyInitRateLimiter } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { emitConversationUpsertForSession } from '../realtime/conversation-events';
 import { computeCustomerThreadId } from '../realtime/conversation-serializer';
@@ -47,6 +47,7 @@ import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
+import { recordOriginDenial } from '../services/widget-abuse.service';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -88,18 +89,31 @@ interface ApiKeyValidationResult {
   bot?: Bot;
   error?: string;
   paused?: boolean;
+  originDenied?: boolean;
 }
 
-async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
+async function validateApiKey(apiKey: string, origin: string | undefined): Promise<ApiKeyValidationResult> {
   if (!apiKey) {
     return { valid: false, error: 'API key is required' };
   }
   try {
-    // #16b: paused bots are rejected at the widget surface. The strict resolver
-    // throws `BotPausedError` when the matched bot is paused — surface that
-    // distinctly from "invalid key" so the caller can return HTTP 403 with a
-    // user-facing message instead of 401.
     const resolved = await resolveBotKeyStrict(apiKey);
+    try {
+      assertOriginAllowed(resolved.bot, origin);
+    } catch (originErr) {
+      if (originErr instanceof BotOriginNotAllowedError) {
+        void recordOriginDenial(resolved.bot, resolved.tenant.id, origin).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn('Failed to record origin denial', { botId: resolved.bot.id, error: message });
+        });
+        return {
+          valid: false,
+          error: 'This chatbot is not allowed on this website.',
+          originDenied: true,
+        };
+      }
+      throw originErr;
+    }
     return { valid: true, tenant: resolved.tenant, bot: resolved.bot };
   } catch (error) {
     if (error instanceof BotPausedError) {
@@ -156,8 +170,8 @@ const router = Router();
 // create and every close-and-open runs under the SAME transaction-level
 // advisory lock on that identity, so concurrent inits (two tabs) serialize:
 // the first creates, the rest resolve the winner - nobody 500s on the index.
-// The helpers live in services/widget-session-identity so the legacy
-// /auth/widget creator shares the EXACT same seam (review fix B1).
+// The helpers live in services/widget-session-identity so every public
+// creator shares the EXACT same seam.
 
 /**
  * Get widget configuration
@@ -173,12 +187,13 @@ router.get(
       throw new ValidationError('API key is required');
     }
 
-    const result = await validateApiKey(apiKey);
+    const result = await validateApiKey(apiKey, req.headers.origin);
 
     if (result.paused) {
-      // #16b: paused bot → 403, not 400. The widget can show a friendly
-      // "this chatbot is unavailable" state.
       throw new ForbiddenError(result.error || 'This chatbot is currently paused');
+    }
+    if (result.originDenied) {
+      throw new ForbiddenError(result.error || 'This chatbot is not allowed on this website.');
     }
     if (!result.valid || !result.tenant || !result.bot) {
       throw new ValidationError(result.error || 'Invalid API key');
@@ -237,22 +252,22 @@ router.get(
 router.post(
   '/init',
   widgetInitRateLimit,
+  widgetKeyInitRateLimiter,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { apiKey, visitorId, metadata } = req.body;
 
     if (!apiKey || !visitorId) {
       throw new ValidationError('API key and visitor ID are required');
     }
-    // 422 for non-string / oversized / control-character ids (S3) - they feed
-    // varchar(255) and the advisory-lock key, and must never become a DB 500.
     assertValidVisitorId(visitorId);
 
-    const result = await validateApiKey(apiKey);
+    const result = await validateApiKey(apiKey, req.headers.origin);
 
     if (result.paused) {
-      // #16b: paused bot → 403, not 400. The widget can show a friendly
-      // "this chatbot is unavailable" state.
       throw new ForbiddenError(result.error || 'This chatbot is currently paused');
+    }
+    if (result.originDenied) {
+      throw new ForbiddenError(result.error || 'This chatbot is not allowed on this website.');
     }
     if (!result.valid || !result.tenant || !result.bot) {
       throw new ValidationError(result.error || 'Invalid API key');

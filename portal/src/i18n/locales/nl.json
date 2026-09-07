@@ -482,7 +482,33 @@
         "title": "Widget insluiten",
         "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag",
         "copied": "Gekopieerd naar klembord",
-        "copyTitle": "Codefragment kopiëren"
+        "copyTitle": "Codefragment kopiëren",
+        "allowedOrigins": {
+          "label": "Toegestane websites",
+          "placeholder": "example.com\n*.example.com",
+          "helper": "Eén per regel. `*.example.com` dekt ook example.com. Laat leeg om elke website toe te staan.",
+          "invalid": "Gebruik een hostnaam zoals example.com of *.example.com",
+          "save": "Opslaan",
+          "saved": "Toegestane websites opgeslagen",
+          "saveFailed": "Opslaan is mislukt"
+        },
+        "rotate": {
+          "button": "Sleutel vernieuwen",
+          "confirmTitle": "Insluitsleutel vernieuwen?",
+          "confirmDescription": "Er wordt meteen een nieuwe sleutel uitgegeven. De vorige blijft 30 dagen geldig zodat bestaande websites blijven werken. Opnieuw vernieuwen tijdens die periode maakt de oudere sleutel meteen ongeldig.",
+          "confirmAction": "Sleutel vernieuwen",
+          "graceBanner": "Vorige sleutel nog geldig tot {{date}}.",
+          "graceNeverUsed": "De oude sleutel is sinds de rotatie niet gebruikt — je kunt die nu stopzetten.",
+          "graceLastUsed": "Laatst gebruikt {{date}}.",
+          "endEarly": "Nu stopzetten",
+          "endEarlyConfirmTitle": "Vorige sleutel nu stopzetten?",
+          "endEarlyConfirmDescription": "Websites die het oude codefragment nog gebruiken, stoppen onmiddellijk met werken.",
+          "endEarlyConfirmAction": "Vorige sleutel stopzetten",
+          "rotated": "Insluitsleutel vernieuwd",
+          "rotateFailed": "Insluitsleutel vernieuwen is mislukt",
+          "ended": "Vorige sleutel ingetrokken",
+          "endFailed": "Vorige sleutel intrekken is mislukt"
+        }
       }
     },
     "integrations": {

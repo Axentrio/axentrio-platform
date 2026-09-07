@@ -65,10 +65,6 @@ import {
 
 export { computeOnboardingStatus } from "./tenant-onboarding.handlers";
 
-function generateApiKey(): string {
-  return crypto.randomBytes(32).toString("hex");
-}
-
 /**
  * One-way sync onto the slot engine (same as PATCH /bots/:id): onboarding
  * writes businessHours to the anchor bot only; without this the spoken
@@ -471,43 +467,6 @@ router.post(
   autoProvision,
   requireAdmin,
   createTenantUser,
-);
-
-/**
- * Rotate API key
- * POST /api/v1/tenants/me/api-key/rotate
- */
-router.post(
-  "/me/api-key/rotate",
-  requireClerkAuth,
-  autoProvision,
-  requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = req.user!.tenantId;
-
-    const tenantRepository = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepository.findOne({
-      where: { id: tenantId },
-    });
-
-    if (!tenant) {
-      throw new NotFoundError("Tenant not found");
-    }
-
-    // Generate new API key
-    const newApiKey = generateApiKey();
-    tenant.apiKey = newApiKey;
-
-    await tenantRepository.save(tenant);
-
-    logger.info("API key rotated", { tenantId });
-
-    sendSuccess(res, {
-      apiKey: newApiKey,
-      message:
-        "API key rotated successfully. Store this key safely as it will not be shown again.",
-    });
-  }),
 );
 
 /**

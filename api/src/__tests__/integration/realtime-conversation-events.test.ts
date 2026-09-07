@@ -398,11 +398,13 @@ describe('operator REST reply — POST /chats/:sessionId/messages', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('session create → conversation:upsert (new row) to the agents room', () => {
-  it('POST /auth/widget announces the created conversation', async () => {
+  it('POST /widget/init announces the created conversation', async () => {
     const tenant = await createTestTenant();
     await createTestAnchorBot(tenant);
 
-    const res = await request(app).post('/api/v1/auth/widget').send({ apiKey: tenant.apiKey });
+    const res = await request(app)
+      .post('/api/v1/widget/init')
+      .send({ apiKey: tenant.apiKey, visitorId: `announce-${tenant.id}` });
     expect(res.status).toBe(200);
     const sessionId = res.body.data.session.id as string;
 

@@ -102,7 +102,8 @@ export const ENDPOINTS = {
     byId: (id: string) => `/tenants/${id}`,
     settings: (id: string) => `/tenants/${id}/settings`,
     webhook: (id: string) => `/tenants/${id}/webhook`,
-    regenerateKey: (id: string) => `/tenants/${id}/regenerate-key`,
+    rotateKey: (botId: string) => `/bots/${botId}/rotate-key`,
+    endKeyGrace: (botId: string) => `/bots/${botId}/end-key-grace`,
   },
   
   // Analytics

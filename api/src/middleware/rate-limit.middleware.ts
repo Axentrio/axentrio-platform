@@ -3,6 +3,7 @@
  * Implements rate limiting per tenant and per IP
  */
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { RateLimiterRedis, RateLimiterRes, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { getRedisClient, isRedisAvailable } from '../config/redis';
 import { config } from '../config/environment';
@@ -87,7 +88,6 @@ function fallbackConsume(key: string, maxRequests: number, windowMs: number): Fa
 // the capped `fallbackCounters` map above.
 let ipLimiter: RateLimiterAbstract | null = null;
 let tenantLimiter: RateLimiterAbstract | null = null;
-let widgetLimiter: RateLimiterAbstract | null = null;
 let socketLimiter: RateLimiterAbstract | null = null;
 
 /**
@@ -123,7 +123,6 @@ function ensureLimiters(): void {
   if (!ipLimiter) {
     ipLimiter = createRateLimiter('rl:ip', RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS);
     tenantLimiter = createRateLimiter('rl:tenant', RATE_LIMIT_MAX_REQUESTS * 2, RATE_LIMIT_WINDOW_MS);
-    widgetLimiter = createRateLimiter('rl:widget', 50, RATE_LIMIT_WINDOW_MS);
     socketLimiter = createRateLimiter('rl:socket', 100, RATE_LIMIT_WINDOW_MS);
   }
 }
@@ -319,68 +318,6 @@ export function rateLimitByTenant(
 }
 
 /**
- * HTTP Middleware: Rate limit widget endpoints
- */
-export function rateLimitWidget(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
-  const clientIp = getClientIp(req);
-  const sessionId = req.headers['x-session-id'] as string;
-  const key = sessionId ? `widget:${sessionId}` : `widget:ip:${clientIp}`;
-
-  ensureLimiters();
-  if (!widgetLimiter) {
-    consumeCappedFallback(
-      req,
-      res,
-      next,
-      `widget:${key}`,
-      50,
-      RATE_LIMIT_WINDOW_MS,
-      'Widget rate limit exceeded. Please try again later.',
-    );
-    return;
-  }
-
-  widgetLimiter
-    .consume(key, 1)
-    .then(() => {
-      next();
-    })
-    .catch((rateLimiterRes: RateLimiterRes | Error) => {
-      if (rateLimiterRes instanceof Error) {
-        logger.error('Widget rate limiter error, using in-memory fallback:', rateLimiterRes);
-        if (fallbackConsume(`widget:${key}`, 50, RATE_LIMIT_WINDOW_MS).allowed) {
-          return next();
-        }
-        if (shouldUseLegacyEnvelope(req)) {
-          emitLegacy429(res, 'Widget rate limit exceeded (fallback). Please try again later.');
-          return;
-        }
-        return next(
-          new ApiError(
-            'Rate limit exceeded (fallback). Please try again later.',
-            429,
-            ERROR_CODES.RATE_LIMIT_FALLBACK,
-          ),
-        );
-      }
-
-      const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
-      res.setHeader('Retry-After', retryAfter.toString());
-      if (shouldUseLegacyEnvelope(req)) {
-        emitLegacy429(res, 'Widget rate limit exceeded. Please try again later.', retryAfter);
-        return;
-      }
-      return next(
-        new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
-      );
-    });
-}
-
-/**
  * Combined rate limiting middleware
  * Applies both IP and tenant rate limiting
  */
@@ -485,7 +422,7 @@ export async function checkSocketRateLimit(
  */
 export async function getRateLimitStatus(
   key: string,
-  type: 'ip' | 'tenant' | 'widget' | 'socket' = 'ip'
+  type: 'ip' | 'tenant' | 'socket' = 'ip'
 ): Promise<{ remaining: number; resetTime: Date } | null> {
   try {
     ensureLimiters();
@@ -493,9 +430,6 @@ export async function getRateLimitStatus(
     switch (type) {
       case 'tenant':
         limiter = tenantLimiter;
-        break;
-      case 'widget':
-        limiter = widgetLimiter;
         break;
       case 'socket':
         limiter = socketLimiter;
@@ -531,6 +465,7 @@ interface NamedLimiterConfig {
   windowMs: number;
   maxRequests: number;
   keyPrefix: string;
+  identifier?: (req: Request) => string | undefined;
 }
 
 const createRateLimitKey = (req: Request, prefix: string): string => {
@@ -547,7 +482,10 @@ const createRedisRateLimiter = (limiterConfig: NamedLimiterConfig) => {
         // No Redis — fail open
         return next();
       }
-      const key = createRateLimitKey(req, limiterConfig.keyPrefix);
+      const customId = limiterConfig.identifier?.(req);
+      const key = customId
+        ? `rl:${limiterConfig.keyPrefix}:${customId}`
+        : createRateLimitKey(req, limiterConfig.keyPrefix);
       const windowSeconds = Math.floor(limiterConfig.windowMs / 1000);
 
       // Get current count
@@ -631,4 +569,24 @@ export const placesRateLimiter = createRedisRateLimiter({
   windowMs: 60000,
   maxRequests: 40,
   keyPrefix: 'places',
+});
+
+function widgetKeyIdentifier(req: Request): string | undefined {
+  const body = req.body;
+  let raw: unknown;
+  if (body && typeof body === 'object' && 'apiKey' in body) {
+    raw = body.apiKey;
+  } else {
+    raw = req.query.apiKey;
+  }
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+}
+
+/** 1000 new sessions / 10 min per bot key — must exceed any tenant's peak new-visitor rate; the origin allow-list is the abuse gate */
+export const widgetKeyInitRateLimiter = createRedisRateLimiter({
+  windowMs: 600_000,
+  maxRequests: 1000,
+  keyPrefix: 'widget-key-init',
+  identifier: widgetKeyIdentifier,
 });

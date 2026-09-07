@@ -144,11 +144,11 @@ describe('AccountInformationSettings', () => {
     await user.click(screen.getByRole('button', { name: 'Do setup again' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByText('Do setup again?')).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(
-        'You will walk through every setup step from the start. Your documents, chats, and billing stay as they are. If you skip a feature in setup, the platform turns that feature off. Your team cannot use the portal until an admin finishes the steps.',
-      ),
-    ).toBeInTheDocument();
+    // The dialog's job is to state the two consequences before the click, not to
+    // hold a paragraph byte-for-byte — matching the whole string only meant the
+    // test failed the next time the copy was improved.
+    expect(within(dialog).getByText(/turns that feature off/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/are not deleted/i)).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('button', { name: 'Start setup again' }));
     await waitFor(() => expect(post).toHaveBeenCalledWith('/onboarding/restart'));

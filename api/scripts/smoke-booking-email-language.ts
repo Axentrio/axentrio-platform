@@ -31,6 +31,8 @@ import { Tenant } from '../src/database/entities/Tenant';
 import { logger } from '../src/utils/logger';
 import {
   BOOKING_COPY_EN,
+  BOOKING_COPY_NL,
+  BOOKING_COPY_FR,
   fill,
   formatWhen,
   getBookingCopy,
@@ -127,17 +129,22 @@ async function assertCopyCatalog(): Promise<void> {
   const en = await getBookingCopy('en');
   if (en['customer.lead_confirmed'] !== BOOKING_COPY_EN['customer.lead_confirmed']) fail('English copy mismatch');
   pass('getBookingCopy(en) returns catalog without LLM');
-  if (process.env.SMOKE_SKIP_LLM === '1') return;
-  const translated = await getBookingCopy(CUSTOMER_LANG);
-  if (translated === BOOKING_COPY_EN) {
-    console.warn(`⚠ getBookingCopy('${CUSTOMER_LANG}') fell back to English`);
-  } else {
-    pass(`getBookingCopy('${CUSTOMER_LANG}') translated`, translated['customer.lead_confirmed'].slice(0, 60));
-  }
+  const nl = await getBookingCopy('nl');
+  if (nl['event.title'] !== BOOKING_COPY_NL['event.title']) fail('Dutch event title mismatch');
+  if (nl['event.customer'] !== 'Klant: {name}') fail('Dutch event customer label mismatch');
+  pass('getBookingCopy(nl) returns shipped Dutch catalog');
+  const fr = await getBookingCopy('fr');
+  if (fr['event.title'] !== BOOKING_COPY_FR['event.title']) fail('French event title mismatch');
+  pass('getBookingCopy(fr) returns shipped French catalog');
 }
 
 async function assertRedisCopyCache(lang: string): Promise<void> {
   console.log('\n--- Redis booking-copy cache ---');
+  const normalized = normalizeLanguageCode(lang) ?? 'en';
+  if (normalized === 'en' || normalized === 'nl' || normalized === 'fr') {
+    pass('shipped catalog — Redis LLM cache not used', normalized);
+    return;
+  }
   __resetBookingCopyCache();
   const copy = await getBookingCopy(lang);
   const redisKey = `booking-copy:${catalogHash()}:${lang}`;

@@ -29,11 +29,11 @@ describe('getBookingCopy · Redis cache edge cases', () => {
   });
 
   it('serves a Redis hit without calling the LLM', async () => {
-    const cached = { ...BOOKING_COPY_EN, 'customer.lead_confirmed': 'FR: confirmé.' };
+    const cached = { ...BOOKING_COPY_EN, 'customer.lead_confirmed': 'DE: bestätigt.' };
     redisGet.mockResolvedValueOnce(JSON.stringify(cached));
 
-    const copy = await getBookingCopy('fr', 'tenant-1');
-    expect(copy['customer.lead_confirmed']).toBe('FR: confirmé.');
+    const copy = await getBookingCopy('de', 'tenant-1');
+    expect(copy['customer.lead_confirmed']).toBe('DE: bestätigt.');
     expect(chat).not.toHaveBeenCalled();
     expect(redisSet).not.toHaveBeenCalled();
   });
@@ -43,13 +43,13 @@ describe('getBookingCopy · Redis cache edge cases', () => {
     chat.mockResolvedValueOnce({
       content: JSON.stringify({
         ...BOOKING_COPY_EN,
-        'customer.lead_confirmed': 'NL: bevestigd.',
+        'customer.lead_confirmed': 'DE: bestätigt.',
       }),
     });
 
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(chat).toHaveBeenCalledOnce();
-    expect(copy['customer.lead_confirmed']).toBe('NL: bevestigd.');
+    expect(copy['customer.lead_confirmed']).toBe('DE: bestätigt.');
   });
 
   it('writes successful translations to Redis with TTL', async () => {
@@ -57,16 +57,16 @@ describe('getBookingCopy · Redis cache edge cases', () => {
     chat.mockResolvedValueOnce({
       content: JSON.stringify({
         ...BOOKING_COPY_EN,
-        'customer.lead_confirmed': 'NL: bevestigd.',
+        'customer.lead_confirmed': 'DE: bestätigt.',
       }),
     });
 
-    await getBookingCopy('nl');
+    await getBookingCopy('de');
     expect(redisSet).toHaveBeenCalledOnce();
     const [, payload, mode, ttl] = redisSet.mock.calls[0];
     expect(String(mode)).toBe('EX');
     expect(ttl).toBe(90 * 24 * 3600);
-    expect(JSON.parse(String(payload))['customer.lead_confirmed']).toBe('NL: bevestigd.');
+    expect(JSON.parse(String(payload))['customer.lead_confirmed']).toBe('DE: bestätigt.');
   });
 
   it('still returns copy when Redis set fails', async () => {
@@ -75,11 +75,18 @@ describe('getBookingCopy · Redis cache edge cases', () => {
     chat.mockResolvedValueOnce({
       content: JSON.stringify({
         ...BOOKING_COPY_EN,
-        'customer.lead_confirmed': 'NL: bevestigd.',
+        'customer.lead_confirmed': 'DE: bestätigt.',
       }),
     });
 
+    const copy = await getBookingCopy('de');
+    expect(copy['customer.lead_confirmed']).toBe('DE: bestätigt.');
+  });
+
+  it('does not consult Redis for a shipped locale', async () => {
     const copy = await getBookingCopy('nl');
-    expect(copy['customer.lead_confirmed']).toBe('NL: bevestigd.');
+    expect(copy['event.customer']).toBe('Klant: {name}');
+    expect(redisGet).not.toHaveBeenCalled();
+    expect(chat).not.toHaveBeenCalled();
   });
 });

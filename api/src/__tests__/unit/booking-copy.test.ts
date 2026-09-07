@@ -16,6 +16,8 @@ vi.mock('../../utils/logger', () => ({
 
 import {
   BOOKING_COPY_EN,
+  BOOKING_COPY_NL,
+  BOOKING_COPY_FR,
   fill,
   formatWhen,
   getBookingCopy,
@@ -66,19 +68,40 @@ describe('getBookingCopy', () => {
     expect(chat).not.toHaveBeenCalled();
   });
 
+  it('returns shipped Dutch and French catalogs without the LLM', async () => {
+    const nl = await getBookingCopy('nl');
+    const fr = await getBookingCopy('FR');
+    expect(chat).not.toHaveBeenCalled();
+    expect(nl).toEqual(BOOKING_COPY_NL);
+    expect(fr).toEqual(BOOKING_COPY_FR);
+    expect(nl['event.title_with_name']).toBe('Boeking: {service} - {who}');
+    expect(fr['event.customer']).toBe('Client : {name}');
+
+    for (const [lang, copy] of [
+      ['nl', nl],
+      ['fr', fr],
+    ] as const) {
+      for (const key of Object.keys(BOOKING_COPY_EN) as Array<keyof typeof BOOKING_COPY_EN>) {
+        const enTokens = [...(BOOKING_COPY_EN[key].match(/\{\w+\}/g) ?? [])].sort();
+        const got = [...(copy[key].match(/\{\w+\}/g) ?? [])].sort();
+        expect(got, `${lang} ${key}`).toEqual(enTokens);
+      }
+    }
+  });
+
   it('translates once and serves the second call from cache', async () => {
     chat.mockResolvedValueOnce({
       content: JSON.stringify({
         ...BOOKING_COPY_EN,
-        'customer.subject_confirmed': 'Bevestigd: {summary}',
+        'customer.subject_confirmed': 'Bestätigt: {summary}',
       }),
     });
 
-    const first = await getBookingCopy('nl', 'ten-1');
-    const second = await getBookingCopy('nl', 'ten-1');
+    const first = await getBookingCopy('de', 'ten-1');
+    const second = await getBookingCopy('de', 'ten-1');
 
     expect(chat).toHaveBeenCalledOnce();
-    expect(first['customer.subject_confirmed']).toBe('Bevestigd: {summary}');
+    expect(first['customer.subject_confirmed']).toBe('Bestätigt: {summary}');
     expect(second).toEqual(first);
   });
 
@@ -95,7 +118,7 @@ describe('getBookingCopy', () => {
         'customer.subject_confirmed': 'Zonder placeholder',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.subject_confirmed']).toBe(BOOKING_COPY_EN['customer.subject_confirmed']);
   });
 
@@ -113,7 +136,7 @@ describe('getBookingCopy', () => {
         'customer.lead_confirmed': 'Bevestigd. Zie https://evil.example',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.lead_confirmed']).toBe(BOOKING_COPY_EN['customer.lead_confirmed']);
   });
 
@@ -124,7 +147,7 @@ describe('getBookingCopy', () => {
         'customer.subject_confirmed': 'Bevestigd zonder samenvatting',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.subject_confirmed']).toBe(BOOKING_COPY_EN['customer.subject_confirmed']);
   });
 
@@ -135,7 +158,7 @@ describe('getBookingCopy', () => {
         'customer.subject_confirmed': 'Bevestigd: {summary} ({extra})',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.subject_confirmed']).toBe(BOOKING_COPY_EN['customer.subject_confirmed']);
   });
 
@@ -146,13 +169,13 @@ describe('getBookingCopy', () => {
         'customer.lead_confirmed': '   ',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.lead_confirmed']).toBe(BOOKING_COPY_EN['customer.lead_confirmed']);
   });
 
   it('falls back entirely to English when most keys fail validation', async () => {
     chat.mockResolvedValueOnce({ content: '{}' });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy).toEqual(BOOKING_COPY_EN);
   });
 
@@ -164,7 +187,7 @@ describe('getBookingCopy', () => {
         'customer.subject_confirmed': 'bad',
       }),
     });
-    const copy = await getBookingCopy('nl');
+    const copy = await getBookingCopy('de');
     expect(copy['customer.lead_confirmed']).toBe('Uw afspraak is bevestigd.');
     expect(copy['customer.subject_confirmed']).toBe(BOOKING_COPY_EN['customer.subject_confirmed']);
   });
@@ -183,7 +206,7 @@ describe('getBookingCopy', () => {
           'Nous avons envoyé une demande. Votre rendez-vous <strong>n\'est pas encore annulé</strong>.',
       }),
     });
-    const copy = await getBookingCopy('fr');
+    const copy = await getBookingCopy('de');
     expect(copy['manage.cancel_requested_body']).toContain('<strong>');
     expect(copy['manage.cancel_requested_body']).toContain('</strong>');
   });
@@ -195,18 +218,23 @@ describe('warmBookingCopyCache', () => {
     __resetBookingCopyCache();
   });
 
-  it('translates each non-English locale once', async () => {
+  it('loads shipped locales without the LLM', async () => {
+    const results = await warmBookingCopyCache(['nl', 'fr']);
+    expect(results).toHaveLength(2);
+    expect(chat).not.toHaveBeenCalled();
+    await expect(getBookingCopy('nl')).resolves.toEqual(BOOKING_COPY_NL);
+  });
+
+  it('still translates an unshipped language', async () => {
     chat.mockImplementation(async () => ({
       content: JSON.stringify({
         ...BOOKING_COPY_EN,
         'customer.lead_confirmed': 'Vertaald.',
       }),
     }));
-
-    const results = await warmBookingCopyCache(['nl', 'fr']);
-
-    expect(results).toHaveLength(2);
-    expect(chat).toHaveBeenCalledTimes(2);
-    await expect(getBookingCopy('nl')).resolves.toMatchObject({ 'customer.lead_confirmed': 'Vertaald.' });
+    const results = await warmBookingCopyCache(['de']);
+    expect(results).toHaveLength(1);
+    expect(chat).toHaveBeenCalledOnce();
+    await expect(getBookingCopy('de')).resolves.toMatchObject({ 'customer.lead_confirmed': 'Vertaald.' });
   });
 });

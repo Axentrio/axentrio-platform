@@ -26,23 +26,13 @@ vi.mock('../../integrations/google/google-calendar.service', async (importOrigin
 });
 
 /**
- * Deterministic stand-in for the booking-copy translator. Real getBookingCopy logic
- * (placeholder validation, merge, cache write) still runs on this output.
+ * Stand-in for the booking-copy translator. Shipped locales (nl/fr) never call it;
+ * it remains so an unshipped language would still be deterministic.
  */
-const NL_PATCH: Record<string, string> = {
-  'customer.subject_confirmed': 'Bevestigd: {summary}',
-  'customer.lead_confirmed': 'Uw afspraak is bevestigd.',
-};
-const FR_PATCH: Record<string, string> = {
-  'owner.subject_new': 'Nouveau : {summary}',
-};
 
 const copyChat = vi.fn(async (messages: Array<{ role: string; content: string }>) => {
-  const system = messages.find((m) => m.role === 'system')?.content ?? '';
-  const lang = /code "([a-z]{2,3})"/.exec(system)?.[1] ?? 'en';
   const english = JSON.parse(messages.find((m) => m.role === 'user')!.content) as Record<string, string>;
-  const patch = lang === 'nl' ? NL_PATCH : lang === 'fr' ? FR_PATCH : {};
-  return { content: JSON.stringify({ ...english, ...patch }) };
+  return { content: JSON.stringify(english) };
 });
 
 vi.mock('../../llm/provider-factory', async (importOriginal) => {
@@ -73,6 +63,8 @@ import { InternalProvider } from '../../booking/booking-providers/internal.provi
 import type { BookingContext } from '../../booking/booking-providers/types';
 import {
   BOOKING_COPY_EN,
+  BOOKING_COPY_NL,
+  BOOKING_COPY_FR,
   fill,
   __resetBookingCopyCache,
 } from '../../booking/booking-copy';
@@ -228,9 +220,9 @@ describe('InternalProvider.createBooking · mirrorCreatedBooking email i18n', ()
     );
     expect(customerDelivery).toBeDefined();
     expect(customerDelivery!.subject).toBe(
-      fill(NL_PATCH['customer.subject_confirmed']!, { summary: 'Integratie consult' }),
+      fill(BOOKING_COPY_NL['customer.subject_confirmed'], { summary: 'Integratie consult' }),
     );
-    expect(customerDelivery!.payload?.body).toContain(NL_PATCH['customer.lead_confirmed']!);
+    expect(customerDelivery!.payload?.body).toContain(BOOKING_COPY_NL['customer.lead_confirmed']);
     // The customer copy must not be the English catalog: proves audienceLanguages resolved
     // the chat language rather than defaulting.
     expect(customerDelivery!.payload?.body).not.toContain(BOOKING_COPY_EN['customer.lead_confirmed']);
@@ -240,15 +232,14 @@ describe('InternalProvider.createBooking · mirrorCreatedBooking email i18n', ()
     );
     expect(ownerDelivery).toBeDefined();
     expect(ownerDelivery!.subject).toBe(
-      fill(FR_PATCH['owner.subject_new']!, { summary: 'Integratie consult' }),
+      fill(BOOKING_COPY_FR['owner.subject_new'], { summary: 'Integratie consult' }),
     );
     // Owner gets the portal locale (fr), not the customer's chat language (nl).
     expect(ownerDelivery!.subject).not.toBe(
-      fill(NL_PATCH['customer.subject_confirmed']!, { summary: 'Integratie consult' }),
+      fill(BOOKING_COPY_NL['customer.subject_confirmed'], { summary: 'Integratie consult' }),
     );
 
     expect(send).toHaveBeenCalled();
-    // Real getBookingCopy ran for both audiences through the translator double.
-    expect(copyChat).toHaveBeenCalled();
+    expect(copyChat).not.toHaveBeenCalled();
   });
 });

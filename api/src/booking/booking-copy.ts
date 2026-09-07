@@ -8,6 +8,9 @@ import { logger } from '../utils/logger';
 import { customerLanguageFor, normalizeLanguageCode, resolveOwnerLanguage } from '../i18n/audience-language';
 import type { BotSettings } from '../database/entities/Bot';
 import { SUPPORTED_LOCALES } from '../schemas/user.schema';
+import { BOOKING_COPY_NL } from './booking-copy.nl';
+import { BOOKING_COPY_FR } from './booking-copy.fr';
+
 
 export const BOOKING_COPY_EN = {
   'customer.subject_confirmed': 'Confirmed: {summary}',
@@ -73,7 +76,7 @@ export const BOOKING_COPY_EN = {
   'event.service': 'Service: {text}',
   'event.customer': 'Customer: {name}',
   'event.email': 'Email: {text}',
-    'event.phone': 'Phone: {text}',
+  'event.phone': 'Phone: {text}',
   'event.address': 'Address: {text}',
   'event.duration': 'Duration: {n} min',
   'event.price': 'Price: {price}',
@@ -151,6 +154,8 @@ export const BOOKING_COPY_EN = {
 
 export type BookingCopy = { [K in keyof typeof BOOKING_COPY_EN]: string };
 export type BookingCopyKey = keyof BookingCopy;
+export { BOOKING_COPY_NL, BOOKING_COPY_FR };
+
 
 export type RejectReasonKey =
   | 'owner.reason_all_day'
@@ -180,6 +185,28 @@ function placeholderTokens(value: string): Set<string> {
   for (const m of value.matchAll(/\{(\w+)\}/g)) tokens.add(`{${m[1]}}`);
   return tokens;
 }
+
+function assertShippedCatalog(lang: string, copy: BookingCopy): BookingCopy {
+  for (const key of Object.keys(BOOKING_COPY_EN) as BookingCopyKey[]) {
+    const expected = placeholderTokens(BOOKING_COPY_EN[key]);
+    if (placeholderTokens(copy[key]).size !== expected.size) {
+      throw new Error(`[booking-copy] ${lang} ${key} placeholder count mismatch`);
+    }
+    for (const token of expected) {
+      if (!copy[key].includes(token)) {
+        throw new Error(`[booking-copy] ${lang} ${key} missing ${token}`);
+      }
+    }
+  }
+  return copy;
+}
+
+const SHIPPED_COPY: Record<string, BookingCopy> = {
+  en: BOOKING_COPY_EN,
+  nl: assertShippedCatalog('nl', BOOKING_COPY_NL),
+  fr: assertShippedCatalog('fr', BOOKING_COPY_FR),
+};
+
 
 function addsUrl(original: string, out: string): boolean {
   const orig = new Set((original.match(URL_RE) || []).map((u) => u.toLowerCase()));
@@ -219,7 +246,8 @@ function mergeTranslated(base: BookingCopy, candidate: Record<string, unknown>):
 
 export async function getBookingCopy(language: string, tenantId?: string): Promise<BookingCopy> {
   const lang = normalizeLanguageCode(language) ?? 'en';
-  if (lang === 'en') return { ...BOOKING_COPY_EN };
+  const shipped = SHIPPED_COPY[lang];
+  if (shipped) return { ...shipped };
 
   const key = `booking-copy:${CATALOG_HASH}:${lang}`;
   const cached = inProcess.get(key);
@@ -323,7 +351,8 @@ export function formatWhen(start: Date, timezone: string, language: string): str
 
 /**
  * Fire-and-forget: load customer + owner copy while slot/travel checks run so
- * `mirrorCreatedBooking` usually hits a warm cache instead of a cold LLM call.
+ * `mirrorCreatedBooking` usually hits a warm cache instead of a cold LLM call
+ * (en/nl/fr are shipped statically and are instant).
  */
 export function prefetchAudienceBookingCopy(
   tenantId: string,
@@ -344,7 +373,7 @@ export function prefetchAudienceBookingCopy(
   });
 }
 
-/** Pre-translate portal locales after deploy or catalog change. Non-English only. */
+/** Pre-load copy after deploy. Shipped locales are instant; others hit the LLM. */
 export async function warmBookingCopyCache(
   languages: readonly string[] = SUPPORTED_LOCALES.filter((l) => l !== 'en'),
 ): Promise<Array<{ lang: string; ms: number }>> {

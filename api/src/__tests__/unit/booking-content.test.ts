@@ -8,7 +8,7 @@
  * raw service name; rich content lives in `description`.
  */
 import { describe, it, expect } from 'vitest';
-import { BOOKING_COPY_EN } from '../../booking/booking-copy';
+import { BOOKING_COPY_EN, BOOKING_COPY_NL } from '../../booking/booking-copy';
 import {
   buildBookingEventContent,
   storedFileNames,
@@ -392,5 +392,36 @@ describe('storedFileNames', () => {
   it('treats a non-array column as no files at all', () => {
     expect(storedFileNames(null)).toEqual([]);
     expect(storedFileNames({ fileName: 'x.pdf' })).toEqual([]);
+  });
+});
+
+describe('buildBookingEventContent — Dutch owner catalog', () => {
+  it('labels the owner calendar event in Dutch', () => {
+    const { summary, description } = buildBookingEventContent(
+      {
+        attendeeName: 'Achraf',
+        attendeeEmail: 'achraf.lamrani@telenet.be',
+        customerPhone: '+32475464421',
+        customerAddress: 'Passtraat 248B, 9100 Sint-Niklaas',
+        durationMin: 30,
+        sourceChannel: 'whatsapp',
+        bookingId: 'aa885b61-0000-4000-8000-000000000000',
+      },
+      { name: 'klantenafspraak' },
+      MANAGE,
+      BOOKING_COPY_NL,
+    );
+    expect(summary).toBe('Boeking: klantenafspraak - Achraf');
+    expect(description.split('\n')).toEqual([
+      'Dienst: klantenafspraak',
+      'Klant: Achraf',
+      'E-mail: achraf.lamrani@telenet.be',
+      'Telefoon: +32475464421',
+      'Adres: Passtraat 248B, 9100 Sint-Niklaas',
+      'Duur: 30 min',
+      'Geboekt via: whatsapp',
+      'Referentie: AX-BKG-AA885B61',
+      `Beheren: ${MANAGE}`,
+    ]);
   });
 });

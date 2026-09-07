@@ -1799,6 +1799,27 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       }
     }
 
+    _tokenUsable(token) {
+      // Restore requires a live JWT. A blob with sessionId+tenantId but no token
+      // (or an expired one) must fall through to /widget/init — otherwise
+      // _connectSocketIO defers, syncHistory early-returns, and the visitor
+      // sits on cached messages with a Reconnecting banner forever.
+      if (typeof token !== 'string' || !token) return false;
+      try {
+        const parts = token.split('.');
+        if (parts.length < 2) return false;
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+        const payload = JSON.parse(atob(padded));
+        if (payload && typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) {
+          return false;
+        }
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
     async _initSession(epoch) {
       // Try to restore existing session
       const storedSession = this.readStoredSession();
@@ -1806,6 +1827,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         const { key, session } = storedSession;
 
         if (session.sessionId && session.tenantId &&
+            this._tokenUsable(session.token) &&
             // Never resume a blob written for ANOTHER identity (S2) - a stale
             // cached script may have rewritten it since the constructor check.
             (!session.visitorId || !this.visitorId || session.visitorId === this.visitorId)) {

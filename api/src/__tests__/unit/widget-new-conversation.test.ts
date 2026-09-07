@@ -104,6 +104,15 @@ describe('widget.js — New conversation control', () => {
     expect(initSession).toMatch(/session\.visitorId === this\.visitorId/);
   });
 
+  it('refuses to restore a blob without a usable JWT and falls through to /widget/init', () => {
+    // A sessionId+tenantId blob with no token used to restore anyway, then
+    // _connectSocketIO deferred and syncHistory no-op'd — Reconnecting forever.
+    const initSession = from('async _initSession(epoch) {').slice(0, 3500);
+    expect(initSession).toMatch(/this\._tokenUsable\(session\.token\)/);
+    expect(widgetSrc).toMatch(/_tokenUsable\(token\)/);
+    expect(widgetSrc).toMatch(/payload\.exp \* 1000 <= Date\.now\(\)/);
+  });
+
   it('guards the socket connect + init against a stale (superseded) epoch', () => {
     // _connectSocketIO and _initSession must bail when their epoch is stale.
     expect(widgetSrc).toMatch(/_connectSocketIO\(epoch\)/);

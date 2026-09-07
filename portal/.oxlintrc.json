@@ -7,10 +7,12 @@
     "**/*.spec.tsx",
     "**/__tests__/**"
   ],
+  "plugins": ["react"],
   "categories": {
     "correctness": "warn"
   },
   "rules": {
+    "react/rules-of-hooks": "error",
     "complexity": ["warn", { "max": 20 }],
     "max-lines": ["warn", { "max": 800, "skipBlankLines": true, "skipComments": true }],
     "max-lines-per-function": ["warn", { "max": 80, "skipBlankLines": true, "skipComments": true }],

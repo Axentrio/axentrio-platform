@@ -564,7 +564,10 @@ export default function Leads() {
   // pressed spins — two controls sharing one flag would look like both are working.
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null);
 
-  const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];
+  const allLeads = useMemo(
+    () => data?.pages.flatMap((p) => p.leads) ?? [],
+    [data],
+  );
   // Counted over the LOADED rows, and labelled as such next to the number. The list
   // endpoint returns a cursor and no totals, so anything presented as a whole-dataset
   // figure here would be a guess dressed as a fact.

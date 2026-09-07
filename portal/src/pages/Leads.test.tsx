@@ -132,6 +132,30 @@ describe('Leads page — gating', () => {
     expect(container.innerHTML).not.toMatch(/requiredTier["']?\s*[:=]\s*["']pro/i);
   });
 
+  it('does not throw when leadCapture entitlement loads in', () => {
+    // Prod React #310: useMemo below if (!isEntitled) ran one extra hook once
+    // entitlements flipped false → true.
+    hasFeatureMock.mockReturnValue(false);
+    apiGet.mockImplementation(async (url: string) => {
+      if (url.startsWith('/leads/retention')) return { retentionDays: null, minDays: 30, maxDays: 3650 };
+      if (url.startsWith('/leads')) return { leads: [], nextCursor: null };
+      return {};
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrap = (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <Leads />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(wrap);
+    hasFeatureMock.mockReturnValue(true);
+    expect(() => rerender(wrap)).not.toThrow();
+  });
+
   it('shows the Pro columns only when leadEnrichment is on', async () => {
     hasFeatureMock.mockImplementation((k) => k !== 'leadEnrichment');
     renderUI([PRO_LEAD]);

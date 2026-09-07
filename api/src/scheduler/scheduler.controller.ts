@@ -21,6 +21,7 @@ import {
   UnsupportedBusinessCountryError,
 } from '../booking/business-timezone';
 import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
+import { availabilityToBusinessHours } from '../booking/sync-hours-from-bot';
 import { targetBotId } from '../utils/target-bot';
 import { resolveWorkLocation, locationTypeSideEffects } from '../booking/service-location';
 import { requireFeature } from '../billing/enforce';
@@ -68,6 +69,7 @@ import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { isBookingConfigured } from './booking-readiness';
+import { isBusinessHoursConfigured } from '../utils/format-business-hours';
 
 /** Surface a BookingError through the global handler with its real status/code. */
 function asApiError(err: unknown): never {
@@ -420,6 +422,29 @@ async function writeAvailabilitySection(
   await repo.save(rule);
 }
 
+/**
+ * The spoken half of a booking-hours save.
+ *
+ * `{openingHours}` prefers Bot.settings.businessHours over the AvailabilityRule, so a rule
+ * written here without this mirror leaves the bot advertising hours it will refuse to book
+ * (observed live: diary tue 12:00-18:00, bot said "dinsdag 09:00 tot 17:00").
+ */
+async function writeSpokenHoursSection(
+  botId: string,
+  tenantId: string,
+  settings: BotSettings,
+  input: NonNullable<UpdateSchedulerInput['availability']>,
+): Promise<void> {
+  if (!isBusinessHoursConfigured(settings.businessHours)) return;
+  if (input.availabilityMode !== 'business_hours') return;
+  const patch = availabilityToBusinessHours(input, settings.businessHours.schedule);
+  await replaceBotSettingsSection(botId, tenantId, 'businessHours', {
+    ...settings.businessHours,
+    schedule: patch.schedule,
+    dateOverrides: patch.dateOverrides,
+  });
+}
+
 /** Is travel time already switched on for this Agent? */
 async function travelIsAlreadyOn(botId: string): Promise<boolean> {
   const stored = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
@@ -698,7 +723,10 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
   if (data.eventType) await writeEventTypeSection(tenantId, bot.id, data.eventType);
 
-  if (data.availability) await writeAvailabilitySection(tenantId, bot, data.availability);
+  if (data.availability) {
+    await writeAvailabilitySection(tenantId, bot, data.availability);
+    await writeSpokenHoursSection(bot.id, tenantId, settings, data.availability);
+  }
 
   // Checked BEFORE the upsert, so a refused enable leaves nothing written — not even the
   // slack value that rode along in the same payload. Only an enable is gated: switching

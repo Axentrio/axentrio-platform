@@ -1909,12 +1909,14 @@ export class AgentService {
       { role: 'user', text: ctx.message },
     ]);
     // Chips exist to pick a time. If the customer already named one that we can actually
-    // book, or the reply is confirming that one time, attaching hours again is how the
-    // WhatsApp loop starts: they tap the same chip, we re-check, we re-attach the chips.
-    const alreadyChoseTime = !state.namedTimeRefused && !!(
-      times.confirmableLocal &&
-      (namesSingleOfferedTime(customerTimeText, times.confirmableLocal) ||
-        namesSingleOfferedTime(finalContent, times.confirmableLocal))
+    // book, attaching hours again is how the WhatsApp loop starts: they tap the same chip,
+    // we re-check, we re-attach the chips. A single time in the REPLY is not that — when
+    // their own hour was ruled out, it is the refusal naming the day's opening.
+    const customerChoseFree = namesSingleOfferedTime(customerTimeText, times.confirmableLocal ?? []);
+    const customerNamedRuledOut = !!unofferedSingleTimeIn(customerTimeText, times.everyOfferableLocal ?? []);
+    const alreadyChoseTime = !state.namedTimeRefused && !!times.confirmableLocal && (
+      customerChoseFree ||
+      (!customerNamedRuledOut && namesSingleOfferedTime(finalContent, times.confirmableLocal))
     );
     const slotChips = alreadyChoseTime
       ? undefined

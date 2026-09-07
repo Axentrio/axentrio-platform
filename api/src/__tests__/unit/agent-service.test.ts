@@ -1822,6 +1822,55 @@ describe('AgentService', () => {
     }
   });
 
+  it('keeps Auto-book chips when a refusal names only the day\'s first open hour', async () => {
+    // Measured on the real run loop: customer asks 10:00 on a 12:00-open Tuesday,
+    // reply is "Er zijn die dag tijden vanaf 12:00." — one offered clock in the
+    // reply, none in the customer's own hour. alreadyChoseTime used to treat
+    // that as the customer picking 12:00 and drop the chips.
+    const slots = [
+      { start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' },
+      { start: '2026-09-08T10:30:00.000Z', end: '2026-09-08T11:00:00.000Z' },
+      { start: '2026-09-08T11:00:00.000Z', end: '2026-09-08T11:30:00.000Z' },
+    ];
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-08', endDate: '2026-09-08' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Er zijn die dag tijden vanaf 12:00.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ik wil dinsdag 8 september 2026 om 10:00 een Booking test boeken. Tom Test, 0470 00 00 03, achraflamranim@gmail.com.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toHaveLength(3);
+      expect(result.content).toBe('Er zijn die dag tijden vanaf 12:00.');
+    }
+  });
+
   it('still withholds chips when a day-part window misses, so namiddag does not become morning', async () => {
     const slots = [{ start: '2026-09-07T07:00:00.000Z', end: '2026-09-07T07:30:00.000Z' }];
     const clockWindow = { from: '12:00', to: '18:00', matched: false };

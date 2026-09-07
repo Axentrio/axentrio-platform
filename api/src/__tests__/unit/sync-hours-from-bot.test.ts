@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { businessHoursToAvailability, type SpokenHours } from '../../booking/sync-hours-from-bot';
+import { availabilityToBusinessHours, businessHoursToAvailability, type SpokenHours } from '../../booking/sync-hours-from-bot';
 
 const open = (day: string, open = '09:00', close = '17:00') => ({
   day,
@@ -128,5 +128,65 @@ describe('businessHoursToAvailability — dateOverrides', () => {
   it('replaces dateOverrides with [] when the spoken hours omit them', () => {
     const spoken: SpokenHours = { schedule: [open('monday')] };
     expect(businessHoursToAvailability(spoken).dateOverrides).toEqual([]);
+  });
+});
+
+describe('availabilityToBusinessHours — weeklyHours', () => {
+  it('emits all seven days; open days take the window, missing days shut', () => {
+    const { schedule } = availabilityToBusinessHours({
+      weeklyHours: {
+        mon: [{ start: '09:00', end: '17:00' }],
+        tue: [{ start: '12:00', end: '18:00' }],
+      },
+    });
+
+    expect(schedule).toHaveLength(7);
+    expect(schedule.map((d) => d.day)).toEqual([
+      'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    ]);
+    expect(schedule.find((d) => d.day === 'monday')).toEqual({
+      day: 'monday', open: '09:00', close: '17:00', closed: false,
+    });
+    expect(schedule.find((d) => d.day === 'tuesday')).toEqual({
+      day: 'tuesday', open: '12:00', close: '18:00', closed: false,
+    });
+    for (const day of ['wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+      expect(schedule.find((d) => d.day === day)).toEqual({
+        day, open: '09:00', close: '17:00', closed: true,
+      });
+    }
+  });
+
+  it('collapses a split shift to the earliest start and latest end', () => {
+    const { schedule } = availabilityToBusinessHours({
+      weeklyHours: {
+        mon: [
+          { start: '09:00', end: '12:00' },
+          { start: '14:00', end: '18:00' },
+        ],
+      },
+    });
+
+    expect(schedule.find((d) => d.day === 'monday')).toEqual({
+      day: 'monday', open: '09:00', close: '18:00', closed: false,
+    });
+  });
+
+  it('keeps stored clock text on a day that the rule shuts', () => {
+    const { schedule } = availabilityToBusinessHours(
+      { weeklyHours: { mon: [{ start: '09:00', end: '17:00' }] } },
+      [{ day: 'wednesday', open: '08:00', close: '16:00', closed: false }],
+    );
+
+    expect(schedule.find((d) => d.day === 'wednesday')).toEqual({
+      day: 'wednesday', open: '08:00', close: '16:00', closed: true,
+    });
+  });
+});
+
+describe('availabilityToBusinessHours — dateOverrides', () => {
+  it('copies dateOverrides verbatim', () => {
+    const dateOverrides = [{ date: '2026-12-25', closed: true }];
+    expect(availabilityToBusinessHours({ dateOverrides }).dateOverrides).toEqual(dateOverrides);
   });
 });

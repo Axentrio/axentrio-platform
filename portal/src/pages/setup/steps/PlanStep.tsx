@@ -20,6 +20,7 @@ import {
   type CheckoutablePlan,
 } from '@/queries/useBillingQueries';
 import type { StepProps } from './types';
+import { isPlanCovered } from '@contracts/billing-coverage';
 
 /** Mirrors SELF_SERVE_PLANS in Settings → Billing, in upgrade-rank order. */
 const PLANS: CheckoutablePlan[] = ['essential', 'pro', 'enterprise'];
@@ -43,12 +44,7 @@ export function PlanStep({ submit }: StepProps) {
   const { data: billing, isLoading: billingLoading } = useBillingState();
   const checkout = useStartCheckout();
   const [selected, setSelected] = React.useState<CheckoutablePlan | null>(null);
-  const alreadyCovered =
-    billing?.hasStripeSubscription === true ||
-    billing?.status === 'trialing' ||
-    billing?.status === 'active' ||
-    billing?.status === 'past_due' ||
-    (billing != null && billing.tier !== 'free');
+  const alreadyCovered = billing != null && isPlanCovered(billing);
   const buy = (planId: CheckoutablePlan) => {
     setSelected(planId);
     // Record the answer first: the redirect below leaves the app, and coming back to

@@ -226,6 +226,17 @@ export async function updateClerkOrganization(
   }
 }
 
+/** Whether the Clerk organization has an uploaded logo. False on any Clerk error. */
+export async function organizationHasImage(clerkOrgId: string): Promise<boolean> {
+  try {
+    const org = await clerkClient.organizations.getOrganization({ organizationId: clerkOrgId });
+    return org.hasImage === true;
+  } catch (error) {
+    logger.warn('Could not read Clerk organization image', { error, clerkOrgId });
+    return false;
+  }
+}
+
 export async function deleteClerkOrganization(clerkOrgId: string): Promise<boolean> {
   try {
     await clerkClient.organizations.deleteOrganization(clerkOrgId);

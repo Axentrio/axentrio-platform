@@ -229,6 +229,7 @@ describe('restartOnboarding — re-open the wizard without wiping the workspace'
 
 const noEvidence: RestartEvidence = {
   aiEnabled: false,
+  hasLogo: false,
   documentCount: 0,
   planCovered: false,
   calendarConnected: false,
@@ -260,6 +261,14 @@ describe('hydrateRestartSteps — mark done from live evidence, never skipped', 
     expect(hydrateRestartSteps(wiped, noEvidence).steps.plan).toBeUndefined();
     expect(
       hydrateRestartSteps(wiped, { ...noEvidence, planCovered: true }).steps.plan,
+    ).toBe('done');
+  });
+
+  it('marks logo done from hasLogo', () => {
+    const wiped = restartOnboarding(finished());
+    expect(hydrateRestartSteps(wiped, noEvidence).steps.logo).toBeUndefined();
+    expect(
+      hydrateRestartSteps(wiped, { ...noEvidence, hasLogo: true }).steps.logo,
     ).toBe('done');
   });
 

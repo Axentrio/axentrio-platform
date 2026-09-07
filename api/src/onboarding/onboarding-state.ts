@@ -12,7 +12,7 @@
  *   REQUIRED   — language, company, plan. There is no way past these.
  *   OPTIONAL   — logo, chatbot, documents, social, bookings, leads. Skipping is a
  *                real answer. For features, it SWITCHES THE FEATURE OFF rather than
- *                leaving it half-configured. Documents is optional too: the assistant
+ *                leaving it half-configured. Documents is optional too: the Agent
  *                will have nothing to answer from until they add knowledge later.
  *
  * GRANDFATHERING. Existing tenants are stamped complete by migration. Absent state means
@@ -52,7 +52,7 @@ export const REQUIRED_STEPS: readonly OnboardingStep[] = ['language', 'company',
  * nothing, which is worse than not offering the choice.
  *
  * `chatbot` is deliberately absent, but NOT because skipping it does nothing. The
- * website assistant is `ai.enabled` on the tenant's anchor bot, not an entitlement, so
+ * website Agent is `ai.enabled` on the tenant's anchor bot, not an entitlement, so
  * it cannot be expressed as a toggle key — the route turns it off directly. Listing a
  * fake key here would have been worse than the special case.
  */
@@ -189,10 +189,11 @@ export function restartOnboarding(state: OnboardingState): OnboardingState {
  * After a restart wipe, mark steps `done` where live evidence already exists.
  *
  * Writes `done` only — never `skipped` — so `applySkipEffects` does not run and
- * working features stay on. Logo is not set here: Clerk's image is not on the tenant.
+ * working features stay on. Logo comes from Clerk's organization image, read by the route.
  */
 export interface RestartEvidence {
   aiEnabled: boolean;
+  hasLogo: boolean;
   documentCount: number;
   planCovered: boolean;
   calendarConnected: boolean;
@@ -207,6 +208,7 @@ export function hydrateRestartSteps(
   const steps: OnboardingState['steps'] = { ...state.steps };
   if (state.language != null) steps.language = 'done';
   if (state.company != null) steps.company = 'done';
+  if (evidence.hasLogo) steps.logo = 'done';
   if (evidence.aiEnabled) steps.chatbot = 'done';
   if (evidence.documentCount > 0) steps.documents = 'done';
   if (evidence.planCovered) steps.plan = 'done';

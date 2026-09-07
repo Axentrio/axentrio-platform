@@ -18,7 +18,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
+import { useQuery, useQueryClient, queryOptions, type QueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { api, handleApiError } from "../services/apiClient";
 import { queryKeys } from "./queryKeys";
@@ -423,43 +423,53 @@ function conflictCodeOf(err: unknown): string | undefined {
  *   pending bubble; `retryMessage` re-sends a FAILED bubble with the SAME
  *   clientMessageId (server-side idempotent).
  */
+/** Apply `patch` to every cached chat row + the detail entry, then run `request`; roll back on failure. */
+async function patchChatOptimistically(
+  queryClient: QueryClient,
+  chatId: string,
+  patch: Partial<Chat>,
+  request: () => Promise<unknown>,
+): Promise<void> {
+  const previous = queryClient.getQueriesData({
+    queryKey: queryKeys.chats.all(),
+  });
+  queryClient.setQueriesData<{ data?: Chat[] }>(
+    { queryKey: queryKeys.chats.all() },
+    (old) => {
+      if (!old) return old;
+      if (Array.isArray(old.data)) {
+        return {
+          ...old,
+          data: old.data.map((row) =>
+            row.id === chatId ? mergeDefined(row, patch) : row,
+          ),
+        };
+      }
+      return old;
+    },
+  );
+  queryClient.setQueryData<ChatDetailCacheEntry>(
+    queryKeys.chats.detail(chatId),
+    (old) => (old ? mergeDefined(old, patch) : old),
+  );
+  try {
+    await request();
+  } catch (err) {
+    for (const [key, data] of previous) {
+      queryClient.setQueryData(key, data);
+    }
+    throw err;
+  }
+}
+
 /** PATCH /chats/:id { userName } — optimistic list + detail via mergeDefined. */
 export function useRenameConversation() {
   const queryClient = useQueryClient();
   return useCallback(
-    async (chatId: string, userName: string) => {
-      const patch = { userName };
-      const previous = queryClient.getQueriesData({
-        queryKey: queryKeys.chats.all(),
-      });
-      queryClient.setQueriesData<{ data?: Chat[] }>(
-        { queryKey: queryKeys.chats.all() },
-        (old) => {
-          if (!old) return old;
-          if (Array.isArray(old.data)) {
-            return {
-              ...old,
-              data: old.data.map((row) =>
-                row.id === chatId ? mergeDefined(row, patch) : row,
-              ),
-            };
-          }
-          return old;
-        },
-      );
-      queryClient.setQueryData<ChatDetailCacheEntry>(
-        queryKeys.chats.detail(chatId),
-        (old) => (old ? mergeDefined(old, patch) : old),
-      );
-      try {
-        await api.patch(`/chats/${chatId}`, { userName });
-      } catch (err) {
-        for (const [key, data] of previous) {
-          queryClient.setQueryData(key, data);
-        }
-        throw err;
-      }
-    },
+    (chatId: string, userName: string) =>
+      patchChatOptimistically(queryClient, chatId, { userName }, () =>
+        api.patch(`/chats/${chatId}`, { userName }),
+      ),
     [queryClient],
   );
 }
@@ -468,39 +478,10 @@ export function useRenameConversation() {
 export function useUpdateConversationTags() {
   const queryClient = useQueryClient();
   return useCallback(
-    async (chatId: string, tags: string[]) => {
-      const patch = { tags };
-      const previous = queryClient.getQueriesData({
-        queryKey: queryKeys.chats.all(),
-      });
-      queryClient.setQueriesData<{ data?: Chat[] }>(
-        { queryKey: queryKeys.chats.all() },
-        (old) => {
-          if (!old) return old;
-          if (Array.isArray(old.data)) {
-            return {
-              ...old,
-              data: old.data.map((row) =>
-                row.id === chatId ? mergeDefined(row, patch) : row,
-              ),
-            };
-          }
-          return old;
-        },
-      );
-      queryClient.setQueryData<ChatDetailCacheEntry>(
-        queryKeys.chats.detail(chatId),
-        (old) => (old ? mergeDefined(old, patch) : old),
-      );
-      try {
-        await api.patch(`/chats/${chatId}/tags`, { tags });
-      } catch (err) {
-        for (const [key, data] of previous) {
-          queryClient.setQueryData(key, data);
-        }
-        throw err;
-      }
-    },
+    (chatId: string, tags: string[]) =>
+      patchChatOptimistically(queryClient, chatId, { tags }, () =>
+        api.patch(`/chats/${chatId}/tags`, { tags }),
+      ),
     [queryClient],
   );
 }

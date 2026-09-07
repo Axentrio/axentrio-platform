@@ -29,11 +29,13 @@ import { KnowledgeDocument } from '../database/entities/KnowledgeDocument';
 import { CalendarCredential } from '../database/entities/CalendarCredential';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
+import { organizationHasImage } from '../services/clerk-sync.service';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { logAudit } from '../utils/audit';
 import { prefillAccountInformation } from '../account/account-information';
 import { getEntitlements } from '../billing/entitlements';
 import { getBillingState } from '../billing/service';
+import { isPlanCovered } from '../contracts/billing-coverage';
 import {
   emptyState,
   isComplete,
@@ -381,9 +383,9 @@ router.post(
  * Live workspace facts used only by restart hydration. Never writes `skipped`.
  */
 async function loadRestartEvidence(tenantId: string): Promise<RestartEvidence> {
-  const [tenant, billing, documentCount, calendarCount, channelCount, aiEnabled] =
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  const [billing, documentCount, calendarCount, channelCount, aiEnabled, hasLogo] =
     await Promise.all([
-      AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } }),
       getBillingState(tenantId),
       AppDataSource.getRepository(KnowledgeDocument).count({ where: { tenantId } }),
       AppDataSource.getRepository(CalendarCredential).count({
@@ -393,20 +395,17 @@ async function loadRestartEvidence(tenantId: string): Promise<RestartEvidence> {
         where: { tenantId, status: 'active' },
       }),
       getAnchorBotConfig(tenantId).then(({ settings }) => settings.ai?.enabled === true),
+      tenant?.clerkOrgId ? organizationHasImage(tenant.clerkOrgId) : Promise.resolve(false),
     ]);
 
   return {
     aiEnabled,
     documentCount,
-    planCovered:
-      billing.tier !== 'free' ||
-      billing.status === 'trialing' ||
-      billing.status === 'active' ||
-      billing.status === 'past_due' ||
-      billing.hasStripeSubscription === true,
+    planCovered: isPlanCovered(billing),
     calendarConnected: calendarCount > 0,
     leadCaptureOn: tenant?.featureToggles?.leadCapture !== false,
     hasChannelConnection: channelCount > 0,
+    hasLogo,
   };
 }
 

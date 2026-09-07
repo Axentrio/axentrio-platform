@@ -29,6 +29,7 @@ const logAudit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
  * neither depends on it being up nor spends seconds per assertion.
  */
 const lookupCompanyByVat = vi.hoisted(() => vi.fn());
+const organizationHasImage = vi.hoisted(() => vi.fn(async () => false));
 
 vi.mock('../../middleware/clerk.middleware', async () => {
   const { UnauthorizedError } = await import('../../middleware/error-handler');
@@ -62,11 +63,17 @@ vi.mock('../../utils/audit', () => ({ logAudit }));
 vi.mock('../../integrations/company-lookup/company-lookup.service', () => ({
   lookupCompanyByVat,
 }));
+vi.mock('../../services/clerk-sync.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/clerk-sync.service')>()),
+  organizationHasImage,
+}));
 
 import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
+import { CalendarCredential } from '../../database/entities/CalendarCredential';
+import { replaceAnchorBotSettingsSection } from '../../services/bot-config.service';
 import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import { Bot } from '../../database/entities/Bot';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
@@ -126,6 +133,7 @@ async function answerAllSteps(tenantId: string) {
 beforeEach(() => {
   logAudit.mockClear();
   lookupCompanyByVat.mockReset().mockResolvedValue(FOUND);
+  organizationHasImage.mockResolvedValue(false);
 });
 
 describe('test isolation', () => {
@@ -632,6 +640,80 @@ describe('POST /onboarding/restart', () => {
     res = await request(app).post('/api/v1/onboarding/restart');
     expect(res.status).toBe(200);
     expect(res.body.data.state.steps.social).toBe('done');
+  });
+
+  it('completes a fully evidenced workspace on restart when Clerk holds a logo', async () => {
+    organizationHasImage.mockResolvedValue(true);
+    const tenant = await signedInTenant({ clerkOrgId: 'org_logo' });
+    const bot = await createTestAnchorBot(tenant);
+    await replaceAnchorBotSettingsSection(tenant.id, 'ai', { enabled: true } as never);
+    await answerAllSteps(tenant.id);
+    await request(app).post('/api/v1/onboarding/complete');
+    const credRepo = AppDataSource.getRepository(CalendarCredential);
+    await credRepo.save(
+      credRepo.create({
+        tenantId: tenant.id,
+        botId: bot.id,
+        provider: 'google',
+        status: 'active',
+        accessTokenEnc: 'enc:test',
+        refreshTokenEnc: 'enc:test',
+        accountEmail: `owner+${bot.id.slice(0, 6)}@example.com`,
+        calendarId: 'primary',
+        tokenExpiry: new Date(Date.now() + 3_600_000),
+      }),
+    );
+    const channels = AppDataSource.getRepository(ChannelConnection);
+    await channels.save(
+      channels.create({
+        tenantId: tenant.id,
+        channel: 'whatsapp',
+        status: 'active',
+        platformAccountId: `acct_logo_${Date.now()}`,
+      }),
+    );
+
+    const res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ complete: true, nextStep: null });
+    expect((await storedState(tenant.id)).completedAt).toEqual(expect.any(String));
+  });
+
+  it('leaves logo open when Clerk has no image', async () => {
+    organizationHasImage.mockResolvedValue(false);
+    const tenant = await signedInTenant({ clerkOrgId: 'org_nologo' });
+    const bot = await createTestAnchorBot(tenant);
+    await replaceAnchorBotSettingsSection(tenant.id, 'ai', { enabled: true } as never);
+    await answerAllSteps(tenant.id);
+    await request(app).post('/api/v1/onboarding/complete');
+    const credRepo = AppDataSource.getRepository(CalendarCredential);
+    await credRepo.save(
+      credRepo.create({
+        tenantId: tenant.id,
+        botId: bot.id,
+        provider: 'google',
+        status: 'active',
+        accessTokenEnc: 'enc:test',
+        refreshTokenEnc: 'enc:test',
+        accountEmail: `owner+${bot.id.slice(0, 6)}@example.com`,
+        calendarId: 'primary',
+        tokenExpiry: new Date(Date.now() + 3_600_000),
+      }),
+    );
+    const channels = AppDataSource.getRepository(ChannelConnection);
+    await channels.save(
+      channels.create({
+        tenantId: tenant.id,
+        channel: 'whatsapp',
+        status: 'active',
+        platformAccountId: `acct_nologo_${Date.now()}`,
+      }),
+    );
+
+    const res = await request(app).post('/api/v1/onboarding/restart');
+    expect(res.status).toBe(200);
+    expect(res.body.data.nextStep).toBe('logo');
+    expect(res.body.data.state.steps.logo).toBeUndefined();
   });
 
   it('is admin-only', async () => {

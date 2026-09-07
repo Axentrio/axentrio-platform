@@ -564,6 +564,22 @@ export default function Leads() {
   // pressed spins — two controls sharing one flag would look like both are working.
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null);
 
+  const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];
+  // Counted over the LOADED rows, and labelled as such next to the number. The list
+  // endpoint returns a cursor and no totals, so anything presented as a whole-dataset
+  // figure here would be a guess dressed as a fact.
+  const attention = useMemo(() => {
+    let overdue = 0;
+    let unconfirmed = 0;
+    for (const lead of allLeads) {
+      if (lead.status === 'archived') continue;
+      const days = daysWaiting(lead);
+      if (days != null && days >= OVERDUE_DAYS) overdue += 1;
+      if (lead.followUp?.action === 'confirm_request') unconfirmed += 1;
+    }
+    return { overdue, unconfirmed };
+  }, [allLeads]);
+
   const exportLeads = async (format: 'csv' | 'xlsx') => {
     setExporting(format);
     try {
@@ -645,22 +661,6 @@ export default function Leads() {
     return <FeatureDisabledNotice featureLabel={t('features.keys.leadCapture.label', { defaultValue: 'Leads' })} />;
   }
 
-  const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];
-
-  // Counted over the LOADED rows, and labelled as such next to the number. The list
-  // endpoint returns a cursor and no totals, so anything presented as a whole-dataset
-  // figure here would be a guess dressed as a fact.
-  const attention = useMemo(() => {
-    let overdue = 0;
-    let unconfirmed = 0;
-    for (const lead of allLeads) {
-      if (lead.status === 'archived') continue;
-      const days = daysWaiting(lead);
-      if (days != null && days >= OVERDUE_DAYS) overdue += 1;
-      if (lead.followUp?.action === 'confirm_request') unconfirmed += 1;
-    }
-    return { overdue, unconfirmed };
-  }, [allLeads]);
   const colCount = hasEnrichment ? 9 : 5;
 
   return (

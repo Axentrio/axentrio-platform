@@ -2224,6 +2224,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         const resp = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/history`, {
           headers: { 'Authorization': 'Bearer ' + this.token },
         }, 15000);
+        // Expired JWT in the cached blob: re-init via durable visitorId and reconnect.
+        // Without this, history silently no-ops while the socket retries forever.
+        if (resp.status === 401) {
+          this._recoverWidgetSession('history_auth');
+          return;
+        }
         if (!resp.ok) return;
         const { data } = await resp.json();
         if (!Array.isArray(data)) return;

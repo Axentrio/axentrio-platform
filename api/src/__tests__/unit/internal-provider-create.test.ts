@@ -2787,8 +2787,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
  * Nothing was wrong with the arithmetic. `slots: []` simply cannot tell "the diary is full"
  * from "your day was outside the window", and the caller had to guess. `emptyRange` is that
  * missing fact, and these tests drive the real provider through both reported configurations.
- * The two negative cases are the other half of the contract: a genuinely shut day must NOT get
- * a policy reason, because the request advice is right for it.
+ * The negative cases are the other half of the contract: a business that never opens must
+ * NOT get a policy reason, because the retry week is empty too and the request advice is
+ * right for it. A single closed weekday with open days around it is `closed` — see below.
  */
 describe('InternalProvider.checkAvailability · a range the policy ruled out', () => {
   let provider: InternalProvider;
@@ -2858,8 +2859,8 @@ describe('InternalProvider.checkAvailability · a range the policy ruled out', (
   });
 
   it('says nothing about a day the business is simply shut', async () => {
-    // The request advice is RIGHT here and must survive. A policy reason would send the
-    // customer to a range with nothing in it either.
+    // weeklyHours: {} is always-shut. A closed diagnosis would send the model to a range
+    // with nothing in it either, so the request advice is RIGHT here and must survive.
     configured({ minNoticeMin: 1440 }, { weeklyHours: {} });
     const res = await provider.checkAvailability(ctx, '2026-08-26', '2026-08-26');
     expect(res.slots).toEqual([]);
@@ -2873,6 +2874,60 @@ describe('InternalProvider.checkAvailability · a range the policy ruled out', (
     expect(res.emptyRange).toBeUndefined();
   });
 });
+
+/**
+ * A closed weekday must not look like an empty diary.
+ *
+ * Report: Auto-book, 30 min, Wed/Fri 09:00-17:00, Thursday closed, asked for
+ * Thursday 10 September 2026 at 10:00. The engine refused correctly. The bot
+ * then offered to register the appointment as a request, while Friday was open.
+ */
+describe('InternalProvider.checkAvailability · a closed weekday', () => {
+  let provider: InternalProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-07T08:00:00Z'));
+    provider = new InternalProvider();
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValue([]);
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const configured = (): void => {
+    const svc = { ...EVENT_TYPE, bookingMode: 'auto' };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    ruleFindOne.mockResolvedValue({
+      ...RULE,
+      weeklyHours: {
+        wed: [{ start: '09:00', end: '17:00' }],
+        fri: [{ start: '09:00', end: '17:00' }],
+      },
+    });
+  };
+
+  it('reads Thursday as closed, not as an empty diary', async () => {
+    configured();
+    const res = await provider.checkAvailability(ctx, '2026-09-10', '2026-09-10');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toEqual({ reason: 'closed', boundary: '2026-09-10T22:00:00.000Z' });
+  });
+
+  it('and Friday, the next working day, was bookable all along', async () => {
+    configured();
+    const res = await provider.checkAvailability(ctx, '2026-09-11', '2026-09-11');
+    expect(res.slots[0]?.start).toBe('2026-09-11T07:00:00.000Z'); // Fri 11 Sep, 09:00 Brussels
+    expect(res.emptyRange).toBeUndefined();
+  });
+});
+
 
 /**
  * An auto-book service must not BANK a time its own policy refuses.
@@ -3030,6 +3085,34 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
     );
     await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ success: true, requested: true });
   });
+
+  it('refuses an auto-book capture on a closed weekday, and writes nothing', async () => {
+    // Report: Thursday closed, asked for Thursday 10:00. request_appointment used to
+    // succeed because requests skip hours, and the customer was offered a manual
+    // request on a service that still books automatically the next open day.
+    // RULE opens Wednesday only, so Thu 11 Jun is shut and the retry week has hours.
+    const thursday = '2026-06-11T08:00:00Z'; // Thu 11 Jun, 10:00 Brussels
+    await expect(ask(thursday)).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+    await expect(ask(thursday)).rejects.toThrow(/do NOT capture it/i);
+    await expect(ask(thursday)).rejects.toThrow(/closed that whole date/i);
+    await expect(ask(thursday)).rejects.toThrow(/startDate 2026-06-12 and endDate 2026-06-18/);
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('still captures a REQUEST-ONLY service on a closed weekday', async () => {
+    const requestOnly = { ...EVENT_TYPE, bookingMode: 'request' };
+    eventTypeFindOne.mockResolvedValue(requestOnly);
+    serviceTypeFind.mockResolvedValue([requestOnly]);
+    await expect(ask('2026-06-11T08:00:00Z')).resolves.toMatchObject({ success: true, requested: true });
+  });
+
+  it('still captures when the business never opens', async () => {
+    // Always-shut is ordinary empty: there is no later open day to send them to, so
+    // refusing the capture would leave the customer with nowhere to go.
+    ruleFindOne.mockResolvedValue({ ...RULE, weeklyHours: {} });
+    await expect(ask('2026-06-11T08:00:00Z')).resolves.toMatchObject({ success: true, requested: true });
+  });
+
 });
 
 /**

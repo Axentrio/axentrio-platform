@@ -17,7 +17,7 @@ A Service with `bookingMode: auto` confirms through `create_booking` whenever th
 Capture a Request (`request_appointment`, status `request_created`) only when:
 
 - the Service is request-only, or
-- `check_availability` returned no confirmable times (empty diary / closed day), or
+- `check_availability` returned no confirmable times (empty diary — a full day that still had hours, or a business that never opens), or
 - the check failed technically (`BOOKING_TEMPORARILY_UNAVAILABLE`) or with `CALENDAR_NOT_CONNECTED`, or
 - travel left only `requestableSlots`, and the customer picks one, or
 - address is outside the Service Area / unplaceable after one retry, or
@@ -26,6 +26,7 @@ Capture a Request (`request_appointment`, status `request_created`) only when:
 These are **not** Requests on an Auto-book Service. Check the date they named, refuse the hour, offer the times that come back:
 
 - named time outside opening hours on a day that has hours (08:30 vs 09:00–17:00)
+- named date that is closed all day (`closed`) — offer **another date**, never another hour that same day
 - minimum notice (`too_soon`)
 - max horizon (`too_far`)
 - this Service's daily cap (`service_day_full`) — offer **another date**, never another hour that same day
@@ -36,7 +37,7 @@ Never call `request_appointment` on Auto-book before a `check_availability` resu
 
 Request-only Services: no `check_availability`, no chips. Ask preferred time in their words.
 
-Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`.
+Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, closed weekday, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`.
 
 ---
 
@@ -124,13 +125,14 @@ Pinned: `buildSlotQuickReplies` in `agent.service.ts`; `address-picker-affordanc
 | `too_soon` | whole range inside minimum notice | retry later range; Auto-book |
 | `too_far` | whole range past horizon | retry earlier range; Auto-book |
 | `service_day_full` | only this Service's daily cap emptied the day | retry the **next** day; say the cap; Auto-book |
-| absent | shut, full, or mixed | ordinary empty: capture a Request |
+| `closed` | the asked range has no hours, and the next 7 days do | retry those days; say closed; Auto-book |
+| absent | full, mixed, or never-open | ordinary empty: capture a Request |
 
 `boundary` is a policy instant, never a bookable time. It stays off `data`. Guidance names a retry **date range**, never the bound clock.
 
 A range that still has policy-allowed starts which busy time removed is an ordinary empty range.
 
-Pinned: `diagnoseEmptyRange`; `booking-prompt-behaviour.test.ts` policy-ruled-out range.
+Pinned: `diagnoseEmptyRange`; `booking-prompt-behaviour.test.ts` policy-ruled-out range / closed weekday.
 
 ---
 
@@ -231,8 +233,8 @@ Unconfigured booking (no hours / no Service) drops booking tools while skill-sta
 
 | change | also check |
 |---|---|
-| SERVICES prompt / `AVAILABILITY_RULE` | Auto-book stays Auto-book; out-of-hours still offers times |
-| `check_availability` empty path | `emptyRange` vs ordinary empty; `suggestedAction` |
+| SERVICES prompt / `AVAILABILITY_RULE` | Auto-book stays Auto-book; out-of-hours still offers times; a closed weekday still offers the next open day |
+| `check_availability` empty path | `emptyRange` vs ordinary empty; `suggestedAction`; `closed` stays Auto-book |
 | `clockWindow` / day-part | namiddag chips ≥12:00; exact 08:30 still chips the day |
 | `buildSlotQuickReplies` / `safeReplyContent` | `NO_SLOTS_ON_SCREEN_FALLBACK` cannot fire while utcSlots exist for an exact-time miss |
 | named-time / intake | hour survives intake; chips stay off when they already chose a free hour |

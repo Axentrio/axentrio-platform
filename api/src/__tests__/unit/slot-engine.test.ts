@@ -321,6 +321,8 @@ describe('slot-engine · diagnoseEmptyRange', () => {
   });
 
   it('says nothing about a day the business is simply closed', () => {
+    // weeklyHours: {} is always-shut. Diagnosing closed would send the model to the
+    // next week, which is also empty. Ordinary empty (request) is the right answer.
     expect(diagnoseEmptyRange(input({ weeklyHours: {} }))).toBeNull();
   });
 
@@ -358,6 +360,94 @@ describe('slot-engine · diagnoseEmptyRange', () => {
     expect(diagnoseEmptyRange(past)).toBeNull();
   });
 });
+
+/**
+ * A closed weekday is not a request.
+ *
+ * Report: Auto-book, 30 min, Wed/Fri 09:00-17:00, Thursday closed, asked for
+ * Thursday 10 September 2026 at 10:00. The engine correctly offered nothing that
+ * day. The bot then offered to register the appointment as a request - on a
+ * service whose owner had chosen automatic booking, with Friday sitting open.
+ * `slots: []` cannot tell "this day is shut" from "the diary is full".
+ *
+ * The retry week is the discriminator. A shut range with open days next to it is
+ * `closed`; a business that never opens stays ordinary empty, because sending the
+ * model a week forward would read the same nothing back.
+ */
+describe('slot-engine · a closed weekday is not a request', () => {
+  // Thu 10 Sep 2026, 00:00-24:00 Brussels (CEST, UTC+2).
+  const closedThursday = input({
+    weeklyHours: {
+      wed: [{ start: '09:00', end: '17:00' }],
+      fri: [{ start: '09:00', end: '17:00' }],
+    },
+    now: new Date('2026-09-07T08:00:00Z'),
+    rangeStart: '2026-09-09T22:00:00Z',
+    rangeEnd: '2026-09-10T22:00:00Z',
+  });
+
+  it('offers nothing on a weekday with no hours', () => {
+    expect(computeSlots(closedThursday)).toEqual([]);
+  });
+
+  it('reads that emptiness as closed, not as a full diary', () => {
+    expect(diagnoseEmptyRange(closedThursday)).toEqual({
+      reason: 'closed',
+      boundary: '2026-09-10T22:00:00.000Z',
+    });
+  });
+
+  it('and the next open day is bookable, which is what the customer should be offered', () => {
+    const friday = computeSlots({
+      ...closedThursday,
+      rangeStart: '2026-09-10T22:00:00Z',
+      rangeEnd: '2026-09-11T22:00:00Z',
+    });
+    expect(starts(friday)[0]).toBe('2026-09-11T07:00:00.000Z'); // Fri 11 Sep, 09:00 Brussels
+  });
+
+  it('reads a date-override closure the same way', () => {
+    const holiday = input({
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }], thu: [{ start: '09:00', end: '17:00' }] },
+      dateOverrides: [{ date: '2026-06-10', closed: true }],
+      rangeStart: '2026-06-09T22:00:00Z',
+      rangeEnd: '2026-06-10T22:00:00Z',
+    });
+    expect(computeSlots(holiday)).toEqual([]);
+    expect(diagnoseEmptyRange(holiday)).toEqual({
+      reason: 'closed',
+      boundary: '2026-06-10T22:00:00.000Z',
+    });
+  });
+
+  it('still reads as closed when a daily cap is also set', () => {
+    // Lifting the cap cannot invent hours. Returning null here would recapture a request
+    // on every closed weekday of a capped Auto-book service.
+    const cappedClosed = {
+      ...closedThursday,
+      eventType: { ...closedThursday.eventType, maxBookingsPerDay: 2 },
+    };
+    expect(diagnoseEmptyRange(cappedClosed)).toEqual({
+      reason: 'closed',
+      boundary: '2026-09-10T22:00:00.000Z',
+    });
+  });
+
+  it('says nothing when the whole retry week is shut too', () => {
+    // A closure long enough to swallow the retry range is ordinary empty: there is no
+    // open day to send them to, so the request advice is right.
+    const fortnightShut = input({
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }], fri: [{ start: '09:00', end: '17:00' }] },
+      dateOverrides: [{ date: '2026-09-10', endDate: '2026-09-30', closed: true }],
+      now: new Date('2026-09-07T08:00:00Z'),
+      rangeStart: '2026-09-09T22:00:00Z',
+      rangeEnd: '2026-09-10T22:00:00Z',
+    });
+    expect(computeSlots(fortnightShut)).toEqual([]);
+    expect(diagnoseEmptyRange(fortnightShut)).toBeNull();
+  });
+});
+
 
 /**
  * A service daily cap is the owner's own policy, not a full diary.

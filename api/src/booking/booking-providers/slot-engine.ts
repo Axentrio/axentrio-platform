@@ -338,22 +338,54 @@ export function bookableWindow(
 const NO_HORIZON_DAYS = 3650;
 
 /**
- * WHY a range produced nothing, when the answer is the owner's own notice/horizon/cap policy.
+ * WHY a range produced nothing, when the answer is the owner's own notice/horizon/cap
+ * policy or a day with no opening hours while other days do.
  *
- * An empty range has two very different causes and one of them used to be invisible. A shut or
- * full diary genuinely has nothing to offer. A range the POLICY ruled out is full of times this
- * business would happily take on another day - and told only `slots: []`, the caller advised a
- * manual request, which drops an auto-book service into a flow its owner never chose.
+ * An empty range has two very different causes and one of them used to be invisible. A full
+ * diary genuinely has nothing to offer. A range the POLICY ruled out, or a weekday the
+ * business does not open, is full of times this business would happily take on another day
+ * - and told only `slots: []`, the caller advised a manual request, which drops an auto-book
+ * service into a flow its owner never chose.
  *
  * Notice and horizon: THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only those two lifted.
- * Service daily cap: the same range with only that cap lifted. Either way it is one pure pass
- * over data the caller has already loaded, so it costs no query, and it cannot disagree with the
- * real pass about opening hours, buffers or busy time - it runs the same engine.
+ * Service daily cap: the same range with only that cap lifted. Closed: every local day in the
+ * queried range has no opening windows, AND the 7-day retry starting at rangeEnd has hours.
+ * A business that never opens is ordinary empty - retrying the next week is still empty.
  *
- * Null unless EVERY would-be start falls on one side of the window, or the only thing that
- * emptied the range is this service's daily cap. A range holding even one policy-allowed start
- * that busy time removed is an ordinary empty range, and calling it "too soon" would be false.
+ * Null unless EVERY would-be start falls on one side of the window, the only thing that
+ * emptied the range is this service's daily cap, or the range is shut with open days next
+ * to it. A range holding even one policy-allowed start that busy time removed is an
+ * ordinary empty range, and calling it "too soon" would be false.
  */
+function rangeIsShut(input: SlotEngineInput): boolean {
+  const zone = input.rule.timezone || 'UTC';
+  const start = DateTime.fromISO(input.rangeStart, { zone: 'utc' }).setZone(zone).startOf('day');
+  const end = DateTime.fromISO(input.rangeEnd, { zone: 'utc' }).setZone(zone);
+  if (!start.isValid || !end.isValid || end <= start) return false;
+  let anyDay = false;
+  for (let day = start, guard = 0; day < end && guard < 400; day = day.plus({ days: 1 }), guard++) {
+    anyDay = true;
+    if (windowsForDay(input.rule, day).length > 0) return false;
+  }
+  return anyDay;
+}
+
+/**
+ * The 7 local days `retryRange('closed')` names, starting at `from` inclusive.
+ * Shared with the write-path gate so a closed Thursday is only refused when Friday
+ * (or another day in that week) actually opens.
+ */
+export function weekFromHasHours(
+  rule: SlotEngineInput['rule'],
+  from: DateTime,
+): boolean {
+  if (!from.isValid) return false;
+  for (let i = 0, day = from.startOf('day'); i < 7; i++, day = day.plus({ days: 1 })) {
+    if (windowsForDay(rule, day).length > 0) return true;
+  }
+  return false;
+}
+
 export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis | null {
   const windowReason = (slots: BookingSlot[]): EmptyRangeDiagnosis | null => {
     if (slots.length === 0) return null;
@@ -387,7 +419,7 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
     }
     // Cap AND notice/horizon together: prefer the window reason so we do not send the
     // customer back to a day that is also too soon.
-    return windowReason(
+    const fromCapWindow = windowReason(
       computeSlots({
         ...input,
         eventType: {
@@ -398,8 +430,16 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
         },
       }),
     );
+    if (fromCapWindow) return fromCapWindow;
   }
-  return null; // shut, full, or entirely in the past
+  if (rangeIsShut(input)) {
+    const zone = input.rule.timezone || 'UTC';
+    const retryFrom = DateTime.fromISO(input.rangeEnd, { zone: 'utc' }).setZone(zone);
+    if (weekFromHasHours(input.rule, retryFrom)) {
+      return { reason: 'closed', boundary: new Date(input.rangeEnd).toISOString() };
+    }
+  }
+  return null; // full, mixed, never-open, or entirely in the past
 }
 
 /**

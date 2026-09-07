@@ -127,3 +127,23 @@ export const requestServiceDayFull = (startDate: string, endDate: string): strin
   `Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
   `customer the times it returns, and book one outright: this service books automatically. ` +
   `Offer ONLY times that call gives you. Do not retry the same date.`;
+
+/**
+ * An auto-book service on a closed weekday is not a request.
+ *
+ * Requests skip slot validation on purpose: a request is a preference and the owner
+ * decides. That holds for a full day. It does not hold for a weekday the business does
+ * not open — they have already said no, and bookable times sit on the next open day.
+ * Observed: Thursday closed, asked for Thursday 10:00, the bot offered to register
+ * the appointment as a request while Friday was open.
+ */
+export const requestClosedDay = (startDate: string, endDate: string): string =>
+  `That date is closed: the business is not open that day, so it cannot be booked OR requested ` +
+  `- they have already said they do not take appointments that day, so there is nothing ` +
+  `for them to confirm. Do NOT capture it and do NOT tell the customer the team will come back ` +
+  `on it. SAY THE REASON: tell the customer plainly that the business is closed that whole date. ` +
+  `Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date. ` +
+  `Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
+  `customer the times it returns, and book one outright: this service books automatically. ` +
+  `Offer ONLY times that call gives you. Do not retry the same date.`;
+

@@ -3,7 +3,7 @@
  * timezone, never the server's.
  */
 import { DateTime } from 'luxon';
-import { BookingError, type ClockWindow } from './types';
+import { BookingError, type ClockWindow, type EmptyRangeDiagnosis } from './types';
 import { luxonBookingDisplayFormat } from '../../contracts/clock-format';
 
 /**
@@ -85,7 +85,7 @@ const DAY = 'yyyy-MM-dd';
  * documents as the widest a single check may span.
  */
 export function retryRange(
-  reason: 'too_soon' | 'too_far' | 'service_day_full',
+  reason: EmptyRangeDiagnosis['reason'],
   boundary: string,
   timezone: string,
 ): { startDate: string; endDate: string } {
@@ -97,8 +97,8 @@ export function retryRange(
     const from = DateTime.max(at.minus({ days: 6 }), DateTime.now().setZone(timezone));
     return { startDate: from.toFormat(DAY), endDate: at.toFormat(DAY) };
   }
-  // too_soon and service_day_full: a week forward from the bound (earliest start, or the
-  // day after the capped-out one).
+  // too_soon, service_day_full, closed: a week forward from the bound (earliest start, or the
+  // day after the refused one).
   return { startDate: at.toFormat(DAY), endDate: at.plus({ days: 6 }).toFormat(DAY) };
 }
 

@@ -208,19 +208,22 @@ export interface TravelFilterSummary {
 
 /**
  * WHY an availability range came back with nothing, when the cause is the owner's own
- * notice/horizon/daily-cap policy rather than a full or closed diary.
+ * notice/horizon/daily-cap policy or a closed day that has open days next to it.
  *
  * The distinction decides where the customer goes next, and conflating the two was a live bug
- * twice for notice/horizon and once for a service daily cap. An empty range normally means
- * "ask for their preferred time and capture a request", which is right when the diary is
- * genuinely full. Applied to a time the POLICY ruled out, it drops an auto-book service into
- * a manual-request flow while perfectly bookable times sit a day either side. Observed on a
- * 1440-minute minimum notice, on a 14-day horizon, and on an auto-book service with
- * maxBookingsPerDay = 2 that already had two jobs that day.
+ * twice for notice/horizon, once for a service daily cap, and once for a closed weekday. An
+ * empty range normally means "ask for their preferred time and capture a request", which is
+ * right when the diary is genuinely full, or when the business never opens. Applied to a time
+ * the POLICY ruled out, or to a weekday the business does not open while others do, it drops
+ * an auto-book service into a manual-request flow while perfectly bookable times sit a day
+ * either side. Observed on a 1440-minute minimum notice, on a 14-day horizon, on an auto-book
+ * service with maxBookingsPerDay = 2 that already had two jobs that day, and on Thursday
+ * 10 September 2026 when Wednesday and Friday were open.
  *
- * Absent unless the range missed the window ENTIRELY, or every start in range was removed
- * only by this service's daily cap. A range that holds even one policy-allowed start which
- * something else removed is an ordinary empty range, and the ordinary answer applies.
+ * Absent unless the range missed the window ENTIRELY, every start in range was removed
+ * only by this service's daily cap, or the range is shut AND the 7-day retry has hours.
+ * A range that holds even one policy-allowed start which something else removed is an
+ * ordinary empty range, and the ordinary answer applies.
  */
 export interface EmptyRangeDiagnosis {
   /**
@@ -228,13 +231,16 @@ export interface EmptyRangeDiagnosis {
    * `too_far`: past the horizon.
    * `service_day_full`: this service has already reached maxBookingsPerDay for the
    * requested day, and lifting that cap would have produced times.
+   * `closed`: no day in the range has opening hours, and the next 7 days do
+   * (weekly grid or a date-override closure). Never-open is ordinary empty.
    */
-  reason: 'too_soon' | 'too_far' | 'service_day_full';
+  reason: 'too_soon' | 'too_far' | 'service_day_full' | 'closed';
   /**
    * The bound the range fell outside, as a UTC ISO instant. For `too_soon`, the earliest a
    * booking may start; for `too_far`, the last instant this business takes bookings for.
-   * For `service_day_full`, the exclusive end of the queried range (the next local midnight),
-   * so the retry starts the day after the capped-out one. Never a bookable clock time.
+   * For `service_day_full` and `closed`, the exclusive end of the queried range (the next
+   * local midnight), so the retry starts the day after the refused one. Never a bookable
+   * clock time.
    */
   boundary: string;
 }
@@ -267,9 +273,9 @@ export interface AvailabilityResult {
   /** Absent unless travel time actually ran — which is every bot on the platform today. */
   travel?: TravelFilterSummary;
   /**
-   * Set ONLY when `slots` is empty because of notice, horizon, or this service's daily cap,
-   * never when the diary is merely full or shut. It sends the model back to a bookable range
-   * instead of a request.
+   * Set ONLY when `slots` is empty because of notice, horizon, this service's daily cap,
+   * or a closed day — never when the diary is merely full. It sends the model back to a
+   * bookable range instead of a request.
    */
   emptyRange?: EmptyRangeDiagnosis;
   /**

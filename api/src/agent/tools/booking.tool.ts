@@ -835,13 +835,28 @@ function outOfWindowGuidance(
   outOfWindow: EmptyRangeDiagnosis,
   retry: { startDate: string; endDate: string },
 ): string {
+  const retryCall = ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.`;
+  const autoBook =
+    ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off';
+  if (outOfWindow.reason === 'closed') {
+    return (
+      'That date is closed: the business is not open that day, so NO time on that date can be booked - not the one they asked for and not any other hour.' +
+      retryCall +
+      ' SAY THE REASON: tell the customer plainly that the business is closed that whole date.' +
+      ' Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date - a second time on that date is refused for the same reason.' +
+      ' Checking the same date again returns the same nothing, so do not repeat it.' +
+      ' Offer ONLY times that call gives you.' +
+      autoBook +
+      ' - there are times this customer can book, and your job is to find them and offer them now.'
+    );
+  }
   return (
     (outOfWindow.reason === 'too_soon'
       ? 'That range is too soon: this business needs more notice than that.'
       : outOfWindow.reason === 'too_far'
         ? 'That range is further ahead than this business takes bookings.'
         : 'This service already has its maximum number of bookings for that date, so NO time on that date can be booked - not the one they asked for and not any other hour.') +
-    ` Call check_availability again with startDate ${retry.startDate} and endDate ${retry.endDate}, then offer the customer the times it returns.` +
+    retryCall +
     (outOfWindow.reason === 'service_day_full'
       ? ' SAY THE REASON: tell the customer plainly that this service is fully booked for that whole date because the business limits how many of these appointments it takes per day.' +
         ' Do NOT say only the time they asked for is unavailable, and do NOT offer another time on that same date - a second time on that date is refused for the same reason.' +
@@ -851,7 +866,8 @@ function outOfWindowGuidance(
       : ' Checking the same range again returns the same nothing, so do not repeat it.' +
         ' Offer ONLY times that call gives you: the notice and the horizon say nothing about opening hours, so do not work out a date yourself and do not promise the customer the soonest one.' +
         ' This does NOT mean the business is closed or fully booked, so do not say either.') +
-    ' This service books automatically: do NOT capture it with request_appointment, do NOT offer to have anyone confirm the appointment by hand, and do not hand off - there are times this customer can book, and your job is to find them and offer them now.'
+    autoBook +
+    ' - there are times this customer can book, and your job is to find them and offer them now.'
   );
 }
 

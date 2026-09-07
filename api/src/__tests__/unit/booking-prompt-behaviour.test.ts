@@ -127,6 +127,26 @@ describe('a time outside hours on an Auto-book day is not a request', () => {
 });
 
 /**
+ * A weekday that is closed all day is not a request on Auto-book.
+ *
+ * Live report: Auto-book, Thursday closed, asked for Thursday 10 September 2026
+ * at 10:00. The check correctly returned nothing that day. The bot then offered
+ * to register the appointment as a request, while Friday was open.
+ */
+describe('a closed weekday on Auto-book is not a request', () => {
+  it('tells the model to refuse the closed date, check another open day, and never capture a request', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/closed all day is also NOT that case/i);
+    expect(p).toMatch(/Stay in the auto-book flow/i);
+    expect(p).toMatch(/Do NOT capture a request because the selected day is closed/i);
+    // The no-times sentence belongs on a LATER empty retry, never on the closed date
+    // itself - said here it talks the model out of offering the open day.
+    expect(p).not.toMatch(/no bookable times are currently available/i);
+  });
+});
+
+
+/**
  * The catalog line for a service, isolated from the rules below it.
  *
  * Rule 7 quotes BOTH cues ("choose length", "AI-estimated") as examples, so asserting
@@ -1217,6 +1237,95 @@ describe('check_availability — a service at its daily cap is not a request', (
 
   it('never states the bound itself, in the guidance OR on the payload', async () => {
     const res = await load(dayFull);
+    expect(res.data.emptyRange).toBeUndefined();
+    const payload = JSON.stringify(res.data);
+    expect(payload).not.toMatch(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/);
+    expect(payload).not.toContain('22:00');
+  });
+});
+
+/**
+ * A closed weekday must stay in the auto-book flow.
+ *
+ * Report: Auto-book, Thursday closed, asked for Thursday 10 September 2026 at
+ * 10:00. The engine refused correctly. The tool then returned the empty-range
+ * request advice, and the bot offered to register the appointment as a request
+ * while Friday was open. Same class as notice/horizon/daily-cap: `slots: []`
+ * recommended a request when the owner had chosen automatic booking.
+ */
+describe('check_availability — a closed weekday is not a request', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-07T08:00:00Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const load = async (emptyRange: { reason: string; boundary: string }) => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({
+      slots: [],
+      timezone: 'Europe/Brussels',
+      serviceId: 's1',
+      serviceName: 'Booking test',
+      emptyRange,
+    }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+      peekCustomerChange: async () => 'auto',
+    }));
+    // Dynamic because `vi.doMock` is not hoisted: a static import would bind the real
+    // booking.service before the mock above is registered.
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const res = await new CheckAvailabilityTool().execute(
+      { startDate: '2026-09-10', endDate: '2026-09-10' },
+      { sessionId: 'cs-1' } as never,
+    );
+    return { success: res.success, data: res.data as Record<string, unknown> };
+  };
+
+  const closed = { reason: 'closed', boundary: '2026-09-10T22:00:00.000Z' };
+
+  it('sends the model back to check_availability, never to a request', async () => {
+    const res = await load(closed);
+    expect(res.success).toBe(true);
+    expect(res.data.suggestedAction).toBe('check_availability');
+    expect(res.data.guidance).toMatch(/do NOT capture it with request_appointment/);
+    expect(res.data.guidance).not.toMatch(/(?<!do NOT )capture it with request_appointment/);
+  });
+
+  it('refuses the manual-confirmation offer in so many words', async () => {
+    const res = await load(closed);
+    expect(res.data.guidance).toMatch(/confirm the appointment by hand/i);
+    expect(res.data.guidance).toMatch(/books automatically/i);
+    expect(res.data.guidance).toMatch(/closed that whole date/i);
+  });
+
+  it('tells the model to say the whole DATE is closed, and why', async () => {
+    const g = (await load(closed)).data.guidance as string;
+    expect(g).toMatch(/business is not open that day/i);
+    expect(g).toMatch(/NO time on that date can be booked/i);
+    expect(g).toMatch(/do NOT say only the time they asked for is unavailable/i);
+    expect(g).toMatch(/do NOT offer another time on that same date/i);
+  });
+
+  it('sends the model to a LATER range, without naming a time of its own', async () => {
+    const res = await load(closed);
+    expect(res.data.guidance).toContain('startDate 2026-09-11 and endDate 2026-09-17');
+    expect(res.data.guidance).toMatch(/Offer ONLY times that call gives you/);
+    expect(res.data.guidance).not.toContain('10:00');
+  });
+
+  it('does not tell the model there are no times on this first closed result', async () => {
+    // The whole point of the retry is Friday. A "no bookable times" line here refuses
+    // an open day the customer can have.
+    const g = (await load(closed)).data.guidance as string;
+    expect(g).not.toMatch(/no bookable times are currently available/i);
+    expect(g).toMatch(/there are times this customer can book/i);
+  });
+
+  it('never states the bound itself, in the guidance OR on the payload', async () => {
+    const res = await load(closed);
     expect(res.data.emptyRange).toBeUndefined();
     const payload = JSON.stringify(res.data);
     expect(payload).not.toMatch(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/);

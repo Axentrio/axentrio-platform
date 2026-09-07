@@ -49,7 +49,7 @@ import {
   type UpdateBookingPatch,
   type UpdateBookingResult,
 } from './types';
-import { computeSlots, diagnoseEmptyRange, bookableWindow, type SlotEngineInput } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, bookableWindow, windowsForDay, weekFromHasHours, type SlotEngineInput } from './slot-engine';
 import {
   buildBookingEventContent,
   storedFileNames,
@@ -132,6 +132,7 @@ import {
   SLOT_TAKEN_ON_RESCHEDULE,
   requestTooSoon,
   requestTooFar,
+  requestClosedDay,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
@@ -502,9 +503,9 @@ export class InternalProvider implements BookingProvider {
     // Filtered HERE, ahead of travel: the enforce path clears the first 20 slots and stops, so a
     // window applied after it would find nothing but the morning it was asked to skip.
     const { offerable, windowMatched } = offerableSlotsForWindow(slots, clockWindow, rule.timezone);
-    // WHY nothing came back, when the reason is this owner's notice, horizon, or service
-    // daily cap, and not a full or closed diary. Only on the path that produced nothing, and
-    // it costs no query: it re-runs the pure engine over the busy data already in hand.
+    // WHY nothing came back, when the reason is this owner's notice, horizon, service
+    // daily cap, or a closed day, and not a full diary. Only on the path that produced
+    // nothing, and it costs no query: it re-runs the pure engine over the busy data already in hand.
     const emptyRange = slots.length === 0 ? diagnoseEmptyRange(engineInput) : null;
     // Travel time filters what the engine produced rather than teaching the engine about it.
     // The engine is pure and DST-critical and expresses everything as busy intervals; this pad
@@ -2391,19 +2392,21 @@ export class InternalProvider implements BookingProvider {
     // Requests deliberately skip slot validation: a request is a preference and the owner
     // decides. That holds for a full day, an out-of-area job, or an unmeasured drive - all
     // times the owner COULD say yes to. It does not hold outside their notice or horizon,
-    // or once this service has reached maxBookingsPerDay: they have already said no and no
-    // decision is left to make.
+    // once this service has reached maxBookingsPerDay, or on a weekday they do not open:
+    // they have already said no and no decision is left to make.
     //
     // Seen on production with this fix's other half already deployed: the model skipped
     // check_availability entirely, asked for a name, and captured a request for a date 63 days
     // out against a 60-day horizon. The customer was promised a callback nobody could honour.
     // The same skip then captured a request after CAPACITY_REACHED on an auto-book service
-    // with two jobs and a cap of two. The gate has to be here, because the tool the model
-    // chose never looked at a slot.
+    // with two jobs and a cap of two. It then offered a request for Thursday 10:00 on a
+    // service whose Thursday is closed and whose Friday was open. The gate has to be here,
+    // because the tool the model chose never looked at a slot.
     //
     // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
     // capturing exactly as before - a request is the RIGHT answer for those - and so does any
-    // time inside the window that is merely taken. A daily cap is not "merely taken".
+    // time inside the window that is merely taken. A daily cap is not "merely taken". A closed
+    // weekday is not "merely taken". Never-open is ordinary empty and still captures.
     const canAuto =
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
@@ -2418,6 +2421,12 @@ export class InternalProvider implements BookingProvider {
       if (startMs > latestMs) {
         const { startDate, endDate } = retryRange('too_far', new Date(latestMs).toISOString(), rule.timezone);
         throw new BookingError(requestTooFar(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
+      const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
+      const retryFrom = day.plus({ days: 1 });
+      if (windowsForDay(rule, day).length === 0 && weekFromHasHours(rule, retryFrom)) {
+        const { startDate, endDate } = retryRange('closed', retryFrom.toJSDate().toISOString(), rule.timezone);
+        throw new BookingError(requestClosedDay(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       await enforceServiceDayCapacity(null, service, start, rule.timezone);
     }

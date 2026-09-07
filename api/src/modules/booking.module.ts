@@ -443,10 +443,12 @@ const CHECK_BEFORE_REQUEST_RULE = `- Check before you capture: ALWAYS call check
  * Empty diary → request. A time before open on an otherwise bookable Auto-book day is not
  * empty: check that date and offer the times. Live WhatsApp 2026-09-06: 08:30 refused
  * on a 09:00–17:00 Monday while 09:00 sat free, because this bullet used to send
- * out-of-hours to request_appointment.
+ * out-of-hours to request_appointment. A weekday that is closed all day is the same
+ * class: refuse that date, stay Auto-book, and offer the next open day. Live report:
+ * Thursday 10 September 2026 closed, Friday open, the bot offered a request.
  */
 const AVAILABILITY_RULE =
-  '- Availability: if check_availability returns no available times, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. A named time outside the opening hours is NOT that case: call check_availability for the date they named, do not pass earliestTime or latestTime for an exact clock time, refuse the hour they asked for, and offer the times that call returns. Stay in the auto-book flow. Do NOT capture a request, and do not ask them to guess another time, while that call has times. Opening hours never stop you from helping. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.';
+  '- Availability: if check_availability returns no available times, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. A named time outside the opening hours is NOT that case: call check_availability for the date they named, do not pass earliestTime or latestTime for an exact clock time, refuse the hour they asked for, and offer the times that call returns. Stay in the auto-book flow. Do NOT capture a request, and do not ask them to guess another time, while that call has times. Opening hours never stop you from helping. A named date that is closed all day is also NOT that case: refuse that date, stay in the auto-book flow, call check_availability for another open day, and offer the times that call returns. Do NOT capture a request because the selected day is closed. If the chosen service flags "needs phone" and you still have no number, ask for it first — that is not a reason to capture a request or to say the service is unavailable.';
 
 
 /**

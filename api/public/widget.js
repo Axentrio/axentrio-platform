@@ -2098,17 +2098,18 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         this.log('Connection acknowledged:', data);
       });
 
-      this.socket.on('message:receive', (data) => {
+      this.socket.on('message:receive', async (data) => {
         this.log('Message received:', data);
         // Only show messages from bot/agent, not our own echoes
         if (data.senderType !== 'user') {
           this.hideTypingIndicator();
+          const file = await this._attachmentFromPayload(data.type, data.metadata);
           this.addMessage({
             id: data.id || utils.generateId(),
             text: data.content,
             sender: 'bot',
             timestamp: new Date(data.timestamp || data.createdAt),
-            file: this._attachmentFromPayload(data.metadata, data.type),
+            file,
             quickReplies: data.metadata && Array.isArray(data.metadata.quickReplies) ? data.metadata.quickReplies : undefined,
             // A control the SERVER asked us to offer. Unlike a chip, its result does not go back
             // as a customer message — it goes to an endpoint the server owns, which is the only
@@ -2242,12 +2243,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           if (lastTs && ts <= lastTs) continue;
           const senderType = msg.sender && msg.sender.type;
           this.hideTypingIndicator();
+          const file = await this._attachmentFromPayload(msg.type, msg.metadata);
           this.addMessage({
             id: msg.id,
             text: msg.content,
             sender: senderType === 'user' ? 'user' : 'bot',
             timestamp: new Date(msg.createdAt),
-            file: this._attachmentFromPayload(msg.metadata, msg.type),
+            file,
             // Backfilled messages used to arrive stripped of their metadata, so a reconnect or a
             // reload silently dropped the chips a reply had offered. Harmless for slot chips - the
             // customer can type the time - but not for the address picker: it is the only way to
@@ -2442,19 +2444,40 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     
 
-    _attachmentFromPayload(metadata, messageType) {
-      if (!metadata || typeof metadata.uploadSessionId !== 'string') return undefined;
-      const name = typeof metadata.fileName === 'string' ? metadata.fileName : 'File';
-      const size = typeof metadata.fileSize === 'number' ? metadata.fileSize : 0;
-      const mime = typeof metadata.fileType === 'string'
-        ? metadata.fileType
-        : (messageType === 'image' ? 'image/jpeg' : 'application/octet-stream');
-      return {
-        sessionId: metadata.uploadSessionId,
-        name,
-        size,
-        type: mime,
+    async _attachmentFromPayload(type, metadata) {
+      if (
+        (type !== 'image' && type !== 'file') ||
+        !metadata ||
+        typeof metadata.uploadSessionId !== 'string'
+      ) {
+        return undefined;
+      }
+      const sessionId = metadata.uploadSessionId;
+      const file = {
+        sessionId,
+        name: typeof metadata.fileName === 'string' ? metadata.fileName : 'File',
+        size: typeof metadata.fileSize === 'number' ? metadata.fileSize : 0,
+        type: typeof metadata.fileType === 'string'
+          ? metadata.fileType
+          : (type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
       };
+      if (!file.type.startsWith('image/') || !this.token) {
+        return file;
+      }
+      try {
+        const res = await fetchWithTimeout(
+          `${this.config.apiUrl}/api/v1/widget/files/${sessionId}/url`,
+          { headers: { Authorization: 'Bearer ' + this.token } },
+          15000,
+        );
+        if (!res.ok) return file;
+        const body = await res.json();
+        const url = (body && body.data && body.data.url) || (body && body.url);
+        if (url) file.url = url;
+      } catch (err) {
+        this.log('Attachment URL prefetch failed:', err && err.message);
+      }
+      return file;
     }
 
     async openWidgetFile(sessionId) {

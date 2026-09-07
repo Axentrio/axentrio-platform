@@ -62,6 +62,7 @@ import {
   type PlanFeatures,
 } from '../queries/useEntitlementsQueries';
 import { PlanBadge } from '@/components/billing/PlanBadge';
+import { AxentrioMark } from '@/components/brand/AxentrioMark';
 import type { User, UserRole } from '@app-types/index';
 
 type RequiredTier = 'pro' | 'enterprise';
@@ -184,10 +185,10 @@ const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount })
         cn(
           'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
           isActive
-            ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
+            ? 'bg-sidebar-active text-sidebar-accent'
             : isLocked
-              ? 'text-text-muted hover:bg-surface-3 hover:text-text-secondary'
-              : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary',
+              ? 'text-sidebar-muted/70 hover:bg-white/5 hover:text-sidebar-muted'
+              : 'text-sidebar-muted hover:bg-white/5 hover:text-sidebar-fg',
         )
       }
       aria-label={
@@ -210,7 +211,7 @@ const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount })
         </span>
       )}
       {!isLocked && badgeCount != null && badgeCount > 0 && (
-        <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full flex-shrink-0">
+        <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-sidebar-bg bg-sidebar-accent rounded-full flex-shrink-0">
           {badgeCount > 99 ? '99+' : badgeCount}
         </span>
       )}
@@ -242,7 +243,7 @@ const SidebarOrgIdentity: React.FC<{
       <div className="relative">
         <div className={cn(
           'absolute inset-0 rounded-xl blur-md',
-          isImpersonating ? 'bg-orange-500/20' : 'bg-primary-500/20'
+          isImpersonating ? 'bg-orange-500/20' : 'bg-sidebar-accent/20'
         )} />
         {!isImpersonating && organization?.hasImage ? (
           <img
@@ -250,21 +251,20 @@ const SidebarOrgIdentity: React.FC<{
             alt={organization.name ?? ''}
             className="relative w-8 h-8 rounded-xl object-cover"
           />
-        ) : (
-          <div className={cn(
-            'relative w-8 h-8 rounded-xl flex items-center justify-center',
-            isImpersonating ? 'bg-orange-500' : 'bg-primary-600'
-          )}>
+        ) : isImpersonating ? (
+          <div className="relative w-8 h-8 rounded-xl flex items-center justify-center bg-orange-500">
             <span className="text-sm font-bold text-white">
-              {isImpersonating
-                ? impersonatedTenantName.charAt(0).toUpperCase()
-                : organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
+              {impersonatedTenantName.charAt(0).toUpperCase()}
             </span>
+          </div>
+        ) : (
+          <div className="relative w-8 h-8 rounded-xl overflow-hidden bg-sidebar-active flex items-center justify-center p-1">
+            <AxentrioMark variant="onDark" className="w-full h-full" />
           </div>
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <h1 className="font-bold text-text-primary truncate">
+        <h1 className="font-bold text-sidebar-fg truncate">
           {isImpersonating ? impersonatedTenantName : organization?.name ?? 'Axentrio'}
         </h1>
         {isImpersonating && (
@@ -300,7 +300,7 @@ const SidebarOrgHeader: React.FC<{
   return (
     <div
       className={cn(
-        'flex items-center gap-3 px-4 py-4 border-b border-edge relative',
+        'flex items-center gap-3 px-4 py-4 border-b border-sidebar-border relative',
         isImpersonating && 'bg-orange-500/10'
       )}
     >
@@ -312,7 +312,7 @@ const SidebarOrgHeader: React.FC<{
         <button
           type="button"
           onClick={onOpenTenantPalette}
-          className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+          className="p-1 rounded-md hover:bg-white/5 text-sidebar-muted hover:text-sidebar-fg transition-colors"
           title={t('sidebar.switchTenant')}
         >
           <ChevronDown className="w-4 h-4" />
@@ -323,7 +323,7 @@ const SidebarOrgHeader: React.FC<{
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+              className="p-1 rounded-md hover:bg-white/5 text-sidebar-muted hover:text-sidebar-fg transition-colors"
               title={t('sidebar.switchOrganization', { defaultValue: 'Switch organization' })}
             >
               <ChevronDown className="w-4 h-4" />
@@ -358,20 +358,20 @@ const SidebarUserSection: React.FC<{
 }> = ({ user, onSignOut }) => {
   const { t } = useTranslation();
   return (
-    <div className="px-4 py-4 border-t border-edge">
-      <div className="flex items-center gap-3 mb-4 p-2 rounded-xl glass">
-        <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
-          <span className="text-sm font-medium text-primary-400">
+    <div className="px-4 py-4 border-t border-sidebar-border">
+      <div className="flex items-center gap-3 mb-4 p-2 rounded-xl bg-white/5">
+        <div className="w-10 h-10 rounded-full bg-sidebar-accent/20 flex items-center justify-center">
+          <span className="text-sm font-medium text-sidebar-accent">
             {user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}
           </span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-text-primary truncate">
+          <p className="text-sm font-medium text-sidebar-fg truncate">
             {user?.firstName} {user?.lastName}
           </p>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-status-online shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-            <p className="text-xs text-text-muted">{user?.role ? t(`roles.${user.role}`) : ''}</p>
+            <p className="text-xs text-sidebar-muted">{user?.role ? t(`roles.${user.role}`) : ''}</p>
           </div>
         </div>
       </div>
@@ -379,7 +379,7 @@ const SidebarUserSection: React.FC<{
       <Button
         variant="ghost"
         onClick={() => onSignOut()}
-        className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors justify-start"
+        className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-sidebar-muted hover:bg-white/5 hover:text-sidebar-fg rounded-xl transition-colors justify-start"
       >
         <LogOut className="w-5 h-5" />
         {t('sidebar.signOut')}
@@ -437,12 +437,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className={cn(
-      'relative flex flex-col w-full h-full bg-surface-0 border-r border-edge',
+      'relative flex flex-col w-full h-full bg-sidebar border-r border-sidebar-border',
       isImpersonating && 'border-l-[3px] border-l-orange-500',
       className
     )}>
       {/* Gradient overlay at top */}
-      <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-sidebar-accent/10 to-transparent pointer-events-none" />
 
       {/* Org branding / Tenant switcher trigger */}
       <SidebarOrgHeader
@@ -471,9 +471,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {filteredAdminItems.length > 0 && (
             <>
-              <div className="my-3 mx-2 border-t border-edge" />
+              <div className="my-3 mx-2 border-t border-sidebar-border" />
               <div className="px-3 mb-1">
-                <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                <span className="text-xs font-semibold text-sidebar-muted uppercase tracking-wider">
                   {t('nav.superAdmin')}
                 </span>
               </div>
@@ -487,8 +487,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         return cn(
                           'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
                           active
-                            ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
-                            : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
+                            ? 'bg-sidebar-active text-sidebar-accent'
+                            : 'text-sidebar-muted hover:bg-white/5 hover:text-sidebar-fg'
                         );
                       }}
                     >

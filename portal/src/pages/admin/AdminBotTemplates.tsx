@@ -109,16 +109,16 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
             {tpl.skills.length > 0 ? (
               <div className="mt-1 flex flex-wrap items-center gap-1">
                 {tpl.skills.slice(0, 3).map((sid) => (
-                  <span key={sid} className="inline-flex items-center gap-1 rounded border border-edge bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-secondary">
+                  <span key={sid} className="inline-flex items-center gap-1 rounded border border-edge bg-surface-2 px-1.5 py-0.5 text-2xs text-text-secondary">
                     <Cpu className="h-2.5 w-2.5 text-text-muted" />{skillLabel(sid)}
                   </span>
                 ))}
-                {tpl.skills.length > 3 && <span className="text-[10px] text-text-muted">+{tpl.skills.length - 3}</span>}
+                {tpl.skills.length > 3 && <span className="text-2xs text-text-muted">+{tpl.skills.length - 3}</span>}
               </div>
             ) : (
-              <div className="mt-1 text-[10px] text-text-muted">Prompt-only · no skills</div>
+              <div className="mt-1 text-2xs text-text-muted">Prompt-only · no skills</div>
             )}
-            <div className="mt-1 font-mono text-[10px] text-text-muted">{tpl.key}{tpl.category ? ` · ${tpl.category}` : ''}</div>
+            <div className="mt-1 font-mono text-2xs text-text-muted">{tpl.key}{tpl.category ? ` · ${tpl.category}` : ''}</div>
           </div>
         </div>
       </TableCell>
@@ -168,7 +168,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold text-text-primary">{tier.label}</h2>
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums ${tier.chip}`}>{rows.length}</span>
+                <span className={`rounded-full border px-2 py-0.5 text-xs font-medium tabular-nums ${tier.chip}`}>{rows.length}</span>
               </div>
               <p className="text-xs text-text-muted">{tier.blurb}</p>
             </div>

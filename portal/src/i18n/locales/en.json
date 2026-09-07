@@ -2274,6 +2274,46 @@
         "subtitle": "Choose a conversation from the list to start"
       }
     },
+    "details": {
+      "tab": "Details",
+      "activityTab": "Activity",
+      "toggle": "Conversation details",
+      "contact": {
+        "title": "Contact",
+        "viewProfile": "View full profile"
+      },
+      "overview": {
+        "title": "Conversation",
+        "first": "First message",
+        "last": "Last message",
+        "channel": "Channel",
+        "status": "Status",
+        "workspace": "Workspace",
+        "unavailable": "Unavailable"
+      },
+      "labels": {
+        "title": "Labels",
+        "add": "Add label",
+        "placeholder": "New label",
+        "empty": "No labels",
+        "remove": "Remove {{tag}}"
+      },
+      "actions": {
+        "title": "Quick actions",
+        "viewLead": "View customer",
+        "linkLead": "Link to lead",
+        "addLabel": "Add label",
+        "assign": "Assign conversation",
+        "export": "Export conversation"
+      },
+      "activity": {
+        "empty": "No activity to show",
+        "started": "Conversation started",
+        "last": "Last activity",
+        "closed": "Conversation closed"
+      },
+      "today": "Today, {{time}}"
+    },
     "closeDialog": {
       "title": "Close this chat?",
       "description": "The conversation will be marked as resolved and removed from the active list. This action cannot be undone.",
@@ -2314,7 +2354,10 @@
       "returnToBotSuccess": "Chat returned to bot",
       "returnToBotFailed": "Failed to return chat to bot",
       "durationUpdated": "Control duration updated",
-      "durationUpdateFailed": "Failed to update the control duration"
+      "durationUpdateFailed": "Failed to update the control duration",
+      "tagsUpdated": "Labels updated",
+      "tagsFailed": "Couldn't update labels",
+      "exported": "Conversation exported"
     },
     "stream": {
       "title": "Live chats",
@@ -3101,13 +3144,13 @@
         "add": "Add your first document",
         "addAnother": "Add another",
         "examples": "Your services, prices, opening hours, or a list of common questions",
+        "skipConsequence": "The assistant will have nothing to answer from until you add documents in AI Bot & Content.",
         "status": {
           "pending": "Queued",
           "processing": "Reading",
           "indexed": "Ready",
           "failed": "Failed"
-        },
-        "skipConsequence": "The assistant will have nothing to answer from until you add documents in AI Bot & Content."
+        }
       },
       "social": {
         "title": "Messaging channels",

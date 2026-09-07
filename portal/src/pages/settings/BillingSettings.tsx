@@ -135,11 +135,11 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
 function StatusBadge({ status }: { status: BillingState['status'] }) {
   const { t } = useTranslation();
   const map: Record<BillingState['status'], { label: string; cls: string }> = {
-    trialing: { label: t('settings.billing.status.trialing'), cls: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
-    active: { label: t('settings.billing.status.active'), cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-    past_due: { label: t('settings.billing.status.pastDue'), cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
-    cancelled: { label: t('settings.billing.status.cancelled'), cls: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30' },
-    none: { label: t('settings.billing.status.none'), cls: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30' },
+    trialing: { label: t('settings.billing.status.trialing'), cls: 'bg-primary-600/10 text-primary-400 border-primary-500/30' },
+    active: { label: t('settings.billing.status.active'), cls: 'bg-status-online/15 text-status-online border-status-online/30' },
+    past_due: { label: t('settings.billing.status.pastDue'), cls: 'bg-status-away/15 text-status-away border-status-away/30' },
+    cancelled: { label: t('settings.billing.status.cancelled'), cls: 'bg-status-offline/15 text-status-offline border-status-offline/30' },
+    none: { label: t('settings.billing.status.none'), cls: 'bg-status-offline/15 text-status-offline border-status-offline/30' },
   };
   const { label, cls } = map[status];
   return <Badge className={`border ${cls}`}>{label}</Badge>;
@@ -410,7 +410,7 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
             }`}
           >
             {isRecommended && (
-              <Badge className="absolute -top-2.5 right-4 border-transparent bg-primary-500 text-white shadow-sm">
+              <Badge className="absolute -top-2.5 right-4 border-transparent bg-primary text-primary-foreground shadow-sm">
                 {t('settings.billing.subscribe.recommended')}
               </Badge>
             )}
@@ -627,7 +627,7 @@ const TokenUsageCard: React.FC = () => {
               </span>
               <span className="font-medium text-text-primary">{data.percentUsed}%</span>
             </div>
-            <div className="mt-2 h-2 rounded-full bg-zinc-700/50 overflow-hidden">
+            <div className="mt-2 h-2 rounded-full bg-surface-3 overflow-hidden">
               <div
                 className={`h-full rounded-full ${paused ? 'bg-red-400' : warn ? 'bg-amber-400' : 'bg-primary-400'}`}
                 style={{ width: `${barWidth}%` }}

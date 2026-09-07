@@ -37,14 +37,14 @@ export function CopilotLauncher() {
       aria-label={label}
       className={cn(
         'fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full shadow-lg p-0',
-        'bg-primary-600 text-white hover:bg-primary-700',
+        'bg-primary text-primary-foreground hover:bg-primary/90',
       )}
     >
       <Bot className="h-5 w-5" />
       {hasFeature && hasUnseenSuggestions && (
         <span
           aria-hidden
-          className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-warning-500 px-1 text-[10px] text-white"
+          className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-status-away px-1 text-2xs text-white"
         >
           {suggestions.length}
         </span>
@@ -52,7 +52,7 @@ export function CopilotLauncher() {
       {!hasFeature && (
         <span
           aria-hidden
-          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-warning-500 text-white text-[10px]"
+          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-status-away text-white text-2xs"
         >
           <Lock className="h-3 w-3" />
         </span>

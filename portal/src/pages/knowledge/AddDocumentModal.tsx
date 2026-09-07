@@ -141,7 +141,7 @@ const DocTypeSelector: React.FC<{
           );
         })}
       </div>
-      <p className="text-[10px] text-text-muted mt-1.5">
+      <p className="text-2xs text-text-muted mt-1.5">
         {t(selectedType.descriptionKey)}
       </p>
     </div>
@@ -215,11 +215,11 @@ const WebsiteUrlField: React.FC<{
         )}
         required
       />
-      <p className="text-[10px] text-text-muted mt-1.5">
+      <p className="text-2xs text-text-muted mt-1.5">
         {t("ai.knowledge.modal.fields.websiteUrl.helper")}
       </p>
       {isDiscovering && (
-        <p className="text-[10px] text-text-muted mt-2">
+        <p className="text-2xs text-text-muted mt-2">
           {t("ai.knowledge.modal.fields.extraHosts.looking")}
         </p>
       )}
@@ -228,7 +228,7 @@ const WebsiteUrlField: React.FC<{
           <p className="text-xs text-text-secondary">
             {t("ai.knowledge.modal.fields.extraHosts.label")}
           </p>
-          <p className="text-[10px] text-text-muted">
+          <p className="text-2xs text-text-muted">
             {t("ai.knowledge.modal.fields.extraHosts.helper")}
           </p>
           {hosts.map((host) => {
@@ -353,7 +353,7 @@ const FileDropField: React.FC<{
                 {t("ai.knowledge.modal.fields.file.browse")}
               </span>
             </p>
-            <p className="text-[10px] text-text-muted mt-1">
+            <p className="text-2xs text-text-muted mt-1">
               {t("ai.knowledge.modal.fields.file.maxSize")}
             </p>
           </div>
@@ -398,7 +398,7 @@ const ContentField: React.FC<{
       {content.length > 0 && (
         <p
           className={cn(
-            "text-[10px] mt-1 text-right",
+            "text-2xs mt-1 text-right",
             content.length > MAX_CONTENT_LENGTH * 0.9
               ? "text-amber-400"
               : "text-text-muted",

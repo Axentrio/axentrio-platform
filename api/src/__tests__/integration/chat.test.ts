@@ -49,6 +49,7 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
+import { Lead } from '../../database/entities/Lead';
 import { Participant } from '../../database/entities/Participant';
 import {
   createTestTenant,
@@ -198,6 +199,71 @@ describe('Chat Lifecycle', () => {
       const res = await request(app).get(`/api/v1/chats/${session.id}`);
       expect(res.status).toBe(200);
       expect(res.body.data.assignedAgentName).toBe(user.name);
+    });
+
+    it('GET /chats/:id exposes contact, tags, workspace, and linked lead', async () => {
+      const s = await createTestSession(tenantId, {
+        status: 'bot',
+        channel: 'whatsapp',
+        tags: ['Urgent'],
+        metadata: { pageUrl: 'https://example.com/pricing', customData: { displayName: 'Ada' } },
+      });
+      await createTestParticipant(s.id, {
+        type: 'user',
+        name: 'Ada',
+        email: 'ada@example.com',
+        metadata: { location: { city: 'Ghent', country: 'Belgium' } },
+      });
+      const leadRepo = AppDataSource.getRepository(Lead);
+      const lead = await leadRepo.save(
+        leadRepo.create({
+          tenantId,
+          sessionId: s.id,
+          name: 'Ada',
+          email: 'ada@example.com',
+          phone: '+32611111111',
+          source: 'channel',
+          channel: 'whatsapp',
+          dedupeKey: `whatsapp:${s.visitorId}`,
+        }),
+      );
+
+      const res = await request(app).get(`/api/v1/chats/${s.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        userEmail: 'ada@example.com',
+        userPhone: '+32611111111',
+        location: 'Ghent, Belgium',
+        leadId: lead.id,
+        tags: ['Urgent'],
+        tenantName: 'Test Tenant',
+        channel: 'whatsapp',
+      });
+      expect(res.body.data.metadata.pageUrl).toBe('https://example.com/pricing');
+      expect(res.body.data.lastActivityAt).toBeTruthy();
+    });
+
+    it('GET /chats/:id omits contact when none was captured', async () => {
+      const s = await createTestSession(tenantId, { status: 'bot' });
+      const res = await request(app).get(`/api/v1/chats/${s.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.userEmail).toBeNull();
+      expect(res.body.data.userPhone).toBeNull();
+      expect(res.body.data.location).toBeNull();
+      expect(res.body.data.leadId).toBeNull();
+      expect(res.body.data.tags).toEqual([]);
+    });
+
+    it('PATCH /chats/:id/tags replaces labels', async () => {
+      const s = await createTestSession(tenantId, { status: 'bot', tags: ['old'] });
+      const res = await request(app)
+        .patch(`/api/v1/chats/${s.id}/tags`)
+        .send({ tags: ['Urgent', 'urgent', 'Toegang'] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.tags).toEqual(['Urgent', 'Toegang']);
+
+      const fresh = await AppDataSource.getRepository(ChatSession).findOneBy({ id: s.id });
+      expect(fresh?.tags).toEqual(['Urgent', 'Toegang']);
     });
   });
 

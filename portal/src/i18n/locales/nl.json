@@ -2236,6 +2236,46 @@
         "subtitle": "Kies een gesprek uit de lijst om te beginnen"
       }
     },
+    "details": {
+      "tab": "Details",
+      "activityTab": "Activiteit",
+      "toggle": "Gespreksdetails",
+      "contact": {
+        "title": "Contactinformatie",
+        "viewProfile": "Bekijk volledig profiel"
+      },
+      "overview": {
+        "title": "Gespreksoverzicht",
+        "first": "Eerste bericht",
+        "last": "Laatste bericht",
+        "channel": "Kanaal",
+        "status": "Status",
+        "workspace": "Workspace",
+        "unavailable": "Niet beschikbaar"
+      },
+      "labels": {
+        "title": "Labels",
+        "add": "Label toevoegen",
+        "placeholder": "Nieuw label",
+        "empty": "Geen labels",
+        "remove": "{{tag}} verwijderen"
+      },
+      "actions": {
+        "title": "Snelle acties",
+        "viewLead": "Bekijk klant",
+        "linkLead": "Koppel aan lead",
+        "addLabel": "Voeg label toe",
+        "assign": "Wijs gesprek toe",
+        "export": "Exporteer gesprek"
+      },
+      "activity": {
+        "empty": "Geen activiteit om te tonen",
+        "started": "Gesprek gestart",
+        "last": "Laatste activiteit",
+        "closed": "Gesprek gesloten"
+      },
+      "today": "Vandaag, {{time}}"
+    },
     "closeDialog": {
       "title": "Dit gesprek sluiten?",
       "description": "Het gesprek wordt gemarkeerd als opgelost en uit de actieve lijst verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
@@ -2276,7 +2316,10 @@
       "returnToBotSuccess": "Gesprek terug naar bot",
       "returnToBotFailed": "Terugzetten naar bot mislukt",
       "durationUpdated": "Duur van overname bijgewerkt",
-      "durationUpdateFailed": "Duur bijwerken mislukt"
+      "durationUpdateFailed": "Duur bijwerken mislukt",
+      "tagsUpdated": "Labels bijgewerkt",
+      "tagsFailed": "Labels bijwerken mislukt",
+      "exported": "Gesprek geëxporteerd"
     },
     "stream": {
       "title": "Live chats",
@@ -3063,13 +3106,13 @@
         "add": "Voeg je eerste document toe",
         "addAnother": "Nog een toevoegen",
         "examples": "Je diensten, prijzen, openingsuren of een lijst met veelgestelde vragen",
+        "skipConsequence": "De assistent heeft niets om uit te antwoorden tot je documenten toevoegt onder AI Bot & Content.",
         "status": {
           "pending": "In wachtrij",
           "processing": "Wordt gelezen",
           "indexed": "Klaar",
           "failed": "Mislukt"
-        },
-        "skipConsequence": "De assistent heeft niets om uit te antwoorden tot je documenten toevoegt onder AI Bot & Content."
+        }
       },
       "social": {
         "title": "Berichtenkanalen",

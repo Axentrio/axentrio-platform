@@ -171,7 +171,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
                   onClick={() => handleFilterClick(f.key)}
                   className={`px-2.5 py-2 rounded-full text-xs font-medium transition-all duration-150 ${
                     typeFilter === f.key
-                      ? "bg-primary-500 text-white shadow-sm"
+                      ? "bg-primary text-primary-foreground shadow-sm"
                       : "bg-surface-2 text-text-muted hover:text-text-secondary hover:bg-surface-3"
                   }`}
                 >

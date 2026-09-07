@@ -62,7 +62,7 @@ export function SkillStateCard({ skill, readyTools }: SkillStateCardProps) {
         <span
           data-testid="skill-state-badge"
           data-state={skill.state}
-          className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE_BADGE_CLASS[skill.state]}`}
+          className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${STATE_BADGE_CLASS[skill.state]}`}
         >
           {REMEDY_TEXT[skill.state]}
         </span>
@@ -72,7 +72,7 @@ export function SkillStateCard({ skill, readyTools }: SkillStateCardProps) {
           {readyTools!.map((tool) => (
             <li
               key={tool}
-              className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-text-muted"
+              className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-2xs text-text-muted"
             >
               {tool}
             </li>

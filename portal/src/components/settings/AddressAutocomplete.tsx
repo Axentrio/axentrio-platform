@@ -148,7 +148,7 @@ export function AddressAutocomplete({ onSelect, label = 'Search for your address
             Required, not decorative. Autocomplete (New) obliges us to attribute predictions
             wherever they are shown without a Google map beside them.
           */}
-          <li className="px-3 py-1 text-[10px] text-text-muted text-right">Powered by Google</li>
+          <li className="px-3 py-1 text-2xs text-text-muted text-right">Powered by Google</li>
         </ul>
       )}
       <p className="text-xs text-text-muted mt-1">

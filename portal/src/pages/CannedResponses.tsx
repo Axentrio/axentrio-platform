@@ -254,7 +254,7 @@ export const CannedResponsesContent: React.FC = () => {
                     {cr.tags.length > 0 && (
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {cr.tags.map((tag) => (
-                          <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-surface-3 text-text-muted rounded">
+                          <span key={tag} className="text-2xs px-1.5 py-0.5 bg-surface-3 text-text-muted rounded">
                             {tag}
                           </span>
                         ))}

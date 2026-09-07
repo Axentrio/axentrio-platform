@@ -13,6 +13,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message, MessageStatus } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
 import { Participant } from '../database/entities/Participant';
+import { Lead } from '../database/entities/Lead';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
@@ -42,7 +43,7 @@ export function requireWidgetSessionMatch(req: import('express').Request, _res: 
 }
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
-import { sendMessageSchema, chatListQuerySchema, renameChatSchema } from '../schemas';
+import { sendMessageSchema, chatListQuerySchema, renameChatSchema, updateChatTagsSchema } from '../schemas';
 import { emitWebhookEvent } from '../webhooks/webhook.emitter';
 import {
   serializeConversationSummary,
@@ -96,10 +97,23 @@ function serialiseMessage(m: Message) {
   };
 }
 
+function visitorLocationLabel(
+  metadata: Participant['metadata'] | undefined,
+): string | null {
+  const loc = metadata?.location;
+  if (!loc) return null;
+  const parts = [loc.city, loc.country]
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
 const agentRepository = AppDataSource.getRepository(Agent);
+const participantRepository = AppDataSource.getRepository(Participant);
+const leadRepository = AppDataSource.getRepository(Lead);
 
 // Message request body
 interface SendMessageRequest {
@@ -738,11 +752,12 @@ router.get(
 
     const tenantId = req.user?.tenantId;
 
-    // Run session + messages queries in parallel to halve latency
-    const [session, messages] = await Promise.all([
+    // Session + transcript + visitor contact in parallel. Lead/participant
+    // miss is a hole in the panel, not a 404 — the conversation still opens.
+    const [session, messages, visitor, lead] = await Promise.all([
       sessionRepository.findOne({
         where: { id, tenantId },
-        relations: ['assignedAgent', 'assignedAgent.user'],
+        relations: ['assignedAgent', 'assignedAgent.user', 'tenant'],
       }),
       messageRepository
         .createQueryBuilder('m')
@@ -751,6 +766,15 @@ router.get(
         .orderBy('m.createdAt', 'DESC')
         .take(50)
         .getMany(),
+      participantRepository.findOne({
+        where: { sessionId: id, type: 'user', isDeleted: false },
+      }),
+      tenantId
+        ? leadRepository.findOne({
+            where: { tenantId, sessionId: id, deletedAt: IsNull() },
+            order: { createdAt: 'DESC' },
+          })
+        : Promise.resolve(null),
     ]);
 
     if (!session) {
@@ -769,6 +793,12 @@ router.get(
       guardrailStatus: session.guardrailStatus,
       visitorId: session.visitorId,
       userName: displayNameFromSession(session),
+      userEmail: lead?.email ?? visitor?.email ?? null,
+      userPhone: lead?.phone ?? null,
+      location: visitorLocationLabel(visitor?.metadata),
+      leadId: lead?.id ?? null,
+      tags: session.tags ?? [],
+      tenantName: session.tenant?.name,
       channel: session.channel,
       assignedAgentId: session.assignedAgentId,
       assignedAgentName: resolveAssignedAgentName(session.assignedAgent ?? null),
@@ -790,10 +820,12 @@ router.get(
       })),
       metadata: {
         source: session.source,
+        pageUrl: session.metadata?.pageUrl,
       },
       createdAt: session.createdAt,
       updatedAt: session.lastActivityAt,
       lastMessageAt: session.lastActivityAt,
+      lastActivityAt: session.lastActivityAt,
       closedAt: session.endedAt,
     });
   })
@@ -839,6 +871,31 @@ router.patch(
       userName,
       channel: session.channel,
     });
+  }),
+);
+
+/**
+ * PATCH /chats/:id/tags
+ * Replace the operator-managed labels on this conversation.
+ */
+router.patch(
+  '/:id/tags',
+  requireClerkAuth, autoProvision, resolveTenantContext,
+  validate(updateChatTagsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const tags = (req.body as { tags: string[] }).tags;
+    const tenantId = req.user?.tenantId;
+
+    const session = await sessionRepository.findOne({ where: { id, tenantId } });
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    await sessionRepository.update({ id, tenantId }, { tags });
+    await emitConversationUpsertForSession(id, tenantId);
+
+    sendSuccess(res, { id: session.id, tags });
   }),
 );
 

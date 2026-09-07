@@ -61,7 +61,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
       <header className="flex items-center justify-between px-5 py-4 border-b border-edge">
         <div>
           <h2 className="text-sm font-semibold text-text-primary">{t('help.drawer.title')}</h2>
-          <p className="text-[11px] text-text-muted mt-0.5">{t('help.drawer.subtitle')}</p>
+          <p className="text-xs text-text-muted mt-0.5">{t('help.drawer.subtitle')}</p>
         </div>
         <button
           ref={closeButtonRef}

@@ -152,11 +152,11 @@ function InvoiceRow({ row, focused }: { row: AdminLegalInvoice; focused: boolean
         <Link to={`/admin/tenants/${row.tenantId}`} className="text-primary-400 hover:underline">
           {row.tenantName ?? row.tenantId}
         </Link>
-        <p className="text-[11px] text-text-muted font-mono">{row.documentKind}</p>
+        <p className="text-xs text-text-muted font-mono">{row.documentKind}</p>
       </TableCell>
       <TableCell className="font-mono text-xs">
         {row.billitInvoiceNumber ?? '—'}
-        <p className="text-[11px] text-text-muted">{row.stripeInvoiceId ?? row.stripeRefundId ?? ''}</p>
+        <p className="text-xs text-text-muted">{row.stripeInvoiceId ?? row.stripeRefundId ?? ''}</p>
       </TableCell>
       <TableCell className="font-mono text-xs">{formatMoney(row.amountInclCents, row.currency)}</TableCell>
       <TableCell>

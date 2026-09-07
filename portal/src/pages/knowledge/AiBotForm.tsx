@@ -375,7 +375,7 @@ const IdentitySection: React.FC<{
             placeholder={orgBusinessName || t('ai.bot.identity.businessName.placeholder')}
             disabled={readOnly}
           />
-          <p className="text-[10px] text-text-muted mt-1">
+          <p className="text-2xs text-text-muted mt-1">
             {orgBusinessName
               ? t('ai.bot.identity.businessName.helperInherit', { name: orgBusinessName })
               : t('ai.bot.identity.businessName.helper')}
@@ -392,9 +392,9 @@ const IdentitySection: React.FC<{
             aria-invalid={!isSupportEmailValid}
           />
           {isSupportEmailValid ? (
-            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
+            <p className="text-2xs text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
           ) : (
-            <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
+            <p className="text-2xs text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
           )}
         </div>
         <div>
@@ -424,7 +424,7 @@ const IdentitySection: React.FC<{
               disabled={readOnly}
             />
           )}
-          <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
+          <p className="text-2xs text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
         </div>
         <div>
           <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.language.label')}</Label>
@@ -452,7 +452,7 @@ const IdentitySection: React.FC<{
               ))}
             </SelectContent>
           </Select>
-          <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.language.helper')}</p>
+          <p className="text-2xs text-text-muted mt-1">{t('ai.bot.identity.language.helper')}</p>
         </div>
       </div>
     </Section>
@@ -482,9 +482,9 @@ const TemplatePicker: React.FC<{
           <SelectItem key={tpl.id} value={tpl.id}>
             <span className="flex flex-col gap-0.5">
               <span>{tpl.displayName}</span>
-              {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
+              {tpl.description && <span className="text-xs text-text-muted">{tpl.description}</span>}
               {(tpl.skills?.length ?? 0) > 0 && (
-                <span className="text-[10px] text-text-muted">
+                <span className="text-2xs text-text-muted">
                   {t('ai.bot.template.gives', { defaultValue: 'Gives' })}: {(tpl.skills ?? []).map(skillLabel).join(' · ')}
                 </span>
               )}
@@ -532,12 +532,12 @@ const BoundTemplateList: React.FC<{
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</div>
-                    {tpl?.description && <div className="truncate text-[11px] text-text-muted">{tpl.description}</div>}
+                    {tpl?.description && <div className="truncate text-xs text-text-muted">{tpl.description}</div>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {b.publishedVersions.length > 0 && (
                       <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || isSaving}>
-                        <SelectTrigger className="h-7 gap-1 rounded-full border border-edge bg-surface-3 px-2.5 text-[11px] text-text-secondary" title={b.version === 'latest' ? t('ai.bot.template.latest') : t('ai.bot.template.pinTo', { version: b.version })}>
+                        <SelectTrigger className="h-7 gap-1 rounded-full border border-edge bg-surface-3 px-2.5 text-xs text-text-secondary" title={b.version === 'latest' ? t('ai.bot.template.latest') : t('ai.bot.template.pinTo', { version: b.version })}>
                           {b.version === 'latest' ? t('ai.bot.template.latestShort', { defaultValue: 'Latest' }) : `v${b.version}`}
                         </SelectTrigger>
                         <SelectContent>
@@ -557,11 +557,11 @@ const BoundTemplateList: React.FC<{
                 </div>
                 {skills.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-edge/50 pt-3">
-                    <span className="mr-0.5 text-[10px] uppercase tracking-wide text-text-muted">{t('ai.bot.template.gives', { defaultValue: 'Gives' })}</span>
+                    <span className="mr-0.5 text-2xs uppercase tracking-wide text-text-muted">{t('ai.bot.template.gives', { defaultValue: 'Gives' })}</span>
                     {skills.map((id) => {
                       const issue = skillIssue(skillStateById[id]);
                       return (
-                        <span key={id} className="inline-flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-[11px] text-text-secondary">
+                        <span key={id} className="inline-flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-xs text-text-secondary">
                           <span className={`h-1.5 w-1.5 rounded-full ${issue ? 'bg-amber-400' : 'bg-emerald-400'}`} />
                           {skillLabel(id)}
                           {issue && <span className="text-amber-400/90">· {issue}</span>}
@@ -583,10 +583,10 @@ const BoundTemplateList: React.FC<{
       )}
 
       {bindings.filter((b) => b.pinnedButUnavailable).map((b) => (
-        <p key={'p' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
+        <p key={'p' + b.templateId} className="text-xs text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
       ))}
       {bindings.filter((b) => b.templateUnavailable).map((b) => (
-        <p key={'u' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
+        <p key={'u' + b.templateId} className="text-xs text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
       ))}
     </>
   );
@@ -613,7 +613,7 @@ const TemplateModeToggle: React.FC<{
           {t('ai.bot.template.modeAnd')}
         </Button>
       </div>
-      <p className="text-[10px] text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
+      <p className="text-2xs text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
     </div>
   );
 };
@@ -632,7 +632,7 @@ const SkillAdvisories: React.FC<{
 
       {/* Legacy advisory — only when the composable per-skill states aren't shown. */}
       {!COMPOSABLE_TEMPLATES_ENABLED && missingModules.length > 0 && (
-        <p className="text-[11px] text-amber-400">
+        <p className="text-xs text-amber-400">
           {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
           {t('ai.bot.template.warnings.missingModulesAction')}
         </p>
@@ -693,7 +693,7 @@ const TemplatesSection: React.FC<{
       title={t('ai.bot.template.title')}
       description={t('ai.bot.template.descriptionMulti')}
       action={availableTemplates.length > 0 ? (
-        <span className="whitespace-nowrap text-[11px] text-text-muted">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
+        <span className="whitespace-nowrap text-xs text-text-muted">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
       ) : undefined}
     >
       {availableTemplates.length === 0 ? (
@@ -779,8 +779,8 @@ const TemplateVariablesSection: React.FC<{
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplateVarValues((prev) => ({ ...prev, [v.key]: e.target.value }))}
                 className={`w-full rounded-lg border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-50 ${missing ? 'border-amber-500/50' : 'border-edge'}`}
               />
-              {v.help && <p className="text-[11px] text-text-muted">{v.help}</p>}
-              {missing && <p className="text-[11px] text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
+              {v.help && <p className="text-xs text-text-muted">{v.help}</p>}
+              {missing && <p className="text-xs text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
             </div>
           );
         })}
@@ -816,7 +816,7 @@ const SpecialtiesSection: React.FC<{
             />
             <span>
               <span className="font-medium text-text-primary">{s.name}</span>
-              {s.requiresSpecialPrompt && <span className="ml-1 text-[10px] text-amber-400">(special handling)</span>}
+              {s.requiresSpecialPrompt && <span className="ml-1 text-2xs text-amber-400">(special handling)</span>}
               {s.description && <span className="block text-xs text-text-muted">{s.description}</span>}
             </span>
           </label>
@@ -872,7 +872,7 @@ const SocialSection: React.FC<{
                   ))}
                 </SelectContent>
               </Select>
-              <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.toneHelper', { defaultValue: 'Used only on messaging channels.' })}</p>
+              <p className="mt-1 text-2xs text-text-muted">{t('ai.bot.social.toneHelper', { defaultValue: 'Used only on messaging channels.' })}</p>
             </div>
             <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.social.maxLen', { defaultValue: 'Max reply length (characters)' })}</Label>
@@ -887,7 +887,7 @@ const SocialSection: React.FC<{
                 }
                 disabled={readOnly}
               />
-              <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.maxLenHelper', { defaultValue: 'Leave blank to use the main limit. Shorter suits phone screens.' })}</p>
+              <p className="mt-1 text-2xs text-text-muted">{t('ai.bot.social.maxLenHelper', { defaultValue: 'Leave blank to use the main limit. Shorter suits phone screens.' })}</p>
             </div>
           </div>
           <div>
@@ -901,7 +901,7 @@ const SocialSection: React.FC<{
               placeholder={t('ai.bot.social.instructionsPlaceholder', { defaultValue: 'e.g. Keep replies under two sentences and always end with a question.' })}
               className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
             />
-            <p className="mt-1 text-[10px] text-text-muted">
+            <p className="mt-1 text-2xs text-text-muted">
               {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule — it can't be removed, only tightened." })}
             </p>
           </div>
@@ -946,8 +946,8 @@ const BusinessHoursCard: React.FC<{
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
-          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
-          <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.alwaysOnHint')}</p>
+          <p className="text-2xs text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
+          <p className="text-2xs text-text-muted">{t('ai.bot.operational.businessHours.alwaysOnHint')}</p>
         </div>
         <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
       </div>
@@ -956,7 +956,7 @@ const BusinessHoursCard: React.FC<{
         <>
           {!readOnly && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.presetsLabel')}</span>
+              <span className="text-2xs text-text-muted">{t('ai.bot.operational.businessHours.presetsLabel')}</span>
               <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_WEEKDAYS)}>
                 {t('ai.bot.operational.businessHours.presetWeekdays')}
               </Button>
@@ -993,7 +993,7 @@ const BusinessHoursCard: React.FC<{
             <div className="flex items-center justify-between">
               <div>
                 <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.overrides.label')}</Label>
-                <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.overrides.helper')}</p>
+                <p className="text-2xs text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.overrides.helper')}</p>
               </div>
               {!readOnly && (
                 <Button
@@ -1014,7 +1014,7 @@ const BusinessHoursCard: React.FC<{
               )}
             </div>
             {bhOverrides.length === 0 ? (
-              <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.overrides.empty')}</p>
+              <p className="text-2xs text-text-muted">{t('ai.bot.operational.businessHours.overrides.empty')}</p>
             ) : (
               <div className="space-y-2">
                 {bhOverrides.map((o, i) => (
@@ -1163,7 +1163,7 @@ const QuotedAddressCard: React.FC<{
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-text-secondary">{t('ai.bot.operational.quotedAddress.label')}</Label>
-          <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
+          <p className="text-2xs text-text-muted mt-0.5">{t('ai.bot.operational.quotedAddress.helper')}</p>
         </div>
         <Switch
           aria-label={t('ai.bot.operational.quotedAddress.label')}
@@ -1676,7 +1676,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                   placeholder={t('ai.bot.operational.escalationKeywords.placeholder')}
                   disabled={readOnly}
                 />
-                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
+                <p className="text-2xs text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
               </div>
 
               <BusinessHoursCard
@@ -1725,7 +1725,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         <Button
           onClick={handleGoToKnowledgeBase}
           size="lg"
-          className="bg-primary-600 hover:bg-primary-500 text-white"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           {t('ai.bot.actions.goToKnowledgeBase')}
           <ArrowRight className="w-4 h-4 ml-2" />

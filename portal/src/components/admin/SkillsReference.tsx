@@ -68,7 +68,7 @@ export function SkillsReference() {
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {s.provides.map((tool) => (
-                      <span key={tool} className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                      <span key={tool} className="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-2xs text-text-muted">
                         {tool}
                       </span>
                     ))}
@@ -85,7 +85,7 @@ export function SkillsReference() {
 
               {/* Bulk-apply: bind this skill to every template in a tier (confirmed first). */}
               <div className="border-t border-edge/60 pt-2.5">
-                <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+                <div className="mb-1.5 flex items-center gap-1.5 text-2xs font-medium uppercase tracking-wider text-text-muted">
                   <Layers className="h-3 w-3" /> Apply to all templates in
                 </div>
                 <div className="flex gap-1.5">

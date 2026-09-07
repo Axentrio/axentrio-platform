@@ -464,6 +464,47 @@ export function useRenameConversation() {
   );
 }
 
+/** PATCH /chats/:id/tags — optimistic list + detail via mergeDefined. */
+export function useUpdateConversationTags() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (chatId: string, tags: string[]) => {
+      const patch = { tags };
+      const previous = queryClient.getQueriesData({
+        queryKey: queryKeys.chats.all(),
+      });
+      queryClient.setQueriesData<{ data?: Chat[] }>(
+        { queryKey: queryKeys.chats.all() },
+        (old) => {
+          if (!old) return old;
+          if (Array.isArray(old.data)) {
+            return {
+              ...old,
+              data: old.data.map((row) =>
+                row.id === chatId ? mergeDefined(row, patch) : row,
+              ),
+            };
+          }
+          return old;
+        },
+      );
+      queryClient.setQueryData<ChatDetailCacheEntry>(
+        queryKeys.chats.detail(chatId),
+        (old) => (old ? mergeDefined(old, patch) : old),
+      );
+      try {
+        await api.patch(`/chats/${chatId}/tags`, { tags });
+      } catch (err) {
+        for (const [key, data] of previous) {
+          queryClient.setQueryData(key, data);
+        }
+        throw err;
+      }
+    },
+    [queryClient],
+  );
+}
+
 export function useChatDetail(chatId: string): UseChatDetailReturn {
   const queryClient = useQueryClient();
   const {

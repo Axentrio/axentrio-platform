@@ -231,7 +231,7 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
           </div>
         </div>
         <div className="px-3 py-1.5 text-xs text-text-muted border-b border-edge">
-          Tip: Type <kbd className="px-1 py-0.5 bg-surface-3 rounded text-[10px] font-mono">/</kbd> in chat to quick-select
+          Tip: Type <kbd className="px-1 py-0.5 bg-surface-3 rounded text-2xs font-mono">/</kbd> in chat to quick-select
         </div>
         <div className="max-h-[300px] overflow-y-auto">
           {Object.keys(grouped).length === 0 ? (

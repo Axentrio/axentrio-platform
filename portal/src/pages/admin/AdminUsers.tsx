@@ -242,7 +242,7 @@ const AdminUsers: React.FC = () => {
                       <span className="flex items-center gap-2">
                         {user.name}
                         {currentUser?.email === user.email && currentTenantId === user.tenantId && (
-                          <Badge className="bg-primary-600/15 text-primary-400 border-primary-500/25 text-[10px] px-1.5 py-0">
+                          <Badge className="bg-primary-600/15 text-primary-400 border-primary-500/25 text-2xs px-1.5 py-0">
                             {t('admin.users.youBadge')}
                           </Badge>
                         )}

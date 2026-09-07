@@ -547,7 +547,7 @@ export const ServicesSection: React.FC<{
                   */}
                   {s.onlineBookable !== false && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                         s.bookingMode === 'request' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
                       }`}
                     >
@@ -561,23 +561,23 @@ export const ServicesSection: React.FC<{
                     on its own) and `not_allowed` (the customer cannot ask at all).
                   */}
                   {(s.rescheduleMode ?? 'request') !== 'request' && (
-                    <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-sky-500/10 text-sky-400">
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-sky-500/10 text-sky-400">
                       reschedule: {s.rescheduleMode}
                     </span>
                   )}
                   {(s.cancelMode ?? 'request') !== 'request' && (
-                    <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-orange-500/10 text-orange-400">
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-orange-500/10 text-orange-400">
                       cancel: {s.cancelMode}
                     </span>
                   )}
-                  {!s.isActive && <span className="text-[11px] text-text-muted">(inactive)</span>}
+                  {!s.isActive && <span className="text-xs text-text-muted">(inactive)</span>}
                   {/*
                     Gated on isActive so an inactive service does not stack two muted markers.
                     Without this the switch had no visible effect at all: an owner unticks
                     "customers can book this online", saves, and the row looks identical.
                   */}
                   {s.isActive && s.onlineBookable === false && (
-                    <span className="text-[11px] text-text-muted">(not bookable online)</span>
+                    <span className="text-xs text-text-muted">(not bookable online)</span>
                   )}
                 </div>
                 <div className="mt-0.5 text-xs text-text-secondary">

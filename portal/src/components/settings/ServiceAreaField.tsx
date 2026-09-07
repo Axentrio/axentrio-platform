@@ -142,7 +142,7 @@ export const ServiceAreaField: React.FC<Props> = ({ value, onChange, hasAddressS
                     <span className="text-text-muted">, {s.context}</span>
                   </span>
                   {/* "Antwerpen" is both a province and a city — say which this row is. */}
-                  <span className="ml-auto shrink-0 text-[11px] uppercase tracking-wide text-text-muted">
+                  <span className="ml-auto shrink-0 text-xs uppercase tracking-wide text-text-muted">
                     {KIND_LABEL[s.kind]}
                   </span>
                 </button>
@@ -165,7 +165,7 @@ export const ServiceAreaField: React.FC<Props> = ({ value, onChange, hasAddressS
               )}
             >
               {entry.label}
-              <span className="text-[10px] uppercase tracking-wide text-text-muted">{KIND_LABEL[entry.kind]}</span>
+              <span className="text-2xs uppercase tracking-wide text-text-muted">{KIND_LABEL[entry.kind]}</span>
               <button
                 type="button"
                 onClick={() => remove(i)}

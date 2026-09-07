@@ -2235,6 +2235,46 @@
         "subtitle": "Choisissez une conversation dans la liste pour commencer"
       }
     },
+    "details": {
+      "tab": "Détails",
+      "activityTab": "Activité",
+      "toggle": "Détails de la conversation",
+      "contact": {
+        "title": "Coordonnées",
+        "viewProfile": "Voir le profil complet"
+      },
+      "overview": {
+        "title": "Aperçu de la conversation",
+        "first": "Premier message",
+        "last": "Dernier message",
+        "channel": "Canal",
+        "status": "Statut",
+        "workspace": "Espace de travail",
+        "unavailable": "Indisponible"
+      },
+      "labels": {
+        "title": "Libellés",
+        "add": "Ajouter un libellé",
+        "placeholder": "Nouveau libellé",
+        "empty": "Aucun libellé",
+        "remove": "Retirer {{tag}}"
+      },
+      "actions": {
+        "title": "Actions rapides",
+        "viewLead": "Voir le client",
+        "linkLead": "Lier au lead",
+        "addLabel": "Ajouter un libellé",
+        "assign": "Assigner la conversation",
+        "export": "Exporter la conversation"
+      },
+      "activity": {
+        "empty": "Aucune activité à afficher",
+        "started": "Conversation démarrée",
+        "last": "Dernière activité",
+        "closed": "Conversation clôturée"
+      },
+      "today": "Aujourd’hui, {{time}}"
+    },
     "closeDialog": {
       "title": "Clôturer cette conversation ?",
       "description": "La conversation sera marquée comme résolue et retirée de la liste active. Cette action est irréversible.",
@@ -2275,7 +2315,10 @@
       "returnToBotSuccess": "Conversation rendue au bot",
       "returnToBotFailed": "Échec du retour de la conversation au bot",
       "durationUpdated": "Durée de prise en charge mise à jour",
-      "durationUpdateFailed": "Échec de la mise à jour de la durée"
+      "durationUpdateFailed": "Échec de la mise à jour de la durée",
+      "tagsUpdated": "Libellés mis à jour",
+      "tagsFailed": "Impossible de mettre à jour les libellés",
+      "exported": "Conversation exportée"
     },
     "stream": {
       "title": "Conversations en direct",
@@ -3062,13 +3105,13 @@
         "add": "Ajoutez votre premier document",
         "addAnother": "En ajouter un autre",
         "examples": "Vos services, tarifs, heures d'ouverture, ou une liste de questions fréquentes",
+        "skipConsequence": "L'assistant n'aura rien à lire tant que vous n'ajouterez pas de documents dans AI Bot & Content.",
         "status": {
           "pending": "En attente",
           "processing": "Lecture en cours",
           "indexed": "Prêt",
           "failed": "Échec"
-        },
-        "skipConsequence": "L'assistant n'aura rien à lire tant que vous n'ajouterez pas de documents dans AI Bot & Content."
+        }
       },
       "social": {
         "title": "Canaux de messagerie",

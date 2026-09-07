@@ -180,7 +180,7 @@ function LeadPersonCell({ lead }: { lead: Lead }) {
             </span>
           )}
           {lead.isRepeatCustomer && (
-            <Badge variant="outline" className="text-[10px] font-normal">
+            <Badge variant="outline" className="text-2xs font-normal">
               {t('leads.table.returning', { defaultValue: 'Been here before' })}
             </Badge>
           )}
@@ -203,7 +203,7 @@ function LeadWaitingCell({ lead, days }: { lead: Lead; days: number | null }) {
       ) : (
         <>
           <span
-            className={`text-[15px] font-semibold ${
+            className={`text-sm font-semibold ${
               lead.followUp?.priority === 'now'
                 ? 'text-destructive'
                 : days >= OVERDUE_DAYS
@@ -213,7 +213,7 @@ function LeadWaitingCell({ lead, days }: { lead: Lead; days: number | null }) {
           >
             {days}
           </span>
-          <span className="block text-[11px] text-text-muted">
+          <span className="block text-xs text-text-muted">
             {t('leads.table.days', { defaultValue: 'days', count: days })}
           </span>
         </>
@@ -456,7 +456,7 @@ function LeadDetailRow({
                 },
               ].map((f) => (
                 <div key={f.k} className="min-w-0">
-                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-text-muted">
                     {f.label}
                   </dt>
                   <dd className="mt-0.5 flex items-center gap-1.5 text-text-primary">

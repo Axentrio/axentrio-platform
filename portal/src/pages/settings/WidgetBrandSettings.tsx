@@ -136,7 +136,7 @@ const LogoCard: React.FC<{ tenantName: string }> = ({ tenantName }) => {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-white font-bold text-xl bg-primary-600">
+              <div className="w-full h-full flex items-center justify-center text-primary-foreground font-bold text-xl bg-primary">
                 {tenantName.charAt(0).toUpperCase()}
               </div>
             )}
@@ -244,7 +244,7 @@ const WidgetBrandSettings: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-semibold text-text-primary">{t('settings.widget.title')}</h2>
+        <h2 className="text-lg font-semibold text-text-primary">{t('settings.widget.title')}</h2>
         <p className="text-sm text-text-secondary">
           {t('settings.widget.description')}
         </p>

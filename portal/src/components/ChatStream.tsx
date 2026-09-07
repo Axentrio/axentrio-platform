@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, MessageSquare, Clock, User, ShieldAlert, History } from 'lucide-react';
+import { Search, MessageSquare, User, ShieldAlert, History } from 'lucide-react';
 import { useChatsQuery, useChatThread } from '../queries/useChatQueries';
 import { LIST_ROWS_MAX } from '../queries/conversationLive';
 import { ChatStatusBadge } from './StatusBadge';
@@ -46,9 +46,15 @@ function activityMs(chat: Chat): number {
   return at ? new Date(at).getTime() : 0;
 }
 
-/** s: keys and missing keys are unresolvable identities — each row stands alone. */
 function isStandaloneThreadKey(id: string | undefined): boolean {
   return !id || id.startsWith('s:');
+}
+
+function rowInitials(name: string | undefined): string {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const letters = (parts[0][0] || '') + (parts[1]?.[0] || '');
+  return letters.toUpperCase();
 }
 
 /**
@@ -159,7 +165,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
   };
 
   return (
-    <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
+    <div className={cn('flex flex-col h-full overflow-hidden bg-transparent', className)}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-edge">
         <div className="flex items-center justify-between mb-3">
@@ -196,7 +202,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                 <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
                   <SelectValue placeholder={t('inbox.stream.filters.status.all')} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="inbox-desk">
                   {statusFilters.map((filter) => (
                     <SelectItem key={filter.value} value={filter.value}>
                       {t(filter.labelKey)}
@@ -255,24 +261,31 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                 }
               }}
               className={cn(
-                'px-4 py-3 border-b border-edge/50 cursor-pointer transition-colors hover:bg-surface-3',
+                'mx-2 my-0.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors',
                 selectedChatId === chat.id
-                  ? 'bg-primary-600/10 border-l-4 border-l-primary-500'
-                  : 'border-l-4 border-l-transparent'
+                  ? 'bg-primary-600/10'
+                  : 'hover:bg-surface-3',
               )}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-primary">
+                  {rowInitials(chat.userName)}
+                </div>
                 <div className="flex-1 min-w-0">
-                  {/* User info */}
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-start justify-between gap-2">
                     <span className="font-medium text-text-primary truncate">
                       {chat.userName || t('inbox.chat.anonymous')}
                     </span>
+                    <span className="text-xs text-text-muted tabular-nums shrink-0">
+                      {formatTime(chat.lastMessageAt || chat.lastActivityAt)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
                     <ChannelBadge channel={chat.channel} source={chat.metadata?.source} />
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
                     {siblingCount > 1 && (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                        className="inline-flex items-center rounded-full bg-surface-3 px-1.5 py-0.5 text-2xs font-medium text-text-secondary"
                         title={t('inbox.thread.pageGroupTooltip', { count: siblingCount })}
                       >
                         {t('inbox.thread.pageGroupBadge', { count: siblingCount })}
@@ -280,7 +293,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                     )}
                     {chat.id === selectedChatId && earlierCount > 0 && (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+                        className="inline-flex items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-2xs font-medium text-text-secondary"
                         title={t('inbox.thread.earlierTooltip')}
                       >
                         <History className="w-3 h-3" />
@@ -289,7 +302,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                     )}
                     {chat.aiAutoReplyEnabled === false && (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-2xs font-medium text-amber-600"
                         title={t('inbox.guardrail.pausedTooltip')}
                       >
                         <ShieldAlert className="w-3 h-3" />
@@ -297,39 +310,21 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                       </span>
                     )}
                   </div>
-
-                  {/* Last message */}
-                  <p className="text-sm text-text-secondary truncate">
+                  <p className="text-sm text-text-secondary truncate mt-1">
                     {getLastMessage(chat) || ''}
                   </p>
-
-                  {/* Meta info */}
-                  <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatTime(chat.lastMessageAt || chat.lastActivityAt)}
-                    </span>
-                    {(chat as any).messageCount > 0 && (
-                      <span className="flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3" />
-                        {(chat as any).messageCount}
-                      </span>
-                    )}
-                    {chat.tenantName && (
-                      <span>{chat.tenantName}</span>
-                    )}
-                    {chat.assignedAgentName && (
-                      <span className="flex items-center gap-1">
-                        <User className="w-3 h-3" />
-                        {chat.assignedAgentName}
-                      </span>
-                    )}
-                  </div>
+                  {(chat.tenantName || chat.assignedAgentName) && (
+                    <p className="mt-1 flex items-center gap-2 text-xs text-text-muted truncate">
+                      {chat.tenantName && <span>{chat.tenantName}</span>}
+                      {chat.assignedAgentName && (
+                        <span className="inline-flex items-center gap-1">
+                          <User className="w-3 h-3" />
+                          {chat.assignedAgentName}
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
-
-                {/* Take Over on any chat the AI still owns, not only handoff.
-                    A human-owned chat also carries status 'handsoff'
-                    (deriveStatusFromOwnership), so ownership must exclude it. */}
                 {chat.ownership !== 'human_owned' && chat.status !== 'closed' && (
                   <Button
                     size="sm"
@@ -338,7 +333,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                       e.stopPropagation();
                       onTakeover(chat.id);
                     }}
-                    className="bg-primary-600 text-white text-xs font-medium rounded-xl hover:bg-primary-500 hover:shadow-glow-sm flex-shrink-0"
+                    className="bg-primary text-primary-foreground text-xs font-medium rounded-xl hover:bg-primary/90 hover:shadow-glow-sm flex-shrink-0"
                   >
                     {t('inbox.takeover.button')}
                   </Button>

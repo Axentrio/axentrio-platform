@@ -117,6 +117,9 @@ vi.mock('@components/ChatStream', () => ({ ChatStream: () => null }));
 vi.mock('@components/ChatWindow', () => ({
   ChatWindow: () => <div data-testid="chat-window" />,
 }));
+vi.mock('@components/ConversationDetailsPanel', () => ({
+  ConversationDetailsPanel: () => null,
+}));
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },

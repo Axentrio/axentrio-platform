@@ -85,7 +85,7 @@ function ChatWidget({
         type="button"
         onClick={onToggle}
         aria-label="Open chat"
-        className="group w-14 h-14 rounded-full bg-[#4338ca] text-white flex items-center justify-center shadow-[0_4px_24px_rgba(67,56,202,0.35)] transition-transform duration-200 hover:scale-[1.06] active:scale-95 cursor-pointer"
+        className="group w-14 h-14 rounded-full bg-[#123B3A] text-white flex items-center justify-center shadow-[0_4px_24px_rgba(18,59,58,0.35)] transition-transform duration-200 hover:scale-[1.06] active:scale-95 cursor-pointer"
       >
         <MessageCircle size={22} strokeWidth={2.2} />
       </button>
@@ -95,13 +95,13 @@ function ChatWidget({
   return (
     <div className="w-[370px] h-[520px] rounded-[18px] overflow-hidden flex flex-col shadow-[0_8px_48px_rgba(0,0,0,0.12),0_1px_4px_rgba(0,0,0,0.06)] border border-[#e8e5de]/60 bg-[#fcfbf9]">
       {/* Header — warm, not saturated */}
-      <div className="relative px-4 py-3.5 bg-[#4338ca] flex items-center justify-between">
+      <div className="relative px-4 py-3.5 bg-[#123B3A] flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-[10px] bg-white/[0.14] flex items-center justify-center backdrop-blur-sm">
             <MessageCircle size={17} className="text-white/90" strokeWidth={2} />
           </div>
           <div>
-            <div className="text-[14px] font-semibold text-white tracking-[-0.01em]">
+            <div className="text-sm font-semibold text-white tracking-[-0.01em]">
               Support
             </div>
             <div className="flex items-center gap-1.5 mt-px">
@@ -109,7 +109,7 @@ function ChatWidget({
                 'w-[5px] h-[5px] rounded-full',
                 connected ? 'bg-emerald-300' : 'bg-red-300',
               )} />
-              <span className="text-[11px] text-white/60 font-medium">
+              <span className="text-xs text-white/60 font-medium">
                 {connected ? statusLabel(sessionStatus) : 'Reconnecting...'}
               </span>
             </div>
@@ -130,13 +130,13 @@ function ChatWidget({
         <div className="flex flex-col gap-3.5">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 text-center">
-              <div className="w-10 h-10 rounded-xl bg-[#4338ca]/[0.07] flex items-center justify-center mb-3">
-                <MessageCircle size={18} className="text-[#4338ca]/60" />
+              <div className="w-10 h-10 rounded-xl bg-[#123B3A]/[0.07] flex items-center justify-center mb-3">
+                <MessageCircle size={18} className="text-[#123B3A]/60" />
               </div>
-              <p className="text-[13px] font-medium text-[#3d3929]">
+              <p className="text-sm font-medium text-[#3d3929]">
                 How can we help?
               </p>
-              <p className="text-[12px] text-[#9c9584] mt-0.5 max-w-[200px]">
+              <p className="text-xs text-[#9c9584] mt-0.5 max-w-[200px]">
                 Ask us anything — we typically reply in under a minute.
               </p>
             </div>
@@ -150,21 +150,21 @@ function ChatWidget({
               <React.Fragment key={msg.id}>
                 <div className={cn('flex gap-2', isVisitor ? 'justify-end' : 'justify-start')}>
                   {!isVisitor && (
-                    <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#4338ca]/[0.08] flex items-center justify-center mt-0.5">
+                    <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#123B3A]/[0.08] flex items-center justify-center mt-0.5">
                       {msg.sender === 'agent'
-                        ? <User size={11} className="text-[#4338ca]" strokeWidth={2.5} />
-                        : <Bot size={11} className="text-[#4338ca]" strokeWidth={2.5} />
+                        ? <User size={11} className="text-[#123B3A]" strokeWidth={2.5} />
+                        : <Bot size={11} className="text-[#123B3A]" strokeWidth={2.5} />
                       }
                     </div>
                   )}
                   <div className={cn(
-                    'max-w-[78%] text-[13px] leading-[1.55] px-3.5 py-2.5 whitespace-pre-wrap',
+                    'max-w-[78%] text-sm leading-[1.55] px-3.5 py-2.5 whitespace-pre-wrap',
                     isVisitor
-                      ? 'bg-[#4338ca] text-white rounded-[14px] rounded-br-[4px]'
+                      ? 'bg-[#123B3A] text-white rounded-[14px] rounded-br-[4px]'
                       : 'bg-[#f0ede6] text-[#2d2a23] rounded-[14px] rounded-bl-[4px]',
                   )}>
                     {msg.content}
-                    <div className={cn('text-[10px] mt-1 leading-none', isVisitor ? 'text-white/50' : 'text-[#b5ae9e]')}>
+                    <div className={cn('text-2xs mt-1 leading-none', isVisitor ? 'text-white/50' : 'text-[#b5ae9e]')}>
                       {timeStr(msg.timestamp)}
                     </div>
                   </div>
@@ -184,7 +184,7 @@ function ChatWidget({
                             setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, metadata: null } : m));
                             onSend(null, value);
                           }}
-                          className="text-[12px] font-medium px-3 py-1.5 rounded-full border-[1.5px] border-[#4338ca] text-[#4338ca] bg-white hover:bg-[#4338ca] hover:text-white transition-colors cursor-pointer"
+                          className="text-xs font-medium px-3 py-1.5 rounded-full border-[1.5px] border-[#123B3A] text-[#123B3A] bg-white hover:bg-[#123B3A] hover:text-white transition-colors cursor-pointer"
                         >
                           {title}
                         </button>
@@ -198,8 +198,8 @@ function ChatWidget({
 
           {isTyping && (
             <div className="flex gap-2 justify-start">
-              <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#4338ca]/[0.08] flex items-center justify-center mt-0.5">
-                <Bot size={11} className="text-[#4338ca]" strokeWidth={2.5} />
+              <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#123B3A]/[0.08] flex items-center justify-center mt-0.5">
+                <Bot size={11} className="text-[#123B3A]" strokeWidth={2.5} />
               </div>
               <div className="bg-[#f0ede6] rounded-[14px] rounded-bl-[4px] px-4 py-3 flex items-center gap-[5px]">
                 {[0, 150, 300].map((delay) => (
@@ -223,20 +223,20 @@ function ChatWidget({
             aria-label="Write a message"
             placeholder={sessionStatus === 'closed' ? 'Session closed' : 'Write a message...'}
             disabled={sessionStatus === 'closed'}
-            className="flex-1 bg-[#f5f3ee] text-[#2d2a23] text-[13px] rounded-xl px-3.5 py-2.5 border border-[#e8e5de] placeholder:text-[#b5ae9e] focus:outline-none focus:border-[#4338ca]/40 focus:ring-2 focus:ring-[#4338ca]/10 disabled:opacity-40 transition-all"
+            className="flex-1 bg-[#f5f3ee] text-[#2d2a23] text-sm rounded-xl px-3.5 py-2.5 border border-[#e8e5de] placeholder:text-[#b5ae9e] focus:outline-none focus:border-[#123B3A]/40 focus:ring-2 focus:ring-[#123B3A]/10 disabled:opacity-40 transition-all"
           />
           <button
             type="button"
             onClick={onSend}
             disabled={!input.trim() || sessionStatus === 'closed'}
             aria-label="Send message"
-            className="w-9 h-9 rounded-xl bg-[#4338ca] hover:bg-[#3730a3] disabled:bg-[#e8e5de] disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors cursor-pointer active:scale-95"
+            className="w-9 h-9 rounded-xl bg-[#123B3A] hover:bg-[#0C1112] disabled:bg-[#e8e5de] disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors cursor-pointer active:scale-95"
           >
             <Send size={14} strokeWidth={2.2} />
           </button>
         </div>
         <div className="text-center mt-2">
-          <span className="text-[10px] text-[#c7c1b4] tracking-wide">
+          <span className="text-2xs text-[#c7c1b4] tracking-wide">
             Powered by <span className="font-medium text-[#b5ae9e]">Axentrio</span>
           </span>
         </div>
@@ -261,7 +261,7 @@ function CopyBtn({
 }) {
   return (
     <button type="button" onClick={() => copyText(text, label)} className="flex items-center gap-1 text-[#78716c] hover:text-[#44403c] transition-colors cursor-pointer group" aria-label={`Copy ${label}`}>
-      <span className="font-mono text-[11px] truncate max-w-[140px]">{text.slice(0, 20)}...</span>
+      <span className="font-mono text-xs truncate max-w-[140px]">{text.slice(0, 20)}...</span>
       {copied === label
         ? <Check size={10} className="text-emerald-500 shrink-0" />
         : <Copy size={10} className="shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity" />
@@ -271,7 +271,7 @@ function CopyBtn({
 }
 
 const logColors: Record<LogEntry['type'], string> = {
-  info: 'text-[#6366f1]',
+  info: 'text-[#2DD4BF]',
   send: 'text-[#059669]',
   receive: 'text-[#7c3aed]',
   error: 'text-[#dc2626]',
@@ -279,7 +279,7 @@ const logColors: Record<LogEntry['type'], string> = {
 };
 
 const logDots: Record<LogEntry['type'], string> = {
-  info: 'bg-[#6366f1]',
+  info: 'bg-[#2DD4BF]',
   send: 'bg-[#059669]',
   receive: 'bg-[#7c3aed]',
   error: 'bg-[#dc2626]',
@@ -311,7 +311,7 @@ function DevPanel({
       {/* Header */}
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[#e8e5de]">
         <Code2 size={14} className="text-[#a8a29e]" strokeWidth={2.2} />
-        <span className="text-[12px] font-semibold text-[#78716c] tracking-wide uppercase">
+        <span className="text-xs font-semibold text-[#78716c] tracking-wide uppercase">
           Inspector
         </span>
       </div>
@@ -319,27 +319,27 @@ function DevPanel({
       {/* Session info */}
       <div className="px-5 py-3.5 border-b border-[#e8e5de] space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Status</span>
+          <span className="text-xs text-[#a8a29e] font-medium uppercase tracking-wider">Status</span>
           <div className="flex items-center gap-1.5">
             <span className={cn('w-[6px] h-[6px] rounded-full', connected ? 'bg-emerald-400' : 'bg-red-400')} />
-            <span className={cn('text-[12px] font-medium', connected ? 'text-emerald-600' : 'text-red-500')}>
+            <span className={cn('text-xs font-medium', connected ? 'text-emerald-600' : 'text-red-500')}>
               {connected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Mode</span>
-          <span className="text-[12px] text-[#57534e] font-medium capitalize">{sessionStatus}</span>
+          <span className="text-xs text-[#a8a29e] font-medium uppercase tracking-wider">Mode</span>
+          <span className="text-xs text-[#57534e] font-medium capitalize">{sessionStatus}</span>
         </div>
         {sessionId && (
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Session</span>
+            <span className="text-xs text-[#a8a29e] font-medium uppercase tracking-wider">Session</span>
             <CopyBtn text={sessionId} label="session" copied={copied} copyText={copyText} />
           </div>
         )}
         {tenantId && (
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Tenant</span>
+            <span className="text-xs text-[#a8a29e] font-medium uppercase tracking-wider">Tenant</span>
             <CopyBtn text={tenantId} label="tenant" copied={copied} copyText={copyText} />
           </div>
         )}
@@ -352,12 +352,12 @@ function DevPanel({
           onClick={() => setShowEmbed(!showEmbed)}
           className="flex items-center justify-between w-full text-[#78716c] hover:text-[#44403c] transition-colors cursor-pointer"
         >
-          <span className="text-[11px] font-semibold uppercase tracking-wider">Embed Code</span>
+          <span className="text-xs font-semibold uppercase tracking-wider">Embed Code</span>
           {showEmbed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         {showEmbed && (
           <div className="mt-2.5 relative">
-            <pre className="bg-[#292524] rounded-lg p-3 text-[10.5px] text-[#a8a29e] overflow-x-auto leading-relaxed font-mono">
+            <pre className="bg-[#292524] rounded-lg p-3 text-2xs text-[#a8a29e] overflow-x-auto leading-relaxed font-mono">
               {embedSnippet}
             </pre>
             <button
@@ -376,7 +376,7 @@ function DevPanel({
       <div className="flex-1 overflow-y-auto px-5 py-3">
         <div className="space-y-1.5">
           {logs.map((log) => (
-            <div key={log.id} className="flex items-start gap-2 text-[11px] leading-relaxed">
+            <div key={log.id} className="flex items-start gap-2 text-xs leading-relaxed">
               <span className="text-[#c4c0b8] shrink-0 font-mono tabular-nums w-[65px]">{logTime(log.timestamp)}</span>
               <span className={cn('w-[5px] h-[5px] rounded-full shrink-0 mt-[5px]', logDots[log.type])} />
               <span className={cn('shrink-0 font-medium w-[52px]', logColors[log.type])}>
@@ -386,7 +386,7 @@ function DevPanel({
             </div>
           ))}
           {logs.length === 0 && (
-            <div className="text-[#c4c0b8] py-8 text-center text-[12px]">
+            <div className="text-[#c4c0b8] py-8 text-center text-xs">
               Waiting for events...
             </div>
           )}
@@ -406,20 +406,20 @@ function MockWebsite() {
       {/* Nav */}
       <div className="bg-white/80 backdrop-blur-sm border-b border-[#e8e5de]/60 px-10 py-4 flex items-center justify-between">
         <div className="flex items-center gap-10">
-          <div className="text-[15px] font-bold text-[#2d2a23] tracking-tight">
+          <div className="text-sm font-bold text-[#2d2a23] tracking-tight">
             acme<span className="text-[#4338ca]">.</span>co
           </div>
           <nav className="flex items-center gap-7">
             {['Product', 'Pricing', 'Changelog'].map((item) => (
-              <span key={item} className="text-[13px] text-[#9c9584] hover:text-[#57534e] transition-colors cursor-default font-medium">
+              <span key={item} className="text-sm text-[#9c9584] hover:text-[#57534e] transition-colors cursor-default font-medium">
                 {item}
               </span>
             ))}
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-[13px] text-[#9c9584] cursor-default font-medium">Log in</span>
-          <div className="px-4 py-[7px] bg-[#2d2a23] text-white text-[13px] font-medium rounded-lg cursor-default">
+          <span className="text-sm text-[#9c9584] cursor-default font-medium">Log in</span>
+          <div className="px-4 py-[7px] bg-[#2d2a23] text-white text-sm font-medium rounded-lg cursor-default">
             Get started
           </div>
         </div>
@@ -427,24 +427,24 @@ function MockWebsite() {
 
       {/* Hero — asymmetric, editorial */}
       <div className="px-10 pt-24 pb-20 max-w-[640px]">
-        <div className="inline-flex items-center gap-2 text-[12px] font-medium text-[#4338ca] mb-8">
+        <div className="inline-flex items-center gap-2 text-xs font-medium text-[#4338ca] mb-8">
           <Zap size={12} strokeWidth={2.5} />
           <span>Now with AI-powered responses</span>
         </div>
-        <h1 className="text-[44px] font-bold text-[#1c1917] leading-[1.1] tracking-[-0.025em]">
+        <h1 className="text-5xl font-bold text-[#1c1917] leading-[1.1] tracking-[-0.025em]">
           Customer support
           <br />
           <span className="text-[#a8a29e]">that runs itself.</span>
         </h1>
-        <p className="text-[15px] text-[#78716c] mt-5 leading-relaxed max-w-[440px]">
+        <p className="text-sm text-[#78716c] mt-5 leading-relaxed max-w-[440px]">
           AI handles conversations. Humans step in when it matters.
           Every interaction visible in one dashboard.
         </p>
         <div className="flex items-center gap-3 mt-10">
-          <div className="px-5 py-2.5 bg-[#4338ca] text-white text-[13px] font-semibold rounded-lg cursor-default hover:bg-[#3730a3] transition-colors">
+          <div className="px-5 py-2.5 bg-[#4338ca] text-white text-sm font-semibold rounded-lg cursor-default hover:bg-[#3730a3] transition-colors">
             Start free trial
           </div>
-          <div className="px-5 py-2.5 text-[#57534e] text-[13px] font-medium rounded-lg border border-[#e8e5de] flex items-center gap-1.5 cursor-default hover:border-[#d6d3cc] transition-colors">
+          <div className="px-5 py-2.5 text-[#57534e] text-sm font-medium rounded-lg border border-[#e8e5de] flex items-center gap-1.5 cursor-default hover:border-[#d6d3cc] transition-colors">
             See it work
             <ArrowUpRight size={13} strokeWidth={2.2} />
           </div>
@@ -458,8 +458,8 @@ function MockWebsite() {
             <Zap size={14} className="text-[#4338ca]" strokeWidth={2.2} />
           </div>
           <div>
-            <div className="text-[13px] font-semibold text-[#2d2a23]">AI-first</div>
-            <div className="text-[12px] text-[#a8a29e] mt-0.5 leading-relaxed">Resolves 80% of queries without human intervention.</div>
+            <div className="text-sm font-semibold text-[#2d2a23]">AI-first</div>
+            <div className="text-xs text-[#a8a29e] mt-0.5 leading-relaxed">Resolves 80% of queries without human intervention.</div>
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -467,8 +467,8 @@ function MockWebsite() {
             <Shield size={14} className="text-emerald-600" strokeWidth={2.2} />
           </div>
           <div>
-            <div className="text-[13px] font-semibold text-[#2d2a23]">Handoff</div>
-            <div className="text-[12px] text-[#a8a29e] mt-0.5 leading-relaxed">Seamless escalation to human agents when needed.</div>
+            <div className="text-sm font-semibold text-[#2d2a23]">Handoff</div>
+            <div className="text-xs text-[#a8a29e] mt-0.5 leading-relaxed">Seamless escalation to human agents when needed.</div>
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -476,8 +476,8 @@ function MockWebsite() {
             <Palette size={14} className="text-amber-600" strokeWidth={2.2} />
           </div>
           <div>
-            <div className="text-[13px] font-semibold text-[#2d2a23]">White-label</div>
-            <div className="text-[12px] text-[#a8a29e] mt-0.5 leading-relaxed">Your brand, your colors, your domain.</div>
+            <div className="text-sm font-semibold text-[#2d2a23]">White-label</div>
+            <div className="text-xs text-[#a8a29e] mt-0.5 leading-relaxed">Your brand, your colors, your domain.</div>
           </div>
         </div>
       </div>
@@ -650,12 +650,12 @@ const WidgetTest: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-screen bg-[#fcfbf9]">
         <div className="max-w-xs text-center">
-          <div className="w-11 h-11 rounded-xl bg-[#4338ca]/[0.07] flex items-center justify-center mx-auto mb-4">
-            <MessageCircle size={20} className="text-[#4338ca]/60" />
+          <div className="w-11 h-11 rounded-xl bg-[#123B3A]/[0.07] flex items-center justify-center mx-auto mb-4">
+            <MessageCircle size={20} className="text-[#123B3A]/60" />
           </div>
-          <h2 className="text-[16px] font-semibold text-[#1c1917] mb-1">API Key Required</h2>
-          <p className="text-[13px] text-[#78716c] mb-4">Add your tenant API key to the URL to begin.</p>
-          <code className="block text-[11px] text-[#4338ca] bg-[#4338ca]/[0.04] border border-[#4338ca]/10 px-4 py-2.5 rounded-lg break-all font-mono">
+          <h2 className="text-base font-semibold text-[#1c1917] mb-1">API Key Required</h2>
+          <p className="text-sm text-[#78716c] mb-4">Add your tenant API key to the URL to begin.</p>
+          <code className="block text-xs text-[#123B3A] bg-[#123B3A]/[0.04] border border-[#123B3A]/10 px-4 py-2.5 rounded-lg break-all font-mono">
             /widget-test?apiKey=YOUR_KEY
           </code>
         </div>
@@ -667,8 +667,8 @@ const WidgetTest: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-screen bg-[#fcfbf9]">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-7 h-7 border-2 border-[#4338ca] border-t-transparent rounded-full animate-spin" />
-          <span className="text-[13px] text-[#78716c]">Connecting...</span>
+          <div className="w-7 h-7 border-2 border-[#123B3A] border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-[#78716c]">Connecting...</span>
         </div>
       </div>
     );
@@ -693,7 +693,7 @@ const WidgetTest: React.FC = () => {
         </div>
 
         {error && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-red-50 border border-red-200 text-red-700 text-[12px] px-4 py-2 rounded-lg flex items-center gap-2">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-2 rounded-lg flex items-center gap-2">
             <WifiOff size={12} />
             {error}
             <button type="button" onClick={() => setError(null)} className="ml-1 hover:text-red-900 cursor-pointer"><X size={12} /></button>

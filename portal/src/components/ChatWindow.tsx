@@ -37,6 +37,8 @@ interface ChatWindowProps {
   onTransfer?: (chatId: string) => void;
   /** Open another session read-only from the possible-duplicates audit. */
   onOpenSession?: (sessionId: string) => void;
+  /** Inbox supplies its own action bar; hide the duplicate identity strip. */
+  chrome?: 'full' | 'thread';
   className?: string;
 }
 
@@ -160,25 +162,22 @@ const MessageRow: React.FC<{
   const isFailed = message.deliveryState === 'failed';
 
   return (
-    <div className={`flex ${isVisitor ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
+    <div className={`flex ${isVisitor ? 'justify-start' : 'justify-end'} mb-3`}>
+      <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row' : 'flex-row-reverse'} gap-2`}>
         {/* Avatar */}
         <MessageAvatar isAgent={isAgent} isBot={isBot} />
 
         {/* Message content */}
-        <div className={`flex flex-col ${isVisitor ? 'items-end' : 'items-start'}`}>
-          {/* Sender name */}
+        <div className={`flex flex-col ${isVisitor ? 'items-start' : 'items-end'}`}>
           <MessageSenderName message={message} isAgent={isAgent} isBot={isBot} />
-
-          {/* Message bubble */}
           <div
             className={cn(
-              'px-4 py-2 rounded-2xl',
+              'px-3.5 py-2 rounded-2xl text-sm',
               isVisitor
-                ? 'bg-primary-600 text-white rounded-br-md'
+                ? 'bg-surface-3 text-text-primary rounded-bl-md'
                 : isBot
-                  ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'
-                  : 'bg-surface-3 text-text-primary rounded-bl-md',
+                  ? 'bg-primary-600/15 text-text-primary rounded-br-md'
+                  : 'bg-primary-600/20 text-text-primary rounded-br-md',
               isPending && 'opacity-60',
               isFailed && 'border border-red-500/50'
             )}
@@ -347,6 +346,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onClose,
   onTransfer,
   onOpenSession,
+  chrome = 'full',
   className = '',
 }) => {
   const { t } = useTranslation();
@@ -534,31 +534,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     sendingTakesOver && (composerFocused || messageInput.trim().length > 0);
 
   return (
-    <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
-      {/* Header */}
-      <ChatWindowHeader chat={chat} onClose={onClose} onTransfer={onTransfer} />
-
-      {/* Visitor info */}
-      <VisitorInfoBar chat={chat} />
+    <div className={cn('flex flex-col h-full bg-surface-1 overflow-hidden', className)}>
+      {chrome === 'full' && (
+        <>
+          <ChatWindowHeader chat={chat} onClose={onClose} onTransfer={onTransfer} />
+          <VisitorInfoBar chat={chat} />
+        </>
+      )}
 
       <PossibleDuplicatesNote duplicates={possibleDuplicates} onOpenSession={onOpenSession} />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 bg-surface-1">
+      <div className="flex-1 overflow-y-auto p-5 bg-surface-0">
         {messages.length > 0 || earlierSessions.length > 0 ? (
           <>
-            {/* B-PR4b: prior sessions of the same customer, oldest→newest,
-                as collapsed boundary blocks ABOVE the live thread */}
             {truncated && (
               <p className="mb-3 text-center text-xs text-text-muted">
                 {t('inbox.thread.truncated')}
               </p>
             )}
             {earlierSessions.map(renderEarlierSession)}
-
             {messages.map(renderMessage)}
-
-            {/* Typing indicator */}
             {typingUsers.length > 0 && (
               <div className="flex justify-start mb-4">
                 <CompactTypingIndicator />
@@ -613,7 +608,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <Button
             onClick={handleSend}
             disabled={!messageInput.trim() || isSending}
-            className="p-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
+            className="p-2 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
             size="icon"
             aria-label={t('inbox.window.composer.send')}
             title={t('inbox.window.composer.send')}

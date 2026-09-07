@@ -39,6 +39,7 @@ import {
 } from 'recharts';
 import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus, Moon, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useChartPalette } from '@/lib/css-color';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -100,12 +101,6 @@ const ChartSkeleton: React.FC<{ height?: number }> = ({ height = 250 }) => (
   <Skeleton className="w-full rounded-xl" style={{ height }} />
 );
 
-const chartTooltipStyle = {
-  backgroundColor: '#1e2030',
-  border: '1px solid #2a2d3e',
-  borderRadius: '12px',
-  color: '#f1f3f9',
-};
 
 interface StatCard {
   label: string;
@@ -220,6 +215,7 @@ const Analytics: React.FC = () => {
   const { user } = useAppAuth();
   const isAgent = user?.role === 'agent';
   const hasBookings = useHasFeature('bookings');
+  const chart = useChartPalette();
   const [dateRange, setDateRange] = useState('7d');
   const [activeTab, setActiveTab] = useState<'overview' | 'chats'>('overview');
 
@@ -301,10 +297,10 @@ const Analytics: React.FC = () => {
     const botResolved = Math.max(metrics.closed - humanResolved, 0);
     const total = metrics.closed;
     return [
-      { name: t('analytics.charts.resolutionDistribution.botResolved'), value: Math.round((botResolved / total) * 100), color: '#a78bfa' },
-      { name: t('analytics.charts.resolutionDistribution.humanResolved'), value: Math.round((humanResolved / total) * 100), color: '#34d399' },
+      { name: t('analytics.charts.resolutionDistribution.botResolved'), value: Math.round((botResolved / total) * 100), color: chart.bot },
+      { name: t('analytics.charts.resolutionDistribution.humanResolved'), value: Math.round((humanResolved / total) * 100), color: chart.human },
     ];
-  }, [metrics, t]);
+  }, [metrics, t, chart.bot, chart.human]);
 
   const stats: StatCard[] = [
     ...outcomeStatCards({ t, navigate, hasBookings, outcomes, formatDelta }),
@@ -404,16 +400,16 @@ const Analytics: React.FC = () => {
                 ) : (
                   <ResponsiveContainer width="100%" height={250}>
                     <AreaChart data={outcomesSeries}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-                      <XAxis dataKey="date" stroke="#6b7194" />
-                      <YAxis stroke="#6b7194" allowDecimals={false} />
-                      <Tooltip contentStyle={chartTooltipStyle} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                      <XAxis dataKey="date" stroke={chart.axis} />
+                      <YAxis stroke={chart.axis} allowDecimals={false} />
+                      <Tooltip contentStyle={chart.tooltip} />
                       <Legend />
-                      <Area type="monotone" dataKey="conversations" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
+                      <Area type="monotone" dataKey="conversations" stroke={chart.bot} fill={chart.bot} fillOpacity={0.25} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
                       {hasBookings && (
-                        <Area type="monotone" dataKey="bookings" stroke="#34d399" fill="#34d399" fillOpacity={0.25} name={t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' })} />
+                        <Area type="monotone" dataKey="bookings" stroke={chart.human} fill={chart.human} fillOpacity={0.25} name={t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' })} />
                       )}
-                      <Area type="monotone" dataKey="leads" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.25} name={t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' })} />
+                      <Area type="monotone" dataKey="leads" stroke={chart.lead} fill={chart.lead} fillOpacity={0.25} name={t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' })} />
                     </AreaChart>
                   </ResponsiveContainer>
                 )}
@@ -433,11 +429,11 @@ const Analytics: React.FC = () => {
                 ) : (
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={channelData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-                      <XAxis dataKey="channel" stroke="#6b7194" />
-                      <YAxis stroke="#6b7194" allowDecimals={false} />
-                      <Tooltip contentStyle={chartTooltipStyle} />
-                      <Bar dataKey="count" fill="#818cf8" radius={[4, 4, 0, 0]} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                      <XAxis dataKey="channel" stroke={chart.axis} />
+                      <YAxis stroke={chart.axis} allowDecimals={false} />
+                      <Tooltip contentStyle={chart.tooltip} />
+                      <Bar dataKey="count" fill={chart.bot} radius={[4, 4, 0, 0]} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -456,14 +452,14 @@ const Analytics: React.FC = () => {
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={chatVolumeData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-                    <XAxis dataKey="date" stroke="#6b7194" />
-                    <YAxis stroke="#6b7194" />
-                    <Tooltip contentStyle={chartTooltipStyle} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                    <XAxis dataKey="date" stroke={chart.axis} />
+                    <YAxis stroke={chart.axis} />
+                    <Tooltip contentStyle={chart.tooltip} />
                     <Legend />
-                    <Area type="monotone" dataKey="bot" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.bot')} />
-                    <Area type="monotone" dataKey="human" stackId="1" stroke="#34d399" fill="#34d399" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.human')} />
-                    <Area type="monotone" dataKey="handoff" stackId="1" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.handoff')} />
+                    <Area type="monotone" dataKey="bot" stackId="1" stroke={chart.bot} fill={chart.bot} fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.bot')} />
+                    <Area type="monotone" dataKey="human" stackId="1" stroke={chart.human} fill={chart.human} fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.human')} />
+                    <Area type="monotone" dataKey="handoff" stackId="1" stroke={chart.lead} fill={chart.lead} fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.handoff')} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -494,7 +490,7 @@ const Analytics: React.FC = () => {
                         <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={chartTooltipStyle} />
+                    <Tooltip contentStyle={chart.tooltip} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>

@@ -219,7 +219,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
                 </div>
                 <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap ${
                   isUser
-                    ? 'bg-primary-600 text-white rounded-br-md'
+                    ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-surface-3 text-text-primary rounded-bl-md'
                 }`}>
                   {msg.content}

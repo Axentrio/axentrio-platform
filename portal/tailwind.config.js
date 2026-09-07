@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: ['class', 'class'],
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
   	container: {
@@ -10,22 +10,25 @@ module.exports = {
   			'2xl': '1400px'
   		}
   	},
-  	extend: {
+  		extend: {
   		fontFamily: {
   			sans: [
-  				'Plus Jakarta Sans"',
+  				'Inter',
   				'system-ui',
   				'sans-serif'
   			],
   			mono: [
-  				'JetBrains Mono"',
+  				'JetBrains Mono',
   				'monospace'
   			],
   			display: [
-  				'Plus Jakarta Sans"',
+  				'Inter',
   				'system-ui',
   				'sans-serif'
   			]
+  		},
+  		fontSize: {
+  			'2xs': ['0.625rem', { lineHeight: '0.875rem' }],
   		},
   		colors: {
   			border: 'hsl(var(--border))',
@@ -34,16 +37,16 @@ module.exports = {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			primary: {
-  				'50': 'rgb(var(--color-primary-50, 238 242 255) / <alpha-value>)',
-  				'100': 'rgb(var(--color-primary-100, 224 231 255) / <alpha-value>)',
-  				'200': 'rgb(var(--color-primary-200, 199 210 254) / <alpha-value>)',
-  				'300': 'rgb(var(--color-primary-300, 165 180 252) / <alpha-value>)',
-  				'400': 'rgb(var(--color-primary-400, 129 140 248) / <alpha-value>)',
-  				'500': 'rgb(var(--color-primary-500, 99 102 241) / <alpha-value>)',
-  				'600': 'rgb(var(--color-primary-600, 79 70 229) / <alpha-value>)',
-  				'700': 'rgb(var(--color-primary-700, 67 56 202) / <alpha-value>)',
-  				'800': 'rgb(var(--color-primary-800, 55 48 163) / <alpha-value>)',
-  				'900': 'rgb(var(--color-primary-900, 49 46 129) / <alpha-value>)',
+  				'50': 'rgb(var(--color-primary-50, 213 246 242) / <alpha-value>)',
+  				'100': 'rgb(var(--color-primary-100, 192 242 235) / <alpha-value>)',
+  				'200': 'rgb(var(--color-primary-200, 158 235 225) / <alpha-value>)',
+  				'300': 'rgb(var(--color-primary-300, 115 226 212) / <alpha-value>)',
+  				'400': 'rgb(var(--color-primary-400, 77 219 200) / <alpha-value>)',
+  				'500': 'rgb(var(--color-primary-500, 45 212 191) / <alpha-value>)',
+  				'600': 'rgb(var(--color-primary-600, 36 178 159) / <alpha-value>)',
+  				'700': 'rgb(var(--color-primary-700, 29 140 125) / <alpha-value>)',
+  				'800': 'rgb(var(--color-primary-800, 21 102 91) / <alpha-value>)',
+  				'900': 'rgb(var(--color-primary-900, 15 72 64) / <alpha-value>)',
   				DEFAULT: 'hsl(var(--primary))',
   				foreground: 'hsl(var(--primary-foreground))'
   			},
@@ -89,25 +92,35 @@ module.exports = {
   			edge: {
   				DEFAULT: 'rgb(var(--color-edge) / <alpha-value>)',
   				light: 'rgb(var(--color-edge-light, 53 56 80) / <alpha-value>)',
-  				focus: 'rgb(var(--color-primary-600, 79 70 229) / <alpha-value>)'
+  				focus: 'rgb(var(--color-primary-600, 36 178 159) / <alpha-value>)'
   			},
   			text: {
   				primary: 'rgb(var(--color-text-primary) / <alpha-value>)',
   				secondary: 'rgb(var(--color-text-secondary) / <alpha-value>)',
   				muted: 'rgb(var(--color-text-muted, 107 113 148) / <alpha-value>)',
+  				tertiary: 'rgb(var(--color-text-muted) / <alpha-value>)',
   				inverse: 'rgb(var(--color-text-inverse, 15 17 23) / <alpha-value>)'
   			},
+  			sidebar: {
+  				DEFAULT: 'rgb(var(--color-sidebar-bg, 12 17 18) / <alpha-value>)',
+  				fg: 'rgb(var(--color-sidebar-fg, 242 240 233) / <alpha-value>)',
+  				muted: 'rgb(var(--color-sidebar-muted, 148 160 156) / <alpha-value>)',
+  				hover: 'rgb(var(--color-sidebar-hover, 22 42 41) / <alpha-value>)',
+  				active: 'rgb(var(--color-sidebar-active, 18 59 58) / <alpha-value>)',
+  				border: 'rgb(var(--color-sidebar-border, 30 45 44) / <alpha-value>)',
+  				accent: 'rgb(var(--color-sidebar-accent, 45 212 191) / <alpha-value>)'
+  			},
   			status: {
-  				online: '#34d399',
-  				away: '#fbbf24',
-  				offline: '#6b7194',
-  				busy: '#f87171'
+  				online: 'rgb(var(--color-status-online) / <alpha-value>)',
+  				away: 'rgb(var(--color-status-away) / <alpha-value>)',
+  				offline: 'rgb(var(--color-status-offline) / <alpha-value>)',
+  				busy: 'rgb(var(--color-status-busy) / <alpha-value>)'
   			},
   			chat: {
-  				bot: '#a78bfa',
-  				human: '#34d399',
-  				handsoff: '#fbbf24',
-  				closed: '#6b7194'
+  				bot: 'rgb(var(--color-chat-bot) / <alpha-value>)',
+  				human: 'rgb(var(--color-chat-human) / <alpha-value>)',
+  				handsoff: 'rgb(var(--color-chat-handsoff) / <alpha-value>)',
+  				closed: 'rgb(var(--color-chat-closed) / <alpha-value>)'
   			}
   		},
   		backgroundImage: {
@@ -119,9 +132,9 @@ module.exports = {
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		boxShadow: {
-  			'glow-sm': '0 0 10px -3px rgba(var(--color-primary-rgb, 99, 102, 241), 0.3)',
-  			glow: '0 0 20px -5px rgba(var(--color-primary-rgb, 99, 102, 241), 0.4)',
-  			'glow-lg': '0 0 30px -5px rgba(var(--color-primary-rgb, 99, 102, 241), 0.5)',
+  			'glow-sm': '0 0 10px -3px rgba(var(--color-primary-rgb, 45, 212, 191), 0.3)',
+  			glow: '0 0 20px -5px rgba(var(--color-primary-rgb, 45, 212, 191), 0.4)',
+  			'glow-lg': '0 0 30px -5px rgba(var(--color-primary-rgb, 45, 212, 191), 0.5)',
   			card: '0 4px 24px -4px rgba(0, 0, 0, 0.3)',
   			'card-hover': '0 8px 32px -4px rgba(0, 0, 0, 0.5)'
   		},
@@ -166,10 +179,10 @@ module.exports = {
   			},
   			glowPulse: {
   				'0%, 100%': {
-  					boxShadow: '0 0 8px rgba(var(--color-primary-rgb, 99, 102, 241), 0.3)'
+  					boxShadow: '0 0 8px rgba(var(--color-primary-rgb, 45, 212, 191), 0.3)'
   				},
   				'50%': {
-  					boxShadow: '0 0 20px rgba(var(--color-primary-rgb, 99, 102, 241), 0.6)'
+  					boxShadow: '0 0 20px rgba(var(--color-primary-rgb, 45, 212, 191), 0.6)'
   				}
   			},
   			'accordion-down': {

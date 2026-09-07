@@ -19,6 +19,29 @@ export const renameChatSchema = z.object({
     .pipe(z.string().min(1, 'Name is required').max(100)),
 });
 
+const tagString = z
+  .string()
+  .trim()
+  .transform((s) => s.replace(/[\p{Cc}\p{Cf}]/gu, '').trim())
+  .pipe(z.string().min(1, 'Tag is required').max(100));
+
+export const updateChatTagsSchema = z.object({
+  tags: z
+    .array(tagString)
+    .max(20)
+    .transform((tags) => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const tag of tags) {
+        const key = tag.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(tag);
+      }
+      return out;
+    }),
+});
+
 export const chatListQuerySchema = z.object({
   status: z.enum(['active', 'closed', 'waiting', 'handoff', 'bot']).optional(),
   // Filter to guardrail-paused conversations (AI auto-reply disabled by a guardrail).

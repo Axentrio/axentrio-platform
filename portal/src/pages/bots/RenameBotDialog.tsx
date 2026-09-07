@@ -87,7 +87,7 @@ export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }
                 autoFocus
                 disabled={updateBot.isPending}
               />
-              <p className="text-[10px] text-text-muted">
+              <p className="text-2xs text-text-muted">
                 {t('bots.rename.nameHelper', { defaultValue: 'Only you see this — it labels the bot in this list.' })}
               </p>
             </div>
@@ -103,7 +103,7 @@ export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }
                 disabled={updateBot.isPending}
                 placeholder={t('bots.rename.assistantNamePlaceholder', { defaultValue: 'e.g. Ava' })}
               />
-              <p className="text-[10px] text-text-muted">
+              <p className="text-2xs text-text-muted">
                 {t('bots.rename.assistantNameHelper', {
                   defaultValue: 'The name the bot introduces itself with in every conversation.',
                 })}

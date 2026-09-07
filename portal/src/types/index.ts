@@ -115,6 +115,13 @@ export interface Chat {
   userId: string;
   userName?: string;
   userEmail?: string;
+  userPhone?: string;
+  /** Visitor city/country when the widget captured it. */
+  location?: string | null;
+  /** Linked CRM lead, when this session captured one. */
+  leadId?: string | null;
+  /** Operator-managed labels on the session. */
+  tags?: string[];
   status: ChatStatus;
   // Guardrail state: false = AI auto-reply paused by a guardrail (status stays
   // 'bot'); guardrailStatus is the reason category (spam/scam/phishing/bot_loop).

@@ -202,12 +202,12 @@ const DocumentQuality: React.FC<{
                 <span
                     className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[report.qualityScore]?.color || "bg-gray-400"}`}
                 />
-                <span className="text-[10px] text-text-muted truncate">
+                <span className="text-2xs text-text-muted truncate">
                     {qualitySummary(t, report)}
                 </span>
             </div>
             {["poor", "fair"].includes(report.qualityScore) && (
-                <p className="text-[10px] text-amber-400/80 mt-1">
+                <p className="text-2xs text-amber-400/80 mt-1">
                     {report.qualityReason}
                 </p>
             )}
@@ -241,7 +241,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
                 </div>
                 <div className="flex items-center gap-1.5">
                     <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${status.bg}`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-medium ${status.bg}`}
                     >
                         <span
                             className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
@@ -249,7 +249,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
                         {t(status.labelKey)}
                     </span>
                     {cloudMeta && (
-                        <span className="text-[10px] text-text-muted">
+                        <span className="text-2xs text-text-muted">
                             {cloudMeta.provider}
                             {cloudMeta.owner ? ` · ${cloudMeta.owner}` : ""}
                         </span>
@@ -273,7 +273,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
             </h3>
 
             {/* Meta */}
-            <div className="flex items-center gap-2 text-[11px] text-text-muted">
+            <div className="flex items-center gap-2 text-xs text-text-muted">
                 <span>{t(type.labelKey)}</span>
                 <span className="w-0.5 h-0.5 rounded-full bg-text-muted" />
                 <span>
@@ -301,7 +301,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
             {/* Error state */}
             {document.status === "failed" && document.errorMessage && (
                 <div className="mt-3 flex items-start gap-2 p-2 bg-red-400/5 rounded-lg border border-red-400/10">
-                    <p className="text-[11px] text-red-400/80 line-clamp-2 flex-1">
+                    <p className="text-xs text-red-400/80 line-clamp-2 flex-1">
                         {document.errorMessage}
                     </p>
                     {isAdmin && (

@@ -255,7 +255,7 @@ function CopilotTranscript({
       {persisted.map((m) => <PersistedMessage key={m.id} msg={m} />)}
       {inflight && !hideInflight && <InflightAssistant inflight={inflight} />}
       {rateLimitNotice && (
-        <div className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+        <div className="rounded-md border border-status-away/30 bg-status-away/10 px-3 py-2 text-sm text-status-away">
           {t('copilot.drawer.rateLimited', {
             seconds: rateLimitNotice.retryAfterSeconds,
           })}
@@ -290,7 +290,7 @@ function PersistedMessage({ msg }: { msg: CopilotConversationMessage }) {
 function UserBubble({ msg }: { msg: CopilotUserMessage }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary-600 px-3 py-2 text-sm text-white">
+      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
         {msg.content}
       </div>
     </div>
@@ -339,7 +339,7 @@ function InflightAssistant({ inflight }: { inflight: CopilotInflightTurn }) {
   return (
     <>
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary-600 px-3 py-2 text-sm text-white">
+        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
           {inflight.userMessage}
         </div>
       </div>
@@ -398,14 +398,14 @@ function ToolBadge({
   const { t } = useTranslation();
   const colorClass =
     outcome === 'error'
-      ? 'bg-danger-50 text-danger-700 border-danger-200'
+      ? 'bg-status-busy/10 text-status-busy border-status-busy/30'
       : outcome === 'in_flight'
         ? 'bg-surface-2 text-text-tertiary border-edge'
-        : 'bg-success-50 text-success-700 border-success-200';
+        : 'bg-status-online/10 text-status-online border-status-online/30';
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tracking-wide',
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs tracking-wide',
         colorClass,
       )}
       title={t('copilot.drawer.toolBadgeTooltip', { name })}

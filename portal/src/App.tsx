@@ -14,7 +14,8 @@ import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 import { Menu } from 'lucide-react';
 
 // Context Providers
-import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import { cssRgb, useHtmlThemeMode } from '@/lib/css-color';
 import { SocketProvider, useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
 
@@ -30,7 +31,7 @@ import { Sidebar } from '@components/Sidebar';
 import { MobileNavDrawer } from '@components/MobileNavDrawer';
 import { TenantCommandPalette } from '@components/admin/TenantCommandPalette';
 import { TenantImpersonationBanner } from '@components/admin/TenantImpersonationBanner';
-import { useTenantTheme } from '@/hooks/useTenantTheme';
+import { AxentrioMark } from '@/components/brand/AxentrioMark';
 import { useOrganization } from '@clerk/clerk-react';
 import { useUiStore } from './stores/uiStore';
 import { useAppAuth } from '@auth/useAppAuth';
@@ -149,7 +150,6 @@ const ConnectionBanner: React.FC = () => {
 
 // Layout wrapper for authenticated pages
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  useTenantTheme();
   const { organization } = useOrganization();
   const { openTenantPalette } = useUiStore();
   const { user } = useAppAuth();
@@ -183,7 +183,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
   }, [isSuperAdmin, openTenantPalette]);
 
   return (
-    <div className="h-screen flex overflow-hidden bg-surface-1">
+    <div className="h-screen flex overflow-hidden bg-surface-0">
       {/* During first-run setup the nav is hidden: every destination in it bounces
           back to the wizard, and offering doors that do not open is worse than
           offering none. Same cached query the gate reads, so no extra request. */}
@@ -196,7 +196,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         <MobileNavDrawer open={navOpen} onClose={() => setNavOpen(false)} />
       )}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between md:hidden">
+        <div className="bg-surface-1 border-b border-edge px-4 py-2 flex items-center justify-between md:hidden">
           <div className="flex items-center gap-2">
             {organization?.hasImage ? (
               <img
@@ -205,10 +205,8 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
                 className="w-7 h-7 rounded-lg object-cover"
               />
             ) : (
-              <div className="w-7 h-7 bg-primary-600 rounded-lg flex items-center justify-center">
-                <span className="text-xs font-bold text-white">
-                  {organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
-                </span>
+              <div className="w-7 h-7 rounded-lg overflow-hidden bg-sidebar-active flex items-center justify-center p-0.5">
+                <AxentrioMark variant="onDark" className="w-full h-full" />
               </div>
             )}
             <span className="font-semibold text-text-primary truncate max-w-[150px]">
@@ -254,65 +252,53 @@ const WidgetTestRouter: React.FC = () => {
 
 // Clerk provider with theme-aware appearance
 
-/** The nine colours the Clerk appearance map needs, resolved once per theme. */
-interface ClerkPalette {
-  background: string;
-  inputBackground: string;
-  formInputBackground: string;
-  text: string;
-  textSecondary: string;
-  border: string;
-  cardShadow: string;
-  socialHover: string;
-  divider: string;
-}
-
-function clerkPalette(isDark: boolean): ClerkPalette {
-  return isDark
-    ? {
-        background: '#161821',
-        inputBackground: '#1e2030',
-        formInputBackground: '#1e2030',
-        text: '#f1f3f9',
-        textSecondary: '#9ca3bf',
-        border: '1px solid #2a2d3e',
-        cardShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
-        socialHover: '#262940',
-        divider: '#2a2d3e',
-      }
-    : {
-        background: '#ffffff',
-        inputBackground: '#f9fafb',
-        formInputBackground: '#ffffff',
-        text: '#111827',
-        textSecondary: '#6b7280',
-        border: '1px solid #e5e7eb',
-        cardShadow: '0 25px 50px -12px rgba(0,0,0,0.1)',
-        socialHover: '#f3f4f6',
-        divider: '#e5e7eb',
-      };
+/** Clerk cannot take Tailwind classes — same tokens, read as `rgb()`. */
+function clerkPalette() {
+  const primaryRgb = getComputedStyle(document.documentElement)
+    .getPropertyValue('--color-primary-rgb')
+    .trim();
+  return {
+    background: cssRgb('--color-surface-0'),
+    inputBackground: cssRgb('--color-surface-2'),
+    formInputBackground: cssRgb('--color-surface-1'),
+    text: cssRgb('--color-text-primary'),
+    textSecondary: cssRgb('--color-text-secondary'),
+    border: `1px solid ${cssRgb('--color-edge')}`,
+    cardShadow: document.documentElement.classList.contains('dark')
+      ? '0 25px 50px -12px rgba(0,0,0,0.5)'
+      : '0 25px 50px -12px rgba(12,17,18,0.08)',
+    socialHover: cssRgb('--color-surface-3'),
+    divider: cssRgb('--color-edge'),
+    primary: cssRgb('--color-primary-400'),
+    primaryHover: cssRgb('--color-primary-300'),
+    onPrimary: cssRgb('--color-text-inverse'),
+    danger: cssRgb('--color-status-busy'),
+    success: cssRgb('--color-status-online'),
+    focusRing: primaryRgb ? `0 0 0 3px rgba(${primaryRgb}, 0.18)` : undefined,
+  };
 }
 
 const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { resolvedTheme } = useTheme();
-  const palette = clerkPalette(resolvedTheme === 'dark');
+  const mode = useHtmlThemeMode();
+  const palette = React.useMemo(() => clerkPalette(), [mode]);
 
   return (
     <ClerkProvider
       publishableKey={CLERK_PUBLISHABLE_KEY}
       appearance={{
+        layout: { logoImageUrl: '/favicon.svg' },
         variables: {
           colorBackground: palette.background,
           colorInputBackground: palette.inputBackground,
           colorText: palette.text,
           colorTextSecondary: palette.textSecondary,
-          colorPrimary: '#6366f1',
+          colorPrimary: palette.primary,
           colorInputText: palette.text,
-          colorDanger: '#f87171',
-          colorSuccess: '#34d399',
+          colorDanger: palette.danger,
+          colorSuccess: palette.success,
           colorNeutral: palette.textSecondary,
           borderRadius: '0.75rem',
-          fontFamily: "'Plus Jakarta Sans', sans-serif",
+          fontFamily: "'Inter', sans-serif",
         },
         elements: {
           card: {
@@ -336,18 +322,19 @@ const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children
             border: palette.border,
             color: palette.text,
             '&:focus': {
-              borderColor: '#6366f1',
-              boxShadow: '0 0 0 3px rgba(99,102,241,0.15)',
+              borderColor: palette.primary,
+              boxShadow: palette.focusRing,
             },
           },
           formButtonPrimary: {
-            backgroundColor: '#6366f1',
-            '&:hover': { backgroundColor: '#818cf8' },
+            backgroundColor: palette.primary,
+            color: palette.onPrimary,
+            '&:hover': { backgroundColor: palette.primaryHover },
           },
-          footerActionLink: { color: '#818cf8' },
+          footerActionLink: { color: palette.primary },
           footerActionText: { color: palette.textSecondary },
-          identityPreviewEditButton: { color: '#818cf8' },
-          formFieldAction: { color: '#818cf8' },
+          identityPreviewEditButton: { color: palette.primary },
+          formFieldAction: { color: palette.primary },
           otpCodeFieldInput: {
             backgroundColor: palette.formInputBackground,
             border: palette.border,

@@ -38,14 +38,14 @@ export function PlaceholderBar({
 }) {
   const { t } = useTranslation();
   const builtinClass = readOnly
-    ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
-    : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200';
+    ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-xs text-text-secondary'
+    : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-xs text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200';
   const customClass = readOnly
-    ? 'cursor-default rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300'
-    : 'rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:border-amber-400 hover:bg-amber-500/20';
+    ? 'cursor-default rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-xs text-amber-300'
+    : 'rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-xs text-amber-300 transition-colors hover:border-amber-400 hover:bg-amber-500/20';
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
-      <span className="mr-1 text-[11px] font-medium text-text-muted">
+      <span className="mr-1 text-xs font-medium text-text-muted">
         {t(readOnly ? 'admin.botTemplates.editor.availableLabel' : 'admin.botTemplates.editor.insertLabel')}
       </span>
       {PLACEHOLDER_CHIPS.map((p) => (
@@ -77,7 +77,7 @@ export function PlaceholderBar({
           type="button"
           onClick={onManage}
           title="Set labels, defaults, and required for your custom variables"
-          className="ml-0.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-amber-300/90 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
+          className="ml-0.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-300/90 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
         >
           <SlidersHorizontal className="h-3 w-3" />Manage variables
         </button>
@@ -99,7 +99,7 @@ export const BlockKey: React.FC<{ name: string }> = ({ name }) => (
 // A small field caption with an info tooltip — used to explain the template-variable
 // fields (label / default / help / required), which aren't self-explanatory.
 export const FieldHint: React.FC<{ label: string; tip: string }> = ({ label, tip }) => (
-  <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-muted">
+  <span className="mb-1 flex items-center gap-1 text-xs font-medium text-text-muted">
     {label}
     <Tooltip>
       <TooltipTrigger asChild>
@@ -135,7 +135,7 @@ export const AuthorSection: React.FC<{
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-[11px] tabular-nums text-text-muted">{String(step).padStart(2, '0')}</span>
+            <span className="font-mono text-xs tabular-nums text-text-muted">{String(step).padStart(2, '0')}</span>
             <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
           </div>
           {hint && <p className="mt-1 max-w-prose text-xs leading-relaxed text-text-tertiary">{hint}</p>}
@@ -149,5 +149,5 @@ export const AuthorSection: React.FC<{
 
 // A compact grouping label for the live-preview rail (uppercase eyebrow + count).
 export const RailLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">{children}</div>
+  <div className="text-2xs font-medium uppercase tracking-wider text-text-tertiary">{children}</div>
 );

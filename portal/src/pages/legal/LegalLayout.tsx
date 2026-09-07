@@ -33,7 +33,7 @@ const LegalLayout: React.FC<LegalLayoutProps> = ({ title, lastUpdated, children 
       <main className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
         <p className="mt-2 text-sm text-text-muted">Last updated: {lastUpdated}</p>
-        <div className="legal-prose mt-8 space-y-6 text-[15px] leading-relaxed text-text-secondary">
+        <div className="legal-prose mt-8 space-y-6 text-sm leading-relaxed text-text-secondary">
           {children}
         </div>
       </main>

@@ -41,7 +41,7 @@ interface SearchHit {
 }
 
 const HIGHLIGHT_STYLE: React.CSSProperties = {
-  backgroundColor: 'rgba(var(--color-primary-rgb, 99, 102, 241), 0.35)',
+  backgroundColor: 'rgba(var(--color-primary-rgb, 45, 212, 191), 0.35)',
   color: 'inherit',
 };
 
@@ -225,7 +225,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
                         {pickTranslation(s.titles, i18n.language)}
                       </span>
                       {isSearching && count ? (
-                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-400">
+                        <span className="shrink-0 text-2xs px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-400">
                           {count}
                         </span>
                       ) : null}
@@ -353,7 +353,7 @@ const SearchResultsPane: React.FC<SearchResultsPaneProps> = ({
               >
                 <AccordionTrigger className="text-sm text-left hover:no-underline py-3">
                   <div className="flex-1 min-w-0 pr-3">
-                    <div className="text-[10px] uppercase tracking-wide text-text-muted mb-0.5">
+                    <div className="text-2xs uppercase tracking-wide text-text-muted mb-0.5">
                       {pickTranslation(hit.section.titles, i18n.language)}
                     </div>
                     <div className="text-text-primary">

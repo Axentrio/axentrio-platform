@@ -44,7 +44,7 @@ function Stat({ label, value, sub, alert }: { label: string; value: number; sub?
     <div className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2">
       <p className="text-xs text-text-muted">{label}</p>
       <p className={`text-xl font-semibold ${alert && value > 0 ? 'text-red-500' : 'text-text-primary'}`}>{value}</p>
-      {sub && <p className="text-[11px] text-text-muted">{sub}</p>}
+      {sub && <p className="text-xs text-text-muted">{sub}</p>}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Timer,
+  PanelRight,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -43,6 +44,7 @@ import {
 import { ChatStream } from '@components/ChatStream';
 import { ConversationName } from '@components/ConversationName';
 import { ChatWindow } from '@components/ChatWindow';
+import { ConversationDetailsPanel } from '@components/ConversationDetailsPanel';
 import { HumanControlBadge, TakeoverMenu } from '@components/HumanControl';
 import type { TakeoverPolicy } from '@utils/humanControl';
 import { ChatStatusBadge, PriorityBadge } from '@components/StatusBadge';
@@ -200,7 +202,7 @@ const InboxListPanel: React.FC<InboxListPanelProps> = ({
 
   return (
     <div className={cn(
-      'w-full md:w-[400px] md:min-w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col',
+      'w-full md:w-[320px] md:min-w-[280px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col bg-surface-1',
       isChatSelected && 'hidden md:flex'
     )}>
       {activeTab === 'handsoff' && pendingCount === 0 ? (
@@ -522,8 +524,11 @@ const SelectedChatActions: React.FC<
 };
 
 /** Action bar above the thread: identity, badges, controls. */
-const ChatActionBar: React.FC<ChatPaneProps> = (props) => {
-  const { chat, actions } = props;
+const ChatActionBar: React.FC<ChatPaneProps & {
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
+}> = (props) => {
+  const { chat, actions, detailsOpen, onToggleDetails } = props;
   const { t } = useTranslation();
   const isHumanOwned = chat.ownership === 'human_owned';
   // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
@@ -554,44 +559,74 @@ const ChatActionBar: React.FC<ChatPaneProps> = (props) => {
         </div>
       </div>
 
-      <SelectedChatActions
-        {...props}
-        isGuardrailPaused={isGuardrailPaused}
-        isHumanOwned={isHumanOwned}
-      />
+      <div className="flex items-center gap-2">
+        <SelectedChatActions
+          {...props}
+          isGuardrailPaused={isGuardrailPaused}
+          isHumanOwned={isHumanOwned}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="lg:hidden rounded-xl text-text-secondary"
+          aria-label={t('inbox.details.toggle')}
+          aria-pressed={detailsOpen}
+          onClick={onToggleDetails}
+        >
+          <PanelRight className="w-5 h-5" />
+        </Button>
+      </div>
     </div>
   );
 };
 
-/** Right pane: the open conversation, or the empty state. */
+/** Conversation pane + details rail, or the empty state. */
 const InboxDetailPanel: React.FC<Omit<ChatPaneProps, 'chat'> & { chat: Chat | null }> = ({
   chat,
   actions,
   ...rest
 }) => {
   const { t } = useTranslation();
+  const { tenantName } = useAppAuth();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   return (
     <div className={cn(
-      'flex-1 flex flex-col overflow-hidden',
-      !chat && 'hidden md:flex'
+      'flex-1 flex overflow-hidden relative',
+      !chat && 'hidden md:flex flex-col',
     )}>
       {chat ? (
         <>
-          {/* Action bar */}
-          <ChatActionBar chat={chat} actions={actions} {...rest} />
-
-          {/* Chat window */}
-          <div className="flex-1 overflow-hidden">
-            <ChatWindow
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <ChatActionBar
               chat={chat}
-              onTransfer={actions.onOpenTransfer}
-              onOpenSession={actions.onOpenSession}
-              className="h-full rounded-none border-0 shadow-none"
+              actions={actions}
+              detailsOpen={detailsOpen}
+              onToggleDetails={() => setDetailsOpen((open) => !open)}
+              {...rest}
             />
+            <div className="flex-1 overflow-hidden">
+              <ChatWindow
+                chat={chat}
+                chrome="thread"
+                onTransfer={actions.onOpenTransfer}
+                onOpenSession={actions.onOpenSession}
+                className="h-full rounded-none border-0 shadow-none"
+              />
+            </div>
           </div>
+          <ConversationDetailsPanel
+            chat={chat}
+            workspaceName={tenantName}
+            onAssign={actions.onOpenTransfer}
+            className={cn(
+              detailsOpen ? 'block' : 'hidden lg:block',
+              'max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:z-20 max-lg:shadow-xl',
+            )}
+          />
         </>
       ) : (
-        /* Empty state */
         <div className="flex-1 flex flex-col items-center justify-center text-text-secondary">
           <MessageSquare className="w-16 h-16 mb-4 text-text-muted" />
           <p className="text-lg font-medium">{t('inbox.detail.empty.title')}</p>
@@ -622,6 +657,7 @@ const TransferAgentsModal: React.FC<{
       onClose={onClose}
       title={t('inbox.transferModal.title')}
       size="md"
+      className="inbox-desk"
     >
       <div className="space-y-4">
         <p className="text-text-secondary">
@@ -1025,9 +1061,9 @@ const Inbox: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="inbox-desk h-full flex flex-col">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-edge bg-surface-2">
+      <div className="px-6 py-4 border-b border-edge bg-surface-1">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">{t('nav.inbox')}</h1>
@@ -1094,7 +1130,7 @@ const Inbox: React.FC = () => {
 
       {/* Confirm Close Dialog */}
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
-        <AlertDialogContent>
+        <AlertDialogContent className="inbox-desk">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('inbox.closeDialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>{t('inbox.closeDialog.description')}</AlertDialogDescription>
@@ -1108,7 +1144,7 @@ const Inbox: React.FC = () => {
 
       {/* Super-admin testing reset — next inbound starts a new session. */}
       <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
-        <AlertDialogContent>
+        <AlertDialogContent className="inbox-desk">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('inbox.resetDialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>{t('inbox.resetDialog.description')}</AlertDialogDescription>

@@ -539,7 +539,7 @@ const SortableSectionRow: React.FC<SortableSectionRowProps> = ({
             </span>
             {s.isReserved && <Lock className="w-3 h-3 shrink-0 text-text-muted" />}
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">
+          <div className="text-2xs text-text-muted mt-0.5">
             {t('admin.faq.itemsCount', { count: s.items.length })}
           </div>
         </button>
@@ -643,7 +643,7 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
       {/* Section header — visually distinct from the items list below. */}
       <div className="px-5 pt-5 pb-4 border-b-2 border-edge bg-gradient-to-b from-primary-500/[0.04] to-transparent flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wider font-semibold text-text-muted mb-1.5">
+          <div className="text-2xs uppercase tracking-wider font-semibold text-text-muted mb-1.5">
             {t('admin.faq.sectionEyebrow')}
           </div>
           <div className="flex items-center gap-2">
@@ -651,13 +651,13 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
               {section.titles.en}
             </h2>
             {section.isReserved && (
-              <Badge variant="outline" className="gap-1 text-[10px] shrink-0">
+              <Badge variant="outline" className="gap-1 text-2xs shrink-0">
                 <Lock className="w-2.5 h-2.5" />
                 {t('admin.faq.reserved')}
               </Badge>
             )}
           </div>
-          <div className="text-[11px] text-text-muted mt-2 flex items-center gap-2">
+          <div className="text-xs text-text-muted mt-2 flex items-center gap-2">
             <code className="px-1.5 py-0.5 rounded bg-surface-3 text-text-secondary">
               {section.id}
             </code>
@@ -788,7 +788,7 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
       <div className="flex-1 min-w-0">
         <div className="text-sm text-text-primary truncate">{it.question.en}</div>
         <div className="flex items-center gap-2 mt-0.5">
-          <div className="text-[10px] text-text-muted font-mono truncate">{it.slug}</div>
+          <div className="text-2xs text-text-muted font-mono truncate">{it.slug}</div>
           <TranslationStatus question={it.question} answer={it.answer} />
         </div>
         {isExpanded && (
@@ -881,7 +881,7 @@ const TranslationStatus: React.FC<{ question: FaqTranslation; answer: FaqTransla
             <TooltipTrigger asChild>
               <span
                 className={cn(
-                  'text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded',
+                  'text-2xs font-mono font-semibold uppercase px-1 py-0.5 rounded',
                   complete
                     ? 'bg-primary-500/15 text-primary-400'
                     : 'bg-surface-3 text-text-muted line-through opacity-60',
@@ -994,7 +994,7 @@ const SectionDialog: React.FC<SectionDialogProps> = ({ state, existingIds, onClo
                 placeholder="getting-started"
                 aria-invalid={!!idError}
               />
-              <p className={cn('text-[10px]', idError ? 'text-red-400' : 'text-text-muted')}>
+              <p className={cn('text-2xs', idError ? 'text-red-400' : 'text-text-muted')}>
                 {idError ?? t('admin.faq.fields.idHelp')}
               </p>
             </div>
@@ -1120,7 +1120,7 @@ const ItemDialog: React.FC<ItemDialogProps> = ({ state, existingSlugs, onClose }
               placeholder="what-is-handsoff"
               aria-invalid={!!slugError}
             />
-            <p className={cn('text-[10px]', slugError ? 'text-red-400' : 'text-text-muted')}>
+            <p className={cn('text-2xs', slugError ? 'text-red-400' : 'text-text-muted')}>
               {slugError ?? t('admin.faq.fields.slugHelp')}
             </p>
           </div>

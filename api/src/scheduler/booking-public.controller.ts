@@ -28,22 +28,22 @@ function page(title: string, bodyHtml: string, lang = 'en', copy: BookingCopy = 
 <title>${esc(title)} · ${esc(copy['manage.title_suffix'])}</title>
 <style>
   :root { color-scheme: light dark; }
-  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-         background:#0b0f17; color:#e6e8ee; display:flex; min-height:100vh; align-items:center; justify-content:center; }
-  .card { width:100%; max-width:440px; margin:24px; background:#151b26; border:1px solid #232b3a; border-radius:16px; padding:28px; }
+  body { margin:0; font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+         background:#0C1112; color:#F2F0E9; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+  .card { width:100%; max-width:440px; margin:24px; background:#123B3A; border:1px solid #1E2D2C; border-radius:16px; padding:28px; }
   h1 { font-size:20px; margin:0 0 4px; }
-  p { color:#9aa3b2; font-size:14px; line-height:1.5; }
-  .when { color:#e6e8ee; font-weight:600; font-size:16px; margin:14px 0; }
+  p { color:#9EC9C2; font-size:14px; line-height:1.5; }
+  .when { color:#F2F0E9; font-weight:600; font-size:16px; margin:14px 0; }
   .btn { display:inline-block; border:none; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:600;
          cursor:pointer; text-decoration:none; }
-  .btn-primary { background:#4f7cff; color:#fff; }
+  .btn-primary { background:#2DD4BF; color:#0C1112; }
   .btn-danger { background:#e5484d; color:#fff; }
-  .btn-ghost { background:transparent; color:#9aa3b2; border:1px solid #232b3a; }
+  .btn-ghost { background:transparent; color:#9EC9C2; border:1px solid #1E2D2C; }
   .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
-  .day { margin-top:16px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#9aa3b2; }
+  .day { margin-top:16px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#9EC9C2; }
   .slots { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-  .slot { background:#1c2433; border:1px solid #2a3447; color:#e6e8ee; border-radius:10px; padding:8px 12px; font-size:14px; cursor:pointer; }
-  .slot:hover { border-color:#4f7cff; }
+  .slot { background:#0C1112; border:1px solid #1E2D2C; color:#F2F0E9; border-radius:10px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  .slot:hover { border-color:#2DD4BF; }
   form { display:inline; }
   .muted { font-size:12px; color:#6b7280; margin-top:18px; }
 </style></head><body><div class="card">${bodyHtml}</div></body></html>`;

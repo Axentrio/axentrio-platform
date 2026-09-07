@@ -263,7 +263,7 @@ const VersionEditorHeader: React.FC<{
             {mode === 'view'
               ? <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.versionStatus.published')}</Badge>
               : dirty && (
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('admin.botTemplates.editor.unsaved')}
                 </span>
               )}
@@ -315,7 +315,7 @@ const PromptSection: React.FC<{
           <Label htmlFor="d-body" className="text-xs font-medium uppercase tracking-wide text-text-secondary">
             {COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}
           </Label>
-          <span className="font-mono text-[11px] tabular-nums text-text-muted">{t('admin.botTemplates.editor.charCount', { n: draft.body.length.toLocaleString() })}</span>
+          <span className="font-mono text-xs tabular-nums text-text-muted">{t('admin.botTemplates.editor.charCount', { n: draft.body.length.toLocaleString() })}</span>
         </div>
         <Textarea
           id="d-body"
@@ -394,7 +394,7 @@ const CapabilitiesSection: React.FC<{
                         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-medium text-text-primary">
                           <Cpu className="h-3.5 w-3.5 shrink-0 text-text-muted" />{skill.displayName}
                           {checked && (
-                            <span className={`rounded px-1 text-[9px] font-medium uppercase tracking-wide ${custom ? 'bg-primary-500/15 text-primary-300' : 'bg-surface-3 text-text-muted'}`}>
+                            <span className={`rounded px-1 text-2xs font-medium uppercase tracking-wide ${custom ? 'bg-primary-500/15 text-primary-300' : 'bg-surface-3 text-text-muted'}`}>
                               {custom ? 'custom prose' : 'default prose'}
                             </span>
                           )}
@@ -408,9 +408,9 @@ const CapabilitiesSection: React.FC<{
                     {checked && (
                       <div className="space-y-1.5 border-t border-edge/60 bg-surface-0/40 p-3 pt-2.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">Prose · this template only</span>
+                          <span className="text-2xs font-medium uppercase tracking-wider text-text-muted">Prose · this template only</span>
                           {!ro && custom && (
-                            <button type="button" onClick={() => resetProse(skill.id)} className="text-[11px] font-medium text-primary-400 hover:text-primary-300">
+                            <button type="button" onClick={() => resetProse(skill.id)} className="text-xs font-medium text-primary-400 hover:text-primary-300">
                               Reset to default
                             </button>
                           )}
@@ -482,7 +482,7 @@ const TestPromptSection: React.FC<{
           <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">
             {log.map((mtest, i) => (
               <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
-                <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
+                <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-surface-3 text-text-primary'}`}>
                   {mtest.content}
                 </span>
               </div>
@@ -532,7 +532,7 @@ const PreviewRail: React.FC<{
 
       <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-3">
         <div>
-          <label className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+          <label className="mb-1 flex items-center gap-1.5 text-2xs font-medium uppercase tracking-wider text-text-tertiary">
             <SlidersHorizontal className="h-3 w-3" />Plan
           </label>
           <Select value={tier} onValueChange={(v) => setTier(v as PreviewTier)}>
@@ -547,7 +547,7 @@ const PreviewRail: React.FC<{
             <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        <p className="text-[10px] leading-relaxed text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules. Channel only tweaks reply length and proactive contact.'}</p>
+        <p className="text-2xs leading-relaxed text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules. Channel only tweaks reply length and proactive contact.'}</p>
       </div>
 
       {isPending && (
@@ -609,20 +609,20 @@ const PreviewRail: React.FC<{
                 <AccordionContent className="space-y-3 text-xs">
                   <TooltipProvider delayDuration={150}>
                     <div>
-                      <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Prompt blocks included ({included.length})</div>
+                      <div className="mb-1 text-2xs uppercase tracking-wider text-text-tertiary">Prompt blocks included ({included.length})</div>
                       {included.map((b) => (
                         <div key={b} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-primary"><Check className="h-3 w-3 shrink-0 text-status-online" /><BlockKey name={b} /></div>
                       ))}
                     </div>
                     {excluded.length > 0 && (
                       <div>
-                        <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Not in this scenario ({excluded.length})</div>
+                        <div className="mb-1 text-2xs uppercase tracking-wider text-text-tertiary">Not in this scenario ({excluded.length})</div>
                         {excluded.map((e) => (
-                          <div key={e.key} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-tertiary"><X className="h-3 w-3 shrink-0" /><BlockKey name={e.key} /><span className="ml-auto rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-sans text-[10px]">{EXCLUDED_NOTE[e.key] ?? REASON_TEXT[e.reason] ?? e.reason}</span></div>
+                          <div key={e.key} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-tertiary"><X className="h-3 w-3 shrink-0" /><BlockKey name={e.key} /><span className="ml-auto rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-sans text-2xs">{EXCLUDED_NOTE[e.key] ?? REASON_TEXT[e.reason] ?? e.reason}</span></div>
                         ))}
                       </div>
                     )}
-                    <div className="font-mono text-text-secondary"><span className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
+                    <div className="font-mono text-text-secondary"><span className="mb-1 block text-2xs uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
                   </TooltipProvider>
                 </AccordionContent>
               </AccordionItem>
@@ -1102,7 +1102,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-sm font-semibold text-text-primary">v{v.version}</span>
-                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${labelCls}`}>{label}</span>
+                            <span className={`rounded-full px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide ${labelCls}`}>{label}</span>
                           </div>
                           <p className="mt-0.5 truncate text-xs text-text-muted">{v.changelog?.trim() || 'No release notes'}</p>
                         </div>
@@ -1285,12 +1285,12 @@ const AdminBotTemplateDetail: React.FC = () => {
                           <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs font-medium text-text-primary">{confidence.toFixed(2)}</span>
                         </div>
                         <Slider value={[confidence]} min={0.4} max={0.95} step={0.05} disabled={ro} onValueChange={([v]) => setCfg({ confidenceThreshold: String(v) })} />
-                        <div className="flex justify-between text-[10px] text-text-tertiary">
+                        <div className="flex justify-between text-2xs text-text-tertiary">
                           <span>{t('admin.botTemplates.editor.confidenceFlexible')}</span>
                           <span>{t('admin.botTemplates.editor.confidenceBalanced')}</span>
                           <span>{t('admin.botTemplates.editor.confidenceStrict')}</span>
                         </div>
-                        <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.confidenceHelper')}</p>
+                        <p className="text-2xs text-text-tertiary">{t('admin.botTemplates.editor.confidenceHelper')}</p>
                       </div>
 
                       {/* Max response length — preset chips + number */}

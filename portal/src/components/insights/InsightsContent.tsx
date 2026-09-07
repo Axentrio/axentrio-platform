@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { useChartPalette } from '@/lib/css-color';
 import {
   Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
   FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
@@ -553,6 +554,7 @@ function ExperimentsSection() {
 /** Pro+ basic sentiment distribution; Enterprise themes remain in Experiments. */
 function SentimentTrendSection() {
   const { t } = useTranslation();
+  const chart = useChartPalette();
   const enabled = useHasFeature('gapEvidence');
   const { data, isLoading } = useSentimentTrend(enabled);
   if (!enabled) return null;
@@ -566,14 +568,14 @@ function SentimentTrendSection() {
         <h3 className="text-sm font-semibold text-text-primary">
           {t('insights.sentiment.title', { defaultValue: 'Customer sentiment' })}
         </h3>
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-text-muted">
           {t('insights.sentiment.window', { defaultValue: 'Last 30 days' })}
         </span>
       </div>
       {isLoading ? (
         <Skeleton className="h-48 w-full rounded-xl" />
       ) : !hasData ? (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-text-muted">
           {t('insights.sentiment.empty', {
             defaultValue: 'Sentiment trends appear after conversations are analysed.',
           })}
@@ -586,7 +588,7 @@ function SentimentTrendSection() {
                 <XAxis
                   dataKey="date"
                   tickFormatter={(date: string) => date.slice(5)}
-                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  tick={{ fill: chart.axis, fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
                   minTickGap={20}
@@ -594,21 +596,15 @@ function SentimentTrendSection() {
                 <YAxis
                   allowDecimals={false}
                   width={24}
-                  tick={{ fill: '#71717a', fontSize: 10 }}
+                  tick={{ fill: chart.axis, fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1e2030',
-                    border: '1px solid #2a2d3e',
-                    borderRadius: 10,
-                  }}
-                />
+                <Tooltip contentStyle={chart.tooltip} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="positive" stackId="sentiment" fill="#34d399" />
-                <Bar dataKey="neutral" stackId="sentiment" fill="#71717a" />
-                <Bar dataKey="negative" stackId="sentiment" fill="#f87171" />
+                <Bar dataKey="positive" stackId="sentiment" fill={chart.human} />
+                <Bar dataKey="neutral" stackId="sentiment" fill={chart.muted} />
+                <Bar dataKey="negative" stackId="sentiment" fill={chart.busy} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

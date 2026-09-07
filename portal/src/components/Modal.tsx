@@ -24,6 +24,7 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   showCloseButton?: boolean;
   closeOnOverlayClick?: boolean;
+  className?: string;
 }
 
 const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
@@ -42,6 +43,7 @@ export const Modal: React.FC<ModalProps> = ({
   size = 'md',
   showCloseButton = true,
   closeOnOverlayClick = true,
+  className,
 }) => {
   return (
     <Dialog
@@ -56,19 +58,17 @@ export const Modal: React.FC<ModalProps> = ({
           className={cn(
             sizeClasses[size],
             'bg-surface-2 rounded-2xl shadow-card border border-edge p-0 gap-0',
-            // Hide the default shadcn/radix close button — we render our own
             '[&>button.absolute]:hidden',
+            className,
           )}
           onInteractOutside={(e) => {
             if (!closeOnOverlayClick) e.preventDefault();
           }}
         >
-          {/* Visually-hidden title for accessibility when no visible title */}
           {!title && (
             <DialogTitle className="sr-only">Dialog</DialogTitle>
           )}
 
-          {/* Header */}
           {(title || showCloseButton) && (
             <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b border-edge space-y-0">
               {title ? (
@@ -91,11 +91,9 @@ export const Modal: React.FC<ModalProps> = ({
             </DialogHeader>
           )}
 
-          {/* Content */}
           <div className="p-6">{children}</div>
         </DialogContent>
       </DialogPortal>
     </Dialog>
   );
 };
-

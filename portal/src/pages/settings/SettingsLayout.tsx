@@ -58,7 +58,7 @@ const SettingsLayout: React.FC = () => {
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-text-primary">{t('settings.header.title')}</h1>
-          <p className="text-text-secondary">{t('settings.header.subtitle')}</p>
+          <p className="text-sm text-text-secondary">{t('settings.header.subtitle')}</p>
         </div>
 
         {/* Mobile horizontal tabs */}

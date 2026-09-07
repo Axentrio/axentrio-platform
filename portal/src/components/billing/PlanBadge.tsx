@@ -29,7 +29,7 @@ const TIER_CLASSES: Record<PlanBadgeTier, string> = {
 };
 
 const SIZE_CLASSES: Record<PlanBadgeSize, string> = {
-  sm: 'text-[11px] leading-none px-2 py-0.5',
+  sm: 'text-xs leading-none px-2 py-0.5',
   md: 'text-xs leading-none px-2.5 py-1',
 };
 

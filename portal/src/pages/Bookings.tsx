@@ -477,7 +477,7 @@ function statusPill(status: string): { label: string; cls: string } {
     case 'pending':
       return { label: 'Pending', cls: 'bg-amber-500/10 text-amber-400' };
     case 'request_created':
-      return { label: 'Request', cls: 'bg-indigo-500/10 text-indigo-400' };
+      return { label: 'Request', cls: 'bg-primary-500/10 text-primary-400' };
     default:
       return { label: status, cls: 'bg-surface-2 text-text-secondary' };
   }

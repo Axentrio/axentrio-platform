@@ -52,12 +52,12 @@ describe('PlanBadge — tier colour class', () => {
 });
 
 describe('PlanBadge — size prop', () => {
-  it('defaults to size="sm" (smaller text/padding)', () => {
+  it('defaults to size="sm" (tighter padding)', () => {
     render(<PlanBadge tier="pro" data-testid="badge" />);
-    // SIZE_CLASSES.sm uses the explicit 11px arbitrary value.
-    expect(screen.getByTestId('badge').className).toMatch(/text-\[11px\]/);
+    expect(screen.getByTestId('badge').className).toMatch(/text-xs/);
+    expect(screen.getByTestId('badge').className).toMatch(/px-2/);
+    expect(screen.getByTestId('badge').className).not.toMatch(/px-2\.5/);
   });
-
   it('uses the larger preset when size="md"', () => {
     render(<PlanBadge tier="pro" size="md" data-testid="badge" />);
     // SIZE_CLASSES.md uses text-xs (not 11px) and px-2.5.

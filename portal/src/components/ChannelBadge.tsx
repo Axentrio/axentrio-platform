@@ -18,7 +18,7 @@ export function ChannelBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0',
+        'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-2xs font-medium shrink-0',
         color,
         className,
       )}

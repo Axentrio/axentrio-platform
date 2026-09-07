@@ -1,97 +1,177 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  :root {
-    /* shadcn CSS variables — LIGHT theme defaults */
-    --background: 0 0% 100%;
-    --foreground: 224 71% 4%;
-    --card: 0 0% 99%;
-    --card-foreground: 224 71% 4%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 224 71% 4%;
-    --primary: 244 57% 58%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 220 9% 46%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --accent: 38 92% 50%;
-    --accent-foreground: 224 71% 4%;
+  /**
+   * PAPER — the light palette, and the ONLY copy of it.
+   *
+   * `.inbox-desk` shares this selector because the inbox keeps its paper desk
+   * even when `.dark` is on <html> (brand board). It used to hand-copy the whole
+   * set, which had already drifted out of sync twice. Nothing to keep in step now.
+   *
+   * No layer/order trickery needed: `.dark` declares on <html>, this declares on
+   * the desk element itself, and a specified value always beats an inherited one.
+   */
+  :root,
+  .inbox-desk,
+  .light {
+    /* shadcn — Warm Bone canvas, Ink type, Accent Teal actions */
+    --background: 47 26% 93%;
+    --foreground: 190 20% 6%;
+    --card: 45 40% 98%;
+    --card-foreground: 190 20% 6%;
+    --popover: 45 40% 98%;
+    --popover-foreground: 190 20% 6%;
+    --primary: 172 66% 50%;
+    --primary-foreground: 190 20% 6%;
+    --secondary: 47 16% 90%;
+    --secondary-foreground: 162 5% 37%;
+    --muted: 47 16% 90%;
+    --muted-foreground: 162 5% 37%;
+    --accent: 172 20% 92%;
+    --accent-foreground: 190 20% 6%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 239 84% 67%;
+    --border: 40 14% 86%;
+    --input: 40 14% 86%;
+    --ring: 172 66% 50%;
     --radius: 0.75rem;
 
-    /* Primary color scale (overridden at runtime by useTenantTheme).
-       Stored as "R G B" channels so Tailwind's /opacity modifier works. */
-    --color-primary-50: 238 242 255;
-    --color-primary-100: 224 231 255;
-    --color-primary-200: 199 210 254;
-    --color-primary-300: 165 180 252;
-    --color-primary-400: 129 140 248;
-    --color-primary-500: 99 102 241;
-    --color-primary-600: 79 70 229;
-    --color-primary-700: 67 56 202;
-    --color-primary-800: 55 48 163;
-    --color-primary-900: 49 46 129;
-    --color-primary-rgb: 99, 102, 241;
+    /**
+     * Primary scale — ROLE-ordered, not luminance-ordered, because the canvas flips.
+     *
+     *   50–200  wash / tint fills
+     *   300     strongest accent (hover partner of 400)
+     *   400     default accent text + icons  ← 90+ call sites
+     *   500     tint source, focus ring
+     *   600     solid fill, focus edge
+     *   700–900 pressed / deep
+     *
+     * On bone, "accent teal" has to be a DARK teal: the dark-mode #2dd4bf reads at
+     * 1.9:1 here, so every accent link rendered as a ghost. 300 is deeper than 400
+     * in this mode so hover still gains contrast rather than losing it.
+     */
+    --color-primary-50: 240 247 245;
+    --color-primary-100: 219 238 233;
+    --color-primary-200: 178 217 210;
+    --color-primary-300: 11 95 87;
+    --color-primary-400: 14 114 104;
+    --color-primary-500: 13 116 105;
+    --color-primary-600: 11 101 91;
+    --color-primary-700: 10 84 76;
+    --color-primary-800: 8 66 60;
+    --color-primary-900: 6 46 42;
+    /* Glow shadows: the dark-mode neon reads as a smudge on paper. */
+    --color-primary-rgb: 13, 116, 105;
 
-    /* Light theme surface/text tokens ("R G B" channels) */
-    --color-surface-0: 248 249 251;
-    --color-surface-1: 255 255 255;
-    --color-surface-2: 243 244 246;
-    --color-surface-3: 229 231 235;
-    --color-surface-4: 209 213 219;
-    --color-edge: 229 231 235;
-    --color-edge-light: 209 213 219;
-    --color-text-primary: 17 24 39;
-    --color-text-secondary: 107 114 128;
-    --color-text-muted: 156 163 175;
-    --color-text-inverse: 249 250 251;
+    /**
+     * Elevation on paper runs UP: canvas is the deepest bone, cards are the
+     * warm white above it, and 3/4 are wells cut back into the page. The canvas
+     * is a shade deeper than the brand bone so a card has something to sit on.
+     */
+    --color-surface-0: 237 234 226;
+    --color-surface-1: 252 251 247;
+    --color-surface-2: 246 244 238;
+    --color-surface-3: 232 229 219;
+    --color-surface-4: 213 209 198;
+    --color-edge: 221 216 205;
+    --color-edge-light: 205 199 186;
+    --color-text-primary: 12 17 18;
+    --color-text-secondary: 84 94 91;
+    /* 4.8:1 on the canvas. The old 120 128 125 sat at 3.9 — section labels and
+     * chart axes were the first thing to disappear. */
+    --color-text-muted: 95 103 100;
+    --color-text-inverse: 242 240 233;
+    /* Ink rail. `.light` restates it so a light preview inside `.dark` html
+     * does not inherit the petrol rail. Harmless on `.inbox-desk` (no rail). */
+    --color-sidebar-bg: 12 17 18;
+    --color-sidebar-fg: 242 240 233;
+    --color-sidebar-muted: 148 160 156;
+    --color-sidebar-hover: 22 42 41;
+    --color-sidebar-active: 18 59 58;
+    --color-sidebar-border: 30 45 44;
+    --color-sidebar-accent: 45 212 191;
+
+    --color-status-online: 6 122 90;
+    --color-status-away: 180 83 9;
+    --color-status-offline: 89 99 96;
+    --color-status-busy: 185 28 28;
+    --color-chat-bot: var(--color-primary-400);
+    --color-chat-human: var(--color-status-online);
+    --color-chat-handsoff: var(--color-status-away);
+    --color-chat-closed: var(--color-status-offline);
   }
 
   .dark {
     color-scheme: dark;
 
-    /* shadcn CSS variables — DARK theme */
-    --background: 228 18% 7%;
-    --foreground: 228 47% 96%;
-    --card: 230 19% 11%;
-    --card-foreground: 228 47% 96%;
-    --popover: 230 22% 15%;
-    --popover-foreground: 228 47% 96%;
-    --primary: 244 57% 58%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 230 22% 15%;
-    --secondary-foreground: 224 16% 68%;
-    --muted: 232 24% 20%;
-    --muted-foreground: 231 16% 49%;
-    --accent: 38 92% 50%;
-    --accent-foreground: 228 18% 7%;
+    --background: 190 20% 6%;
+    --foreground: 47 26% 93%;
+    --card: 179 30% 10%;
+    --card-foreground: 47 26% 93%;
+    --popover: 179 28% 12%;
+    --popover-foreground: 47 26% 93%;
+    --primary: 172 66% 50%;
+    --primary-foreground: 190 20% 6%;
+    --secondary: 179 25% 12%;
+    --secondary-foreground: 162 8% 70%;
+    --muted: 179 20% 14%;
+    --muted-foreground: 162 8% 55%;
+    --accent: 172 20% 16%;
+    --accent-foreground: 47 26% 93%;
     --destructive: 0 91% 71%;
     --destructive-foreground: 0 0% 100%;
-    --border: 232 19% 20%;
-    --input: 232 19% 20%;
-    --ring: 239 84% 67%;
+    --border: 179 18% 16%;
+    --input: 179 18% 16%;
+    --ring: 172 66% 50%;
 
-    /* Dark theme surface/text tokens ("R G B" channels) */
-    --color-surface-0: 10 11 15;
-    --color-surface-1: 15 17 23;
-    --color-surface-2: 22 24 33;
-    --color-surface-3: 30 32 48;
-    --color-surface-4: 38 41 64;
-    --color-edge: 42 45 62;
-    --color-edge-light: 53 56 80;
-    --color-text-primary: 241 243 249;
-    --color-text-secondary: 156 163 191;
-    --color-text-muted: 107 113 148;
-    --color-text-inverse: 15 17 23;
+    /* Same roles as :root, resolved for an ink canvas — see the comment there. */
+    --color-primary-50: 213 246 242;
+    --color-primary-100: 192 242 235;
+    --color-primary-200: 158 235 225;
+    --color-primary-300: 115 226 212;
+    --color-primary-400: 77 219 200;
+    --color-primary-500: 45 212 191;
+    --color-primary-600: 36 178 159;
+    --color-primary-700: 29 140 125;
+    --color-primary-800: 21 102 91;
+    --color-primary-900: 15 72 64;
+    --color-primary-rgb: 45, 212, 191;
+
+    --color-surface-0: 12 17 18;
+    --color-surface-1: 16 24 24;
+    --color-surface-2: 18 35 34;
+    --color-surface-3: 28 48 47;
+    --color-surface-4: 40 62 60;
+    --color-edge: 32 50 49;
+    --color-edge-light: 48 70 68;
+    --color-text-primary: 242 240 233;
+    --color-text-secondary: 148 160 156;
+    /* Was graphite (89 99 96) — 4.0:1 on ink left axis labels and hints guessy. */
+    --color-text-muted: 122 134 130;
+    --color-text-inverse: 12 17 18;
+
+    /**
+     * The rail has to read as its own plane, or the app loses its left edge.
+     * Light mode gets that free (ink on bone). Dropping the rail BELOW an ink
+     * canvas does not work — 8 levels of near-black is invisible on most
+     * panels — so it goes UP into deep petrol instead, the same family the
+     * elevated surfaces use. Still clears sidebar-hover (22 42 41) and
+     * sidebar-active (18 59 58), so nav state keeps its pop.
+     */
+    --color-sidebar-bg: 14 30 29;
+
+    --color-status-online: 52 211 153;
+    --color-status-away: 251 191 36;
+    --color-status-offline: 89 99 96;
+    --color-status-busy: 248 113 113;
+    --color-chat-bot: var(--color-primary-400);
+    --color-chat-human: var(--color-status-online);
+    --color-chat-handsoff: var(--color-status-away);
+    --color-chat-closed: var(--color-status-offline);
   }
 
   * {
@@ -100,8 +180,8 @@
   }
 
   body {
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-    background-color: rgb(var(--color-surface-1));
+    font-family: Inter, system-ui, sans-serif;
+    background-color: rgb(var(--color-surface-0));
     color: rgb(var(--color-text-primary));
   }
 
@@ -110,8 +190,8 @@
   }
 
   ::selection {
-    background-color: rgba(var(--color-primary-rgb, 99, 102, 241), 0.3);
-    color: white;
+    background-color: rgba(var(--color-primary-rgb, 45, 212, 191), 0.35);
+    color: rgb(var(--color-text-primary));
   }
 
   /* Scrollbar */
@@ -130,6 +210,38 @@
   }
 }
 
+/**
+ * Inbox keeps the paper desk even in dark mode — matches the brand board.
+ *
+ * Tokens come from the shared PAPER block at the top of this file; all that is
+ * left here is what only the desk needs: opting its form controls back to a
+ * light scheme, and painting itself, since the page around it may be ink.
+ */
+.inbox-desk {
+  color-scheme: light;
+  color: rgb(var(--color-text-primary));
+  background-color: rgb(var(--color-surface-0));
+}
+
+/**
+ * The rail is ink in BOTH modes, so canvas edge tokens streak a bone-coloured
+ * scrollbar thumb and hairline down it. Re-point the edge tokens at the rail's
+ * own palette rather than special-casing every border inside it.
+ */
+.bg-sidebar {
+  --color-edge: var(--color-sidebar-border);
+  --color-edge-light: 48 70 68;
+}
+
+/* A full-height thumb at border weight reads as a second divider next to the
+ * real one. Keep it at hover weight — present when you look, quiet when you don't. */
+.bg-sidebar ::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--color-sidebar-hover));
+}
+.bg-sidebar ::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--color-sidebar-border));
+}
+
 @layer components {
   /* Staggered animation delays */
   .stagger-1 { animation-delay: 0.05s; animation-fill-mode: backwards; }
@@ -145,7 +257,7 @@
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    background-image: linear-gradient(to right, rgb(var(--color-primary-400, 129 140 248)), rgb(var(--color-primary-200, 199 210 254)));
+    background-image: linear-gradient(to right, rgb(var(--color-primary-400, 77 219 200)), rgb(var(--color-primary-200, 158 235 225)));
   }
   .glass {
     background: color-mix(in srgb, rgb(var(--color-surface-2)) 85%, transparent);
@@ -178,7 +290,7 @@
   /* Focus ring utilities */
   .focus-ring {
     @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-1;
-    --tw-ring-color: rgb(var(--color-primary-500, 99 102 241));
+    --tw-ring-color: rgb(var(--color-primary-500, 45 212 191));
   }
 }
 

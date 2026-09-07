@@ -657,7 +657,6 @@ const TransferAgentsModal: React.FC<{
       onClose={onClose}
       title={t('inbox.transferModal.title')}
       size="md"
-      className="inbox-desk"
     >
       <div className="space-y-4">
         <p className="text-text-secondary">
@@ -1061,7 +1060,7 @@ const Inbox: React.FC = () => {
   };
 
   return (
-    <div className="inbox-desk h-full flex flex-col">
+    <div className="h-full flex flex-col bg-surface-0 text-text-primary">
       {/* Header */}
       <div className="px-6 py-4 border-b border-edge bg-surface-1">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1130,7 +1129,7 @@ const Inbox: React.FC = () => {
 
       {/* Confirm Close Dialog */}
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
-        <AlertDialogContent className="inbox-desk">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('inbox.closeDialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>{t('inbox.closeDialog.description')}</AlertDialogDescription>
@@ -1144,7 +1143,7 @@ const Inbox: React.FC = () => {
 
       {/* Super-admin testing reset — next inbound starts a new session. */}
       <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
-        <AlertDialogContent className="inbox-desk">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('inbox.resetDialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>{t('inbox.resetDialog.description')}</AlertDialogDescription>

@@ -8,15 +8,10 @@
   /**
    * PAPER — the light palette, and the ONLY copy of it.
    *
-   * `.inbox-desk` shares this selector because the inbox keeps its paper desk
-   * even when `.dark` is on <html> (brand board). It used to hand-copy the whole
-   * set, which had already drifted out of sync twice. Nothing to keep in step now.
-   *
-   * No layer/order trickery needed: `.dark` declares on <html>, this declares on
-   * the desk element itself, and a specified value always beats an inherited one.
+   * `.light` restates it so a light preview inside `.dark` html does not
+   * inherit the ink canvas. Inbox follows the page theme.
    */
   :root,
-  .inbox-desk,
   .light {
     /* shadcn — Warm Bone canvas, Ink type, Accent Teal actions */
     --background: 47 26% 93%;
@@ -86,7 +81,7 @@
     --color-text-muted: 95 103 100;
     --color-text-inverse: 242 240 233;
     /* Ink rail. `.light` restates it so a light preview inside `.dark` html
-     * does not inherit the petrol rail. Harmless on `.inbox-desk` (no rail). */
+     * does not inherit the petrol rail. */
     --color-sidebar-bg: 12 17 18;
     --color-sidebar-fg: 242 240 233;
     --color-sidebar-muted: 148 160 156;
@@ -208,19 +203,6 @@
   ::-webkit-scrollbar-thumb:hover {
     background-color: rgb(var(--color-edge-light, 53 56 80));
   }
-}
-
-/**
- * Inbox keeps the paper desk even in dark mode — matches the brand board.
- *
- * Tokens come from the shared PAPER block at the top of this file; all that is
- * left here is what only the desk needs: opting its form controls back to a
- * light scheme, and painting itself, since the page around it may be ink.
- */
-.inbox-desk {
-  color-scheme: light;
-  color: rgb(var(--color-text-primary));
-  background-color: rgb(var(--color-surface-0));
 }
 
 /**

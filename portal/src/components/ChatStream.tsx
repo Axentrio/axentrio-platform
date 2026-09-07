@@ -202,7 +202,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                 <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
                   <SelectValue placeholder={t('inbox.stream.filters.status.all')} />
                 </SelectTrigger>
-                <SelectContent className="inbox-desk">
+                <SelectContent>
                   {statusFilters.map((filter) => (
                     <SelectItem key={filter.value} value={filter.value}>
                       {t(filter.labelKey)}

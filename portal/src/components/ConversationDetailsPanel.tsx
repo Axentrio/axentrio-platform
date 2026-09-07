@@ -440,7 +440,7 @@ function LabelEditor({
           <Plus className="w-4 h-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="inbox-desk w-56 p-2">
+      <PopoverContent align="end" className="w-56 p-2">
         <form
           onSubmit={(e) => {
             e.preventDefault();

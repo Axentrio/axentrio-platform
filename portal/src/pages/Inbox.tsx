@@ -1060,7 +1060,7 @@ const Inbox: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-surface-0 text-text-primary">
+    <div className="h-full flex flex-col">
       {/* Header */}
       <div className="px-6 py-4 border-b border-edge bg-surface-1">
         <div className="flex items-center justify-between flex-wrap gap-2">

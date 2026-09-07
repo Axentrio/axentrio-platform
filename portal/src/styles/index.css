@@ -103,27 +103,27 @@
   .dark {
     color-scheme: dark;
 
-    --background: 190 20% 6%;
-    --foreground: 47 26% 93%;
-    --card: 179 30% 10%;
-    --card-foreground: 47 26% 93%;
-    --popover: 179 28% 12%;
-    --popover-foreground: 47 26% 93%;
+    /* Achraf petrol dark mode — not ink-black. Sidebar → page → cards, each a step lighter. */
+    --background: 175 28% 8%;
+    --foreground: 0 0% 100%;
+    --card: 172 27% 11%;
+    --card-foreground: 0 0% 100%;
+    --popover: 172 27% 11%;
+    --popover-foreground: 0 0% 100%;
     --primary: 172 66% 50%;
-    --primary-foreground: 190 20% 6%;
-    --secondary: 179 25% 12%;
-    --secondary-foreground: 162 8% 70%;
-    --muted: 179 20% 14%;
-    --muted-foreground: 162 8% 55%;
-    --accent: 172 20% 16%;
-    --accent-foreground: 47 26% 93%;
+    --primary-foreground: 176 50% 5%;
+    --secondary: 172 27% 11%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 168 22% 14%;
+    --muted-foreground: 166 7% 53%;
+    --accent: 168 22% 14%;
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 91% 71%;
     --destructive-foreground: 0 0% 100%;
-    --border: 179 18% 16%;
-    --input: 179 18% 16%;
+    --border: 170 22% 21%;
+    --input: 170 22% 21%;
     --ring: 172 66% 50%;
 
-    /* Same roles as :root, resolved for an ink canvas — see the comment there. */
     --color-primary-50: 213 246 242;
     --color-primary-100: 192 242 235;
     --color-primary-200: 158 235 225;
@@ -136,28 +136,27 @@
     --color-primary-900: 15 72 64;
     --color-primary-rgb: 45, 212, 191;
 
-    --color-surface-0: 12 17 18;
-    --color-surface-1: 16 24 24;
-    --color-surface-2: 18 35 34;
-    --color-surface-3: 28 48 47;
-    --color-surface-4: 40 62 60;
-    --color-edge: 32 50 49;
-    --color-edge-light: 48 70 68;
-    --color-text-primary: 242 240 233;
-    --color-text-secondary: 148 160 156;
-    /* Was graphite (89 99 96) — 4.0:1 on ink left axis labels and hints guessy. */
-    --color-text-muted: 122 134 130;
-    --color-text-inverse: 12 17 18;
+    /* #0E1918 page → #142321 cards → #19302D hover/selected */
+    --color-surface-0: 14 25 24;
+    --color-surface-1: 20 35 33;
+    --color-surface-2: 20 35 33;
+    --color-surface-3: 25 48 45;
+    --color-surface-4: 30 56 53;
+    --color-edge: 41 64 60;
+    --color-edge-light: 52 80 76;
+    --color-text-primary: 255 255 255;
+    --color-text-secondary: 183 194 192;
+    --color-text-muted: 127 144 140;
+    --color-text-inverse: 7 21 20;
 
-    /**
-     * The rail has to read as its own plane, or the app loses its left edge.
-     * Light mode gets that free (ink on bone). Dropping the rail BELOW an ink
-     * canvas does not work — 8 levels of near-black is invisible on most
-     * panels — so it goes UP into deep petrol instead, the same family the
-     * elevated surfaces use. Still clears sidebar-hover (22 42 41) and
-     * sidebar-active (18 59 58), so nav state keeps its pop.
-     */
-    --color-sidebar-bg: 14 30 29;
+    /* #071514 darkest plane. Active nav is brand deep petrol #123B3A. */
+    --color-sidebar-bg: 7 21 20;
+    --color-sidebar-fg: 255 255 255;
+    --color-sidebar-muted: 127 144 140;
+    --color-sidebar-hover: 25 48 45;
+    --color-sidebar-active: 18 59 58;
+    --color-sidebar-border: 41 64 60;
+    --color-sidebar-accent: 45 212 191;
 
     --color-status-online: 52 211 153;
     --color-status-away: 251 191 36;
@@ -212,7 +211,7 @@
  */
 .bg-sidebar {
   --color-edge: var(--color-sidebar-border);
-  --color-edge-light: 48 70 68;
+  --color-edge-light: 41 64 60;
 }
 
 /* A full-height thumb at border weight reads as a second divider next to the

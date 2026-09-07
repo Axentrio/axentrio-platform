@@ -4,7 +4,7 @@
  * Rendered by /settings/channels and the AI & Content "Social" tab.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -662,13 +662,28 @@ export function SocialChannelsContent() {
     }
   }, [metaPages]);
 
+  const metaOAuthAbortRef = useRef<AbortController | null>(null);
+
+  // Unmount → cancel the popup watcher (interval + message listener).
+  useEffect(
+    () => () => {
+      metaOAuthAbortRef.current?.abort();
+      metaOAuthAbortRef.current = null;
+    },
+    [],
+  );
+
   const handleConnectFacebook = async () => {
     const url = await metaOAuthUrl.mutateAsync({
       display: 'popup',
       returnPath: '/settings/channels',
     });
     if (!url) return;
-    const result = await openMetaOAuthPopup(url);
+    metaOAuthAbortRef.current?.abort();
+    const ac = new AbortController();
+    metaOAuthAbortRef.current = ac;
+    const result = await openMetaOAuthPopup(url, { signal: ac.signal });
+    if (metaOAuthAbortRef.current === ac) metaOAuthAbortRef.current = null;
     if (result.status === 'navigated') return;
     if (result.status === 'cancelled') {
       toast.info(t('ai.social.facebook.denied', { defaultValue: 'Facebook connect was cancelled.' }));

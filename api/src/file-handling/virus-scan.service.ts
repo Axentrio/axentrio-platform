@@ -82,6 +82,11 @@ const DEFAULT_CONFIG: VirusScanConfig = {
   cacheTtlMs: 5 * 60 * 1000, // 5 minutes
 };
 
+/** Hard cap on `scanCache` entries; the sweep trims down to this. */
+const SCAN_CACHE_MAX_ENTRIES = 1000;
+/** How often expired scan results are swept out of `scanCache`. */
+const SCAN_CACHE_SWEEP_INTERVAL_MS = 60_000;
+
 // ============================================================================
 // Virus Scan Service Class
 // ============================================================================
@@ -98,6 +103,8 @@ export class VirusScanService {
   };
 
   private enabled: boolean;
+  private healthTimer: NodeJS.Timeout | null = null;
+  private cacheSweepTimer: NodeJS.Timeout | null = null;
 
   constructor(config?: Partial<VirusScanConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -117,6 +124,7 @@ export class VirusScanService {
 
     this.initializeClamScan();
     this.startHealthCheckScheduler();
+    this.startCacheSweeper();
   }
 
   // ==========================================================================
@@ -503,15 +511,40 @@ export class VirusScanService {
       expiresAt: new Date(Date.now() + this.config.cacheTtlMs),
     });
 
-    // Clean old cache entries if cache is too large
-    if (this.scanCache.size > 1000) {
-      const now = new Date();
-      for (const [key, entry] of this.scanCache.entries()) {
-        if (entry.expiresAt < now) {
-          this.scanCache.delete(key);
-        }
+    if (this.scanCache.size > SCAN_CACHE_MAX_ENTRIES) {
+      this.sweepCache();
+    }
+  }
+
+  /**
+   * Drop expired entries, then — if the cache is still over the cap — drop the
+   * entries closest to expiry until it fits. Without this, a stream of unique
+   * file keys grows `scanCache` unbounded: `getCachedResult` only evicts the
+   * key it was asked about, and a one-shot upload key is never looked up again.
+   */
+  private sweepCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.scanCache) {
+      if (entry.expiresAt.getTime() <= now) {
+        this.scanCache.delete(key);
       }
     }
+
+    const excess = this.scanCache.size - SCAN_CACHE_MAX_ENTRIES;
+    if (excess <= 0) return;
+
+    const byExpiry = Array.from(this.scanCache.entries()).sort(
+      (a, b) => a[1].expiresAt.getTime() - b[1].expiresAt.getTime()
+    );
+    for (const [key] of byExpiry.slice(0, excess)) {
+      this.scanCache.delete(key);
+    }
+  }
+
+  private startCacheSweeper(): void {
+    this.cacheSweepTimer = setInterval(() => this.sweepCache(), SCAN_CACHE_SWEEP_INTERVAL_MS);
+    // Unref'd: a cache sweep must never keep the process alive on shutdown.
+    this.cacheSweepTimer.unref();
   }
 
   // ==========================================================================
@@ -519,13 +552,30 @@ export class VirusScanService {
   // ==========================================================================
 
   private startHealthCheckScheduler(): void {
-    // Check health every 5 minutes
-    setInterval(() => {
+    // Check health every 5 minutes. Handle kept so `stop()` can clear it and
+    // unref'd so it does not hold the event loop open.
+    this.healthTimer = setInterval(() => {
       this.checkHealth();
     }, 5 * 60 * 1000);
+    this.healthTimer.unref();
 
     // Initial health check
     this.checkHealth();
+  }
+
+  /**
+   * Clear the background timers this instance owns. Called by
+   * `resetVirusScanService()` so a discarded singleton leaves nothing behind.
+   */
+  stop(): void {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+    if (this.cacheSweepTimer) {
+      clearInterval(this.cacheSweepTimer);
+      this.cacheSweepTimer = null;
+    }
   }
 
   async checkHealth(): Promise<ClamAVHealth> {
@@ -620,6 +670,9 @@ export function getVirusScanService(config?: Partial<VirusScanConfig>): VirusSca
 }
 
 export function resetVirusScanService(): void {
+  // Clear the discarded instance's timers, otherwise every reset (tests, or a
+  // re-configuration) leaks a health-check and a cache-sweep interval.
+  virusScanServiceInstance?.stop();
   virusScanServiceInstance = null;
 }
 

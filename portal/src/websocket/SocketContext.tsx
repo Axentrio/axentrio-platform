@@ -3,7 +3,7 @@
  * Provides real-time communication for chat events
  */
 
-import React, { createContext, useContext, useEffect, useRef, useCallback, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { WS_CONFIG } from '@config/api.config';
 import { WS_EVENTS } from '@config/constants';
@@ -59,6 +59,18 @@ const SocketContext = createContext<SocketContextType | null>(null);
 // Generate unique handler ID
 const generateHandlerId = () => `handler_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+/** Fully release a socket: user listeners, the manager-level reconnection
+ *  listeners registered in `connectSocket`, then the connection itself.
+ *  Without this, every reconnect/tenant-switch left the old client alive —
+ *  `reconnectionAttempts: Infinity` means a merely-`disconnect()`ed socket
+ *  keeps its listeners (and their captured closures) forever. */
+const closeSocket = (socket: Socket) => {
+  socket.removeAllListeners();
+  socket.io.off('reconnect_attempt');
+  socket.io.off('reconnect');
+  socket.disconnect();
+};
+
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const socketRef = useRef<Socket | null>(null);
   const handlersRef = useRef<Map<string, SocketEventHandlers>>(new Map());
@@ -88,6 +100,14 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         tenantId,
       });
       return;
+    }
+
+    // Never stack a second client on top of a live one: `reconnect()` and a
+    // re-fired connect effect both land here while `socketRef` still holds the
+    // previous socket.
+    if (socketRef.current) {
+      closeSocket(socketRef.current);
+      socketRef.current = null;
     }
 
     setIsConnecting(true);
@@ -241,9 +261,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (user?.id) {
         socketRef.current.emit(WS_EVENTS.AGENT_LEAVE, { agentId: user.id });
       }
-      socketRef.current.disconnect();
+      closeSocket(socketRef.current);
       socketRef.current = null;
       setIsConnected(false);
+      setIsConnecting(false);
     }
   }, [user?.id]);
 
@@ -319,25 +340,46 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isConnected, user?.id]);
 
-  // Reconnect manually
+  // Reconnect manually (tenant switch). Connect straight away — the `auth`
+  // callback fetches a fresh token and the active tenant at handshake time, so
+  // a delayed connect bought nothing and its timer outlived unmount.
   const reconnect = useCallback(() => {
     disconnectSocket();
-    setTimeout(connectSocket, 1000);
+    void connectSocket();
   }, [connectSocket, disconnectSocket]);
 
-  const value: SocketContextType = {
-    socket: socketRef.current,
-    isConnected,
-    isConnecting,
-    connectionError,
-    registerHandlers,
-    unregisterHandlers,
-    joinChat,
-    leaveChat,
-    sendTyping,
-    updateStatus,
-    reconnect,
-  };
+  // Memoized: a fresh object here re-renders EVERY consumer of the socket
+  // context on any parent render (the whole authenticated tree), even though
+  // nothing about the connection changed. `socketRef.current` is only ever
+  // reassigned alongside a setIsConnecting/setIsConnected state change, so it
+  // can never go stale behind these deps.
+  const value: SocketContextType = useMemo(
+    () => ({
+      socket: socketRef.current,
+      isConnected,
+      isConnecting,
+      connectionError,
+      registerHandlers,
+      unregisterHandlers,
+      joinChat,
+      leaveChat,
+      sendTyping,
+      updateStatus,
+      reconnect,
+    }),
+    [
+      isConnected,
+      isConnecting,
+      connectionError,
+      registerHandlers,
+      unregisterHandlers,
+      joinChat,
+      leaveChat,
+      sendTyping,
+      updateStatus,
+      reconnect,
+    ],
+  );
 
   return (
     <SocketContext.Provider value={value}>

@@ -8,8 +8,12 @@
  * deployed - see the comment in server.ts.
  */
 import "reflect-metadata";
-import { initializeDatabase } from "./database/data-source";
-import { initializeQueues, registerProcessor } from "./queue/message-queue";
+import { AppDataSource, initializeDatabase } from "./database/data-source";
+import {
+  closeQueues,
+  initializeQueues,
+  registerProcessor,
+} from "./queue/message-queue";
 import { logger } from "./utils/logger";
 
 async function main(): Promise<void> {
@@ -26,7 +30,30 @@ async function main(): Promise<void> {
  logger.info("Website-crawl worker started");
 
  // Keep the event loop alive; Bull owns the timers that matter.
- setInterval(() => {}, 1 << 30);
+ const keepAlive = setInterval(() => {}, 1 << 30);
+
+ // Without this the container only ever dies by SIGKILL: the keep-alive timer
+ // and Bull's Redis connections both hold the loop open past SIGTERM, so an
+ // in-flight crawl is never drained and the queue keeps the stalled job.
+ let shuttingDown = false;
+ const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`Website-crawl worker received ${signal} - shutting down`);
+  clearInterval(keepAlive);
+  try {
+   await closeQueues();
+   if (AppDataSource.isInitialized) await AppDataSource.destroy();
+   process.exit(0);
+  } catch (error) {
+   logger.error("Website-crawl worker shutdown failed", {
+    error: error instanceof Error ? error.message : String(error),
+   });
+   process.exit(1);
+  }
+ };
+ process.on("SIGTERM", () => void shutdown("SIGTERM"));
+ process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
 main().catch((error) => {

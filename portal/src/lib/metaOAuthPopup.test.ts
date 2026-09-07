@@ -45,4 +45,26 @@ describe('openMetaOAuthPopup', () => {
     await expect(pending).resolves.toEqual({ status: 'ok', sessionToken: 'sess.jwt' });
     expect(localStorage.getItem(META_OAUTH_STORAGE_KEY)).toBeNull();
   });
+
+  it('cancels and leaves no live timers when the caller aborts', async () => {
+    vi.useFakeTimers();
+    try {
+      const popup = { closed: false, close: vi.fn() } as unknown as Window;
+      vi.spyOn(window, 'open').mockReturnValue(popup);
+      const controller = new AbortController();
+
+      const pending = openMetaOAuthPopup('https://facebook.test/oauth', {
+        signal: controller.signal,
+      });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      controller.abort();
+
+      await expect(pending).resolves.toEqual({ status: 'cancelled' });
+      expect(vi.getTimerCount()).toBe(0);
+      expect(popup.close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

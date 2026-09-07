@@ -19,7 +19,18 @@ const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
 // After FAILURE_THRESHOLD consecutive failures, skip delivery for COOLDOWN_MS.
 const FAILURE_THRESHOLD = 5;
 const COOLDOWN_MS = 60_000; // 1 minute
-const circuits = new Map<string, { failures: number; openUntil: number }>();
+// `circuits` is keyed by destination URL (tenant-supplied), so idle entries are
+// swept once they have been untouched for CIRCUIT_IDLE_MS.
+const CIRCUIT_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+const circuits = new Map<string, { failures: number; openUntil: number; lastFailureAt: number }>();
+
+// Sweep idle circuits every 60 seconds to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [url, cb] of circuits) {
+    if (now - Math.max(cb.lastFailureAt, cb.openUntil) >= CIRCUIT_IDLE_MS) circuits.delete(url);
+  }
+}, 60_000).unref(); // .unref() so it doesn't keep the process alive
 
 function isCircuitOpen(url: string): boolean {
   const cb = circuits.get(url);
@@ -38,10 +49,11 @@ function recordSuccess(url: string): void {
 }
 
 function recordFailure(url: string): void {
-  const cb = circuits.get(url) ?? { failures: 0, openUntil: 0 };
+  const cb = circuits.get(url) ?? { failures: 0, openUntil: 0, lastFailureAt: 0 };
   cb.failures++;
+  cb.lastFailureAt = Date.now();
   if (cb.failures >= FAILURE_THRESHOLD) {
-    cb.openUntil = Date.now() + COOLDOWN_MS;
+    cb.openUntil = cb.lastFailureAt + COOLDOWN_MS;
   }
   circuits.set(url, cb);
 }

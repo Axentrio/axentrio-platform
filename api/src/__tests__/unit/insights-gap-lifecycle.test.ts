@@ -12,9 +12,9 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: { name: string }) => {
       if (entity.name === 'Judgment') {
-        const qb: any = {};
-        for (const m of ['where', 'andWhere']) qb[m] = () => qb;
-        qb.getMany = async () => judgmentRows;
+        const qb: Record<string, unknown> = {};
+        for (const m of ['select', 'addSelect', 'where', 'andWhere', 'orderBy', 'limit']) qb[m] = () => qb;
+        qb.getRawMany = async () => judgmentRows;
         return { createQueryBuilder: () => qb };
       }
       if (entity.name === 'Gap') {

@@ -7,6 +7,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from './queries/queryConfig';
+import { __resetConversationLiveState } from './queries/conversationLive';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
@@ -84,6 +85,20 @@ const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // Create Query Client
 const queryClient = createQueryClient();
+
+// Sign-out (and session expiry) only tears down the Clerk session: the React
+// Query cache and the module-level live-conversation registries would keep the
+// previous user's conversations, leads and billing state for the life of the
+// tab — and hand them to whoever signs in next. Mounted inside <SignedOut>, so
+// it runs on every path out of an authenticated session, not just the sidebar
+// button.
+const SignedOutCacheReset: React.FC = () => {
+  React.useEffect(() => {
+    queryClient.clear();
+    __resetConversationLiveState();
+  }, []);
+  return null;
+};
 
 // Global desktop delivery for backend notifications (handoff, guardrail pause,
 // channel-down, SLA, leads, booking). The push worker only covers mobile; this
@@ -469,6 +484,7 @@ const App: React.FC = () => {
       <ThemedClerkProvider>
       <QueryClientProvider client={queryClient}>
         <SignedOut>
+          <SignedOutCacheReset />
           <div className="flex items-center justify-center h-screen bg-surface-1">
             <SignIn
               forceRedirectUrl={afterAuthRedirectPath(window.location)}

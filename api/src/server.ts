@@ -24,7 +24,8 @@ import {
   isRedisAvailable,
   getRedisClient,
 } from "./config/redis";
-import { initializeSocketIO } from "./websocket/socket.handler";
+import { initializeSocketIO, getIO } from "./websocket/socket.handler";
+import { closeQueues } from "./queue/message-queue";
 
 // Security middleware
 import {
@@ -459,9 +460,30 @@ app.use(errorHandler);
  */
 const backgroundJobsEnabled = process.env.BACKGROUND_JOBS_ENABLED !== "false";
 
+/**
+ * Every timer started by `startBackgroundJobs`, so `shutdown()` can clear them.
+ *
+ * Each handle is `.unref()`ed on registration: a sweep timer must never be the
+ * reason the process outlives SIGTERM. Before this, ~20 live intervals kept the
+ * event loop alive and every shutdown fell through to the 30s force-exit below.
+ */
+const backgroundTimers: NodeJS.Timeout[] = [];
+
+function trackTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
+  timer.unref();
+  backgroundTimers.push(timer);
+  return timer;
+}
+
 async function startBackgroundJobs(): Promise<void> {
-      // Cleanup old webhook event logs and message deliveries (7-day retention)
+      // Cleanup old webhook event logs and message deliveries (7-day retention).
+      // Re-entrancy guard on every sweep whose body is defined here: an interval
+      // does not wait for the previous async tick, so a slow pass would otherwise
+      // stack copies of itself (and their DB work) on every subsequent tick.
+      let channelLogsInFlight = false;
       const cleanupChannelLogs = async () => {
+        if (channelLogsInFlight) return;
+        channelLogsInFlight = true;
         try {
           const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
           await AppDataSource.query(
@@ -474,15 +496,25 @@ async function startBackgroundJobs(): Promise<void> {
           );
         } catch (error) {
           logger.error("Channel event log cleanup failed", { error });
+        } finally {
+          channelLogsInFlight = false;
         }
       };
-      setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000);
+      trackTimer(setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000));
 
-      // Audit log cleanup — batched to avoid table locks
+      // Audit log cleanup — batched to avoid table locks, and capped per run like
+      // the stale-session sweep: an unbounded drain loop holds the tick (and a DB
+      // connection) for as long as the backlog takes.
+      const AUDIT_BATCH_SIZE = 1000;
+      const AUDIT_MAX_BATCHES = 50; // Cap at 50k rows per run
+      let auditCleanupInFlight = false;
       const cleanupAuditLogs = async () => {
+        if (auditCleanupInFlight) return;
+        auditCleanupInFlight = true;
         try {
           let totalDeleted = 0;
           let batchDeleted: number;
+          let batches = 0;
 
           do {
             // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
@@ -492,15 +524,19 @@ async function startBackgroundJobs(): Promise<void> {
                 SELECT id FROM audit_logs
                 WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
                 ORDER BY created_at ASC
-                LIMIT 1000
+                LIMIT $2
               )
               RETURNING id`,
-                [config.audit.retentionDays],
+                [config.audit.retentionDays, AUDIT_BATCH_SIZE],
               ),
             );
             batchDeleted = deletedRows.length;
             totalDeleted += batchDeleted;
-          } while (batchDeleted === 1000);
+            batches++;
+          } while (
+            batchDeleted === AUDIT_BATCH_SIZE &&
+            batches < AUDIT_MAX_BATCHES
+          );
 
           if (totalDeleted > 0) {
             logger.info("Audit log cleanup complete", {
@@ -509,18 +545,23 @@ async function startBackgroundJobs(): Promise<void> {
           }
         } catch (error) {
           logger.error("Audit log cleanup failed", { error });
+        } finally {
+          auditCleanupInFlight = false;
         }
       };
 
       // Run cleanup after 10 seconds, then every 24 hours
-      setTimeout(cleanupAuditLogs, 10_000);
-      setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
+      trackTimer(setTimeout(cleanupAuditLogs, 10_000));
+      trackTimer(setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000));
 
       // Auto-close stale sessions — sessions with no activity for 30 minutes
       // Batched to avoid locking many rows at once under load.
       const STALE_BATCH_SIZE = 200;
       const STALE_MAX_BATCHES = 50; // Cap at 10k sessions per run
+      let staleSweepInFlight = false;
       const autoCloseStaleSessions = async () => {
+        if (staleSweepInFlight) return;
+        staleSweepInFlight = true;
         try {
           const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
           let totalClosed = 0;
@@ -570,53 +611,56 @@ async function startBackgroundJobs(): Promise<void> {
           // an atomic ownership transition through the command service
           // (cancelHandoff also times out the open HandoffRequest row, which the
           // old raw UPDATE left dangling as 'requested' forever).
+          //
+          // HARD CAP per tick, unlike the bulk UPDATE above: every return here is a
+          // full transaction PLUS a socket fan-out that re-selects the session, so
+          // the old drain loop could spend the whole 5-minute window on one backlog
+          // and starve the close sweep behind it. The cutoff only grows, so the
+          // remainder is returned by the following ticks.
+          const HANDOFF_MAX_PER_TICK = 20;
           const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
           const { conversationCommands } = await import(
             "./services/conversation-command.service"
           );
-          let totalReturned = 0;
-          let returnedBatch: number;
-          batches = 0;
-          do {
-            const stale = (await AppDataSource.query(
-              `SELECT id FROM chat_sessions
+          const { emitConversationUpsertForSession } = await import(
+            "./realtime/conversation-events"
+          );
+          const stale = (await AppDataSource.query(
+            `SELECT id FROM chat_sessions
                WHERE ownership = 'handoff_requested'
                AND last_activity_at < $1
                AND last_activity_at IS NOT NULL
                LIMIT $2`,
-              [handoffCutoff, STALE_BATCH_SIZE],
-            )) as Array<{ id: string }>;
-            returnedBatch = 0;
-            for (const row of stale) {
-              try {
-                const result = await conversationCommands.cancelHandoff(row.id, {
-                  kind: "system",
-                  source: "stale_handoff_sweep",
-                });
-                if (result.outcome === "cancelled") {
-                  returnedBatch++;
-                  // B-PR3a: normalized ownership event, post-commit — a swept
-                  // conversation must leave the operators' pending list live.
-                  const { emitConversationUpsertForSession } = await import(
-                    "./realtime/conversation-events"
-                  );
-                  await emitConversationUpsertForSession(row.id);
-                }
-              } catch (err) {
-                // A concurrent claim/close between SELECT and cancel is expected;
-                // the command's own state checks make the sweep re-entrant.
-                logger.debug("Stale handoff sweep skipped a session", {
-                  sessionId: row.id,
-                  error: err instanceof Error ? err.message : String(err),
-                });
+            [handoffCutoff, HANDOFF_MAX_PER_TICK],
+          )) as Array<{ id: string }>;
+          let totalReturned = 0;
+          for (const row of stale) {
+            try {
+              const result = await conversationCommands.cancelHandoff(row.id, {
+                kind: "system",
+                source: "stale_handoff_sweep",
+              });
+              if (result.outcome === "cancelled") {
+                totalReturned++;
+                // B-PR3a: normalized ownership event, post-commit — a swept
+                // conversation must leave the operators' pending list live. The
+                // command hands back a summary, not the entity the serializer
+                // needs, so the emit still re-selects — scoped to the tenant the
+                // command just committed.
+                await emitConversationUpsertForSession(
+                  row.id,
+                  result.conversation.tenantId,
+                );
               }
+            } catch (err) {
+              // A concurrent claim/close between SELECT and cancel is expected;
+              // the command's own state checks make the sweep re-entrant.
+              logger.debug("Stale handoff sweep skipped a session", {
+                sessionId: row.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
             }
-            totalReturned += returnedBatch;
-            batches++;
-          } while (
-            returnedBatch === STALE_BATCH_SIZE &&
-            batches < STALE_MAX_BATCHES
-          );
+          }
 
           if (totalReturned > 0) {
             logger.info(
@@ -625,9 +669,11 @@ async function startBackgroundJobs(): Promise<void> {
           }
         } catch (error) {
           logger.error("Stale session cleanup failed", { error });
+        } finally {
+          staleSweepInFlight = false;
         }
       };
-      setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
+      trackTimer(setInterval(autoCloseStaleSessions, 5 * 60 * 1000)); // Run every 5 minutes
 
       // Timed human-control expiry (B-PR5a): return sessions whose timed takeover
       // deadline (`human_control_until`) has passed to the bot. Every release goes
@@ -638,7 +684,10 @@ async function startBackgroundJobs(): Promise<void> {
       // an expired session the moment a customer writes, so correctness does not
       // wait on this tick. Unflagged: a timed claim without a running expiry
       // worker must not exist (the codex-locked ordering that gated B-PR2b).
+      let timedControlInFlight = false;
       const sweepTimedControl = async () => {
+        if (timedControlInFlight) return;
+        timedControlInFlight = true;
         try {
           const { sweepExpiredTimedControl } = await import(
             "./services/timed-control-expiry.service"
@@ -646,9 +695,11 @@ async function startBackgroundJobs(): Promise<void> {
           await sweepExpiredTimedControl();
         } catch (error) {
           logger.error("Timed-control expiry sweep failed", { error });
+        } finally {
+          timedControlInFlight = false;
         }
       };
-      setInterval(sweepTimedControl, 60 * 1000); // Run every 60 seconds
+      trackTimer(setInterval(sweepTimedControl, 60 * 1000)); // Run every 60 seconds
 
       // Handoff-notification outbox backstop (ADR-0018). The handoff call sites
       // dispatch the alert immediately for latency and retire the row; this sweep
@@ -666,7 +717,7 @@ async function startBackgroundJobs(): Promise<void> {
           logger.error("Handoff-notification outbox sweep failed", { error });
         }
       };
-      setInterval(sweepHandoffOutboxTick, 30 * 1000); // Run every 30 seconds
+      trackTimer(setInterval(sweepHandoffOutboxTick, 30 * 1000)); // Run every 30 seconds
 
       // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
       // platform LLM budget, and a background pass on this budget previously caused
@@ -678,15 +729,17 @@ async function startBackgroundJobs(): Promise<void> {
         );
         // 5-minute tick; the job is internally sequential and re-entrancy-guarded, so a
         // slow sweep can never overlap itself.
-        setInterval(
-          () => {
-            void runLeadEnrichmentSweep().catch((err) => {
-              logger.error("[lead-enrich] sweep failed", {
-                error: err instanceof Error ? err.message : String(err),
+        trackTimer(
+          setInterval(
+            () => {
+              void runLeadEnrichmentSweep().catch((err) => {
+                logger.error("[lead-enrich] sweep failed", {
+                  error: err instanceof Error ? err.message : String(err),
+                });
               });
-            });
-          },
-          5 * 60 * 1000,
+            },
+            5 * 60 * 1000,
+          ),
         );
         logger.info("[lead-enrich] sweep enabled (5m tick)");
       }
@@ -698,13 +751,15 @@ async function startBackgroundJobs(): Promise<void> {
           const { runCustomerMemorySweep } = await import(
             "./memory/memory-sweep.job"
           );
-          setInterval(() => {
-            void runCustomerMemorySweep().catch((err) => {
-              logger.error("[customer-memory] sweep failed", {
-                error: err instanceof Error ? err.message : String(err),
+          trackTimer(
+            setInterval(() => {
+              void runCustomerMemorySweep().catch((err) => {
+                logger.error("[customer-memory] sweep failed", {
+                  error: err instanceof Error ? err.message : String(err),
+                });
               });
-            });
-          }, 5 * 60 * 1000);
+            }, 5 * 60 * 1000),
+          );
           logger.info("[customer-memory] sweep enabled (5m tick)");
         }
       }
@@ -717,13 +772,13 @@ async function startBackgroundJobs(): Promise<void> {
       const { startAgentTraceRetentionSweep } = await import(
         "./agent/trace-retention.service"
       );
-      startAgentTraceRetentionSweep();
+      startAgentTraceRetentionSweep().forEach(trackTimer);
       const {
         startCustomerMemoryRetentionSweep,
         startStuckMemoryRunWatcher,
       } = await import("./memory/memory-retention.service");
-      startCustomerMemoryRetentionSweep();
-      startStuckMemoryRunWatcher();
+      startCustomerMemoryRetentionSweep().forEach(trackTimer);
+      startStuckMemoryRunWatcher().forEach(trackTimer);
 
       // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
       // env flag, because it is a NO-OP for every tenant that has not chosen a period,
@@ -741,9 +796,12 @@ async function startBackgroundJobs(): Promise<void> {
           });
         }
       };
-      setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
+      trackTimer(setInterval(sweepRetention, 24 * 60 * 60 * 1000)); // Daily
 
+      let recrawlInFlight = false;
       const recrawlWebsites = async () => {
+        if (recrawlInFlight) return;
+        recrawlInFlight = true;
         try {
           const { recrawlStaleWebsiteOrigins } = await import(
             "./knowledge/website-crawl.service"
@@ -756,13 +814,18 @@ async function startBackgroundJobs(): Promise<void> {
           logger.error("Website recrawl sweep failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          recrawlInFlight = false;
         }
       };
-      setTimeout(recrawlWebsites, 5 * 60 * 1000);
-      setInterval(recrawlWebsites, 24 * 60 * 60 * 1000);
+      trackTimer(setTimeout(recrawlWebsites, 5 * 60 * 1000));
+      trackTimer(setInterval(recrawlWebsites, 24 * 60 * 60 * 1000));
 
       // Cloud-import reaper: stuck/failed S3 objects + stale staging/ prefix.
+      let storageReaperInFlight = false;
       const storageReaper = async () => {
+        if (storageReaperInFlight) return;
+        storageReaperInFlight = true;
         try {
           const { reapStaleStorageImports } = await import(
             "./integrations/storage/reaper"
@@ -772,10 +835,12 @@ async function startBackgroundJobs(): Promise<void> {
           logger.error("Storage import reaper failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+        } finally {
+          storageReaperInFlight = false;
         }
       };
-      setTimeout(storageReaper, 10 * 60 * 1000);
-      setInterval(storageReaper, 24 * 60 * 60 * 1000);
+      trackTimer(setTimeout(storageReaper, 10 * 60 * 1000));
+      trackTimer(setInterval(storageReaper, 24 * 60 * 60 * 1000));
 
       // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
       // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps
@@ -787,7 +852,10 @@ async function startBackgroundJobs(): Promise<void> {
       // borrows its SHAPE from does carry a kill switch, `PROVIDER_HEALTH_PROBE_ENABLED` - the
       // shape is the precedent here, not the gating.) One run shortly after boot as well as on the
       // interval, so a redeploy does not leave it silent until the first tick.
+      let travelHealthInFlight = false;
       const travelHealth = async () => {
+        if (travelHealthInFlight) return;
+        travelHealthInFlight = true;
         try {
           const { runTravelHealthCheck, reconcileObservedDegradation } =
             await import("./booking/travel/travel-health");
@@ -797,14 +865,19 @@ async function startBackgroundJobs(): Promise<void> {
           logger.error("[travel-health] check failed", {
             error: err instanceof Error ? err.message : String(err),
           });
+        } finally {
+          travelHealthInFlight = false;
         }
       };
-      setTimeout(travelHealth, 90_000);
-      setInterval(travelHealth, 30 * 60 * 1000); // Every 30 minutes
+      trackTimer(setTimeout(travelHealth, 90_000));
+      trackTimer(setInterval(travelHealth, 30 * 60 * 1000)); // Every 30 minutes
 
       // Agents already sharing a diary when this shipped never fire a rekey, so the event-driven
       // detector alone would only ever catch the cases that arrive after it.
+      let sharedItinerariesInFlight = false;
       const sweepSharedItineraries = async () => {
+        if (sharedItinerariesInFlight) return;
+        sharedItinerariesInFlight = true;
         try {
           const { reconcileSharedItineraries } = await import(
             "./booking/travel/travel-health"
@@ -814,10 +887,12 @@ async function startBackgroundJobs(): Promise<void> {
           logger.error("[travel-health] shared-itinerary reconciliation failed", {
             error: err instanceof Error ? err.message : String(err),
           });
+        } finally {
+          sharedItinerariesInFlight = false;
         }
       };
-      setTimeout(sweepSharedItineraries, 120_000);
-      setInterval(sweepSharedItineraries, 24 * 60 * 60 * 1000); // Daily
+      trackTimer(setTimeout(sweepSharedItineraries, 120_000));
+      trackTimer(setInterval(sweepSharedItineraries, 24 * 60 * 60 * 1000)); // Daily
 
       // Coordinate expiry, daily plus one run shortly after boot (ADR-0014). The Maps terms
       // permit a booking's latitude and longitude for 30 consecutive days and no longer;
@@ -831,7 +906,7 @@ async function startBackgroundJobs(): Promise<void> {
       const { startCoordinateExpirySweep } = await import(
         "./booking/travel/coordinate-retention.service"
       );
-      startCoordinateExpirySweep();
+      startCoordinateExpirySweep().forEach(trackTimer);
 
       // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
       // leads are one row per IDENTITY, so the same human on WhatsApp and in the widget
@@ -857,20 +932,22 @@ async function startBackgroundJobs(): Promise<void> {
       // fresh deploy should not leave the leads inbox showing nobody as returning for a
       // day. The pass only writes rows whose values changed, so the extra run costs a
       // no-op UPDATE per tenant. 60s of headroom so it starts behind the boot traffic.
-      setTimeout(sweepRepeats, 60_000);
-      setInterval(sweepRepeats, 24 * 60 * 60 * 1000); // Daily
+      trackTimer(setTimeout(sweepRepeats, 60_000));
+      trackTimer(setInterval(sweepRepeats, 24 * 60 * 60 * 1000)); // Daily
 
       // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
       const { reconcilePendingBookingSyncs } = await import(
         "./scheduler/sync-reconciler"
       );
-      setInterval(
-        () => {
-          reconcilePendingBookingSyncs().catch((error) =>
-            logger.error("Booking sync reconciliation failed", { error }),
-          );
-        },
-        5 * 60 * 1000,
+      trackTimer(
+        setInterval(
+          () => {
+            reconcilePendingBookingSyncs().catch((error) =>
+              logger.error("Booking sync reconciliation failed", { error }),
+            );
+          },
+          5 * 60 * 1000,
+        ),
       ); // Every 5 minutes
 
       // Pull owner edits made directly in the connected calendar back into the booking.
@@ -879,13 +956,15 @@ async function startBackgroundJobs(): Promise<void> {
         const { syncExternalCalendarChanges } = await import(
           "./scheduler/inbound-calendar-sync"
         );
-        setInterval(
-          () => {
-            syncExternalCalendarChanges().catch((error) =>
-              logger.error("Inbound calendar sync failed", { error }),
-            );
-          },
-          5 * 60 * 1000,
+        trackTimer(
+          setInterval(
+            () => {
+              syncExternalCalendarChanges().catch((error) =>
+                logger.error("Inbound calendar sync failed", { error }),
+              );
+            },
+            5 * 60 * 1000,
+          ),
         ); // Every 5 minutes
       }
 
@@ -901,12 +980,20 @@ async function startBackgroundJobs(): Promise<void> {
         const { sweepStaleChannels } = await import(
           "./channels/health-check.service"
         );
-        const runChannelSweep = () =>
-          sweepStaleChannels().catch((error) =>
-            logger.error("Channel health sweep failed", { error }),
-          );
-        setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
-        setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
+        let channelSweepInFlight = false;
+        const runChannelSweep = async () => {
+          if (channelSweepInFlight) return;
+          channelSweepInFlight = true;
+          try {
+            await sweepStaleChannels();
+          } catch (error) {
+            logger.error("Channel health sweep failed", { error });
+          } finally {
+            channelSweepInFlight = false;
+          }
+        };
+        trackTimer(setTimeout(runChannelSweep, 2 * 60 * 1000)); // first run 2 min after boot
+        trackTimer(setInterval(runChannelSweep, 15 * 60 * 1000)); // every 15 minutes
       }
 
       // Platform LLM health probe. The platform key is a single point of failure —
@@ -918,14 +1005,24 @@ async function startBackgroundJobs(): Promise<void> {
       // total, so the safe default is on.
       if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== "false") {
         const { runProviderHealthCheck } = await import("./llm/provider-health");
-        const runProbe = () =>
-          runProviderHealthCheck().catch((error) =>
+        let probeInFlight = false;
+        const runProbe = async () => {
+          // A probe that outlives its 5-minute tick (a hung provider connection)
+          // must not stack a second completion request on the platform key.
+          if (probeInFlight) return;
+          probeInFlight = true;
+          try {
+            await runProviderHealthCheck();
+          } catch (error) {
             // runProviderHealthCheck never throws by design; this is belt-and-braces
             // so a probe bug can never take down the boot sequence.
-            logger.error("Provider health probe failed", { error }),
-          );
-        setTimeout(runProbe, 60 * 1000); // first run 1 min after boot, once warm
-        setInterval(runProbe, 5 * 60 * 1000);
+            logger.error("Provider health probe failed", { error });
+          } finally {
+            probeInFlight = false;
+          }
+        };
+        trackTimer(setTimeout(runProbe, 60 * 1000)); // first run 1 min after boot, once warm
+        trackTimer(setInterval(runProbe, 5 * 60 * 1000));
       }
 
       // Handoff / guardrail-pause SLA sweep — re-alerts staff about conversations
@@ -936,13 +1033,15 @@ async function startBackgroundJobs(): Promise<void> {
         const { sweepOverdueHandoffsAndPauses } = await import(
           "./notifications/sla-sweep"
         );
-        setInterval(
-          () => {
-            sweepOverdueHandoffsAndPauses().catch((error) =>
-              logger.error("SLA sweep failed", { error }),
-            );
-          },
-          5 * 60 * 1000,
+        trackTimer(
+          setInterval(
+            () => {
+              sweepOverdueHandoffsAndPauses().catch((error) =>
+                logger.error("SLA sweep failed", { error }),
+              );
+            },
+            5 * 60 * 1000,
+          ),
         ); // every 5 minutes
       }
 
@@ -952,7 +1051,7 @@ async function startBackgroundJobs(): Promise<void> {
       const { registerInsightsRefreshJob } = await import(
         "./insights/refresh-insights.job"
       );
-      registerInsightsRefreshJob();
+      trackTimer(registerInsightsRefreshJob());
 }
 
 async function startEmailRetryIfEnabled(): Promise<void> {
@@ -961,7 +1060,7 @@ async function startEmailRetryIfEnabled(): Promise<void> {
     const { startEmailRetryWorker } = await import(
       "./notifications/email-retry.worker"
     );
-    startEmailRetryWorker();
+    trackTimer(startEmailRetryWorker());
     logger.info("[EmailRetry] worker started");
   } else {
     logger.info("[EmailRetry] disabled via EMAIL_RETRY_ENABLED");
@@ -1026,6 +1125,11 @@ async function startServer(): Promise<void> {
       const { initializeQueues } = await import("./queue/message-queue");
       await initializeQueues();
       logger.info("Message queue initialized");
+
+      // Channel inbound Bull (`initializeChannelInboundQueue`) stays unwired:
+      // the processor retries processInboundEvent 3× with 5 concurrent jobs
+      // and no per-session ordering. Graph/generic webhooks ACK 200 without
+      // awaiting the pipeline instead (see graph-webhook.ts).
     } catch (err) {
       logger.warn(
         "Queue initialization failed, falling back to synchronous processing",
@@ -1227,6 +1331,15 @@ async function shutdown(signal: string): Promise<void> {
 
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
+  // Stop the scheduled work FIRST: a sweep that starts after this point would
+  // race the DataSource being destroyed underneath it, and a live interval is
+  // what used to keep the loop busy until the force-exit below fired.
+  for (const timer of backgroundTimers) {
+    clearInterval(timer);
+    clearTimeout(timer);
+  }
+  backgroundTimers.length = 0;
+
   // Force exit after 30s if graceful shutdown stalls
   const forceExit = setTimeout(() => {
     logger.error("Graceful shutdown timed out, forcing exit");
@@ -1236,6 +1349,22 @@ async function shutdown(signal: string): Promise<void> {
   httpServer.close(() => {
     logger.info("HTTP server stopped accepting new connections");
   });
+
+  // Socket.io holds its own client sockets and the Redis adapter's pub/sub
+  // clients; without this they outlive httpServer.close(). getIO() throws when
+  // the server never initialized (BACKGROUND_JOBS_ENABLED runs, boot failures).
+  try {
+    getIO().close();
+  } catch {
+    // never initialized — nothing to close
+  }
+
+  try {
+    // Bull holds three Redis connections per queue; they survive httpServer.close().
+    await closeQueues();
+  } catch (error) {
+    logger.warn("Queue shutdown failed", { error });
+  }
 
   try {
     if (AppDataSource.isInitialized) await AppDataSource.destroy();

@@ -2,6 +2,13 @@ import { NormalizedEvent, EventNormalizer } from '../types';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import crypto from 'crypto';
 
+/**
+ * Cap on the mids carried in one delivery receipt. Meta batches every mid it
+ * has buffered for the thread; the pipeline updates them in one statement and
+ * enforces the same cap, so the tail is dropped here rather than queued.
+ */
+const MAX_RECEIPT_MESSAGE_IDS = 100;
+
 // --- Meta webhook types ---
 
 interface MetaWebhookPayload {
@@ -181,7 +188,7 @@ function normalizeMessagingEvent(
     return {
       type: 'delivery',
       receipt: {
-        messageIds: messaging.delivery.mids,
+        messageIds: messaging.delivery.mids.slice(0, MAX_RECEIPT_MESSAGE_IDS),
         status: 'delivered',
       },
       sender,

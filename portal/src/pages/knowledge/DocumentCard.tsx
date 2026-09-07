@@ -200,7 +200,7 @@ const DocumentQuality: React.FC<{
                 title={report.qualityReason}
             >
                 <span
-                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[report.qualityScore]?.color || "bg-gray-400"}`}
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[report.qualityScore]?.color || "bg-text-muted"}`}
                 />
                 <span className="text-2xs text-text-muted truncate">
                     {qualitySummary(t, report)}

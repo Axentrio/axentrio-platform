@@ -133,13 +133,13 @@ function AnswerGapDialog({
                   defaultValue: 'A suggestion for you, not the answer text',
                 })}
               </p>
-              <p className="mt-1 text-sm text-zinc-300">{recommendation}</p>
+              <p className="mt-1 text-sm text-text-secondary">{recommendation}</p>
             </div>
           )}
 
           {evidence !== null && (
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-zinc-400">
+              <p className="text-xs font-medium text-text-muted">
                 {t('insights.answer.questionsLabel', { defaultValue: 'What customers asked' })}
               </p>
               {loadingEvidence ? (
@@ -147,13 +147,13 @@ function AnswerGapDialog({
               ) : questions.length > 0 ? (
                 <ul className="max-h-32 space-y-1 overflow-y-auto pr-1">
                   {questions.map((m) => (
-                    <li key={m.id} className="text-sm text-zinc-300">
+                    <li key={m.id} className="text-sm text-text-secondary">
                       {m.content}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-zinc-500">
+                <p className="text-sm text-text-muted">
                   {t('insights.answer.noQuestions', {
                     defaultValue: 'No customer questions to show for this topic.',
                   })}
@@ -177,13 +177,13 @@ function AnswerGapDialog({
                 defaultValue: 'Write the answer the way you would say it to a customer.',
               })}
             />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-text-muted">
               {t('insights.answer.hint', {
                 defaultValue:
                   'Customers get this text word for word. You can edit it later on the Knowledge page.',
               })}
             </p>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-text-muted">
               {t('insights.answer.count', {
                 defaultValue: '{{chars}} characters. Use {{min}} to {{max}}.',
                 chars: trimmed.length,
@@ -218,7 +218,7 @@ function GapBadges({ gap }: { gap: GapRow }) {
       <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', SEVERITY_DOT[gap.severity])} />
       <p className="text-sm font-medium text-text-primary truncate capitalize">{gap.topic}</p>
       {gap.status === 'dormant' && (
-        <Badge variant="outline" className="text-xs text-zinc-400">
+        <Badge variant="outline" className="text-xs text-text-muted">
           {t('insights.status.dormant', { defaultValue: 'Dormant' })}
         </Badge>
       )}
@@ -318,7 +318,7 @@ function GapAnswerSummary({ gap }: { gap: GapRow }) {
         <p
           className={cn(
             'text-xs',
-            gap.asksSinceAnswer === 0 ? 'text-emerald-400' : 'text-zinc-400',
+            gap.asksSinceAnswer === 0 ? 'text-emerald-400' : 'text-text-muted',
           )}
         >
           {gap.asksSinceAnswer === 0
@@ -354,19 +354,19 @@ function GapEvidence({
   const { t } = useTranslation();
   if (!expanded || !evidenceEnabled) return null;
   return (
-    <div className="space-y-3 border-t border-white/10 pt-3">
+    <div className="space-y-3 border-t border-edge pt-3">
       {isLoading ? (
         <Skeleton className="h-16 w-full rounded-lg" />
       ) : (
         (evidence ?? []).map((e) => (
           <div key={e.sessionId} className="text-xs space-y-1.5">
-            <p className="text-zinc-500">
+            <p className="text-text-muted">
               {new Date(e.sessionStartedAt).toLocaleString()}
-              {e.reasoning && <span className="ml-2 text-zinc-400 italic">{e.reasoning}</span>}
+              {e.reasoning && <span className="ml-2 text-text-muted italic">{e.reasoning}</span>}
             </p>
             {e.messages.map((m) => (
-              <p key={m.id} className="text-zinc-300">
-                <span className={cn('font-medium mr-1.5', m.sender === 'user' ? 'text-sky-400' : 'text-zinc-500')}>
+              <p key={m.id} className="text-text-secondary">
+                <span className={cn('font-medium mr-1.5', m.sender === 'user' ? 'text-sky-400' : 'text-text-muted')}>
                   {m.sender === 'user'
                     ? t('insights.evidence.customer', { defaultValue: 'Customer' })
                     : t('insights.evidence.assistant', { defaultValue: 'Assistant' })}:
@@ -425,7 +425,7 @@ function GapCard({
           />
         </div>
 
-        <p className="text-xs text-zinc-400">
+        <p className="text-xs text-text-muted">
           {t('insights.card.stats', {
             defaultValue: '{{visitors}} customers asked without getting an answer ({{count}} conversations) · last {{ago}}',
             visitors: gap.distinctVisitors,
@@ -437,7 +437,7 @@ function GapCard({
         {answered && <GapAnswerSummary gap={gap} />}
 
         {recommendationsEnabled && gap.status === 'open' && gap.recommendation && (
-          <p className="flex items-start gap-2 text-sm text-zinc-300">
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
             {gap.recommendation}
           </p>
@@ -453,7 +453,7 @@ function GapCard({
             {t('insights.evidence.toggle', { defaultValue: 'View the conversations' })}
           </button>
         ) : (
-          <p className="flex items-center gap-1.5 text-xs text-zinc-500">
+          <p className="flex items-center gap-1.5 text-xs text-text-muted">
             <Lock className="h-3 w-3" />
             {t('insights.evidence.locked', {
               defaultValue: 'Upgrade to see the conversations behind this finding',
@@ -501,7 +501,7 @@ function ExperimentCard({ exp }: { exp: ExperimentDto }) {
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', EXPERIMENT_DOT[exp.severity])} />
-            <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
+            <Icon className="h-4 w-4 text-text-muted shrink-0" />
             <p className="text-sm font-medium text-text-primary">{exp.title}</p>
           </div>
           <Button
@@ -514,7 +514,7 @@ function ExperimentCard({ exp }: { exp: ExperimentDto }) {
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
-        {exp.detail && <p className="text-sm text-zinc-300">{exp.detail}</p>}
+        {exp.detail && <p className="text-sm text-text-secondary">{exp.detail}</p>}
       </CardContent>
     </Card>
   );
@@ -539,7 +539,7 @@ function ExperimentsSection() {
       {isLoading ? (
         <Skeleton className="h-20 w-full rounded-xl" />
       ) : experiments.length === 0 ? (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-text-muted">
           {t('insights.experiments.empty', {
             defaultValue: 'Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.',
           })}
@@ -647,7 +647,7 @@ function LeadDemandSection() {
       {isLoading ? (
         <Skeleton className="h-20 w-full rounded-xl" />
       ) : !data ? null : data.suppressed ? (
-        <p className="text-xs text-zinc-500">{data.suppressionReason}</p>
+        <p className="text-xs text-text-muted">{data.suppressionReason}</p>
       ) : (
         <div className="space-y-4">
           {data.topServices.length > 0 && (
@@ -656,12 +656,12 @@ function LeadDemandSection() {
                 <div key={s.label} className="flex items-center justify-between gap-3 text-sm">
                   <span className="truncate text-text-secondary">{s.label}</span>
                   <span className="shrink-0 tabular-nums text-text-primary">
-                    {s.leads} <span className="text-xs text-zinc-500">({pct(s.share)})</span>
+                    {s.leads} <span className="text-xs text-text-muted">({pct(s.share)})</span>
                   </span>
                 </div>
               ))}
               {/* The denominator, always. A share without it overstates our confidence. */}
-              <p className="pt-1 text-xs text-zinc-500">
+              <p className="pt-1 text-xs text-text-muted">
                 {t('insights.demand.denominator', {
                   defaultValue:
                     'Of the {{classified}} of {{total}} leads we could match to a service, over the last {{days}} days.',
@@ -674,7 +674,7 @@ function LeadDemandSection() {
           )}
 
           {data.topServices.length === 0 && (
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-text-muted">
               {t('insights.demand.noServices', {
                 defaultValue:
                   'No service could be matched to a lead yet — this fills in as customers book.',
@@ -684,7 +684,7 @@ function LeadDemandSection() {
 
           {data.topTags.length > 0 && (
             <div className="space-y-1.5 border-t border-edge pt-3">
-              <p className="text-xs font-medium text-zinc-400">
+              <p className="text-xs font-medium text-text-muted">
                 {t('insights.demand.tagsTitle', { defaultValue: 'Topics mentioned (AI-derived)' })}
               </p>
               {data.topTags.map((tg: DemandSlice) => (
@@ -693,7 +693,7 @@ function LeadDemandSection() {
                   <span className="shrink-0 tabular-nums text-text-primary">{tg.leads}</span>
                 </div>
               ))}
-              <p className="pt-1 text-xs text-zinc-500">
+              <p className="pt-1 text-xs text-text-muted">
                 {t('insights.demand.tagsDenominator', {
                   defaultValue: 'From the {{tagged}} conversations we were able to analyse.',
                   tagged: data.taggedLeads,
@@ -711,11 +711,11 @@ function LeadDemandSection() {
 function DigestMetric({ label, current, previous }: { label: string; current: number; previous: number }) {
   const delta = previous === 0 ? null : Math.round(((current - previous) / previous) * 100);
   const Icon = delta == null || delta === 0 ? Minus : delta > 0 ? ArrowUp : ArrowDown;
-  const tone = delta == null || delta === 0 ? 'text-zinc-500' : delta > 0 ? 'text-emerald-400' : 'text-red-400';
+  const tone = delta == null || delta === 0 ? 'text-text-muted' : delta > 0 ? 'text-emerald-400' : 'text-red-400';
   return (
     <div className="flex flex-col">
       <span className="text-lg font-semibold text-text-primary">{current}</span>
-      <span className="text-xs text-zinc-400">{label}</span>
+      <span className="text-xs text-text-muted">{label}</span>
       <span className={cn('flex items-center gap-0.5 text-xs', tone)}>
         <Icon className="h-3 w-3" />
         {delta == null ? '—' : delta === 0 ? '0%' : `${Math.abs(delta)}%`}
@@ -747,7 +747,7 @@ function DigestSection() {
               {t('insights.digest.title', { defaultValue: 'Your weekly summary' })}
             </h3>
             {digest && (
-              <Badge variant="outline" className="text-xs text-zinc-400">
+              <Badge variant="outline" className="text-xs text-text-muted">
                 {t('insights.digest.weekOf', { defaultValue: 'Week of {{date}}', date: digest.weekStart })}
               </Badge>
             )}
@@ -759,33 +759,33 @@ function DigestSection() {
               disabled={setEmail.isPending}
               onCheckedChange={(v) => setEmail.mutate(v)}
             />
-            <Label htmlFor="digest-email" className="text-xs text-zinc-400">
+            <Label htmlFor="digest-email" className="text-xs text-text-muted">
               {t('insights.digest.emailToggle', { defaultValue: 'Email me weekly' })}
             </Label>
           </div>
         </div>
 
         {!digest ? (
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-text-muted">
             {t('insights.digest.pending', {
               defaultValue: 'Your first weekly summary will appear here after the coming Monday.',
             })}
           </p>
         ) : (
           <>
-            <p className="text-sm text-zinc-300 leading-relaxed">{digest.summaryMd}</p>
+            <p className="text-sm text-text-secondary leading-relaxed">{digest.summaryMd}</p>
             {m && (
-              <div className="grid grid-cols-3 gap-4 sm:grid-cols-5 border-t border-white/10 pt-3">
+              <div className="grid grid-cols-3 gap-4 sm:grid-cols-5 border-t border-edge pt-3">
                 <DigestMetric label={t('insights.digest.conversations', { defaultValue: 'Conversations' })} {...m.conversations} />
                 <DigestMetric label={t('insights.digest.bookings', { defaultValue: 'Bookings' })} {...m.bookings} />
                 <DigestMetric label={t('insights.digest.leads', { defaultValue: 'Leads' })} {...m.leads} />
                 <div className="flex flex-col">
                   <span className="text-lg font-semibold text-text-primary">{m.gapsOpened}</span>
-                  <span className="text-xs text-zinc-400">{t('insights.digest.gapsOpened', { defaultValue: 'New gaps' })}</span>
+                  <span className="text-xs text-text-muted">{t('insights.digest.gapsOpened', { defaultValue: 'New gaps' })}</span>
                 </div>
                 <div className="flex flex-col">
                   <span className="text-lg font-semibold text-text-primary">{m.gapsWon}</span>
-                  <span className="text-xs text-zinc-400">{t('insights.digest.gapsWon', { defaultValue: 'Resolved' })}</span>
+                  <span className="text-xs text-text-muted">{t('insights.digest.gapsWon', { defaultValue: 'Resolved' })}</span>
                 </div>
               </div>
             )}
@@ -822,7 +822,7 @@ export function InsightsContent() {
       <DigestSection />
 
       {/* Freshness + completeness banners (ADR-0006/0007) */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
         <span className="flex items-center gap-1.5">
           <Clock className="h-3.5 w-3.5" />
           {meta?.lastRefreshedAt
@@ -858,7 +858,7 @@ export function InsightsContent() {
 
         <TabsContent value="open" className="space-y-3">
           {open.length === 0 ? (
-            <div className="text-center py-10 text-zinc-500">
+            <div className="text-center py-10 text-text-muted">
               <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">{t('insights.empty.open.title', { defaultValue: 'No open gaps' })}</p>
               <p className="text-xs mt-1">
@@ -881,7 +881,7 @@ export function InsightsContent() {
 
         <TabsContent value="wins" className="space-y-3">
           {wins.length === 0 ? (
-            <div className="text-center py-10 text-zinc-500">
+            <div className="text-center py-10 text-text-muted">
               <p className="text-sm">{t('insights.empty.wins.title', { defaultValue: 'No wins yet' })}</p>
               <p className="text-xs mt-1">
                 {t('insights.empty.wins.description', {

@@ -66,14 +66,14 @@ type Any = any;
 const STATUS_DOT: Record<string, string> = {
   active: 'bg-emerald-400',
   error: 'bg-red-400',
-  disconnected: 'bg-zinc-500',
+  disconnected: 'bg-text-muted',
   pending_setup: 'bg-amber-400',
 };
 
 const STATUS_TEXT: Record<string, string> = {
   active: 'text-emerald-400',
   error: 'text-red-400',
-  disconnected: 'text-zinc-400',
+  disconnected: 'text-text-muted',
   pending_setup: 'text-amber-400',
 };
 
@@ -181,12 +181,12 @@ function MetaPageSelectionCard({
   return (
     <Card variant="glass">
       <CardHeader>
-        <h3 className="text-sm font-medium text-white">{t('ai.social.metaPages.title')}</h3>
-        <p className="text-xs text-zinc-400">{t('ai.social.metaPages.description')}</p>
+        <h3 className="text-sm font-medium text-text-primary">{t('ai.social.metaPages.title')}</h3>
+        <p className="text-xs text-text-muted">{t('ai.social.metaPages.description')}</p>
       </CardHeader>
       <CardContent className="space-y-3">
         {pages.map((page) => (
-          <label key={page.id} className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+          <label key={page.id} className="flex items-center gap-3 p-2 rounded hover:bg-surface-3 cursor-pointer">
             <Checkbox
               checked={selectedPageIds.includes(page.id)}
               onCheckedChange={(checked) => {
@@ -195,7 +195,7 @@ function MetaPageSelectionCard({
                 );
               }}
             />
-            <span className="text-sm text-white">{page.name}</span>
+            <span className="text-sm text-text-primary">{page.name}</span>
             {!messengerEntitled && (
               <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/40">
                 <Lock className="h-3 w-3 mr-1" />
@@ -242,11 +242,11 @@ function ConnectionRowIdentity({
   const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
   return (
     <div className="flex items-center gap-3 min-w-0">
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-white/10 text-zinc-400'}`}>
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-surface-3 text-text-muted'}`}>
         <Icon className="h-4 w-4" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-white truncate">
+        <p className="text-sm font-medium text-text-primary truncate">
           {conn.label || conn.platformAccountId}
           {planLocked && (
             <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/40">
@@ -255,16 +255,16 @@ function ConnectionRowIdentity({
             </Badge>
           )}
         </p>
-        <p className="text-xs text-zinc-500 truncate">
+        <p className="text-xs text-text-muted truncate">
           {CHANNEL_LABELS[conn.channel] || conn.channel}
           {conn.lastHealthCheckAt && (
-            <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
+            <span className="ml-1.5 text-text-muted" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
               {t('ai.social.activity.checked', { time: timeAgo(conn.lastHealthCheckAt) })}
             </span>
           )}
         </p>
         {activityParts.length > 0 && (
-          <p className="text-xs text-zinc-600 mt-0.5 truncate">{activityParts.join(' · ')}</p>
+          <p className="text-xs text-text-muted mt-0.5 truncate">{activityParts.join(' · ')}</p>
         )}
       </div>
     </div>
@@ -300,7 +300,7 @@ function ConnectionRowControls({
     <div className="flex flex-wrap items-center gap-2">
       {conn.channel !== 'widget' && (
         <label
-          className="flex items-center gap-1.5 text-xs text-zinc-400"
+          className="flex items-center gap-1.5 text-xs text-text-muted"
           title={t('ai.social.autoCapture.hint', { defaultValue: 'Auto-create a lead from each new conversation on this channel' })}
         >
           <Switch
@@ -349,8 +349,8 @@ function ConnectionRowControls({
         </span>
       )}
       <span className="flex items-center gap-1.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[conn.status] || 'bg-zinc-500'}`} />
-        <span className={`text-xs font-medium capitalize ${STATUS_TEXT[conn.status] || 'text-zinc-400'}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[conn.status] || 'bg-text-muted'}`} />
+        <span className={`text-xs font-medium capitalize ${STATUS_TEXT[conn.status] || 'text-text-muted'}`}>
           {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
         </span>
       </span>
@@ -394,7 +394,7 @@ function ConnectionRow({
   if (conn.lastOutboundAt) activityParts.push(t('ai.social.activity.sent', { time: timeAgo(conn.lastOutboundAt) }));
   return (
     <div
-      className={`group flex flex-col gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors ${planLocked ? 'opacity-70' : ''}`}
+      className={`group flex flex-col gap-3 p-3 rounded-lg bg-surface-3/50 hover:bg-surface-3 transition-colors ${planLocked ? 'opacity-70' : ''}`}
     >
       <ConnectionRowIdentity conn={conn} planLocked={planLocked} activityParts={activityParts} />
       <ConnectionRowControls conn={conn} {...controls} />
@@ -443,8 +443,8 @@ function WhatsAppConnectModal({
             })}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
-          <summary className="cursor-pointer select-none text-zinc-300">
+        <details className="mt-2 rounded-lg bg-surface-3 px-3 py-2 text-xs text-text-muted">
+          <summary className="cursor-pointer select-none text-text-secondary">
             {t('ai.social.whatsapp.modal.help.summary', { defaultValue: 'Where do I find these?' })}
           </summary>
           <ol className="mt-2 list-decimal space-y-1 pl-5">
@@ -797,7 +797,7 @@ export function SocialChannelsContent() {
   };
 
   if (isLoading) {
-    return <div className="p-6 text-zinc-400">{t('ai.social.loading')}</div>;
+    return <div className="p-6 text-text-muted">{t('ai.social.loading')}</div>;
   }
 
   const connectionCount = connections?.length || 0;
@@ -805,8 +805,8 @@ export function SocialChannelsContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-white">{t('ai.social.header.title')}</h2>
-        <p className="text-sm text-zinc-400">
+        <h2 className="text-lg font-semibold text-text-primary">{t('ai.social.header.title')}</h2>
+        <p className="text-sm text-text-muted">
           {t('ai.social.header.description')}
         </p>
       </div>
@@ -827,8 +827,8 @@ export function SocialChannelsContent() {
       <Card variant="glass">
         <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-medium text-white">{t('ai.social.connected.title')}</h3>
-            <p className="text-xs text-zinc-400">
+            <h3 className="text-sm font-medium text-text-primary">{t('ai.social.connected.title')}</h3>
+            <p className="text-xs text-text-muted">
               {t('ai.social.connected.count', { count: connectionCount })}
             </p>
           </div>
@@ -845,7 +845,7 @@ export function SocialChannelsContent() {
         </CardHeader>
         <CardContent>
           {!connections || connections.length === 0 ? (
-            <div className="text-center py-8 text-zinc-500">
+            <div className="text-center py-8 text-text-muted">
               <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">{t('ai.social.empty.title')}</p>
               <p className="text-xs mt-1">{t('ai.social.empty.description')}</p>

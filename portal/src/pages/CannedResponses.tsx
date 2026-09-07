@@ -215,7 +215,7 @@ export const CannedResponsesContent: React.FC = () => {
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-edge overflow-hidden">
+      <div className="rounded-lg border border-edge bg-surface-1 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>

@@ -23,7 +23,7 @@ export const CHANNEL_COLORS: Record<string, string> = {
   messenger: 'bg-blue-500/15 text-blue-400',
   instagram: 'bg-pink-500/15 text-pink-400',
   whatsapp: 'bg-emerald-500/15 text-emerald-400',
-  widget: 'bg-zinc-500/15 text-zinc-400',
+  widget: 'bg-surface-3 text-text-muted',
 };
 
 export function channelKeyOf(channel?: string, source?: string): string {

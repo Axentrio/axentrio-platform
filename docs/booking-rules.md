@@ -86,11 +86,11 @@ Date overrides win even on always-open. Closures belong in `{openingHours}` and 
 
 Namiddag chips are ≥ 12:00. If the day-part window matches nothing, keep the day's slots for prose but **do not** chip the morning. The model asks before offering another part.
 
-**Exact clock** (08:30): omit `earliestTime` / `latestTime`. A ≤2h probe around that clock is dropped. On a miss, chip the rest of the day's Auto-book times.
+**Exact clock** (08:30, or 10:00 on a Tuesday that opens at 12:00): omit `earliestTime` / `latestTime`. A ≤2h probe around that clock is dropped. A day-part window the customer did not name (morning = `latestTime: "12:00"`) is dropped the same way. On a miss, chip the rest of the day's Auto-book times.
 
-A named clock newer than a day-part cancels the day-part preference.
+A named clock newer than a day-part cancels the day-part preference. That cancel also applies when the model still passed a morning window: unmatched day-part must not withhold chips for an exact-time miss.
 
-Pinned: `day-part.test.ts`; `agent-service.test.ts` out-of-hours chips vs namiddag withhold.
+Pinned: `day-part.test.ts`; `builtin-tools.test.ts` morning-window drop; `agent-service.test.ts` out-of-hours chips vs namiddag withhold vs later-opening weekday.
 
 ---
 
@@ -103,7 +103,7 @@ Attach chips when the customer still needs to pick a confirmable time.
 Leave chips off when:
 
 - they already named a confirmable hour (`alreadyChoseTime`) and it was not refused this run
-- unmatched **day-part** window
+- unmatched **day-part** window — unless they named an exact clock that missed it
 - `suggestedAction: 'confirm_existing'` (they already hold that time)
 - requestable-only travel (prose, then `request_appointment`)
 - request-only Service
@@ -111,6 +111,8 @@ Leave chips off when:
 `NO_SLOTS_ON_SCREEN_FALLBACK` ("tell me which time suits you") fires only when `av` has deliverable times, chips are off, and the reply names an unoffered hour. That sentence is a last-resort replacement, not an Auto-book strategy. If utcSlots exist for an exact-time miss, chips stay on so the fallback cannot fire.
 
 Address picker must not displace chips when utcSlots exist.
+
+A second unchecked-availability claim does not ship a dead end. The claim guard nudges once; on the repeat the server issues one `check_availability` itself for the date the customer named — whole day, no `earliestTime` / `latestTime` — and gives the model one more iteration with the times in hand. It stands down when a check already ran (repeating failed work), when the tool is not in this run, or when no date resolves from the customer's own text. Corrections: `availability_unchecked_claim` then `availability_unchecked_claim_forced_check`.
 
 Pinned: `buildSlotQuickReplies` in `agent.service.ts`; `address-picker-affordance.test.ts`.
 
@@ -235,9 +237,10 @@ Unconfigured booking (no hours / no Service) drops booking tools while skill-sta
 |---|---|
 | SERVICES prompt / `AVAILABILITY_RULE` | Auto-book stays Auto-book; out-of-hours still offers times; a closed weekday still offers the next open day |
 | `check_availability` empty path | `emptyRange` vs ordinary empty; `suggestedAction`; `closed` stays Auto-book |
-| `clockWindow` / day-part | namiddag chips ≥12:00; exact 08:30 still chips the day |
+| `clockWindow` / day-part | namiddag chips ≥12:00; exact 08:30 still chips the day; exact 10:00 on a 12:00-open Tuesday still chips |
 | `buildSlotQuickReplies` / `safeReplyContent` | `NO_SLOTS_ON_SCREEN_FALLBACK` cannot fire while utcSlots exist for an exact-time miss |
 | named-time / intake | hour survives intake; chips stay off when they already chose a free hour |
+| `applyAvailabilityClaimGuard` | one nudge, then one server-authored whole-day check for the named date; never a second check, never a dead end with no chips |
 | create/request contact errors | ask, don't Request |
 | timing PUT | explicit `null` inherits; explicit `0` is zero |
 | travel | grouping does not refuse; only `maxTravelMin` refuses a long drive |

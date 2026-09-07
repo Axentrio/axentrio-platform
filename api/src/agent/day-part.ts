@@ -38,6 +38,15 @@ export function isDayPartClockWindow(w: ClockWindow): boolean {
   return w.from === '12:00' && w.to === '24:00';
 }
 
+/**
+ * They named one clock, not a day part. A model-passed morning window must not
+ * hide the rest of a day that opens at 12:00.
+ */
+export function namedExactClock(text: string): boolean {
+  if (!text || dayPartWindow(text)) return false;
+  return new Set(parseClockTimes(text).map((t) => t.key)).size === 1;
+}
+
 /** Walk recent customer texts newest-first; a named clock time cancels a day-part preference. */
 export function inferDayPartWindow(customerTextsNewestFirst: string[]): ClockWindow | null {
   for (const text of customerTextsNewestFirst.slice(0, 8)) {

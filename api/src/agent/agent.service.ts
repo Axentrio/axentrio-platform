@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
-import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
-import { isDayPartClockWindow } from './day-part';
+import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseCalendarDates, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { isDayPartClockWindow, namedExactClock } from './day-part';
 import { resolveBotLanguage, slotChipQuickReply } from '../config/bot-language';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
@@ -288,9 +288,10 @@ interface PendingAvailability {
 function buildSlotQuickReplies(
   av: PendingAvailability | null,
   language: ReturnType<typeof resolveBotLanguage>,
+  exactClock = false,
 ): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
-  if (av.clockWindow && !av.clockWindow.matched && isDayPartClockWindow(av.clockWindow)) return undefined;
+  if (av.clockWindow && !av.clockWindow.matched && isDayPartClockWindow(av.clockWindow) && !exactClock) return undefined;
   return av.slots.slice(0, 8).map((s) =>
     slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
   );
@@ -508,6 +509,22 @@ const AVAILABILITY_CORRECTION_NOTE =
   "daily limits are invisible to you until you look. Call check_availability for that exact date " +
   "now. If it returns times, offer them. If it returns none, follow the guidance the tool gives " +
   "you. Do not offer to submit the appointment as a request, and do not repeat the claim.";
+
+/**
+ * The SECOND offence, after the nudge above was already spent.
+ *
+ * The nudge fires once; a model that repeats the claim used to ship it with no availability at
+ * all, which means no chips and no fallback either - the customer is told to choose from options
+ * that structurally cannot exist. So the server checks the date they named itself and hands the
+ * result back for one more iteration. No new model decision: the date comes from the customer's
+ * own text, and the tool message above carries the times.
+ */
+const AVAILABILITY_FORCED_CHECK_NOTE =
+  '(Internal note, not from the customer.) The diary has now been checked for the date they ' +
+  'named and the result is in the tool message above. Answer from it: if "slots" holds times, ' +
+  'say plainly that the hour they asked for cannot be booked and offer the times in "slots" - ' +
+  'this service books automatically, so do NOT capture a request and do NOT ask them to name ' +
+  'another time. Never state a time that is not in "slots".';
 
 /** Nudge for a reply that promised to look at the diary and then ended the turn. */
 const PROMISED_CHECK_NOTE =
@@ -740,6 +757,8 @@ interface RunLoopState {
   /** Own retry budget: a yes with a pending summary and no create_booking this turn. */
   pendingYesNudgeAttempted: boolean;
   availabilityCorrectionAttempted: boolean;
+  /** The one server-authored check_availability this run may issue; see applyAvailabilityClaimGuard. */
+  forcedAvailabilityCheckAttempted: boolean;
   /** Same rule again: the promised-check guard owns its own single retry. */
   promisedCheckCorrectionAttempted: boolean;
   /**
@@ -789,6 +808,7 @@ function newRunLoopState(): RunLoopState {
     pendingYesNudgeAttempted: false,
     correctionAttempted: false,
     availabilityCorrectionAttempted: false,
+    forcedAvailabilityCheckAttempted: false,
     promisedCheckCorrectionAttempted: false,
     availabilityChecked: false,
     heldBooking: false,
@@ -1538,7 +1558,7 @@ export class AgentService {
     if (booking.kind === 'retry') return CONTINUE_ITERATION;
     if (booking.kind === 'result') return { kind: 'done', result: booking.result };
     if (await this.applyPendingYesGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
-    if (this.applyAvailabilityClaimGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
+    if (await this.applyAvailabilityClaimGuard(i, ctx, state, booking.content)) return CONTINUE_ITERATION;
     const promised = await this.applyPromisedCheckGuard(i, ctx, state, booking.content);
     if (promised.kind === 'retry') return CONTINUE_ITERATION;
     if (promised.kind === 'result') return { kind: 'done', result: promised.result };
@@ -1667,19 +1687,27 @@ export class AgentService {
    *
    * Nudge only, never a safe fallback. The model is not lying about a mutation it made,
    * it simply answered too early, and one more iteration with the tool is the whole fix.
-   * A second offence falls through and ships: a clumsy sentence beats a dead end.
+   * A second offence does NOT ship. The nudge is spent, `pendingAvailability` is still null,
+   * and with no availability there are no chips and `safeReplyContent` cannot fire either - the
+   * customer would be told to choose from options that structurally cannot exist. So the server
+   * issues the check itself for the date the customer named and gives the model one more
+   * iteration with the times in hand. Still no new model decision: the date is read out of the
+   * customer's own text, and a date that will not resolve bails out to today's behaviour.
    *
    * Returns true when the run owes the model one more iteration.
    */
-  private applyAvailabilityClaimGuard(
+  private async applyAvailabilityClaimGuard(
     i: number,
     ctx: RunLoopContext,
     state: RunLoopState,
     content: string,
-  ): boolean {
+  ): Promise<boolean> {
     if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.heldBooking || state.bookingRecorded) return false;
     if (!claimsDatedUnavailability(content)) return false;
-    if (state.availabilityCorrectionAttempted || i >= MAX_ITERATIONS - 1) return false;
+    if (i >= MAX_ITERATIONS - 1) return false;
+    if (state.availabilityCorrectionAttempted) {
+      return this.forceAvailabilityCheck(ctx, state, content);
+    }
     state.availabilityCorrectionAttempted = true;
     (ctx.trace.corrections ??= []).push('availability_unchecked_claim');
     logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
@@ -1688,6 +1716,77 @@ export class AgentService {
     state.messages.push({ role: 'assistant', content });
     state.messages.push({ role: 'user', content: AVAILABILITY_CORRECTION_NOTE });
     return true; // re-run: the model should call check_availability before answering
+  }
+
+  /**
+   * The one server-authored `check_availability` a run may issue, for the date the customer
+   * themselves named. Run through `executeToolCall` so absorption - `pendingAvailability`, the
+   * offer record, the trace entry - is identical to a model-issued call.
+   */
+  private async forceAvailabilityCheck(
+    ctx: RunLoopContext,
+    state: RunLoopState,
+    content: string,
+  ): Promise<boolean> {
+    if (state.forcedAvailabilityCheckAttempted) return false;
+    // A check already ran and simply came back empty. Forcing a second is repeating failed
+    // work - the same reasoning `applyPromisedCheckGuard` is already written on.
+    if (state.availabilityChecked) return false;
+    // `availabilityClaimGuardArmed` is armed from the ENTITLED list, so skill-state gating can
+    // still have dropped the tool from this run.
+    if (!ctx.tools.some((t) => t.name === 'check_availability')) return false;
+    const date = this.namedCheckDate(ctx, content);
+    if (!date) return false;
+
+    state.forcedAvailabilityCheckAttempted = true;
+    (ctx.trace.corrections ??= []).push('availability_unchecked_claim_forced_check');
+    logger.warn('[agent] unchecked availability claim repeated; checking the named date server-side', {
+      sessionId: ctx.session.id,
+      date,
+    });
+
+    const forced: ToolCall = {
+      id: `forced_availability_${ctx.runId.slice(0, 8)}`,
+      name: 'check_availability',
+      // No earliestTime / latestTime: the whole point is the full day.
+      arguments: { startDate: date, endDate: date },
+    };
+    // The assistant message carrying `toolCalls` MUST precede the tool result message or
+    // providers reject the sequence - `runIteration` does exactly this before its own loop.
+    state.messages.push({ role: 'assistant', content: '', toolCalls: [forced] });
+    const traceEntry: AgentTrace['iterations'][0] = {
+      llmCall: { model: ctx.model, promptTokens: 0, completionTokens: 0, latencyMs: 0 },
+      toolCalls: [],
+    };
+    await this.executeToolCall(forced, traceEntry, ctx, state);
+    ctx.trace.iterations.push(traceEntry);
+
+    state.messages.push({ role: 'user', content: AVAILABILITY_FORCED_CHECK_NOTE });
+    return true;
+  }
+
+  /**
+   * The date to check, read from the customer's own words: this turn's message first, then
+   * their earlier turns newest-first, and only then the model's reply.
+   *
+   * `RunLoopContext` carries no timezone, so the year falls back to UTC's. A wrong-year guess
+   * yields an empty check - today's behaviour - never a wrong answer.
+   */
+  private namedCheckDate(ctx: RunLoopContext, content: string): string | null {
+    const fallbackYear = new Date().getUTCFullYear();
+    const sources = [
+      ctx.message,
+      ...ctx.conversationHistory
+        .filter((m) => m.role === 'user')
+        .reverse()
+        .map((m) => contentToText(m.content)),
+      content,
+    ];
+    for (const text of sources) {
+      const [date] = parseCalendarDates(text, fallbackYear);
+      if (date) return date;
+    }
+    return null;
   }
 
   /**
@@ -1819,7 +1918,7 @@ export class AgentService {
     );
     const slotChips = alreadyChoseTime
       ? undefined
-      : buildSlotQuickReplies(av, resolveBotLanguage(ctx.aiSettings?.language));
+      : buildSlotQuickReplies(av, resolveBotLanguage(ctx.aiSettings?.language), namedExactClock(customerTimeText));
     const safeContent = await this.safeReplyContent({
       ctx, finalContent, av, times, customerTimeText, onScreen: !!slotChips?.length,
     });

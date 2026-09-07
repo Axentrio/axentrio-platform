@@ -243,6 +243,80 @@ describe('scheduler.controller', () => {
   });
 });
 
+describe('scheduler.controller — spoken hours follow a booking-hours save', () => {
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+  const allOpen = DAYS.map((day) => ({ day, open: '09:00', close: '17:00', closed: false }));
+  const availability = {
+    availabilityMode: 'business_hours' as const,
+    weeklyHours: {
+      mon: [{ start: '09:00', end: '17:00' }],
+      tue: [{ start: '12:00', end: '18:00' }],
+    },
+    dateOverrides: [] as [],
+    slotGranularityMin: 30,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ruleFindOne.mockResolvedValue(null);
+  });
+
+  function spokenCall() {
+    return replaceBotSettingsSection.mock.calls.find((c) => c[2] === 'businessHours');
+  }
+
+  it('mirrors tuesday 12:00–18:00 onto spoken hours and shuts the unnamed days', async () => {
+    resolveTargetBot.mockResolvedValue({
+      id: 'bot-1',
+      settings: {
+        businessHours: { enabled: true, timezone: 'Europe/Brussels', schedule: allOpen },
+      },
+    });
+
+    await updateSchedulerConfig({ tenantId: 'ten-1', body: { availability } } as any, res);
+
+    const call = spokenCall();
+    expect(call).toEqual(['bot-1', 'ten-1', 'businessHours', expect.any(Object)]);
+    const written = call![3] as { enabled: boolean; schedule: Array<{ day: string; open: string; close: string; closed: boolean }> };
+    expect(written.enabled).toBe(true);
+    expect(written.schedule.find((d) => d.day === 'tuesday')).toEqual({
+      day: 'tuesday', open: '12:00', close: '18:00', closed: false,
+    });
+    expect(written.schedule.find((d) => d.day === 'wednesday')).toMatchObject({
+      day: 'wednesday', closed: true,
+    });
+  });
+
+  it('does not create spoken hours when they are disabled', async () => {
+    resolveTargetBot.mockResolvedValue({
+      id: 'bot-1',
+      settings: {
+        businessHours: { enabled: false, timezone: 'Europe/Brussels', schedule: allOpen },
+      },
+    });
+
+    await updateSchedulerConfig({ tenantId: 'ten-1', body: { availability } } as any, res);
+
+    expect(spokenCall()).toBeUndefined();
+  });
+
+  it('does not rewrite spoken hours from an always_open diary', async () => {
+    resolveTargetBot.mockResolvedValue({
+      id: 'bot-1',
+      settings: {
+        businessHours: { enabled: true, timezone: 'Europe/Brussels', schedule: allOpen },
+      },
+    });
+
+    await updateSchedulerConfig({
+      tenantId: 'ten-1',
+      body: { availability: { ...availability, availabilityMode: 'always_open' } },
+    } as any, res);
+
+    expect(spokenCall()).toBeUndefined();
+  });
+});
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 describe('intake questions schema (P3a)', () => {

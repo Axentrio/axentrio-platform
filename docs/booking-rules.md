@@ -63,9 +63,11 @@ Keep the named hour through intake. An intake answer is not a new time. `latestC
 
 If that hour was refused this run (notice, horizon, `REQUEST_OUTSIDE_WINDOW`, or a later retry): it is not "already chosen". `namedTimeRefused` unlocks retry chips. Clock-only match of 10:00 on a different day is alternatives, not confirmation.
 
+A refusal whose only clock is the day's first open hour (the customer's named clock was not offered) is not already-chosen. Keep the chips.
+
 A first message that dumps name + email + time is not a yes. `CONFIRMATION_REQUIRED` → short summary → wait for explicit yes (or a tap after you asked). Then `create_booking` again. Do not send a second summary.
 
-Pinned: `builtin-tools.test.ts` intake named-time; `agent-service.test.ts` horizon retry chips / 08:30 out-of-hours chips.
+Pinned: `builtin-tools.test.ts` intake named-time; `agent-service.test.ts` horizon retry chips / 08:30 out-of-hours chips / opening-hour refusal chips.
 
 ---
 
@@ -102,7 +104,7 @@ Attach chips when the customer still needs to pick a confirmable time.
 
 Leave chips off when:
 
-- they already named a confirmable hour (`alreadyChoseTime`) and it was not refused this run
+- they already named a confirmable hour (`alreadyChoseTime`) and it was not refused this run. A reply that names only the day's opening, after their named clock missed, is not this
 - unmatched **day-part** window — unless they named an exact clock that missed it
 - `suggestedAction: 'confirm_existing'` (they already hold that time)
 - requestable-only travel (prose, then `request_appointment`)

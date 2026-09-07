@@ -142,6 +142,13 @@ export interface ClaimResult {
   replayed?: boolean;
 }
 
+export interface HumanMessageAttachment {
+  uploadSessionId: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+}
+
 export interface SendHumanMessageResult {
   outcome: 'sent' | 'duplicate';
   autoClaimed: boolean;
@@ -772,6 +779,7 @@ export const conversationCommands = {
     agentId: string,
     clientMessageId: string,
     content: string,
+    attachment: HumanMessageAttachment | null,
     opts: CommandOpts = {},
   ): Promise<SendHumanMessageResult> {
     if (!clientMessageId || clientMessageId.length > 128) {
@@ -866,12 +874,24 @@ export const conversationCommands = {
           sessionId: session.id,
           tenantId: session.tenantId,
           participantId: participant.id,
-          type: 'text' as Message['type'],
+          type: (attachment
+            ? attachment.fileType.startsWith('image/')
+              ? 'image'
+              : 'file'
+            : 'text') as Message['type'],
           content: encrypt(content),
           contentEncrypted: true,
           status: 'sent' as Message['status'],
           sentAt: new Date(),
-          metadata: { clientMessageId } as unknown as Message['metadata'],
+          metadata: (attachment
+            ? {
+                clientMessageId,
+                uploadSessionId: attachment.uploadSessionId,
+                fileName: attachment.fileName,
+                fileSize: attachment.fileSize,
+                fileType: attachment.fileType,
+              }
+            : { clientMessageId }) as unknown as Message['metadata'],
         }),
       );
       await manager.query(

@@ -112,6 +112,9 @@ describe('operator reply delivery state over a real socket (#128)', () => {
       clientMessageId,
       content: 'Operator reply',
       createdAt: message.createdAt.toISOString(),
+      type: 'text' as const,
+      metadata: { clientMessageId },
+      attachment: null,
     };
     const messageRepo = AppDataSource.getRepository(Message);
     const client = await connectOperator('tok-op');

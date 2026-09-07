@@ -45,20 +45,28 @@ export const MESSAGE_CREATED_EVENT = 'message:created';
 async function fetchLastMessagePreview(sessionId: string): Promise<LastMessagePreview | null> {
   const { AppDataSource } = await import('../database/data-source');
   const rows = (await AppDataSource.query(
-    `SELECT m.id, m.content, m.content_encrypted AS encrypted, p.type AS sender_type
+    `SELECT m.id, m.content, m.content_encrypted AS encrypted, p.type AS sender_type,
+            m.metadata->>'fileName' AS file_name
        FROM messages m
        LEFT JOIN participants p ON p.id = m.participant_id
       WHERE m.session_id = $1
       ORDER BY m.created_at DESC
       LIMIT 1`,
     [sessionId],
-  )) as Array<{ id: string; content: string | null; encrypted: boolean | null; sender_type: string | null }>;
+  )) as Array<{
+    id: string;
+    content: string | null;
+    encrypted: boolean | null;
+    sender_type: string | null;
+    file_name: string | null;
+  }>;
   if (!rows.length) return null;
   return previewFromRaw({
     id: rows[0].id,
     content: rows[0].content,
     encrypted: rows[0].encrypted,
     senderType: rows[0].sender_type,
+    fileName: rows[0].file_name,
   });
 }
 
@@ -176,7 +184,12 @@ export async function emitMessageCreatedForSession(
     if (!fresh) return;
     emitMessageCreated(fresh, message);
     await emitConversationUpsert(fresh, {
-      lastMessage: { content: message.content, senderType: message.senderType },
+      lastMessage: {
+        content:
+          message.content ||
+          (typeof message.metadata?.fileName === 'string' ? message.metadata.fileName : ''),
+        senderType: message.senderType,
+      },
     });
   } catch (err) {
     logger.error('[realtime] message:created (by id) emit failed', {

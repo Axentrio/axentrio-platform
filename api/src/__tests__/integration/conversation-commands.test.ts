@@ -399,7 +399,7 @@ describe('sendHumanMessage — auto-claim + dedupe + conflict', () => {
     const session = await createTestSession(tenant.id, { status: 'bot' });
 
     const first = await conversationCommands.sendHumanMessage(
-      session.id, agent.id, 'cmid-1', 'Hello, a human here', { tenantId: tenant.id },
+      session.id, agent.id, 'cmid-1', 'Hello, a human here', null, { tenantId: tenant.id },
     );
     expect(first.outcome).toBe('sent');
     expect(first.autoClaimed).toBe(true);
@@ -414,7 +414,7 @@ describe('sendHumanMessage — auto-claim + dedupe + conflict', () => {
 
     // Retry with the same clientMessageId: the ORIGINAL message, no second row.
     const dup = await conversationCommands.sendHumanMessage(
-      session.id, agent.id, 'cmid-1', 'Hello, a human here', { tenantId: tenant.id },
+      session.id, agent.id, 'cmid-1', 'Hello, a human here', null, { tenantId: tenant.id },
     );
     expect(dup.outcome).toBe('duplicate');
     expect(dup.message.id).toBe(first.message.id);
@@ -432,10 +432,10 @@ describe('sendHumanMessage — auto-claim + dedupe + conflict', () => {
     const b = await makeOperator(tenant.id);
     const session = await createTestSession(tenant.id, { status: 'bot' });
 
-    await conversationCommands.sendHumanMessage(session.id, a.agent.id, 'a-1', 'mine now', { tenantId: tenant.id });
+    await conversationCommands.sendHumanMessage(session.id, a.agent.id, 'a-1', 'mine now', null, { tenantId: tenant.id });
 
     await expect(
-      conversationCommands.sendHumanMessage(session.id, b.agent.id, 'b-1', 'my draft', { tenantId: tenant.id }),
+      conversationCommands.sendHumanMessage(session.id, b.agent.id, 'b-1', 'my draft', null, { tenantId: tenant.id }),
     ).rejects.toBeInstanceOf(ConversationAlreadyClaimedError);
 
     // The loser's draft was NOT persisted.

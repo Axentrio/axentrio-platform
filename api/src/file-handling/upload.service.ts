@@ -702,10 +702,10 @@ export class UploadService {
   }
 
   /**
-   * Write the visitor's file bytes for a pending widget upload. The browser
-   * cannot PUT to R2 (CORS). The widget posts the body here instead.
+   * Write the file bytes for a pending upload. The browser (widget or portal)
+   * cannot PUT to R2 (CORS). The client posts the body here instead.
    */
-  async writeWidgetObject(
+  async writeUploadObject(
     sessionId: string,
     buffer: Buffer,
     tenantId: string,

@@ -33,6 +33,9 @@ const REPLY = {
   clientMessageId: 'c1',
   content: 'hi',
   createdAt: '2026-01-01T00:00:00.000Z',
+  type: 'text' as const,
+  metadata: { clientMessageId: 'c1' },
+  attachment: null,
 };
 
 beforeEach(() => {

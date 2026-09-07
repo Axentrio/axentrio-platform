@@ -471,7 +471,7 @@ describe('slide - a committed human reply moves the timed deadline forward', () 
     const beforeUntil = new Date((await stateOf(session.id)).human_control_until!).getTime();
 
     const sent = await conversationCommands.sendHumanMessage(
-      session.id, agent.id, 'slide-1', 'Still with you!', { tenantId: tenant.id },
+      session.id, agent.id, 'slide-1', 'Still with you!', null, { tenantId: tenant.id },
     );
     expect(sent.outcome).toBe('sent');
 
@@ -491,7 +491,7 @@ describe('slide - a committed human reply moves the timed deadline forward', () 
     // Indefinite control: a reply changes nothing about the policy.
     const indef = await createTestSession(tenant.id, { status: 'bot' });
     await conversationCommands.claimConversation(indef.id, agent.id, { mode: 'indefinite' });
-    await conversationCommands.sendHumanMessage(indef.id, agent.id, 'slide-2', 'Here.', { tenantId: tenant.id });
+    await conversationCommands.sendHumanMessage(indef.id, agent.id, 'slide-2', 'Here.', null, { tenantId: tenant.id });
     expect(await stateOf(indef.id)).toMatchObject({
       human_control_mode: 'indefinite',
       human_control_until: null,
@@ -505,7 +505,7 @@ describe('slide - a committed human reply moves the timed deadline forward', () 
     // materializes the expiry and re-claims FRESH (indefinite).
     const { session } = await makeTimedSession(tenant.id, agent.id, -60_000);
     await conversationCommands.sendHumanMessage(
-      session.id, agent.id, 'slide-3', 'I am still handling this', { tenantId: tenant.id },
+      session.id, agent.id, 'slide-3', 'I am still handling this', null, { tenantId: tenant.id },
     );
 
     // A caller that read the session BEFORE the reply sees an expired timed
@@ -576,7 +576,7 @@ describe('no resurrection of an expired control (codex review fix 2)', () => {
     const vBefore = (await stateOf(session.id)).ownership_version;
 
     const sent = await conversationCommands.sendHumanMessage(
-      session.id, agent.id, 'res-1', 'sorry, still here', { tenantId: tenant.id },
+      session.id, agent.id, 'res-1', 'sorry, still here', null, { tenantId: tenant.id },
     );
     expect(sent.outcome).toBe('sent');
     expect(sent.autoClaimed).toBe(true); // FRESH control, not a renewal
@@ -632,7 +632,7 @@ describe('no resurrection of an expired control (codex review fix 2)', () => {
 
     const [, sent] = await Promise.all([
       sweepExpiredTimedControl(),
-      conversationCommands.sendHumanMessage(session.id, agent.id, 'race-1', 'here!', { tenantId: tenant.id }),
+      conversationCommands.sendHumanMessage(session.id, agent.id, 'race-1', 'here!', null, { tenantId: tenant.id }),
     ]);
     // Whichever side wins the row lock, the reply re-establishes control
     // FRESH: sweep-first lands in the bot_owned auto-claim branch, reply-first

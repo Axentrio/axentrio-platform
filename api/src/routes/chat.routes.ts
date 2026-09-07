@@ -453,7 +453,14 @@ router.get(
       const msgs = await messageRepository
         .createQueryBuilder('m')
         .leftJoin(Participant, 'p', 'p.id = m.participant_id')
-        .select(['m.session_id AS session_id', 'm.content AS content', 'm.content_encrypted AS encrypted', 'm.id AS id', 'p.type AS sender_type'])
+        .select([
+          'm.session_id AS session_id',
+          'm.content AS content',
+          'm.content_encrypted AS encrypted',
+          'm.id AS id',
+          'p.type AS sender_type',
+          "m.metadata->>'fileName' AS file_name",
+        ])
         .where('m.session_id IN (:...ids)', { ids: sessionIds })
         .distinctOn(['m.session_id'])
         .orderBy('m.session_id')
@@ -466,6 +473,7 @@ router.get(
           content: row.content,
           encrypted: row.encrypted,
           senderType: row.sender_type,
+          fileName: row.file_name,
         });
       }
     }

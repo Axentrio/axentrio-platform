@@ -43,6 +43,12 @@ vi.mock('@websocket/notificationSound', () => ({
   }),
 }));
 
+
+vi.mock('./ChatAttachments', () => ({
+  MessageAttachment: () => null,
+  AttachButton: () => null,
+}));
+
 vi.mock('./CannedResponsePicker', () => ({
   SlashCommandDropdown: () => null,
   CannedResponsePickerButton: () => null,
@@ -100,7 +106,7 @@ describe('ChatWindow composer', () => {
     const textarea = screen.getByPlaceholderText('Type a message…');
     await user.type(textarea, 'first reply');
     await user.click(screen.getByRole('button', { name: 'Send message' }));
-    expect(sendMessageMock).toHaveBeenCalledWith('first reply');
+    expect(sendMessageMock).toHaveBeenCalledWith('first reply', undefined);
 
     // The operator keeps typing while the POST is in flight.
     await user.type(textarea, ' and a second thought');

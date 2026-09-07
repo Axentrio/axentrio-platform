@@ -32,7 +32,9 @@ import {
   seedChatDetail,
   type ChatDetailCacheEntry,
 } from "./conversationLive";
+import { attachmentFieldsFromMetadata } from "./attachmentMetadata";
 import { LIVE_QUERY_REFETCH_MS } from "./queryConfig";
+import type { ChatAttachmentDraft } from "./useChatAttachment";
 import type {
   Chat,
   ChatStatus,
@@ -105,7 +107,10 @@ interface UseChatDetailReturn {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  sendMessage: (content: string) => Promise<SendMessageResult>;
+  sendMessage: (
+    content: string,
+    attachment?: ChatAttachmentDraft,
+  ) => Promise<SendMessageResult>;
   retryMessage: (clientMessageId: string) => Promise<SendMessageResult>;
   sendTyping: (typing: boolean) => void;
   refetch: () => void;
@@ -140,6 +145,7 @@ export function normalizeChatDetail<
           messages: raw.messages.map((m: Any) => ({
             ...m,
             chatId: m.chatId ?? m.sessionId,
+            ...attachmentFieldsFromMetadata(m.metadata),
             ...(m.status === "failed"
               ? { deliveryState: "failed" as const }
               : {}),
@@ -313,6 +319,7 @@ export function threadMessageToMessage(m: ThreadMessagePayload): Message {
     content: m.content,
     sender: (m.sender || "user") as MessageSender,
     ...(m.senderName ? { senderName: m.senderName } : {}),
+    ...attachmentFieldsFromMetadata(m.metadata),
     isRead: true,
     createdAt: m.createdAt,
   };
@@ -602,6 +609,7 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
       clientMessageId: string,
       content: string,
       opts: { keepBubbleOnConflict?: boolean } = {},
+      attachment?: ChatAttachmentDraft,
     ): Promise<SendMessageResult> => {
       try {
         const res = await api.post<SendReplyResponse>(
@@ -609,6 +617,9 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
           {
             clientMessageId,
             content,
+            ...(attachment
+              ? { attachment: { uploadSessionId: attachment.uploadSessionId } }
+              : {}),
           },
         );
         const serverId = res.message.id;
@@ -691,29 +702,67 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
     [chatId, patchMessages, queryClient],
   );
 
-  const sendMessage = useCallback(
-    async (content: string): Promise<SendMessageResult> => {
-      const trimmed = content.trim();
-      if (!chatId || !trimmed)
-        return { status: "failed", message: "Empty message" };
+  const sendSingle = useCallback(
+    async (
+      content: string,
+      attachment?: ChatAttachmentDraft,
+      keepBubbleOnConflict = false,
+    ): Promise<SendMessageResult> => {
       const clientMessageId = newUuid();
+      const hasAttachment = !!attachment;
+      const bodyContent = hasAttachment ? "" : content.trim();
       const optimistic: Message = {
         id: clientMessageId,
         clientMessageId,
         chatId,
-        type: "text",
-        content: trimmed,
+        type: hasAttachment
+          ? attachment.fileType.startsWith("image/")
+            ? "image"
+            : "file"
+          : "text",
+        content: bodyContent,
         sender: "agent",
         isRead: true,
         createdAt: new Date().toISOString(),
         deliveryState: "pending",
+        ...(hasAttachment
+          ? {
+              uploadSessionId: attachment.uploadSessionId,
+              fileName: attachment.fileName,
+              fileSize: attachment.fileSize,
+              fileType: attachment.fileType,
+            }
+          : {}),
       };
       patchMessages((msgs) => [...msgs, optimistic]);
-      return postReply(clientMessageId, trimmed, {
-        keepBubbleOnConflict: false,
-      });
+      return postReply(
+        clientMessageId,
+        bodyContent,
+        { keepBubbleOnConflict },
+        attachment,
+      );
     },
     [chatId, patchMessages, postReply],
+  );
+
+  const sendMessage = useCallback(
+    async (
+      content: string,
+      attachment?: ChatAttachmentDraft,
+    ): Promise<SendMessageResult> => {
+      const trimmed = content.trim();
+      if (!chatId || (!trimmed && !attachment))
+        return { status: "failed", message: "Empty message" };
+      if (trimmed) {
+        const textResult = await sendSingle(trimmed, undefined, false);
+        if (textResult.status !== "sent") return textResult;
+      }
+      if (attachment) {
+        return sendSingle("", attachment, false);
+      }
+      return { status: "sent" };
+    },
+    [chatId, sendSingle],
   );
 
   const retryMessage = useCallback(
@@ -733,9 +782,20 @@ export function useChatDetail(chatId: string): UseChatDetailReturn {
             : m,
         ),
       );
-      return postReply(clientMessageId, target.content, {
-        keepBubbleOnConflict: true,
-      });
+      const attachment: ChatAttachmentDraft | undefined = target.uploadSessionId
+        ? {
+            uploadSessionId: target.uploadSessionId,
+            fileName: target.fileName ?? "",
+            fileSize: target.fileSize ?? 0,
+            fileType: target.fileType ?? "application/octet-stream",
+          }
+        : undefined;
+      return postReply(
+        clientMessageId,
+        target.content,
+        { keepBubbleOnConflict: true },
+        attachment,
+      );
     },
     [chatId, patchMessages, postReply, queryClient],
   );

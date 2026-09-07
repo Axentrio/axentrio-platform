@@ -39,6 +39,7 @@ import {
   asyncHandler,
   ApiError,
   BadRequestError,
+  NotFoundError,
 } from "../middleware/error-handler";
 import { sendSuccess, sendCreated } from "../utils/response";
 import { emitToSession, emitToTenantAgents } from "../websocket/socket.handler";
@@ -49,10 +50,23 @@ import {
 import {
   deliverOperatorReply,
   claimFailedForRetry,
+  type OperatorReply,
 } from "../channels/delivery-state";
 import { MAX_MESSAGE_CONTENT_CHARS } from "../guardrails/classify";
-import { conversationCommands } from "../services/conversation-command.service";
+import {
+  conversationCommands,
+  type HumanMessageAttachment,
+} from "../services/conversation-command.service";
 import { ResetScratchClearError } from "../services/conversation-reset-state";
+import { isUuid } from "../utils/uuid";
+import { getUploadService } from "../file-handling/upload.service";
+import { getChannelAdapter } from "../channels/channel-registry";
+import {
+  channelSupportsAttachment,
+  outboundAttachmentType,
+} from "../channels/attachment-type";
+import type { ChannelType } from "../database/entities/ChannelConnection";
+import { AppDataSource } from "../database/data-source";
 
 const router = Router();
 
@@ -385,27 +399,101 @@ router.post(
   "/:sessionId/messages",
   ...agentAuth,
   asyncHandler(async (req: TenantRequest, res: Response) => {
-    const { clientMessageId, content } = req.body as {
+    const { clientMessageId, content, attachment: attachmentBody } = req.body as {
       clientMessageId?: string;
       content?: string;
+      attachment?: { uploadSessionId?: string };
     };
     if (typeof clientMessageId !== "string" || !clientMessageId.trim()) {
       throw new BadRequestError("clientMessageId is required");
     }
-    if (typeof content !== "string" || !content.trim()) {
-      throw new BadRequestError("content is required");
-    }
-    if (content.length > MAX_MESSAGE_CONTENT_CHARS) {
+    const text = typeof content === "string" ? content : "";
+    if (text.length > MAX_MESSAGE_CONTENT_CHARS) {
       throw new BadRequestError("Message too long");
+    }
+
+    let humanAttachment: HumanMessageAttachment | null = null;
+    let deliveryAttachment: OperatorReply["attachment"] = null;
+
+    if (attachmentBody != null) {
+      const uploadSessionId = attachmentBody.uploadSessionId;
+      if (!isUuid(uploadSessionId)) {
+        throw new BadRequestError("attachment.uploadSessionId must be a UUID");
+      }
+      const upload = await getUploadService().getSession(uploadSessionId);
+      if (
+        !upload ||
+        upload.tenantId !== req.tenant!.id ||
+        upload.chatSessionId !== req.params.sessionId
+      ) {
+        throw new NotFoundError("Upload session not found");
+      }
+      if (upload.status !== "ready") {
+        throw new ApiError(
+          "Attachment has not finished scanning",
+          400,
+          "ATTACHMENT_NOT_READY",
+        );
+      }
+
+      const channel = await sessionChannel(req.params.sessionId, req.tenant!.id);
+      const external = !!channel && channel !== "widget";
+      if (external && channel) {
+        const adapter = getChannelAdapter(channel as ChannelType);
+        if (
+          adapter &&
+          !channelSupportsAttachment(
+            adapter.outboundTransport.getCapabilities(),
+            outboundAttachmentType(upload.mimeType),
+          )
+        ) {
+          throw new ApiError(
+            "This channel does not accept this attachment type",
+            400,
+            "ATTACHMENT_UNSUPPORTED_ON_CHANNEL",
+          );
+        }
+      }
+
+      humanAttachment = {
+        uploadSessionId,
+        fileName: upload.originalName,
+        fileSize: upload.fileSize,
+        fileType: upload.mimeType,
+      };
+      deliveryAttachment = {
+        uploadSessionId,
+        fileKey: upload.fileKey,
+        mimeType: upload.mimeType,
+        fileName: upload.originalName,
+        fileSize: upload.fileSize,
+      };
+    } else if (!text.trim()) {
+      throw new BadRequestError("content is required");
     }
 
     const result = await conversationCommands.sendHumanMessage(
       req.params.sessionId,
       req.user!.id,
       clientMessageId,
-      content,
+      text,
+      humanAttachment,
       commandScope(req),
     );
+
+    const msgType: "text" | "image" | "file" = humanAttachment
+      ? humanAttachment.fileType.startsWith("image/")
+        ? "image"
+        : "file"
+      : "text";
+    const attachmentMeta = humanAttachment
+      ? {
+          uploadSessionId: humanAttachment.uploadSessionId,
+          fileName: humanAttachment.fileName,
+          fileSize: humanAttachment.fileSize,
+          fileType: humanAttachment.fileType,
+        }
+      : {};
 
     if (result.outcome === "sent") {
       const sessionId = req.params.sessionId;
@@ -413,13 +501,14 @@ router.post(
         id: result.message.id,
         sessionId,
         chatId: sessionId,
-        type: "text",
-        content,
+        type: msgType,
+        content: text,
         status: "sent",
         createdAt: result.message.createdAt,
         sender: "agent",
         senderType: "agent",
         timestamp: new Date().toISOString(),
+        metadata: { clientMessageId, ...attachmentMeta },
       };
       emitToSession(req.tenant!.id, sessionId, "message:receive", messageData);
       emitToTenantAgents(req.tenant!.id, "message:new", {
@@ -432,62 +521,67 @@ router.post(
           agentId: req.user!.id,
         });
       }
-      // B-PR3a: normalized events, post-commit. Only ids are in hand here —
-      // the helper re-selects a fresh row (it also carries an auto-claim's
-      // committed ownership) and is fail-safe END TO END: a DB hiccup on the
-      // re-select or the emits is logged, never a 500 on a request whose
-      // message already committed.
       await emitMessageCreatedForSession(sessionId, req.tenant!.id, {
         id: result.message.id,
         sessionId,
-        type: "text",
-        content,
+        type: msgType,
+        content: text,
         senderType: "agent",
         status: "sent",
         createdAt: result.message.createdAt,
-        // The message row stores clientMessageId in metadata (the dedupe key).
-        // Putting it on the wire lets the sender's portal reconcile its
-        // optimistic bubble by IDENTITY instead of a content heuristic (B-PR3b
-        // fix 1). serializeMessage passes metadata through as-is.
-        metadata: { clientMessageId },
+        metadata: { clientMessageId, ...attachmentMeta },
       });
-      // External channels get the reply post-commit (mirrors the socket path,
-      // including Meta's HUMAN_AGENT tag). Failure is logged, never a rollback:
-      // the persisted message is the source of truth; PR 3 surfaces per-message
-      // delivery state.
-      if (
-        result.conversation &&
-        (await isExternalChannel(sessionId, req.tenant!.id))
-      ) {
-        // Deliver + reconcile per-message delivery state (#128). Fire-and-forget:
-        // the outcome reaches the composer over the socket, not via this response.
+      const channel = await sessionChannel(sessionId, req.tenant!.id);
+      const external = !!channel && channel !== "widget";
+      if (result.conversation && external) {
         void deliverOperatorReply({
           sessionId,
           tenantId: req.tenant!.id,
           messageId: result.message.id,
           clientMessageId,
-          content,
+          content: text,
           createdAt: result.message.createdAt,
+          type: msgType,
+          metadata: { clientMessageId, ...attachmentMeta },
+          attachment: deliveryAttachment,
         });
       }
     } else if (result.outcome === "duplicate") {
-      // A retry re-POSTs the same clientMessageId. Re-attempt external delivery
-      // ONLY while the original is still failed — claimFailedForRetry flips
-      // failed -> sending atomically — so a duplicate of a delivered reply can
-      // never double-send to the customer. #128.
       const sessionId = req.params.sessionId;
-      if (
-        (await isExternalChannel(sessionId, req.tenant!.id)) &&
-        (await claimFailedForRetry(result.message.id))
-      ) {
-        void deliverOperatorReply({
-          sessionId,
-          tenantId: req.tenant!.id,
-          messageId: result.message.id,
-          clientMessageId,
-          content,
-          createdAt: result.message.createdAt,
-        });
+      const channel = await sessionChannel(sessionId, req.tenant!.id);
+      const external = !!channel && channel !== "widget";
+      if (external) {
+        // Resolve attachment from the persisted row BEFORE claiming retry.
+        // claimFailedForRetry flips failed → sending; if the upload is no longer
+        // ready we must not claim (row would stick in sending with no retry path).
+        const retryAttachment = await resolveDuplicateAttachment(result.message.id);
+        if (retryAttachment !== "skip" && (await claimFailedForRetry(result.message.id))) {
+          const retryType: "text" | "image" | "file" = retryAttachment
+            ? retryAttachment.mimeType.startsWith("image/")
+              ? "image"
+              : "file"
+            : "text";
+          const retryMeta = retryAttachment
+            ? {
+                clientMessageId,
+                uploadSessionId: retryAttachment.uploadSessionId,
+                fileName: retryAttachment.fileName,
+                fileSize: retryAttachment.fileSize,
+                fileType: retryAttachment.mimeType,
+              }
+            : { clientMessageId };
+          void deliverOperatorReply({
+            sessionId,
+            tenantId: req.tenant!.id,
+            messageId: result.message.id,
+            clientMessageId,
+            content: text,
+            createdAt: result.message.createdAt,
+            type: retryType,
+            metadata: retryMeta,
+            attachment: retryAttachment,
+          });
+        }
       }
     }
 
@@ -502,16 +596,36 @@ router.post(
 
 /** Widget sessions deliver over the socket only; everything else goes through
  *  the outbound router. Read once post-commit. */
-async function isExternalChannel(
+async function sessionChannel(
   sessionId: string,
   tenantId: string,
-): Promise<boolean> {
-  const { AppDataSource } = await import("../database/data-source");
+): Promise<string | null> {
   const rows = (await AppDataSource.query(
     `SELECT channel FROM chat_sessions WHERE id = $1 AND tenant_id = $2`,
     [sessionId, tenantId],
   )) as Array<{ channel: string | null }>;
-  return !!rows[0]?.channel && rows[0].channel !== "widget";
+  return rows[0]?.channel ?? null;
+}
+
+async function resolveDuplicateAttachment(
+  messageId: string,
+): Promise<OperatorReply["attachment"] | "skip"> {
+  const rows = (await AppDataSource.query(
+    `SELECT type, metadata FROM messages WHERE id = $1`,
+    [messageId],
+  )) as Array<{ type: string; metadata: Record<string, unknown> | null }>;
+  const meta = rows[0]?.metadata ?? {};
+  const uploadSessionId = meta.uploadSessionId;
+  if (typeof uploadSessionId !== "string") return null;
+  const upload = await getUploadService().getSession(uploadSessionId);
+  if (!upload || upload.status !== "ready") return "skip";
+  return {
+    uploadSessionId,
+    fileKey: upload.fileKey,
+    mimeType: upload.mimeType,
+    fileName: upload.originalName,
+    fileSize: upload.fileSize,
+  };
 }
 
 export default router;

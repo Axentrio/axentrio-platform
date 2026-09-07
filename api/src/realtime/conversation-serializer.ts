@@ -37,6 +37,7 @@ export function previewFromRaw(row: {
   content: string | null;
   encrypted: boolean | null;
   senderType?: string | null;
+  fileName?: string | null;
 }): LastMessagePreview {
   let content = row.content || '';
   if (row.encrypted && content) {
@@ -46,6 +47,7 @@ export function previewFromRaw(row: {
       content = '[encrypted]';
     }
   }
+  if (!content && row.fileName) content = row.fileName;
   return {
     content: content.substring(0, CONVERSATION_PREVIEW_CHARS),
     senderType: row.senderType || 'user',

@@ -14,6 +14,8 @@ import { AppDataSource } from '../database/data-source';
 import { emitMessageCreatedForSession } from '../realtime/conversation-events';
 import { routeOutboundMessage } from './outbound-router';
 import { logger } from '../utils/logger';
+import { getUploadService } from '../file-handling/upload.service';
+import { outboundAttachmentType } from './attachment-type';
 
 export interface OperatorReply {
   sessionId: string;
@@ -22,6 +24,15 @@ export interface OperatorReply {
   clientMessageId: string;
   content: string;
   createdAt: string | Date;
+  type: 'text' | 'image' | 'file';
+  metadata: Record<string, unknown>;
+  attachment: {
+    uploadSessionId: string;
+    fileKey: string;
+    mimeType: string;
+    fileName: string;
+    fileSize: number;
+  } | null;
 }
 
 async function emitState(reply: OperatorReply, status: 'sent' | 'failed'): Promise<void> {
@@ -30,12 +41,12 @@ async function emitState(reply: OperatorReply, status: 'sent' | 'failed'): Promi
   await emitMessageCreatedForSession(reply.sessionId, reply.tenantId, {
     id: reply.messageId,
     sessionId: reply.sessionId,
-    type: 'text',
+    type: reply.type,
     content: reply.content,
     senderType: 'agent',
     status,
     createdAt: reply.createdAt,
-    metadata: { clientMessageId: reply.clientMessageId },
+    metadata: reply.metadata,
   });
 }
 
@@ -79,8 +90,15 @@ export async function claimFailedForRetry(messageId: string): Promise<boolean> {
  */
 export async function deliverOperatorReply(reply: OperatorReply): Promise<void> {
   try {
+    const response = reply.attachment
+      ? {
+          type: outboundAttachmentType(reply.attachment.mimeType),
+          mediaUrl: await getUploadService().generatePublicUrl(reply.attachment.fileKey, 3600),
+          content: '',
+        }
+      : { type: 'text' as const, content: reply.content };
     const result = await routeOutboundMessage(
-      { type: 'text', content: reply.content },
+      response,
       { sessionId: reply.sessionId, tenantId: reply.tenantId, messageId: reply.messageId },
       undefined, // WebSocket already emitted by the caller
       { humanAgent: true },

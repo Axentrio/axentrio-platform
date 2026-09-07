@@ -177,6 +177,8 @@ export interface Message {
   fileName?: string;
   fileSize?: number;
   fileType?: string;
+  /** Upload session id for operator attachments (signed URLs fetched on read). */
+  uploadSessionId?: string;
   isRead: boolean;
   createdAt: string;
   updatedAt?: string;

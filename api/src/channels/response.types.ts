@@ -97,6 +97,10 @@ export interface ResponsePayload {
    * off its buttons (#97 D2). Set only by the Meta address renderer.
    */
   protectedTail?: string;
+  /**
+   * Fetchable URL of the media for image/video/audio/file responses; `content` is then the optional caption.
+   */
+  mediaUrl?: string;
   quickReplies?: (string | QuickReply)[];
   /** Measurement only. Never rendered, never sent to a customer. */
   offer?: OfferMeasurement;

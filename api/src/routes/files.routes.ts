@@ -2,7 +2,7 @@
  * File Routes
  * Upload, preview, and download endpoints
  */
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess } from '../utils/response';
@@ -10,19 +10,14 @@ import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middlewa
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireFeature } from '../billing/enforce';
 import { logAudit } from '../utils/audit';
+import { asUploadApiError } from '../file-handling/upload-errors';
+import { isUuid } from '../utils/uuid';
 
 const router = Router();
 
 // All routes require agent authentication
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
-// `AuditLog.entityId` is a NOT-NULL UUID column. Validate any caller-supplied
-// id (request body / route params) before passing it to `logAudit` so the
-// row is queryable and the insert doesn't silently fail in audit's catch.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isUuid(value: unknown): value is string {
-  return typeof value === 'string' && UUID_RE.test(value);
-}
 
 /**
  * Check if S3/upload service is configured
@@ -66,7 +61,8 @@ router.post(
     }
 
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
+    // Effective tenant (honors resolveTenantContext for super-admin impersonation).
+    const tenantId = authReq.tenantId ?? authReq.user?.tenantId;
     if (!tenantId) {
       throw new BadRequestError('Tenant context required');
     }
@@ -107,7 +103,7 @@ router.post(
       tenantId,
       userId,
       chatSessionId: sessionId,
-    });
+    }).catch(asUploadApiError);
 
     sendSuccess(res, {
       upload: {
@@ -138,6 +134,31 @@ router.post(
       },
     );
   })
+);
+
+/**
+ * POST /files/:sessionId/content
+ * Proxy file bytes. The browser cannot PUT to R2 (CORS).
+ */
+router.post(
+  '/:sessionId/content',
+  express.raw({ type: '*/*', limit: '25mb' }),
+  asyncHandler(async (req, res) => {
+    if (!isS3Configured()) throw new ApiError('File service is not configured', 503, ERROR_CODES.FILE_SERVICE_UNAVAILABLE);
+    const { sessionId } = req.params;
+    if (!isUuid(sessionId)) throw new BadRequestError('Invalid sessionId');
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.tenantId ?? authReq.user?.tenantId;
+    if (!tenantId) throw new BadRequestError('Tenant context required');
+    await requireFeature(tenantId, 'fileUpload', 'plan_limit_file_upload');
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) throw new BadRequestError('File body is required');
+    const { getUploadService } = await import('../file-handling/upload.service');
+    const session = await getUploadService().getSession(sessionId);
+    if (!session || session.tenantId !== tenantId) throw new NotFoundError('Upload session not found');
+    await getUploadService().writeUploadObject(sessionId, buffer, tenantId, session.chatSessionId!).catch(asUploadApiError);
+    sendSuccess(res, { sessionId, bytes: buffer.length });
+  }),
 );
 
 /**
@@ -278,6 +299,7 @@ router.get(
  *
  * Idempotent: if the session is already in a terminal state (`ready` /
  * `quarantined`), returns the cached result without re-scanning.
+ *
  *
  * Tenant-scoped: caller's effective tenant must match the file's tenant.
  * Super-admin context-switch is honored via `req.tenantId`

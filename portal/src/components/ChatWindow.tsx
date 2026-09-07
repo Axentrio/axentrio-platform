@@ -25,7 +25,13 @@ import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedRespon
 import { ChatStatusBadge } from './StatusBadge';
 import { ChannelBadge } from './ChannelBadge';
 import { TypingIndicator, CompactTypingIndicator } from './TypingIndicator';
-import { FileAttachment } from './FilePreview';
+import { AttachButton, MessageAttachment } from './ChatAttachments';
+import {
+  uploadChatAttachment,
+  ChatAttachmentUploadError,
+  type ChatAttachmentDraft,
+} from '../queries/useChatAttachment';
+import { fileService } from '../services/fileService';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -82,27 +88,12 @@ const MessageSenderName: React.FC<{ message: Message; isAgent: boolean; isBot: b
   );
 };
 
-/** Bubble payload: text, image, or file attachment. */
+/** Bubble payload: text or attachment (signed URL fetched on read). */
 const MessageBody: React.FC<{ message: Message }> = ({ message }) => {
-  const { t } = useTranslation();
-  return message.type === 'text' ? (
-    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-  ) : message.type === 'image' ? (
-    <img
-      src={message.fileUrl}
-      alt={message.fileName || t('inbox.window.message.image')}
-      className="max-w-48 max-h-48 rounded-lg object-cover"
-    />
-  ) : (
-    <FileAttachment
-      fileName={message.fileName || t('inbox.window.message.file')}
-      fileType={message.fileType || 'application/octet-stream'}
-      fileSize={message.fileSize}
-      onClick={() => {
-        // Open file preview
-      }}
-    />
-  );
+  if (message.type === 'text') {
+    return <p className="text-sm whitespace-pre-wrap">{message.content}</p>;
+  }
+  return <MessageAttachment message={message} />;
 };
 
 /** Timestamp, or the pending / failed delivery line with its Retry. */
@@ -359,6 +350,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [slashQuery, setSlashQuery] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [attachmentDraft, setAttachmentDraft] = useState<ChatAttachmentDraft | null>(null);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
 
   const { messages, typingUsers, sendMessage, retryMessage, sendTyping } = useChatDetail(chat.id);
@@ -402,37 +396,62 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   //  - failed   → the bubble flips to FAILED with a Retry (same
   //               clientMessageId); the composer clears so retry is the one
   //               path (no accidental duplicate send with a new id).
-  const handleSend = async () => {
-    if (!messageInput.trim() || isSending) return;
+  const attachmentErrorMessage = (err: unknown): string => {
+    if (err instanceof ChatAttachmentUploadError) {
+      if (err.code === 'too_large') return t('inbox.window.attachment.tooLarge');
+      if (err.code === 'unsupported_type') return t('inbox.window.attachment.unsupported');
+      if (err.code === 'rejected') return t('inbox.window.attachment.rejected');
+      return err.detail ?? t('inbox.window.attachment.failed');
+    }
+    return t('inbox.window.attachment.failed');
+  };
 
-    // Snapshot the draft being sent: the operator may keep typing during the
-    // POST, and only THIS text may ever be cleared from the composer.
+  const handleFilePicked = async (file: File) => {
+    setAttachmentError(null);
+    setIsUploadingAttachment(true);
+    try {
+      const draft = await uploadChatAttachment(chat.id, file);
+      setAttachmentDraft(draft);
+    } catch (err) {
+      setAttachmentDraft(null);
+      setAttachmentError(attachmentErrorMessage(err));
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
+
+  const handleSend = async () => {
+    const hasText = !!messageInput.trim();
+    const hasAttachment = !!attachmentDraft;
+    if ((!hasText && !hasAttachment) || isSending || isUploadingAttachment) return;
+
     const sentText = messageInput;
+    const sentAttachment = attachmentDraft;
 
     setSendNotice(null);
     setIsSending(true);
     let result: Awaited<ReturnType<typeof sendMessage>>;
     try {
-      result = await sendMessage(sentText.trim());
+      result = await sendMessage(sentText.trim(), sentAttachment ?? undefined);
     } finally {
       setIsSending(false);
     }
 
     if (result.status === 'conflict') {
       setSendNotice(conflictNoticeFor(result.code));
-      return; // keep the draft (and anything typed since)
+      return;
     }
 
-    // Clear ONLY the sent draft. If the composer changed while the POST was
-    // in flight, the operator's newer text stays untouched (on a failure the
-    // sent text itself stays recoverable via the bubble's Retry).
-    if ((inputRef.current?.value ?? messageInput) === sentText) {
-      setMessageInput('');
-      sendTyping(false);
-      // Reset textarea height
-      if (inputRef.current) {
-        inputRef.current.style.height = 'auto';
+    if (result.status === 'sent') {
+      if ((inputRef.current?.value ?? messageInput) === sentText) {
+        setMessageInput('');
+        sendTyping(false);
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+        }
       }
+      setAttachmentDraft(null);
+      setAttachmentError(null);
     }
   };
 
@@ -577,8 +596,38 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {t('inbox.window.composer.sendTakesOver')}
           </p>
         )}
+        {attachmentDraft && (
+          <div
+            className="mb-2 flex items-center gap-2 rounded-xl border border-edge bg-surface-3 px-3 py-2 text-xs text-text-secondary"
+            data-testid="attachment-chip"
+          >
+            <span className="flex-1 truncate">
+              {attachmentDraft.fileName} ({fileService.formatFileSize(attachmentDraft.fileSize)})
+            </span>
+            <button
+              type="button"
+              className="font-medium text-text-muted hover:text-text-primary"
+              onClick={() => {
+                setAttachmentDraft(null);
+                setAttachmentError(null);
+              }}
+            >
+              {t('inbox.window.attachment.remove')}
+            </button>
+          </div>
+        )}
+        {attachmentError && (
+          <p className="mb-2 text-xs text-red-500" role="alert">
+            {attachmentError}
+          </p>
+        )}
         <div className="flex items-end gap-2">
           <CannedResponsePickerButton onSelect={handleCannedResponseSelect} />
+          <AttachButton
+            chatId={chat.id}
+            disabled={isSending || isUploadingAttachment}
+            onPicked={handleFilePicked}
+          />
 
           <div className="flex-1 relative">
             <SlashCommandDropdown
@@ -607,7 +656,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           <Button
             onClick={handleSend}
-            disabled={!messageInput.trim() || isSending}
+            disabled={(!messageInput.trim() && !attachmentDraft) || isSending || isUploadingAttachment}
             className="p-2 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
             size="icon"
             aria-label={t('inbox.window.composer.send')}

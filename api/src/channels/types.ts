@@ -1,6 +1,7 @@
 import { Request } from 'express';
 import { ChannelConnection, ChannelType } from '../database/entities/ChannelConnection';
 import { ResponsePayload } from './response.types';
+import { channelSupportsAttachment } from './attachment-type';
 
 // --- Inbound (platform → us) ---
 
@@ -241,15 +242,20 @@ function formatMediaMessage(
   response: ResponsePayload,
   capabilities: ChannelCapabilities,
 ): OutboundChannelMessage {
-  if (
-    (type === 'image' && !capabilities.supportsImages) ||
-    (type === 'video' && !capabilities.supportsVideo) ||
-    (type === 'audio' && !capabilities.supportsAudio) ||
-    (type === 'file' && !capabilities.supportsFiles)
-  ) {
+  if (!channelSupportsAttachment(capabilities, type)) {
+    if (response.mediaUrl) {
+      return { type: 'text', content: response.mediaUrl };
+    }
     return {
       type: 'text',
       content: typeof response.content === 'string' ? response.content : `[${type} attachment]`,
+    };
+  }
+  if (response.mediaUrl) {
+    return {
+      type,
+      mediaUrl: response.mediaUrl,
+      content: typeof response.content === 'string' && response.content ? response.content : undefined,
     };
   }
   return {

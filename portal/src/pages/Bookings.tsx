@@ -19,9 +19,9 @@ import {
   Paperclip,
   AlertTriangle,
 } from 'lucide-react';
-import { api, extractApiErrorMessage } from '../services/apiClient';
+import { api } from '../services/apiClient';
+import { openFileDownload } from '../services/fileService';
 import { formatClockTime } from '@contracts/clock-format';
-import { toast } from 'sonner';
 import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
 import { FeatureDisabledNotice } from '../components/billing/FeatureDisabledNotice';
@@ -83,17 +83,6 @@ const dayLabel = (iso: string, tz: string) =>
   fmt(iso, tz, { weekday: 'long', day: 'numeric', month: 'long' });
 const timeLabel = (iso: string, tz: string) => formatClockTime(iso, tz);
 
-/** P5e — fetch a fresh signed URL for an attached file and open it (404 if removed). */
-async function downloadFile(fileSessionId: string): Promise<void> {
-  try {
-    const { downloadUrl } = await api.get<{ downloadUrl: string }>(`/files/${fileSessionId}/download`);
-    window.open(downloadUrl, '_blank', 'noopener');
-  } catch (err) {
-    toast.error(extractApiErrorMessage(err) ?? 'File is no longer available');
-  }
-}
-
-
 function BookingAttachedFile({
   file,
 }: {
@@ -124,7 +113,7 @@ function BookingAttachedFile({
     return (
       <button
         type="button"
-        onClick={() => downloadFile(file.fileSessionId)}
+        onClick={() => openFileDownload(file.fileSessionId)}
         className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:border-primary-500 hover:text-text-primary"
       >
         <Paperclip className="h-3 w-3" /> {file.fileName}

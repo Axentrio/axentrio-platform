@@ -25,6 +25,7 @@
 
 import { useEffect, useRef } from 'react';
 import { QueryClient, useQueryClient } from '@tanstack/react-query';
+import { attachmentFieldsFromMetadata } from './attachmentMetadata';
 import { queryKeys } from './queryKeys';
 import { useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
@@ -246,6 +247,7 @@ export function messagePayloadToMessage(dto: MessageCreatedPayload): Message {
     ...(typeof metaClientMessageId === 'string' && metaClientMessageId
       ? { clientMessageId: metaClientMessageId }
       : {}),
+    ...attachmentFieldsFromMetadata(dto.metadata),
     ...(dto.status === 'failed' ? { deliveryState: 'failed' as const } : {}),
   };
 }

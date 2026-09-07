@@ -2108,6 +2108,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             text: data.content,
             sender: 'bot',
             timestamp: new Date(data.timestamp || data.createdAt),
+            file: this._attachmentFromPayload(data.metadata, data.type),
             quickReplies: data.metadata && Array.isArray(data.metadata.quickReplies) ? data.metadata.quickReplies : undefined,
             // A control the SERVER asked us to offer. Unlike a chip, its result does not go back
             // as a customer message — it goes to an endpoint the server owns, which is the only
@@ -2246,6 +2247,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             text: msg.content,
             sender: senderType === 'user' ? 'user' : 'bot',
             timestamp: new Date(msg.createdAt),
+            file: this._attachmentFromPayload(msg.metadata, msg.type),
             // Backfilled messages used to arrive stripped of their metadata, so a reconnect or a
             // reload silently dropped the chips a reply had offered. Harmless for slot chips - the
             // customer can type the time - but not for the address picker: it is the only way to
@@ -2439,6 +2441,39 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.loadingEl = this.container.querySelector('.cb-loading');
     }
     
+
+    _attachmentFromPayload(metadata, messageType) {
+      if (!metadata || typeof metadata.uploadSessionId !== 'string') return undefined;
+      const name = typeof metadata.fileName === 'string' ? metadata.fileName : 'File';
+      const size = typeof metadata.fileSize === 'number' ? metadata.fileSize : 0;
+      const mime = typeof metadata.fileType === 'string'
+        ? metadata.fileType
+        : (messageType === 'image' ? 'image/jpeg' : 'application/octet-stream');
+      return {
+        sessionId: metadata.uploadSessionId,
+        name,
+        size,
+        type: mime,
+      };
+    }
+
+    async openWidgetFile(sessionId) {
+      if (!sessionId || !this.token) return;
+      try {
+        const res = await fetchWithTimeout(
+          `${this.config.apiUrl}/api/v1/widget/files/${sessionId}/url`,
+          { headers: { Authorization: 'Bearer ' + this.token } },
+          8000,
+        );
+        if (!res.ok) return;
+        const body = await res.json();
+        const url = (body && body.data && body.data.url) || (body && body.url);
+        if (url) window.open(url, '_blank', 'noopener');
+      } catch (err) {
+        this.log('File open failed:', err && err.message);
+      }
+    }
+
     renderMessage(message) {
       const isUser = message.sender === 'user';
       const time = this.config.showTimestamp ? utils.formatTime(message.timestamp) : '';
@@ -2446,11 +2481,22 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       let content = '';
       
       if (message.file) {
-        if (message.file.type.startsWith('image/')) {
+        const sessionAttr = message.file.sessionId
+          ? ` data-upload-session="${utils.escapeAttr(message.file.sessionId)}"`
+          : '';
+        if (message.file.url && message.file.type.startsWith('image/')) {
           content = `<img class="cb-message__image" src="${utils.escapeAttr(message.file.url)}" alt="${utils.escapeAttr(message.file.name)}" loading="lazy">`;
+        } else if (message.file.sessionId && message.file.type.startsWith('image/')) {
+          content = `<div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
+              <div class="cb-message__file-icon">${ICONS.file}</div>
+              <div class="cb-message__file-info">
+                <div class="cb-message__file-name">${utils.escapeHtml(message.file.name)}</div>
+                <div class="cb-message__file-size">${utils.formatFileSize(message.file.size)}</div>
+              </div>
+            </div>`;
         } else {
           content = `
-            <div class="cb-message__file">
+            <div class="cb-message__file cb-message__file--link"${sessionAttr} role="button" tabindex="0">
               <div class="cb-message__file-icon">${ICONS.file}</div>
               <div class="cb-message__file-info">
                 <div class="cb-message__file-name">${utils.escapeHtml(message.file.name)}</div>
@@ -2882,7 +2928,23 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       const messageEl = document.createElement('div');
       messageEl.innerHTML = this.renderMessage(message);
-      this.messagesContainer.appendChild(messageEl.firstElementChild);
+      const node = messageEl.firstElementChild;
+      this.messagesContainer.appendChild(node);
+
+      if (node) {
+        node.querySelectorAll('.cb-message__file--link[data-upload-session]').forEach((el) => {
+          const sessionId = el.getAttribute('data-upload-session');
+          if (!sessionId) return;
+          const open = () => this.openWidgetFile(sessionId);
+          el.addEventListener('click', open);
+          el.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              open();
+            }
+          });
+        });
+      }
 
       this.scrollToBottom();
       this.saveSession();

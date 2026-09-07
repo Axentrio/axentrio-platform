@@ -10,6 +10,8 @@ import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { assertUploadEnabledForSession } from '../file-handling/widget-upload-gate';
+import { asUploadApiError } from '../file-handling/upload-errors';
+import { isUuid } from '../utils/uuid';
 import { resolveBotKeyStrict, BotPausedError, BotNotFoundError, BotOriginNotAllowedError, assertOriginAllowed } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
@@ -844,27 +846,12 @@ router.post(
 // service + virus scan the owner/portal path uses. Tenant + chat session come from
 // the server-trusted widget token, never the client.
 
-const UPLOAD_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Storage isn't configured everywhere; without this the visitor gets a 500. */
 function isS3Configured(): boolean {
   return !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET);
 }
 
-/**
- * Map the upload service's own error types onto real statuses.
- *
- * Both reached the global handler as 500/INTERNAL_ERROR, so "your file is too big" and
- * "you are over quota" — the two things a visitor can actually act on — arrived as
- * "something went wrong on our end". The portal path has had this adapter all along.
- */
-async function asUploadApiError(err: unknown): Promise<never> {
-  const { FileValidationError, QuotaExceededError, UploadSessionError } = await import('../file-handling/upload.service');
-  if (err instanceof FileValidationError) throw new ApiError(err.message, 400, 'FILE_VALIDATION_FAILED');
-  if (err instanceof QuotaExceededError) throw new ApiError(err.message, 429, 'QUOTA_EXCEEDED');
-  if (err instanceof UploadSessionError) throw new NotFoundError(err.message);
-  throw err;
-}
 
 router.post(
   '/files/upload',
@@ -910,7 +897,7 @@ router.post(
     const w = req.widget!;
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     const { sessionId } = req.params;
-    if (!UPLOAD_UUID_RE.test(sessionId)) throw new ValidationError('Invalid sessionId');
+    if (!isUuid(sessionId)) throw new ValidationError('Invalid sessionId');
     await assertUploadEnabledForSession(w.tenantId, w.sessionId);
     if (!isS3Configured()) {
       throw new ApiError('File uploads are not available right now', 503, 'STORAGE_UNAVAILABLE');
@@ -919,7 +906,7 @@ router.post(
     if (buffer.length === 0) throw new ValidationError('File body is required');
     const { getUploadService } = await import('../file-handling/upload.service');
     await getUploadService()
-      .writeWidgetObject(sessionId, buffer, w.tenantId, w.sessionId)
+      .writeUploadObject(sessionId, buffer, w.tenantId, w.sessionId)
       .catch(asUploadApiError);
     sendSuccess(res, { sessionId, bytes: buffer.length });
   }),
@@ -933,7 +920,7 @@ router.post(
     const w = req.widget!;
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     const { sessionId } = req.params;
-    if (!UPLOAD_UUID_RE.test(sessionId)) throw new ValidationError('Invalid sessionId');
+    if (!isUuid(sessionId)) throw new ValidationError('Invalid sessionId');
     // Also gated: completing an upload started before the owner switched uploads off must
     // not slip a file through the back half of the flow.
     await assertUploadEnabledForSession(w.tenantId, w.sessionId);
@@ -961,7 +948,36 @@ router.post(
     const { performScan } = await import('../file-handling/virus-scan-trigger');
     const scanResult = await performScan(sessionId, session.fileKey);
     sendSuccess(res, { sessionId, status: scanResult.clean ? 'ready' : 'quarantined', scanResult });
-  })
+  }),
+);
+
+router.get(
+  '/files/:sessionId/url',
+  widgetRateLimiter,
+  authenticateWidget,
+  asyncHandler(async (req, res) => {
+    const w = req.widget!;
+    if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
+    const { sessionId } = req.params;
+    if (!isUuid(sessionId)) throw new ValidationError('Invalid sessionId');
+    const { getUploadService } = await import('../file-handling/upload.service');
+    const s = await getUploadService().getSession(sessionId);
+    if (
+      !s ||
+      s.tenantId !== w.tenantId ||
+      s.chatSessionId !== w.sessionId ||
+      s.status !== 'ready'
+    ) {
+      throw new NotFoundError('File not found');
+    }
+    const url = await getUploadService().generatePublicUrl(s.fileKey, 3600);
+    sendSuccess(res, {
+      url,
+      fileName: s.originalName,
+      mimeType: s.mimeType,
+      fileSize: s.fileSize,
+    });
+  }),
 );
 
 export { router as widgetRouter };

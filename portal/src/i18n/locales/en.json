@@ -2246,7 +2246,8 @@
         "conflictClosed": "This conversation is closed. The message was not sent. Your text is kept below.",
         "conflictNotInTenant": "You are not a support agent in this workspace. Ask an admin to add you as a support agent. The message was not sent. Your text is kept below.",
         "conflictNotOwner": "You are not assigned to this conversation. The message was not sent. Your text is kept below.",
-        "sendTakesOver": "Sending will take over this conversation from the AI"
+        "sendTakesOver": "Sending will take over this conversation from the AI",
+        "attach": "Attach file"
       },
       "sender": {
         "agent": "Agent",
@@ -2258,12 +2259,20 @@
         "file": "File",
         "sending": "Sending…",
         "failed": "Not delivered",
-        "retry": "Retry"
+        "retry": "Retry",
+        "openImage": "Open image"
       },
       "transferChat": "Transfer to teammate",
       "empty": {
         "title": "No messages yet",
         "subtitle": "Messages will appear here once the conversation starts"
+      },
+      "attachment": {
+        "remove": "Remove",
+        "tooLarge": "File is too large (max 25 MB).",
+        "unsupported": "This file type is not supported.",
+        "rejected": "File was rejected by security scan.",
+        "failed": "Could not upload file. Try again."
       }
     },
     "takeover": {

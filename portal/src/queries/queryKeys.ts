@@ -16,6 +16,9 @@ export const queryKeys = {
     members: () => [...queryKeys.tenants.me(), 'members'] as const,
     invites: () => [...queryKeys.tenants.me(), 'invites'] as const,
   },
+  files: {
+    preview: (id: string) => ['files', id, 'preview'] as const,
+  },
   chats: {
     all: () => ['chats'] as const,
     list: (filters?: Record<string, unknown>) => [...queryKeys.chats.all(), 'list', filters] as const,

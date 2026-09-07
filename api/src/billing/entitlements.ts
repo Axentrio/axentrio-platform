@@ -127,7 +127,10 @@ export function entitlementsFor(
   }
 
   const limits = { ...plan.limits };
-  if (tier === 'enterprise') {
+  // -1 = super-admin unlimited LLM tokens on any tier (test tenants).
+  if (overrides.monthlyTokenLimit === -1) {
+    limits.monthlyTokens = null;
+  } else if (tier === 'enterprise') {
     if (overrides.maxSessions !== null) limits.sessions = overrides.maxSessions;
     if (overrides.dailyLlmCallLimit !== null) limits.dailyLlmCalls = overrides.dailyLlmCallLimit;
     if (overrides.monthlyTokenLimit !== null) limits.monthlyTokens = overrides.monthlyTokenLimit;

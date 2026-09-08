@@ -34,11 +34,11 @@ These are **not** Requests on an Auto-book Service. Check the date they named, r
 - `CAPACITY_REACHED` on create — offer a different time; never retry the refused one; never say closed
 - `PHONE_REQUIRED` / `EMAIL_REQUIRED` / `ADDRESS_REQUIRED` / `FILE_REQUIRED` — ask for the missing field, keep the named hour, retry. Missing contact is not "unavailable"
 
-Never call `request_appointment` on Auto-book before a `check_availability` result exists for that date. Enforced: the write path refuses `REQUEST_BEFORE_CHECK` unless the date was checked this conversation (`availability-checked.ts`), except price on request, a "choose length" customer with no length, or an address outside/unplaceable in the Service Area. A first reply that offers a Request on an all-Auto-book catalog with no check is nudged once (`request_offer_without_check`). Today, urgent, vague, or "not confident" are not Request reasons.
+Never call `request_appointment` on Auto-book before a `check_availability` result exists for that date. Checking is what reports travel; an unmeasured journey is a reason to call it.
 
 Request-only Services: no `check_availability`, no chips. Ask preferred time in their words.
 
-Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, closed weekday, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`. `internal-provider-create.test.ts` (check before capture).
+Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, closed weekday, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`.
 
 ---
 
@@ -245,7 +245,6 @@ Unconfigured booking (no hours / no Service) drops booking tools while skill-sta
 | `buildSlotQuickReplies` / `safeReplyContent` | `NO_SLOTS_ON_SCREEN_FALLBACK` cannot fire while utcSlots exist for an exact-time miss |
 | named-time / intake | hour survives intake; chips stay off when they already chose a free hour |
 | `applyAvailabilityClaimGuard` | one nudge, then one server-authored whole-day check for the named date; never a second check, never a dead end with no chips |
-| `request_appointment` / `REQUEST_BEFORE_CHECK` | Auto-book stays Auto-book; never capture before a check for that date; exemptions: on-request price, choose-length without duration, outside/unplaceable area; first-reply offer nudge `request_offer_without_check` |
 | create/request contact errors | ask, don't Request |
 | timing PUT | explicit `null` inherits; explicit `0` is zero |
 | travel | grouping does not refuse; only `maxTravelMin` refuses a long drive |

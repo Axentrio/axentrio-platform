@@ -60,7 +60,6 @@ const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   REQUEST_EXPIRED: 'owner-only accept/decline',
   ORIGINAL_NOT_CONFIRMED: 'owner-only accept of a change request whose original appointment is gone',
   REQUEST_OUTSIDE_WINDOW: 'raised while the agent captures a NEW request; the public pages never create one',
-  REQUEST_BEFORE_CHECK: 'raised while the agent captures a NEW request; the public pages never create one',
   REQUEST_WOULD_DUPLICATE: 'owner-only accept - the customer never sees the Requests tab',
   SERVICE_NOT_FOUND: 'agent-side service selection while creating',
   SESSION_NOT_FOUND: 'there is no chat session behind a signed manage link',

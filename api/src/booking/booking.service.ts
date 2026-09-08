@@ -29,7 +29,6 @@ import {
 import { BookingError, BookingContext, BookingExtras, type UpdateBookingPatch, type ClockWindow, type BookingActorKind } from './booking-providers/types';
 import { serviceRequiresCustomerEmail } from './booking-providers/contact';
 import { InternalProvider } from './booking-providers/internal.provider';
-import { rememberAvailabilityChecked } from './booking-providers/availability-checked';
 import { findBookableService } from './booking-providers/find-bookable-service';
 import { subjectToCustomerChangePolicy, DEFAULT_CUSTOMER_CHANGE_MODE, type CustomerChangePeek } from './customer-change-policy';
 import type { CustomerChangeMode } from '../database/entities/ServiceType';
@@ -178,7 +177,6 @@ export async function checkAvailability(
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  await rememberAvailabilityChecked(ctx.session.id, startDate, endDate);
   // `excludeBookingId` stays undefined here: this entry point is a NEW booking. The reschedule
   // picker has its own function below, which passes both it and the address on the row.
   return internalProvider.checkAvailability(

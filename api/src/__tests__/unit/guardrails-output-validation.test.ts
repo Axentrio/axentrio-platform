@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   validateOutput,
   claimsDatedUnavailability,
-  offersManualRequest,
   type OutputViolationFamily,
 } from "../../guardrails/output-validation";
 
@@ -362,31 +361,5 @@ describe("guardrails · claimsDatedUnavailability", () => {
   it("needs BOTH halves, so neither alone trips it", () => {
     expect(claimsDatedUnavailability("Woensdag 16 september om 10:00?")).toBe(false);
     expect(claimsDatedUnavailability("Dat is helaas volgeboekt.")).toBe(false);
-  });
-});
-
-describe("guardrails · offersManualRequest", () => {
-  it("catches an offer to file a request in Dutch, English, and French", () => {
-    expect(
-      offersManualRequest(
-        "Ik kan de afspraak als aanvraag indienen; die wordt pas bevestigd zodra WaterFix ze beoordeelt.",
-      ),
-    ).toBe(true);
-    expect(
-      offersManualRequest(
-        "I can submit this as a request and it will not be confirmed until WaterFix reviews it.",
-      ),
-    ).toBe(true);
-    expect(
-      offersManualRequest(
-        "Je peux l'enregistrer comme demande, elle ne sera confirmée qu'après validation.",
-      ),
-    ).toBe(true);
-  });
-
-  it("leaves a filed request and a times offer alone", () => {
-    expect(offersManualRequest("Je aanvraag is verstuurd.")).toBe(false);
-    expect(offersManualRequest("Your request has been sent to the owner.")).toBe(false);
-    expect(offersManualRequest("Dinsdag 8 september kan om 12:00, 12:30 of 13:00.")).toBe(false);
   });
 });

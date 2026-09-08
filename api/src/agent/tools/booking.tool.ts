@@ -1429,7 +1429,7 @@ export class CreateBookingTool implements ToolAdapter {
 export class RequestAppointmentTool implements ToolAdapter {
   name = 'request_appointment';
   description =
-    'Capture an appointment REQUEST (not a confirmed booking) for the business owner to review. Use this for a request-only service, or on an auto-book service ONLY after check_availability for that date returned no times, failed, or reported CALENDAR_NOT_CONNECTED (or a SERVICES rule explicitly sends you here: travel requestableSlots, outside the service area, a "choose length" customer who will not give a length, price "on request"). A job that is for today, urgent, complex, or unclear is NOT a reason: an auto-book service checks availability and books. The owner is notified and follows up. Only call once the service is identified.';
+    'Capture an appointment REQUEST (not a confirmed booking) for the customer to be reviewed by the business. Use this — never create_booking — when the service is request-only, the scope/duration is unclear, the job sounds complex/urgent/risky, or you are not confident you can safely confirm a time. The owner is notified and follows up. Only call once the service is identified.';
   parameters = {
     type: 'object',
     properties: {

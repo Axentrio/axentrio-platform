@@ -51,13 +51,11 @@ import {
   claimsBookingDone,
   claimsDatedUnavailability,
   containsCurrencyAmount,
-  offersManualRequest,
   type OutputValidationContext,
 } from '../guardrails/output-validation';
 import { renderMemoryForPrompt } from '../memory/memory-store';
 import { pendingYesNeedsCreate, pendingYesNeedsReschedule, type PendingAgreedMove } from './pending-booking-confirmation';
 import { refusedNamedTimeStillApplies, rememberRefusedNamedTime, clearRefusedNamedTime } from './refused-named-time';
-import { peekAvailabilityChecked } from '../booking/booking-providers/availability-checked';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -512,10 +510,6 @@ const AVAILABILITY_CORRECTION_NOTE =
   "now. If it returns times, offer them. If it returns none, follow the guidance the tool gives " +
   "you. Do not offer to submit the appointment as a request, and do not repeat the claim.";
 
-/** Nudge for a reply that offered to file a request on a catalog that only books automatically, with no check behind it. */
-const REQUEST_OFFER_CORRECTION_NOTE =
-  '(Internal note, not from the customer.) You just offered to submit this appointment as a request for the business to review, but every service here books automatically and you did not call check_availability for that date. A request is only for after check_availability returns no times, fails, or reports no connected calendar. If you still need a required detail (service, name, email, phone, address, intake answer), ask for it. Otherwise call check_availability now for the date the customer named - the whole day, no earliestTime or latestTime - and confirm their time if it is in the result, or offer only the times it returns. Do not mention this note.';
-
 /**
  * The SECOND offence, after the nudge above was already spent.
  *
@@ -716,7 +710,6 @@ interface RunLoopContext {
    */
   bookingClaimGuardArmed: boolean;
   availabilityClaimGuardArmed: boolean;
-  requestOfferGuardArmed: boolean;
   specialtyTerms: string[];
   sessionBotOwned: boolean;
 }
@@ -1023,7 +1016,6 @@ export class AgentService {
         aiSettings,
         bookingClaimGuardArmed: prepared.bookingClaimGuardArmed,
         availabilityClaimGuardArmed: prepared.availabilityClaimGuardArmed,
-        requestOfferGuardArmed: prepared.requestOfferGuardArmed,
         specialtyTerms: prepared.specialtyTerms,
         sessionBotOwned,
       };
@@ -1145,7 +1137,6 @@ export class AgentService {
       this.loadBookingRuleContext(bot, tenant, effBotSettings, bookingActive),
       this.loadVenueContext(bot, tenant, effBotSettings),
     ]);
-    const requestOfferGuardArmed = availabilityClaimGuardArmed && booking.allServicesAutoBook;
     // Template body (layer 2) + effective tone/guardrails both come from the
     // one resolve above (effBotSettings carries the effective AI slice).
     // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
@@ -1225,7 +1216,7 @@ export class AgentService {
       ...conversationHistory,
       { role: 'user', content: buildUserContent(message, images) },
     ];
-    return { tools, bookingClaimGuardArmed, availabilityClaimGuardArmed, requestOfferGuardArmed, specialtyTerms, priceContextLoaded, messages };
+    return { tools, bookingClaimGuardArmed, availabilityClaimGuardArmed, specialtyTerms, priceContextLoaded, messages };
   }
 
   /**
@@ -1374,11 +1365,10 @@ export class AgentService {
     // Any bookable service carried out at the customer's address → travel-caveat
     // wording on ## OUR ADDRESS (and no come-in-person invite).
     let hasTravelServices = false;
-    let allServicesAutoBook = false;
     let bookingServices = '';
     let bookingHours = '';
     if (!bookingActive) {
-      return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours, allServicesAutoBook };
+      return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours };
     }
     try {
       // Full row: the placeholder formatter needs availabilityMode/weeklyHours,
@@ -1444,7 +1434,6 @@ export class AgentService {
       bookingConfigured = isBookingConfigured(services, !!rule);
       bookingServices = formatServicesForPlaceholder(services, bookingTimezone, new Date());
       hasTravelServices = services.some((s) => serviceNeedsCustomerAddress(s));
-      allServicesAutoBook = services.length > 0 && services.every((s) => s.bookingMode === 'auto');
     } catch (error) {
       // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
       // must not falsely decline a CONFIGURED tenant. Worst case is the prior
@@ -1452,7 +1441,7 @@ export class AgentService {
       logger.warn('booking config check failed — treating booking as usable', { tenantId: tenant.id, error });
       bookingConfigured = true;
     }
-    return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours, allServicesAutoBook };
+    return { bookingTimezone, bookingConfigured, bookingServices, bookingHours, hasTravelServices, openingHours };
   }
 
   /**
@@ -1754,19 +1743,19 @@ export class AgentService {
     content: string,
   ): Promise<boolean> {
     if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.heldBooking || state.bookingRecorded) return false;
+    if (!claimsDatedUnavailability(content)) return false;
     if (i >= MAX_ITERATIONS - 1) return false;
-    const dated = claimsDatedUnavailability(content);
-    const offered = !dated && ctx.requestOfferGuardArmed && !state.availabilityChecked && offersManualRequest(content)
-      && ((await peekAvailabilityChecked(ctx.session.id))?.length ?? 0) === 0;
-    if (!dated && !offered) return false;
-    if (state.availabilityCorrectionAttempted) return this.forceAvailabilityCheck(ctx, state, content);
+    if (state.availabilityCorrectionAttempted) {
+      return this.forceAvailabilityCheck(ctx, state, content);
+    }
     state.availabilityCorrectionAttempted = true;
-    const correction = dated ? 'availability_unchecked_claim' : 'request_offer_without_check';
-    (ctx.trace.corrections ??= []).push(correction);
-    logger.warn('[agent] unchecked booking claim; nudging model to check', { sessionId: ctx.session.id, correction });
+    (ctx.trace.corrections ??= []).push('availability_unchecked_claim');
+    logger.warn('[agent] blocked unchecked availability claim; nudging model to check', {
+      sessionId: ctx.session.id,
+    });
     state.messages.push({ role: 'assistant', content });
-    state.messages.push({ role: 'user', content: dated ? AVAILABILITY_CORRECTION_NOTE : REQUEST_OFFER_CORRECTION_NOTE });
-    return true;
+    state.messages.push({ role: 'user', content: AVAILABILITY_CORRECTION_NOTE });
+    return true; // re-run: the model should call check_availability before answering
   }
 
   /**

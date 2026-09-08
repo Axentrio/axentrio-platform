@@ -77,7 +77,6 @@ export const SLOT_TAKEN_ON_RESCHEDULE =
  *
  * The tool description invites exactly this ("...or you are not confident you can safely confirm
  * a time"), so the refusal has to live on the write path. Prose could not have stopped it.
- * The description no longer invites it, and `REQUEST_BEFORE_CHECK` below refuses the skip outright.
  *
  * THE DESTINATION TRAVELS WITH THE REFUSAL, BUT NEVER THE BOUND ITSELF. The first version was a
  * bare string and the model filled the gap: told only "too soon", it answered "choose a date
@@ -150,14 +149,4 @@ export const requestClosedDay = (startDate: string, endDate: string): string =>
   `Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
   `customer the times it returns, and book one outright: this service books automatically. ` +
   `Offer ONLY times that call gives you. Do not retry the same date.`;
-
-/**
- * An auto-book Request with no availability check behind it.
- * BK 2026-09-08: first reply offered a same-day appointment as a request for the owner to
- * review — zero tool calls, open day, free times. The window gates above cannot see it because
- * the time was inside the window. This is booking-rules.md "Never call request_appointment on
- * Auto-book before a check_availability result exists for that date", enforced.
- */
-export const requestBeforeCheck = (date: string): string =>
-  `This service books automatically and nothing has checked ${date} yet, so it cannot be captured as a request - a free time would silently become an unconfirmed request. Do NOT capture it and do NOT tell the customer the team will come back on it. Call check_availability with startDate ${date} and endDate ${date} (whole day, no earliestTime or latestTime). If the customer's time is in the result, confirm it with create_booking; otherwise offer ONLY the times that call returns. Capture a request only if that call returns no times, fails, or returns CALENDAR_NOT_CONNECTED.`;
 

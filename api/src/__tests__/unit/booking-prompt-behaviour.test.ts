@@ -106,13 +106,6 @@ describe('checking before capturing a request', () => {
     const p = buildServicesSection([svc({ bookingMode: 'request' })])!;
     expect(p).not.toMatch(/NEVER call request_appointment before a check_availability result/i);
   });
-
-  it('does not offer a request for urgency, today, or the model’s own doubt', () => {
-    const p = buildServicesSection([svc()])!;
-    expect(p).not.toMatch(/complex\/urgent\/risky|not confident you can safely confirm|scope\/duration is unclear/i);
-    expect(p).toMatch(/An appointment for today, an urgent job, a vague scope, or your own uncertainty is NOT a reason/i);
-    expect(p).toMatch(/ONLY when the service is "request-only", or on an auto-book service AFTER check_availability/i);
-  });
 });
 
 /**

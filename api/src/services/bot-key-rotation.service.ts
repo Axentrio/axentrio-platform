@@ -8,8 +8,12 @@ import { logger } from '../utils/logger';
 
 export const KEY_ROTATION_GRACE_DAYS = 30;
 
+/** ~96 bits — enough for a public widget id (unique index on public_key). */
+export const PUBLIC_KEY_ENTROPY_BYTES = 12;
+
+/** New bot / post-rotation widget ids: `bk_` + 16-char base64url (~19 chars total). */
 export function generatePublicKey(): string {
-  return `bk_${crypto.randomBytes(24).toString('hex')}`;
+  return `bk_${crypto.randomBytes(PUBLIC_KEY_ENTROPY_BYTES).toString('base64url')}`;
 }
 
 export async function rotateBotKey(

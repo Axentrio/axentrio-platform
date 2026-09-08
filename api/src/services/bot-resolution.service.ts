@@ -4,7 +4,7 @@
  * Centralised resolution of a widget-embedded key → `{ tenant, bot }`.
  *
  * A widget can present one of three key shapes:
- *  1. `Bot.publicKey` directly — the standard path (looks like `bk_<random>`).
+ *  1. `Bot.publicKey` directly — the standard path (short `bk_<base64url>`).
  *  2. `Bot.previousPublicKey` — the grace-window key after a rotation.
  *  3. `Tenant.apiKey` — the legacy path, equal to the anchor bot's
  *     `publicKey` by migration backfill.

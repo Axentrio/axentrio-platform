@@ -192,7 +192,8 @@ export class Bot {
 
   /**
    * Key the widget embeds with. For the anchor bot this equals the legacy
-   * `Tenant.apiKey`. New bots get a `bk_<random>` key. Rotation moves the
+   * `Tenant.apiKey`. New bots get a short `bk_<base64url>` key (~19 chars).
+   * Rotation moves the
    * current value to `previousPublicKey` for a grace window.
    * The unique index spans soft-deleted rows too, so a freed key is never recycled.
    */

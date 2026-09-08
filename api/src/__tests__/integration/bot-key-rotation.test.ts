@@ -80,7 +80,8 @@ describe('bot key rotation grace', () => {
   it('POST /bots/:id/rotate-key returns the new snippet', async () => {
     const res = await request(app).post(`/api/v1/bots/${botId}/rotate-key`).send();
     expect(res.status).toBe(200);
-    expect(res.body.data.publicKey).toMatch(/^bk_/);
+    expect(res.body.data.publicKey).toMatch(/^bk_[A-Za-z0-9_-]{16}$/);
+    expect(res.body.data.publicKey.length).toBe(19);
     expect(res.body.data.publicKey).not.toBe(oldKey);
     expect(res.body.data.snippet).toContain(res.body.data.publicKey);
     expect(res.body.data.previousPublicKeyExpiresAt).toBeDefined();

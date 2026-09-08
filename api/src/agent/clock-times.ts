@@ -133,21 +133,32 @@ function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {
   return null;
 }
 
+// Longer offsets first; within each row, longer needles first (`overmorgen` before `morgen`).
+// `hier` is omitted: French "yesterday" is Dutch "here".
 const RELATIVE_DAY_NEEDLES: Array<{ needles: string[]; offsetDays: number }> = [
-  { needles: ['vandaag', 'today', "aujourd'hui", 'aujourdhui'], offsetDays: 0 },
-  { needles: ['morgen', 'tomorrow', 'demain'], offsetDays: 1 },
-  { needles: ['gisteren', 'yesterday', 'hier'], offsetDays: -1 },
   { needles: ['overmorgen', 'day after tomorrow', 'après-demain', 'apres-demain'], offsetDays: 2 },
+  { needles: ['vandaag', 'today', "aujourd'hui", 'aujourdhui'], offsetDays: 0 },
+  { needles: ['gisteren', 'yesterday'], offsetDays: -1 },
+  { needles: ['morgen', 'tomorrow', 'demain'], offsetDays: 1 },
 ];
+
+/** Whole-token match — `morgen` must not hit inside `goedemorgen` or `overmorgen`. */
+function relativeDayNeedleMatches(text: string, needle: string): boolean {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (needle.includes(' ')) {
+    return new RegExp(`\\b${escaped.replace(/\s+/g, '\\s+')}\\b`, 'i').test(text);
+  }
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(text);
+}
 
 /** Relative calendar days named in customer text (`vandaag`, `tomorrow`, …). */
 export function parseRelativeCalendarDates(text: string, timezone: string, now: Date): string[] {
-  const lower = text.toLowerCase();
   const today = DateTime.fromJSDate(now).setZone(timezone);
   if (!today.isValid) return [];
   const out: string[] = [];
   for (const { needles, offsetDays } of RELATIVE_DAY_NEEDLES) {
-    if (needles.some((needle) => lower.includes(needle))) {
+    const sorted = [...needles].sort((a, b) => b.length - a.length);
+    if (sorted.some((needle) => relativeDayNeedleMatches(text, needle))) {
       out.push(today.plus({ days: offsetDays }).toFormat('yyyy-MM-dd'));
     }
   }

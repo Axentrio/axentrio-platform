@@ -16,6 +16,7 @@ import {
   latestCustomerTimeText,
   namesSingleOfferedSlot,
   namesSingleOfferedTime,
+  parseRelativeCalendarDates,
   unofferedSingleNamedSlot,
   parseClockTimes,
   unofferedSingleTimeIn,
@@ -133,6 +134,34 @@ describe('when it must stay quiet', () => {
   });
 });
 
+
+
+describe('parseRelativeCalendarDates — whole-token matching', () => {
+  const TZ = 'Europe/Brussels';
+  const NOW = new Date('2026-09-08T12:00:00.000Z'); // Tue 14:00 Brussels
+
+  it('does not treat goedemorgen as morgen', () => {
+    expect(parseRelativeCalendarDates('Goedemorgen, ik wil om 10:00', TZ, NOW)).toEqual([]);
+  });
+
+  it('does not treat Dutch hier (here) as yesterday', () => {
+    expect(parseRelativeCalendarDates('Hier is mijn adres', TZ, NOW)).toEqual([]);
+  });
+
+  it('matches morgen and overmorgen separately', () => {
+    expect(parseRelativeCalendarDates('morgen om 10:00', TZ, NOW)).toEqual(['2026-09-09']);
+    expect(parseRelativeCalendarDates('overmorgen om 10:00', TZ, NOW)).toEqual(['2026-09-10']);
+    expect(parseRelativeCalendarDates('overmorgen is beter dan morgen', TZ, NOW)).toEqual([
+      '2026-09-10',
+      '2026-09-09',
+    ]);
+  });
+
+  it('matches vandaag and gisteren', () => {
+    expect(parseRelativeCalendarDates('vandaag om 15:00', TZ, NOW)).toEqual(['2026-09-08']);
+    expect(parseRelativeCalendarDates('gisteren ging het niet', TZ, NOW)).toEqual(['2026-09-07']);
+  });
+});
 
 
 describe('date-aware named slot matching', () => {

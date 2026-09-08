@@ -125,8 +125,7 @@ export function upcomingMidnightDate(
 
 function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {
   if (offered.has(t.key)) return t.key;
-  // A 12-hour time with no suffix is ambiguous — "1:30" could be 13:30.
-  if (t.ambiguous && t.hour < 12) {
+  if (allowPmAltFor(t)) {
     const alt = `${String(t.hour + 12).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
     if (offered.has(alt)) return alt;
   }
@@ -198,11 +197,12 @@ function filterSlotsByNamedDay(
   });
 }
 
-/** Zero-padded hours (`01:00`) are explicit AM; `1:30` may still mean PM. */
+/** Zero-padded (`01:00`) and two-digit hours (`10:30`) are explicit; single-digit (`1:30`) may mean PM. */
 function allowPmAltFor(clock: ClockTime): boolean {
   if (!clock.ambiguous || clock.hour >= 12) return false;
   const hourPart = clock.written.match(/^(\d{1,2})/)?.[1];
-  return !(hourPart && hourPart.length >= 2 && hourPart.startsWith('0'));
+  if (!hourPart) return false;
+  return hourPart.length < 2;
 }
 
 function offeredKeyForSlot(clock: ClockTime, slotClock: string, allowPmAlt: boolean): string | null {
@@ -231,10 +231,7 @@ export function resolveNamedOfferedSlotStart(
   const anchored = hasNamedCalendarAnchor(text, timezone, now);
   const { dates, weekdays } = resolveNamedDates(text, timezone, now);
   const candidates = anchored ? filterSlotsByNamedDay(slots, timezone, dates, weekdays) : slots;
-  // Calendar-anchored "23 september om 10:30" means morning; PM alt would wrongly
-  // accept 22:30 when min-gap blocks 10:30 AM but the evening slot is free.
-  // Single-digit hours (e.g. "om 1:30" -> 13:30) still allow PM alt when anchored.
-  const allowPmAlt = allowPmAltFor(clock) && (!anchored || clock.hour < 10);
+  const allowPmAlt = allowPmAltFor(clock);
   const nowMs = now.getTime();
   let pastMatch: string | null = null;
   for (const slot of candidates) {

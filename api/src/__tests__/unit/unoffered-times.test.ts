@@ -188,15 +188,31 @@ describe('date-aware named slot matching', () => {
     const slots = [{ start: '2026-09-07T23:00:00.000Z' }]; // 01:00 today Brussels, already past
     expect(namesSingleOfferedSlot('vandaag om 01:00', slots, TZ, NOW)).toBe(false);
   });
-  it('does not match a calendar-anchored 10:30 to an evening slot when morning is blocked', () => {
+  it('QA min-gap: live probe slots must not set requestedTimeAvailable via PM alt on 10:30', () => {
     const said =
       'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken. Tom GapTest, 0470 00 02 01, achraflamranim@gmail.com.';
-    const slots = [
-      { start: '2026-09-23T09:00:00.000Z' }, // 11:00 Brussels — earliest after min-gap
-      { start: '2026-09-23T20:30:00.000Z' }, // 22:30 — must not satisfy "om 10:30"
-    ];
-    expect(namesSingleOfferedSlot(said, slots, TZ, NOW)).toBe(false);
-    expect(unofferedSingleNamedSlot(said, slots, TZ, NOW)).toBe('10:30');
+    // Prod GET /scheduler/availability 2026-09-22T22:00Z–2026-09-23T22:00Z (Branch A, 2026-09-08).
+    // 08:30Z (10:30 Brussels) absent; 20:30Z (22:30) present — old allowPmAltFor matched evening.
+    const LIVE_PROBE_FULL_DAY = [
+      '2026-09-22T22:00:00.000Z', '2026-09-22T22:30:00.000Z', '2026-09-22T23:00:00.000Z', '2026-09-22T23:30:00.000Z',
+      '2026-09-23T01:30:00.000Z', '2026-09-23T02:00:00.000Z', '2026-09-23T02:30:00.000Z', '2026-09-23T03:00:00.000Z',
+      '2026-09-23T03:30:00.000Z', '2026-09-23T04:00:00.000Z', '2026-09-23T04:30:00.000Z', '2026-09-23T05:00:00.000Z',
+      '2026-09-23T05:30:00.000Z', '2026-09-23T06:00:00.000Z', '2026-09-23T06:30:00.000Z', '2026-09-23T07:00:00.000Z',
+      '2026-09-23T09:00:00.000Z', '2026-09-23T09:30:00.000Z', '2026-09-23T10:00:00.000Z', '2026-09-23T10:30:00.000Z',
+      '2026-09-23T11:00:00.000Z', '2026-09-23T11:30:00.000Z', '2026-09-23T12:00:00.000Z', '2026-09-23T12:30:00.000Z',
+      '2026-09-23T13:00:00.000Z', '2026-09-23T13:30:00.000Z', '2026-09-23T14:00:00.000Z', '2026-09-23T14:30:00.000Z',
+      '2026-09-23T15:00:00.000Z', '2026-09-23T15:30:00.000Z', '2026-09-23T16:00:00.000Z', '2026-09-23T16:30:00.000Z',
+      '2026-09-23T17:00:00.000Z', '2026-09-23T17:30:00.000Z', '2026-09-23T18:00:00.000Z', '2026-09-23T18:30:00.000Z',
+      '2026-09-23T19:00:00.000Z', '2026-09-23T19:30:00.000Z', '2026-09-23T20:00:00.000Z', '2026-09-23T20:30:00.000Z',
+      '2026-09-23T21:00:00.000Z', '2026-09-23T21:30:00.000Z',
+    ].map((start) => ({ start }));
+    const LIVE_PROBE_WEEK = LIVE_PROBE_FULL_DAY;
+
+    expect(parseClockTimes(said)[0]?.ambiguous).toBe(true);
+    for (const slots of [LIVE_PROBE_FULL_DAY, LIVE_PROBE_WEEK]) {
+      expect(namesSingleOfferedSlot(said, slots, TZ, NOW)).toBe(false);
+      expect(unofferedSingleNamedSlot(said, slots, TZ, NOW)).toBe('10:30');
+    }
   });
 });
 

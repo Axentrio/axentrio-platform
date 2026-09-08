@@ -23,8 +23,8 @@
  */
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
-import { initializeDatabase, AppDataSource } from '../src/database/data-source';
-import { initializeRedis, getRedisClient } from '../src/config/redis';
+import { initializeDatabase, closeDatabase, AppDataSource } from '../src/database/data-source';
+import { initializeRedis, getRedisClient, closeRedis } from '../src/config/redis';
 import { Booking } from '../src/database/entities/Booking';
 import { ServiceType } from '../src/database/entities/ServiceType';
 import { ChatSession } from '../src/database/entities/ChatSession';
@@ -322,6 +322,20 @@ async function assertConversationE2E(fixture: EphemeralFixture): Promise<void> {
   pass('live conversation: polite refusal without handoff offer');
 }
 
+/** Release Redis + DB pool so isolated smoke exits instead of hanging until killed. */
+async function shutdownConnections(): Promise<void> {
+  try {
+    await closeRedis();
+  } catch (error) {
+    logger.warn('[smoke-not-allowed-no-handoff] closeRedis failed', { error });
+  }
+  try {
+    await closeDatabase();
+  } catch (error) {
+    logger.warn('[smoke-not-allowed-no-handoff] closeDatabase failed', { error });
+  }
+}
+
 async function main(): Promise<void> {
   if (process.env.LOCAL_REDIS_URL) process.env.REDIS_URL = process.env.LOCAL_REDIS_URL;
 
@@ -350,12 +364,17 @@ async function main(): Promise<void> {
     console.log('\nAll smoke checks passed.');
   } finally {
     if (fixture) {
-      await teardownEphemeralFixture(fixture);
+      try {
+        await teardownEphemeralFixture(fixture);
+      } catch (error) {
+        logger.warn('[smoke-not-allowed-no-handoff] fixture teardown failed', { error });
+      }
     }
+    await shutdownConnections();
   }
 }
 
 main().catch((err) => {
   logger.error('[smoke-not-allowed-no-handoff] failed', err);
-  process.exit(1);
+  process.exitCode = 1;
 });

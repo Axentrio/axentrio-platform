@@ -188,6 +188,16 @@ describe('date-aware named slot matching', () => {
     const slots = [{ start: '2026-09-07T23:00:00.000Z' }]; // 01:00 today Brussels, already past
     expect(namesSingleOfferedSlot('vandaag om 01:00', slots, TZ, NOW)).toBe(false);
   });
+  it('does not match a calendar-anchored 10:30 to an evening slot when morning is blocked', () => {
+    const said =
+      'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken. Tom GapTest, 0470 00 02 01, achraflamranim@gmail.com.';
+    const slots = [
+      { start: '2026-09-23T09:00:00.000Z' }, // 11:00 Brussels — earliest after min-gap
+      { start: '2026-09-23T20:30:00.000Z' }, // 22:30 — must not satisfy "om 10:30"
+    ];
+    expect(namesSingleOfferedSlot(said, slots, TZ, NOW)).toBe(false);
+    expect(unofferedSingleNamedSlot(said, slots, TZ, NOW)).toBe('10:30');
+  });
 });
 
 describe('namesSingleOfferedTime — the customer already chose an offered hour', () => {

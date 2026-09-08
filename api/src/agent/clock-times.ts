@@ -231,7 +231,10 @@ export function resolveNamedOfferedSlotStart(
   const anchored = hasNamedCalendarAnchor(text, timezone, now);
   const { dates, weekdays } = resolveNamedDates(text, timezone, now);
   const candidates = anchored ? filterSlotsByNamedDay(slots, timezone, dates, weekdays) : slots;
-  const allowPmAlt = !anchored || allowPmAltFor(clock);
+  // Calendar-anchored "23 september om 10:30" means morning; PM alt would wrongly
+  // accept 22:30 when min-gap blocks 10:30 AM but the evening slot is free.
+  // Single-digit hours (e.g. "om 1:30" -> 13:30) still allow PM alt when anchored.
+  const allowPmAlt = allowPmAltFor(clock) && (!anchored || clock.hour < 10);
   const nowMs = now.getTime();
   let pastMatch: string | null = null;
   for (const slot of candidates) {

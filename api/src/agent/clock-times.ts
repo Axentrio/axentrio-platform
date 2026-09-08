@@ -274,8 +274,9 @@ export function unofferedSingleNamedSlot(
 
 /**
  * Slots to turn into quick-reply chips when the customer named an exact hour that
- * was refused on an anchored day. Without this, a week-wide probe's `slice(0, 8)`
- * surfaces midnight–05:00 Brussels while 11:00 sits at index 16.
+ * was refused on an anchored day. Picks the same-day slot closest in local time to
+ * the refused clock (tie → earlier), then returns up to eight slots chronologically
+ * from that index in the probe list.
  */
 export function chipCandidateSlots(
   text: string,
@@ -292,23 +293,24 @@ export function chipCandidateSlots(
   const daySlots = filterSlotsByNamedDay(slots, timezone, dates, weekdays);
   if (daySlots.length === 0) return slots;
 
-  const earliestChipMinute = Math.max(0, refusedMinutes - 30);
-  const nearRefusal = daySlots.filter((slot) => {
-    const dt = DateTime.fromISO(slot.start).setZone(timezone);
-    if (!dt.isValid) return false;
-    return dt.hour * 60 + dt.minute > earliestChipMinute;
-  });
-  if (nearRefusal.length === 0) return daySlots;
+  let bestIndex = -1;
+  let bestDistance = Infinity;
+  let bestMinutes = Infinity;
 
-  // Week-wide probes list midnight first; drop early-day slots that would steal slice(0, 8).
-  const earlyStealsChips = daySlots.some((slot) => {
-    const idx = slots.indexOf(slot);
-    if (idx < 0 || idx >= 8) return false;
+  for (const slot of daySlots) {
     const dt = DateTime.fromISO(slot.start).setZone(timezone);
-    if (!dt.isValid) return false;
-    return dt.hour * 60 + dt.minute <= refusedMinutes;
-  });
-  return earlyStealsChips ? nearRefusal : daySlots;
+    if (!dt.isValid) continue;
+    const slotMinutes = dt.hour * 60 + dt.minute;
+    const distance = Math.abs(slotMinutes - refusedMinutes);
+    if (distance < bestDistance || (distance === bestDistance && slotMinutes < bestMinutes)) {
+      bestDistance = distance;
+      bestMinutes = slotMinutes;
+      bestIndex = slots.indexOf(slot);
+    }
+  }
+
+  if (bestIndex < 0) return daySlots;
+  return slots.slice(bestIndex, bestIndex + 8);
 }
 
 /**

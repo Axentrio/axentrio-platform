@@ -225,7 +225,7 @@ describe('date-aware named slot matching', () => {
     expect(chipCandidateSlots(said, retrySlots, TZ, NOW)).toEqual(retrySlots);
   });
 
-    it('QA min-gap: chip candidates skip midnight and start after the refused 10:30', () => {
+  it('QA min-gap: refused 10:30 pivots to 11:00 Brussels, not midnight chips', () => {
     const said =
       'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken. Tom GapTest, 0470 00 02 01, achraflamranim@gmail.com.';
     const LIVE_PROBE_FULL_DAY = [
@@ -243,9 +243,78 @@ describe('date-aware named slot matching', () => {
     ].map((start) => ({ start }));
 
     const candidates = chipCandidateSlots(said, LIVE_PROBE_FULL_DAY, TZ, NOW);
+    // 09:00Z = 11:00 Europe/Brussels — nearest same-day slot to refused 10:30
     expect(candidates[0]?.start).toBe('2026-09-23T09:00:00.000Z');
     expect(candidates.slice(0, 8).some((s) => s.start === '2026-09-23T09:00:00.000Z')).toBe(true);
     expect(candidates.slice(0, 8).some((s) => s.start === '2026-09-22T22:00:00.000Z')).toBe(false);
+  });
+
+  it('09:15 refusal: nearest tie picks earlier slot and keeps 09:00 + 09:30 chips', () => {
+    const said = 'Kan het om 09:15 op woensdag 2 september 2026?';
+    const slots = [
+      { start: '2026-09-02T07:00:00.000Z' },
+      { start: '2026-09-02T07:30:00.000Z' },
+    ];
+    const candidates = chipCandidateSlots(said, slots, TZ, NOW);
+    expect(candidates.map((s) => s.start)).toEqual([
+      '2026-09-02T07:00:00.000Z',
+      '2026-09-02T07:30:00.000Z',
+    ]);
+  });
+
+  it('15-minute grid: nearest alternative to refused 10:15 is 10:00 (tie -> earlier)', () => {
+    const said = 'Ik wil woensdag 23 september 2026 om 10:15 een Booking test boeken.';
+    const slots = [
+      { start: '2026-09-23T08:00:00.000Z' }, // 10:00 Brussels
+      { start: '2026-09-23T08:30:00.000Z' }, // 10:30 Brussels
+    ];
+    const candidates = chipCandidateSlots(said, slots, TZ, NOW);
+    expect(candidates.map((s) => s.start)).toEqual([
+      '2026-09-23T08:00:00.000Z',
+      '2026-09-23T08:30:00.000Z',
+    ]);
+  });
+
+  it('60-minute grid: nearest alternative to refused 10:30 is 10:00 (tie -> earlier)', () => {
+    const said = 'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken.';
+    const slots = [
+      { start: '2026-09-23T08:00:00.000Z' }, // 10:00 Brussels
+      { start: '2026-09-23T09:00:00.000Z' }, // 11:00 Brussels
+    ];
+    const candidates = chipCandidateSlots(said, slots, TZ, NOW);
+    expect(candidates.map((s) => s.start)).toEqual([
+      '2026-09-23T08:00:00.000Z',
+      '2026-09-23T09:00:00.000Z',
+    ]);
+  });
+
+  it('midnight boundary: week-wide probe midnight rows do not steal morning refusal chips', () => {
+    const said = 'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken.';
+    const slots = [
+      { start: '2026-09-22T22:00:00.000Z' }, // 23 Sep 00:00 Brussels
+      { start: '2026-09-22T22:30:00.000Z' },
+      { start: '2026-09-22T23:00:00.000Z' },
+      { start: '2026-09-22T23:30:00.000Z' },
+      { start: '2026-09-23T09:00:00.000Z' }, // 11:00 Brussels
+      { start: '2026-09-23T09:30:00.000Z' },
+    ];
+    const candidates = chipCandidateSlots(said, slots, TZ, NOW);
+    expect(candidates[0]?.start).toBe('2026-09-23T09:00:00.000Z');
+    expect(candidates.some((s) => s.start.startsWith('2026-09-22T22'))).toBe(false);
+  });
+
+  it('end of day: nearest slot before a refused 17:00 is offered first', () => {
+    const said = 'Ik wil woensdag 23 september 2026 om 17:00 een Booking test boeken.';
+    const slots = [
+      { start: '2026-09-23T07:00:00.000Z' },
+      { start: '2026-09-23T14:30:00.000Z' },
+      { start: '2026-09-23T14:45:00.000Z' },
+    ];
+    const candidates = chipCandidateSlots(said, slots, TZ, NOW);
+    expect(candidates[0]?.start).toBe('2026-09-23T14:45:00.000Z');
+    expect(candidates.map((s) => s.start)).toEqual([
+      '2026-09-23T14:45:00.000Z',
+    ]);
   });
 });
 

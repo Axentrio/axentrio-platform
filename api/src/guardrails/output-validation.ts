@@ -122,6 +122,30 @@ export function claimsDatedUnavailability(text: string): boolean {
   ].some((re) => re.test(t));
 }
 
+/**
+ * A reply that OFFERS to file the appointment as a request for the owner to review.
+ * BK 2026-09-08: Auto-book, same-day, name + email given, first reply: "I can submit it as a
+ * request; it will not be confirmed until the business reviews it". Zero tool calls. Not a
+ * dated-unavailability claim, so the guard above never saw it. Narrow on purpose: sentences
+ * that say a request WAS filed are the legitimate after-the-tool wording and stay untouched.
+ */
+export function offersManualRequest(text: string): boolean {
+  const t = text.toLowerCase();
+  return [
+    // English
+    /\b(?:as|into) an? (?:manual |appointment |booking )?request\b/,
+    /\b(?:submit|log|register|put in|send) (?:it|this|that|the appointment|your appointment) as an? request\b/,
+    /\b(?:not|won't|will not) be confirmed until\b/,
+    // Dutch
+    /\bals (?:een )?aanvraag\b/,
+    /\baanvraag (?:indienen|doorgeven|registreren|noteren|doorsturen)\b/,
+    /\b(?:pas|nog niet) bevestigd (?:zodra|tot|totdat|nadat|wanneer)\b/,
+    // French
+    /\b(?:en tant que|comme) (?:une )?demande\b/,
+    /\bne sera (?:pas )?confirm[ée]e? (?:qu'|que |tant que|avant)/,
+  ].some((re) => re.test(t));
+}
+
 // Internal markers that have NO legitimate place in a reply to a customer.
 // The fence markers + section headers mirror compose-system-prompt.ts exactly,
 // so a leak of the assembled system prompt is caught verbatim; the tool/id/

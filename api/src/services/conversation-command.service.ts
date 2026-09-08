@@ -541,7 +541,6 @@ async function applyUnassignedHumanPause(
   if (open) {
     await manager.update(HandoffRequest, open.id, {
       status: 'accepted',
-      assignedAgentId: null,
       acceptedAt: now,
       waitTimeSeconds: Math.max(0, Math.floor((now.getTime() - new Date(open.requestedAt).getTime()) / 1000)),
     });

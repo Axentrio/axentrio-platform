@@ -161,7 +161,7 @@ export function customerChangeNotAllowedError(
     403,
     { action },
     action === 'reschedule'
-      ? 'This appointment cannot be rescheduled online. Please contact the business directly.'
-      : 'This appointment cannot be cancelled online. Please contact the business directly.',
+      ? 'This appointment cannot be rescheduled online.'
+      : 'This appointment cannot be cancelled online.',
   );
 }

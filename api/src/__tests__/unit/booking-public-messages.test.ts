@@ -107,17 +107,30 @@ describe('what the reschedule page offers', () => {
 });
 
 describe('customer change policy copy on the manage pages', () => {
-  it('uses throw-site copy for CHANGE_NOT_ALLOWED, never the model directive', () => {
+  it('uses throw-site copy for policy CHANGE_NOT_ALLOWED, never the model directive or a contact-business workaround', () => {
     const err = new BookingError(
       '"Intro call" does not allow customers to reschedule through the booking system. Do not call request_appointment.',
       'CHANGE_NOT_ALLOWED',
       403,
       { action: 'reschedule' },
-      'This appointment cannot be rescheduled online. Please contact the business directly.',
+      'This appointment cannot be rescheduled online.',
     );
     const shown = customerMessage(err);
-    expect(shown).toBe('This appointment cannot be rescheduled online. Please contact the business directly.');
+    expect(shown).toBe('This appointment cannot be rescheduled online.');
     expect(shown).not.toMatch(BOT_DIRECTIVE);
+    expect(shown).not.toMatch(/contact the business directly/i);
+  });
+
+  it('uses throw-site copy for policy cancel CHANGE_NOT_ALLOWED without a contact-business workaround', () => {
+    const err = new BookingError(
+      'This appointment does not allow customers to cancel through the booking system. Do not call request_appointment.',
+      'CHANGE_NOT_ALLOWED',
+      403,
+      { action: 'cancel' },
+      'This appointment cannot be cancelled online.',
+    );
+    expect(customerMessage(err)).toBe('This appointment cannot be cancelled online.');
+    expect(customerMessage(err)).not.toMatch(/contact the business directly/i);
   });
 
   it('uses throw-site copy for CHANGE_REQUEST_OPEN', () => {

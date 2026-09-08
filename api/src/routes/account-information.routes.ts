@@ -6,6 +6,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireAdmin, asyncHandler, NotFoundError } from '../middleware';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
@@ -21,7 +22,7 @@ import { lookupCompanyByVat } from '../integrations/company-lookup/company-looku
 
 const router = Router();
 
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 function storedAccount(tenant: Tenant): AccountInformation | null {
   if (!tenant.officialBusinessName && !tenant.vatNumber && !tenant.invoiceEmail && !tenant.contactPerson) {

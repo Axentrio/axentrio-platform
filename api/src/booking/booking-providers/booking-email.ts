@@ -18,7 +18,9 @@ import {
   type RejectReasonKey,
 } from '../booking-copy';
 import { loadConfirmationExtras } from './confirmation-extras';
+import { loadCustomerEmailBrand, type CustomerEmailBrand } from './customer-email-brand';
 import { translateCustomerFreeText } from '../../i18n/translate-free-text';
+
 
 let emailService: EmailService | null = null;
 function getEmailService(): EmailService {
@@ -284,37 +286,105 @@ async function notifyOwner(
  * address or intake answer reaches them, so the unescaped version was one service rename
  * away from injecting markup into a real customer's inbox.
  */
+function card(title: string, innerHtml: string): string {
+  return (
+    `<div style="border:1px solid #e6e6e6;border-radius:12px;padding:16px 20px;margin:16px 0;">` +
+    `<p style="font-size:16px;font-weight:bold;margin:0 0 8px 0;">${esc(title)}</p>` +
+    innerHtml +
+    `</div>`
+  );
+}
+
 function customerEmailBody(
   params: BookingEmailParams,
   cancelled: boolean,
   copy: BookingCopy,
-  extraInfo?: string,
+  extraInfo: string | undefined,
+  attachmentNames: string[],
+  brand: CustomerEmailBrand,
 ): string {
   const lead = cancelled ? copy['customer.lead_cancelled'] : copy['customer.lead_confirmed'];
-  const duration =
-    typeof params.durationMin === 'number' && params.durationMin > 0
-      ? ` &middot; ${esc(fill(copy['customer.minutes'], { n: params.durationMin }))}`
+  const attendeeName = params.attendeeName?.trim() ?? '';
+  const greeting = attendeeName
+    ? `<p style="margin:0 0 12px 0;">${esc(fill(copy['customer.greeting'], { name: attendeeName }))}</p>`
+    : '';
+  const logoRow = brand.logoUrl
+    ? `<tr><td><img src="${esc(brand.logoUrl)}" alt="${esc(params.organizerName || '')}" width="200" style="max-height:64px;max-width:220px;width:auto;height:auto;display:block;margin:0 auto 24px auto;border:0;"></td></tr>`
+    : '';
+
+  const bullets: string[] = [
+    `<li>${esc(fill(copy['customer.detail_appointment'], { summary: params.summary }))}</li>`,
+    `<li>${esc(fill(copy['customer.detail_date'], { when: formatWhen(params.start, params.timezone, params.customerLanguage) }))}</li>`,
+  ];
+  if (typeof params.durationMin === 'number' && params.durationMin > 0) {
+    bullets.push(`<li>${esc(fill(copy['customer.detail_duration'], { n: params.durationMin }))}</li>`);
+  }
+  if (!cancelled && params.priceDisplay?.trim()) {
+    bullets.push(`<li>${esc(fill(copy['customer.detail_price'], { price: params.priceDisplay.trim() }))}</li>`);
+  }
+  if (params.location) {
+    bullets.push(`<li>${esc(fill(copy['customer.location'], { location: params.location }))}</li>`);
+  }
+  const appointmentCard = card(
+    copy['customer.appointment_heading'],
+    `<ul style="margin:0;padding-left:20px;">${bullets.join('')}</ul>`,
+  );
+
+  const preparationCard =
+    !cancelled && params.preparationInstructions?.trim()
+      ? card(
+          copy['customer.before_heading'],
+          `<p style="margin:0;">${esc(params.preparationInstructions.trim()).replace(/\n/g, '<br/>')}</p>`,
+        )
       : '';
-  const price =
-    !cancelled && params.priceDisplay?.trim()
-      ? ` &middot; ${esc(params.priceDisplay.trim())}`
+  const informationCard =
+    !cancelled && extraInfo?.trim()
+      ? card(
+          copy['customer.extra_info_heading'],
+          `<p style="margin:0;">${esc(extraInfo.trim()).replace(/\n/g, '<br/>')}</p>`,
+        )
       : '';
-  return (
-    `<p>${lead}</p>` +
-    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone, params.customerLanguage))}${duration}${price}</p>` +
-    (params.location ? `<p>${esc(fill(copy['customer.location'], { location: params.location }))}</p>` : '') +
-    (!cancelled && params.preparationInstructions?.trim()
-      ? `<p><strong>${esc(copy['customer.before_heading'])}</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
-      : '') +
-    (!cancelled && extraInfo?.trim()
-      ? `<p><strong>${esc(copy['customer.extra_info_heading'])}</strong><br/>${esc(extraInfo.trim()).replace(/\n/g, '<br/>')}</p>`
-      : '') +
-    `<p>${esc(copy['customer.invite_attached'])}</p>` +
+  const attachmentsCard =
+    !cancelled && attachmentNames.length > 0
+      ? card(
+          copy['customer.attachments_heading'],
+          `<p style="margin:0;">${esc(fill(copy['customer.attachments_note'], { names: attachmentNames.join(', ') }))}</p>`,
+        )
+      : '';
+
+  const organizerName = params.organizerName?.trim() ?? '';
+  const ownerEmail = params.ownerEmail?.trim() ?? '';
+  const signOffParts: string[] = [];
+  if (organizerName) signOffParts.push(`<strong>${esc(organizerName)}</strong>`);
+  if (brand.venueLine) signOffParts.push(esc(brand.venueLine));
+  if (ownerEmail) signOffParts.push(`<a href="mailto:${esc(ownerEmail)}">${esc(ownerEmail)}</a>`);
+
+  const content =
+    greeting +
+    `<p style="margin:0 0 12px 0;">${esc(lead)}</p>` +
+    appointmentCard +
+    preparationCard +
+    informationCard +
+    attachmentsCard +
+    `<p style="margin:16px 0 12px 0;">${esc(copy['customer.invite_attached'])}</p>` +
     (!cancelled && params.manageUrl
-      ? `<p><a href="${esc(params.manageUrl)}">${esc(copy['customer.manage_link'])}</a></p>`
-      : '')
+      ? `<p style="margin:0 0 12px 0;"><a href="${esc(params.manageUrl)}">${esc(copy['customer.manage_link'])}</a></p>`
+      : '') +
+    `<p style="margin:16px 0 4px 0;">${esc(copy['customer.regards'])}</p>` +
+    (signOffParts.length ? `<p style="margin:0;">${signOffParts.join('<br/>')}</p>` : '');
+
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>` +
+    `<body style="margin:0;padding:0;background:#ffffff;">` +
+    `<table width="100%" cellpadding="0" cellspacing="0" role="presentation"><tr>` +
+    `<td style="padding:24px 16px;">` +
+    `<table cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;margin:0 auto;font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;color:#222222;">` +
+    logoRow +
+    `<tr><td>${content}</td></tr>` +
+    `</table></td></tr></table></body></html>`
   );
 }
+
 
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
   const [customerCopy, ownerCopy] = await Promise.all([
@@ -351,7 +421,19 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   );
   const extras =
     params.method === 'REQUEST' ? await loadConfirmationExtras(params.botId).catch(() => null) : null;
-  const body = customerEmailBody(params, cancelled, customerCopy, extras?.text);
+  const brand = await loadCustomerEmailBrand(params.botId, params.tenantId).catch(() => ({
+    logoUrl: null,
+    venueLine: null,
+  }));
+  const attachmentNames = (extras?.attachments ?? []).map((a) => a.filename).filter(Boolean);
+  const body = customerEmailBody(
+    params,
+    cancelled,
+    customerCopy,
+    extras?.text,
+    cancelled ? [] : attachmentNames,
+    brand,
+  );
 
   await sendOrReport(
     'invite email',

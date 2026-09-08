@@ -1001,8 +1001,10 @@ const ConfirmationEmailSection: React.FC<{
       <h3 className="text-sm font-medium text-text-primary">Booking confirmation email</h3>
       <p className="text-xs text-text-muted">
         Added to every confirmation email this Agent sends. The headings follow the customer's own
-        language; your own text goes exactly as you write it.
+        language; your own text goes exactly as you write it. The logo at the top of the email is
+        the one from Settings → Widget & brand; if none is uploaded the header is left empty.
       </p>
+
 
       <div className="space-y-1">
         <Label htmlFor="confirmation-extra-info">Extra information</Label>

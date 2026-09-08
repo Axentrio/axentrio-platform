@@ -7,6 +7,7 @@ vi.mock('@clerk/express', () => ({
       createOrganization: vi.fn(),
       createOrganizationInvitation: vi.fn(),
       createOrganizationMembership: vi.fn(),
+      getOrganization: vi.fn(),
     },
   },
 }));
@@ -16,7 +17,10 @@ import {
   createClerkOrganization,
   inviteToClerkOrganization,
   addMemberToClerkOrganization,
+  organizationImageUrl,
 } from '../../services/clerk-sync.service';
+
+
 
 const mockOrgs = vi.mocked(clerkClient.organizations);
 
@@ -92,4 +96,36 @@ describe('Clerk Sync Service', () => {
       expect(await addMemberToClerkOrganization('org_1', 'user_1')).toBe(false);
     });
   });
+
+  describe('organizationImageUrl', () => {
+    it('returns a trimmed https URL when the org has an image', async () => {
+      mockOrgs.getOrganization.mockResolvedValue({
+        hasImage: true,
+        imageUrl: '  https://img.clerk.example/logo.png  ',
+      } as any);
+      expect(await organizationImageUrl('org_1')).toBe('https://img.clerk.example/logo.png');
+    });
+
+    it('returns null when hasImage is false', async () => {
+      mockOrgs.getOrganization.mockResolvedValue({
+        hasImage: false,
+        imageUrl: 'https://img.clerk.example/logo.png',
+      } as any);
+      expect(await organizationImageUrl('org_1')).toBeNull();
+    });
+
+    it('returns null on a thrown Clerk call', async () => {
+      mockOrgs.getOrganization.mockRejectedValue(new Error('clerk down'));
+      expect(await organizationImageUrl('org_1')).toBeNull();
+    });
+
+    it('rejects a non-https image URL', async () => {
+      mockOrgs.getOrganization.mockResolvedValue({
+        hasImage: true,
+        imageUrl: 'http://insecure.example/x.png',
+      } as any);
+      expect(await organizationImageUrl('org_1')).toBeNull();
+    });
+  });
+
 });

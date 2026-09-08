@@ -55,6 +55,14 @@ const loadConfirmationExtras = vi.fn(async (_botId: string) => null as {
 vi.mock('../../booking/booking-providers/confirmation-extras', () => ({
   loadConfirmationExtras: (botId: string) => loadConfirmationExtras(botId),
 }));
+const loadCustomerEmailBrand = vi.fn(async (_botId: string, _tenantId: string) => ({
+  logoUrl: null as string | null,
+  venueLine: null as string | null,
+}));
+vi.mock('../../booking/booking-providers/customer-email-brand', () => ({
+  loadCustomerEmailBrand: (botId: string, tenantId: string) => loadCustomerEmailBrand(botId, tenantId),
+}));
+
 
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -422,7 +430,10 @@ describe('booking email — owner and customer get separate messages', () => {
   beforeEach(() => {
     sendDurable.mockReset();
     sendDurable.mockResolvedValue({ status: 'sent' });
+    loadCustomerEmailBrand.mockReset();
+    loadCustomerEmailBrand.mockResolvedValue({ logoUrl: null, venueLine: null });
   });
+
 
 
   it('uses Dutch copy for the customer and English for the owner', async () => {
@@ -609,7 +620,10 @@ describe('booking email — global confirmation extras', () => {
     sendDurable.mockResolvedValue({ status: 'sent' });
     loadConfirmationExtras.mockReset();
     loadConfirmationExtras.mockResolvedValue(null);
+    loadCustomerEmailBrand.mockReset();
+    loadCustomerEmailBrand.mockResolvedValue({ logoUrl: null, venueLine: null });
   });
+
 
   it('reads the extras for the Agent that booked', async () => {
     await sendBookingEmail({ ...BASE });

@@ -237,6 +237,19 @@ export async function organizationHasImage(clerkOrgId: string): Promise<boolean>
   }
 }
 
+/** Public https URL for the Clerk organization logo, or null. Fail-open. */
+export async function organizationImageUrl(clerkOrgId: string): Promise<string | null> {
+  try {
+    const org = await clerkClient.organizations.getOrganization({ organizationId: clerkOrgId });
+    if (org.hasImage !== true) return null;
+    const url = typeof org.imageUrl === 'string' ? org.imageUrl.trim() : '';
+    return url.startsWith('https://') ? url : null;
+  } catch (error) {
+    logger.warn('Could not read Clerk organization image URL', { error, clerkOrgId });
+    return null;
+  }
+}
+
 export async function deleteClerkOrganization(clerkOrgId: string): Promise<boolean> {
   try {
     await clerkClient.organizations.deleteOrganization(clerkOrgId);

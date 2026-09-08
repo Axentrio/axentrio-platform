@@ -11,6 +11,17 @@ export const BOOKING_COPY_FR: BookingCopy = {
   'customer.extra_info_heading': 'Informations complémentaires :',
   'customer.invite_attached': 'Une invitation d’agenda est jointe.',
   'customer.manage_link': 'Déplacer ou annuler ce rendez-vous',
+  'customer.greeting': 'Bonjour {name},',
+  'customer.appointment_heading': 'Rendez-vous',
+  'customer.detail_appointment': 'Rendez-vous : {summary}',
+  'customer.detail_date': 'Date : {when}',
+  'customer.detail_duration': 'Durée : {n} min',
+  'customer.detail_price': 'Prix : {price}',
+
+  'customer.attachments_heading': 'Pièces jointes',
+  'customer.attachments_note': 'Les fichiers suivants sont joints à cet e-mail : {names}',
+  'customer.regards': 'Cordialement,',
+
   'customer.reminder_subject': 'Rappel : {summary}',
   'customer.reminder_lead': 'Rappel : votre rendez-vous est {when}.',
   'customer.reminder_tomorrow': 'demain',

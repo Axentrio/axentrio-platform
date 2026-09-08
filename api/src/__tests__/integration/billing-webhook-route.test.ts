@@ -31,6 +31,7 @@ import {
   createTestTenant,
   createTestBillingAccount,
 } from '../helpers/factories';
+import * as dunning from '../../billing/dunning';
 
 const PRO_PRICE = getStripePriceIdFor('pro') ?? 'price_test_pro';
 
@@ -451,5 +452,148 @@ describe('Out-of-order webhook delivery', () => {
       'subscription.created',
       'subscription.updated',
     ]);
+  });
+});
+
+describe('POST /api/v1/webhooks/billing/stripe — dunning day-0', () => {
+  let tenantId: string;
+
+  beforeEach(async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    tenantId = tenant.id;
+    await createTestBillingAccount(tenantId, {
+      provider: 'stripe',
+      status: 'active',
+      currentPlanId: 'pro',
+      isPrimary: true,
+      customerId: 'cus_dunning_day0',
+      subscriptionId: 'sub_dunning_day0',
+    });
+  });
+
+  it('fires sendDunningReminder(tenantId, 0) after marked_past_due commit', async () => {
+    const reminder = vi.spyOn(dunning, 'sendDunningReminder').mockResolvedValue(undefined);
+    const event = {
+      id: `evt_dunning_day0_${Math.random().toString(36).slice(2)}`,
+      type: 'invoice.payment_failed',
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: 'in_dunning_day0',
+          customer: 'cus_dunning_day0',
+          subscription: 'sub_dunning_day0',
+        },
+      },
+    };
+    installVerifyWebhookStub(event);
+
+    const res = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ received: true, outcome: 'marked_past_due' });
+    await vi.waitFor(() => {
+      expect(reminder).toHaveBeenCalledWith(tenantId, 0);
+    });
+  });
+
+  it('fires sendDunningReminder(tenantId, 0) after past_due_grace commit', async () => {
+    const reminder = vi.spyOn(dunning, 'sendDunningReminder').mockResolvedValue(undefined);
+    const event = makeStripeSubscriptionEvent({
+      type: 'customer.subscription.updated',
+      subscriptionId: 'sub_dunning_day0',
+      customerId: 'cus_dunning_day0',
+      stripeStatus: 'past_due',
+    });
+    installVerifyWebhookStub(event);
+
+    const res = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ received: true, outcome: 'past_due_grace' });
+    await vi.waitFor(() => {
+      expect(reminder).toHaveBeenCalledWith(tenantId, 0);
+    });
+  });
+
+  it('does not fire day-0 on replay', async () => {
+    const reminder = vi.spyOn(dunning, 'sendDunningReminder').mockResolvedValue(undefined);
+    const event = {
+      id: 'evt_dunning_day0_replay',
+      type: 'invoice.payment_failed',
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: 'in_dunning_day0_replay',
+          customer: 'cus_dunning_day0',
+          subscription: 'sub_dunning_day0',
+        },
+      },
+    };
+    installVerifyWebhookStub(event);
+
+    const first = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+    expect(first.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(reminder).toHaveBeenCalledWith(tenantId, 0);
+    });
+    reminder.mockClear();
+
+    const second = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({ alreadyProcessed: true });
+    expect(reminder).not.toHaveBeenCalled();
+  });
+
+  it('does not fire day-0 when webhook processing fails', async () => {
+    const reminder = vi.spyOn(dunning, 'sendDunningReminder').mockResolvedValue(undefined);
+    const event = {
+      id: 'evt_dunning_day0_fail',
+      type: 'customer.subscription.updated',
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: 'sub_dunning_day0',
+          customer: 'cus_dunning_day0',
+          status: 'past_due',
+          current_period_end: 1_900_000_000,
+          cancel_at_period_end: false,
+          trial_end: null,
+          items: { data: [{ id: 'si_1', price: { id: PRO_PRICE } }] },
+          schedule: 'sub_sched_dunning_fail',
+        },
+      },
+    };
+    setStripeClient({
+      subscriptions: { retrieve: vi.fn(), update: vi.fn() },
+      subscriptionSchedules: {
+        retrieve: vi.fn().mockRejectedValue(new Error('stripe down')),
+      },
+      webhooks: { constructEvent: vi.fn(() => event) },
+    } as never);
+
+    const res = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+
+    expect(res.status).toBe(500);
+    expect(reminder).not.toHaveBeenCalled();
   });
 });

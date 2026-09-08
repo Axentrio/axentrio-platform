@@ -17,8 +17,14 @@
  *   - subscription.updated / .deleted: try (provider, subscription_id);
  *     fall back to (provider, customer_id) ONLY when the Stripe row's
  *     subscription_id is still NULL (handles webhook reordering).
- *   - invoice.* / refund.recorded: try (provider, subscriptionId from
- *     normalized event); fall back to (provider, customer_id).
+ *   - invoice.paid / invoice.payment_failed: try (provider, subscription_id);
+ *     no-subscription invoices (token packs) fall back to (provider, customer_id)
+ *     even when the TBA already has a live subscription, so audit rows keep
+ *     tenant_id. Invoices that carry a subscription_id fall back by customer
+ *     ONLY when the row's subscription_id is still NULL. After the locked
+ *     re-read, reject when both IDs are set and they differ.
+ *   - refund.recorded: try (provider, subscription_id); fall back to
+ *     (provider, customer_id).
  *
  * Tier-cascade & primary-switch (§ Primary-switch & tier-cascade rules):
  *   - Promotion to is_primary + Tenant.tier mutation fires ONLY when local
@@ -70,10 +76,13 @@ export async function resolveEventRow(
   }
 
   // Fallback by (provider, customer_id):
-  //  - allowed for `subscription.created` and invoice/refund events
-  //    unconditionally,
+  //  - allowed for `subscription.created` unconditionally,
   //  - allowed for `subscription.updated`/`.deleted` ONLY when the matched
-  //    Stripe row's subscription_id is still NULL (webhook reordering).
+  //    Stripe row's subscription_id is still NULL,
+  //  - allowed for invoice paid/failed with no subscription_id (token pack),
+  //  - allowed for invoice paid/failed WITH a subscription_id only when the
+  //    row's subscription_id is still NULL,
+  //  - allowed for refund.recorded unconditionally.
   if (event.customerId) {
     const byCustomerId = await repo.findOne({
       where: { provider: 'stripe', customerId: event.customerId },
@@ -86,11 +95,17 @@ export async function resolveEventRow(
         if (byCustomerId.subscriptionId === null) {
           return { row: byCustomerId, tenantId: byCustomerId.tenantId };
         }
-        // Subscription mismatch — incoming event is for a different sub.
-        // Audit-only handling lives in caller via the audit row.
         return null;
       }
-      // invoice/refund — always allowed
+      if (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') {
+        const hasSubId =
+          typeof event.subscriptionId === 'string' && event.subscriptionId.length > 0;
+        if (!hasSubId || byCustomerId.subscriptionId === null) {
+          return { row: byCustomerId, tenantId: byCustomerId.tenantId };
+        }
+        return null;
+      }
+      // refund.recorded — always allowed
       return { row: byCustomerId, tenantId: byCustomerId.tenantId };
     }
   }
@@ -188,6 +203,18 @@ export async function handleNormalizedEvent(
   const row = await manager.getRepository(TenantBillingAccount).findOneOrFail({
     where: { id: matched.row.id },
   });
+  if (
+    (event.type === 'invoice.paid' || event.type === 'invoice.payment_failed') &&
+    typeof event.subscriptionId === 'string' &&
+    event.subscriptionId.length > 0 &&
+    row.subscriptionId &&
+    event.subscriptionId !== row.subscriptionId
+  ) {
+    return {
+      outcome: 'invoice_subscription_mismatch',
+      meta: { existing: row.subscriptionId, incoming: event.subscriptionId },
+    };
+  }
 
   switch (event.type) {
     case 'subscription.deleted':
@@ -202,26 +229,47 @@ export async function handleNormalizedEvent(
       return handleSubscriptionUpsert(manager, event, row, tenantId);
 
     case 'invoice.paid': {
-      // Recovery from past_due: if row was past_due, move back to active.
-      if (row.status === 'past_due') {
+      const subscriptionScoped =
+        typeof event.subscriptionId === 'string' && event.subscriptionId.length > 0;
+      if (row.status === 'past_due' && subscriptionScoped) {
         await manager.update(
           TenantBillingAccount,
           { id: row.id },
-          { status: 'active' },
+          { status: 'active', dunningStartedAt: null },
         );
         // tier was preserved through past_due, so no cascade needed
         return { outcome: 'past_due_recovered' };
+      }
+      // subscription.updated may have already flipped status to active
+      // before invoice.paid; still drop a leftover clock so the next
+      // failure starts a fresh 3-day window.
+      if (subscriptionScoped && row.dunningStartedAt) {
+        await manager.update(
+          TenantBillingAccount,
+          { id: row.id },
+          { dunningStartedAt: null },
+        );
       }
       return { outcome: 'invoice_paid_no_state_change' };
     }
 
     case 'invoice.payment_failed': {
+      const subscriptionScoped =
+        typeof event.subscriptionId === 'string' && event.subscriptionId.length > 0;
+      // Token-pack invoices match the TBA for audit but must not flip
+      // subscription state or start the dunning clock.
+      if (!subscriptionScoped) {
+        return { outcome: 'invoice_payment_failed_no_state_change' };
+      }
       // Move to past_due if not already terminal.
       if (row.status === 'active' || row.status === 'trialing') {
         await manager.update(
           TenantBillingAccount,
           { id: row.id },
-          { status: 'past_due' },
+          {
+            status: 'past_due',
+            ...(!row.dunningStartedAt ? { dunningStartedAt: new Date() } : {}),
+          },
         );
         // tier unchanged (grace period)
         return { outcome: 'marked_past_due' };
@@ -348,6 +396,7 @@ async function handleSubscriptionDeleted(
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       subscriptionId: null,
+      dunningStartedAt: null,
     },
   );
   // Primary cancellation cascades Tenant.tier='free'. Non-primary rows
@@ -505,6 +554,7 @@ type SubscriptionUpdateFields = {
   currentPlanId?: InternalPlanId;
   pendingPlanId?: InternalPlanId | null;
   pendingPlanEffectiveAt?: Date | null;
+  dunningStartedAt?: Date | null;
 };
 
 function buildSubscriptionUpdateFields(
@@ -528,6 +578,9 @@ function buildSubscriptionUpdateFields(
   };
   if (!isPastDue) {
     updateFields.currentPlanId = newPlanForStatus;
+    if (s.status === 'active' || s.status === 'trialing') {
+      updateFields.dunningStartedAt = null;
+    }
   }
   if (scheduleEnrichment) {
     if (scheduleEnrichment.clearSchedule) {
@@ -611,7 +664,17 @@ async function resolveSubscriptionOutcome(
   }
 
   if (row.isPrimary && isPastDue) {
-    // Grace period — tier preserved.
+    // Grace period — tier preserved. Stamp the dunning clock on first
+    // past_due if invoice.payment_failed has not already done so.
+    const subscriptionScoped =
+      typeof s.subscriptionId === 'string' && s.subscriptionId.length > 0;
+    if (subscriptionScoped && !row.dunningStartedAt) {
+      await manager.update(
+        TenantBillingAccount,
+        { id: row.id },
+        { dunningStartedAt: new Date() },
+      );
+    }
     return { outcome: 'past_due_grace' };
   }
 

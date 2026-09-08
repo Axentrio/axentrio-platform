@@ -804,7 +804,8 @@
         "renewsOn": "Renews on {{date}}",
         "cancellingOn": "Cancelling on {{date}} - you'll drop to Free after that.",
         "switchingTo": "Switching to {{plan}} on {{date}}",
-        "pastDueWarning": "Payment failed - update your payment method to keep your subscription active."
+        "pastDueWarning": "Payment failed - update your payment method to keep your subscription active.",
+        "pastDueWarningWithDate": "Payment failed — update your payment method by {{date}} or your plan drops to Free."
       },
       "manage": {
         "title": "Manage subscription",

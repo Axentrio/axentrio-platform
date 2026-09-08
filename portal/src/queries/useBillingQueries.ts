@@ -40,6 +40,7 @@ export interface BillingState {
   trialEnd: string | null;
   billingEmail: string | null;
   hasStripeSubscription: boolean;
+  graceEndsAt: string | null;
   events: BillingHistoryEntry[];
 }
 

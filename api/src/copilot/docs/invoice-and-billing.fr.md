@@ -14,7 +14,7 @@ Tout ce qui concerne la facturation se trouve sous *Paramètres → Facturation*
 
 **Retrouver vos factures :** *Paramètres → Facturation → Factures*. La liste affiche chaque facture avec sa date, son montant et son statut. Cliquez sur une ligne pour ouvrir le PDF ou télécharger le reçu.
 
-**Paiements échoués :** si un prélèvement échoue (carte expirée, transaction refusée), vous recevez un e-mail et une bannière dans le portail. Mettez votre carte à jour sous *Paramètres → Facturation → Moyen de paiement*. Stripe réessaie ensuite automatiquement — inutile de relancer vous-même.
+**Paiements échoués :** si un prélèvement échoue (carte expirée, transaction refusée), vous recevez un e-mail quotidien pendant 3 jours et une bannière dans le portail. Stripe réessaie ensuite automatiquement — inutile de relancer vous-même. Si la facture reste impayée au jour 3, nous résilions l’abonnement et l’espace passe à Free. Mettez votre carte à jour sous *Paramètres → Facturation → Moyen de paiement*.
 
 **Changer de moyen de paiement :** *Paramètres → Facturation → Moyen de paiement*. Le formulaire sécurisé de Stripe s'ouvre — modifiez la carte et validez. Les paiements programmés utilisent aussitôt la nouvelle carte.
 

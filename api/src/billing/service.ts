@@ -38,6 +38,7 @@ import { BillingProviderError, CheckoutablePlanId } from './types';
 import { TOKEN_PACKS, type TokenPackId } from './token-packs';
 import { config } from '../config/environment';
 import { expireOnboardingProTrial } from './onboarding-trial';
+import { DUNNING_GRACE_MS } from './dunning-clock';
 
 const STRIPE = 'stripe' as const;
 
@@ -544,6 +545,7 @@ export interface BillingState {
   trialEnd: Date | null;
   billingEmail: string | null;
   hasStripeSubscription: boolean;
+  graceEndsAt: Date | null;
   events: BillingHistoryEntry[];
 }
 
@@ -595,10 +597,10 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
       trialEnd: null,
       billingEmail: null,
       hasStripeSubscription: false,
+      graceEndsAt: null,
       events: history,
     };
   }
-
   // True only when the PRIMARY billing row is a live Stripe subscription.
   // This must mirror the primary-row contract every Stripe action enforces:
   // changePlan / cancelAtPeriodEnd / openCustomerPortal / undo* all reject
@@ -625,10 +627,13 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
     trialEnd: primary.trialEnd ?? null,
     billingEmail: primary.billingEmail ?? null,
     hasStripeSubscription,
+    graceEndsAt:
+      primary.status === 'past_due' && primary.dunningStartedAt
+        ? new Date(primary.dunningStartedAt.getTime() + DUNNING_GRACE_MS)
+        : null,
     events: history,
   };
 }
-
 /**
  * Grant the experimental first-signup Pro trial. The reservation insert is
  * the idempotency gate and also prevents Stripe from granting a second trial.

@@ -79,6 +79,9 @@ export class TenantBillingAccount {
   @Column({ type: 'varchar', length: 20, nullable: true, name: 'vat_id' })
   vatId?: string | null;
 
+  @Column({ type: 'timestamptz', nullable: true, name: 'dunning_started_at' })
+  dunningStartedAt?: Date | null;
+
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb", name: 'raw_provider_data' })
   rawProviderData!: Record<string, unknown>;
 

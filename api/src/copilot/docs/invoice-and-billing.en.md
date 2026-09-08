@@ -14,7 +14,7 @@ All billing actions are under *Settings → Billing*.
 
 **Finding invoices:** *Settings → Billing → Invoices*. The list shows every invoice with date, amount, and status. Click any row to open the PDF or download the receipt.
 
-**Failed payments:** if a charge fails (expired card, declined transaction), you get an email and an in-portal banner. Update your card under *Settings → Billing → Payment method*. Stripe will retry the charge automatically — no need to manually re-trigger.
+**Failed payments:** if a charge fails (expired card, declined transaction), you get a daily email for 3 days and an in-portal banner. Stripe still retries the charge automatically — no need to manually re-trigger. If the invoice is still unpaid at day 3, we cancel the subscription and the workspace drops to Free. Update your card under *Settings → Billing → Payment method*.
 
 **Updating payment method:** *Settings → Billing → Payment method*. Stripe's secure form opens — change card, submit. Existing scheduled payments use the new card.
 

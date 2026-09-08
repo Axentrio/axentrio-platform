@@ -241,7 +241,11 @@ const CurrentPlanCard: React.FC<{ state: BillingState }> = ({ state }) => {
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
               <AlertTriangle className="w-4 h-4" />
               <span>
-                {t('settings.billing.currentPlan.pastDueWarning')}
+                {state.graceEndsAt
+                  ? t('settings.billing.currentPlan.pastDueWarningWithDate', {
+                      date: formatDate(state.graceEndsAt),
+                    })
+                  : t('settings.billing.currentPlan.pastDueWarning')}
               </span>
             </div>
           )}

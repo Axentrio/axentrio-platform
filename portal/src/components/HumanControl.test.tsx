@@ -65,7 +65,7 @@ describe('TakeoverMenu', () => {
     render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    expect(await screen.findByText('Block AI — until I release')).toBeInTheDocument();
+    expect(await screen.findByText('Block AI - until I release')).toBeInTheDocument();
     expect(screen.getByText('Return to AI in 1 hour')).toBeInTheDocument();
     for (const hours of [2, 4, 8, 12, 24]) {
       expect(screen.getByText(`Return to AI in ${hours} hours`)).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe('TakeoverMenu', () => {
     render(<TakeoverMenu onSelect={onSelect} trigger={<button type="button">Take Over</button>} />);
 
     await user.click(screen.getByRole('button', { name: 'Take Over' }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({ mode: 'indefinite' });
   });

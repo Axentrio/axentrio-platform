@@ -15,7 +15,7 @@ import { getBlockInfo } from './template-constants';
 
 // Tap-to-insert chips, straight off the catalog (label + description → tooltip).
 const PLACEHOLDER_CHIPS = PLACEHOLDER_CATALOG.map((e) => `{${e.key}}`);
-const PLACEHOLDER_HELP: Record<string, string> = Object.fromEntries(PLACEHOLDER_CATALOG.map((e) => [`{${e.key}}`, `${e.label} — ${e.description}`]));
+const PLACEHOLDER_HELP: Record<string, string> = Object.fromEntries(PLACEHOLDER_CATALOG.map((e) => [`{${e.key}}`, `${e.label} - ${e.description}`]));
 
 /**
  * Tap-to-insert placeholder chips. In read-only mode it renders as a non-inserting

@@ -127,7 +127,7 @@ describe('AdminBotTemplateDetail — Current prompt variable highlighting', () =
     };
     renderPage();
     expect(screen.getByTitle('Filled in per business')).toHaveTextContent('{businessName}');
-    expect(screen.getByTitle('Unknown variable — will not resolve')).toHaveTextContent('{mystery}');
+    expect(screen.getByTitle('Unknown variable - will not resolve')).toHaveTextContent('{mystery}');
   });
 });
 

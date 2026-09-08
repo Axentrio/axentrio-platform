@@ -147,7 +147,7 @@ export function useChangePlan() {
     mutationFn: (input: { planId: CheckoutablePlan }) =>
       api.post('/billing/change-plan', input),
     onSuccess: () => {
-      toast.success('Plan change requested — waiting for Stripe to confirm…');
+      toast.success('Plan change requested - waiting for Stripe to confirm…');
       invalidateBillingState(queryClient);
     },
     onError: (err) => {
@@ -161,7 +161,7 @@ export function useCancelSubscription() {
   return useMutation({
     mutationFn: () => api.post('/billing/cancel'),
     onSuccess: () => {
-      toast.success('Cancellation scheduled — subscription ends at period end.');
+      toast.success('Cancellation scheduled - subscription ends at period end.');
       invalidateBillingState(queryClient);
     },
     onError: (err) => {

@@ -55,7 +55,7 @@ export const AddLeadControls: React.FC = () => {
         res.created
           ? t('leads.add.created', { defaultValue: 'Lead added' })
           : t('leads.add.merged', {
-              defaultValue: 'We already had this contact — your notes were added to them.',
+              defaultValue: 'We already had this contact - your notes were added to them.',
             }),
       );
       setAddOpen(false);
@@ -140,7 +140,7 @@ export const AddLeadControls: React.FC = () => {
             <DialogDescription>
               {t('leads.add.body', {
                 defaultValue:
-                  'For a customer who called or walked in. An email or phone number is required — it is how we recognise them if they contact you again.',
+                  'For a customer who called or walked in. An email or phone number is required - it is how we recognise them if they contact you again.',
               })}
             </DialogDescription>
           </DialogHeader>
@@ -206,7 +206,7 @@ export const AddLeadControls: React.FC = () => {
                 .map((r) => (
                   <div key={r.line} className="text-text-muted">
                     {t('leads.import.rejectedRow', {
-                      defaultValue: 'Line {{line}} skipped — {{reason}}',
+                      defaultValue: 'Line {{line}} skipped - {{reason}}',
                       line: r.line,
                       reason: r.reason ?? '',
                     })}

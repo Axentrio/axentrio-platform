@@ -130,7 +130,7 @@ function AgentsEmptyState({
       <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
         {variant === 'shifts'
           ? t('team.agentsEmpty.shifts', {
-              defaultValue: 'Shifts let you schedule when each agent is available — add an agent first.',
+              defaultValue: 'Shifts let you schedule when each agent is available - add an agent first.',
             })
           : variant === 'performance'
             ? t('team.agentsEmpty.performance', {
@@ -138,7 +138,7 @@ function AgentsEmptyState({
               })
             : t('team.agentsEmpty.agents', {
                 defaultValue:
-                  'Agents are humans who take over conversations when the AI hands off. Most teams run fine without any — add one only if you want live takeover.',
+                  'Agents are humans who take over conversations when the AI hands off. Most teams run fine without any - add one only if you want live takeover.',
               })}
       </p>
       <Button className="mt-4" variant="outline" onClick={onAdd}>
@@ -753,7 +753,7 @@ const OrgMembersPanel: React.FC = () => {
                       <span className="text-text-secondary">{t(`roles.${invite.role}`)}</span>
                     </TableCell>
                     <TableCell className="text-text-secondary text-sm">
-                      {invite.invitedBy?.name ?? '\u2014'}
+                      {invite.invitedBy?.name ?? '-'}
                     </TableCell>
                     <TableCell>
                       {invite.isExpired ? (

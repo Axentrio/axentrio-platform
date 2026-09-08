@@ -608,9 +608,9 @@ export function duplicateRefusalOf(err: unknown): DuplicateRefusal | undefined {
  * confirmation, and a cancellation is not an appointment being created.
  */
 export function acceptSuccessMessage(requestKind?: string | null): string {
-  if (requestKind === 'reschedule') return 'Request accepted — appointment moved';
-  if (requestKind === 'cancel') return 'Request accepted — appointment cancelled';
-  return 'Request accepted — appointment confirmed';
+  if (requestKind === 'reschedule') return 'Request accepted - appointment moved';
+  if (requestKind === 'cancel') return 'Request accepted - appointment cancelled';
+  return 'Request accepted - appointment confirmed';
 }
 
 /** Accept a request_created row (new lead, move, or cancellation). */

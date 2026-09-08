@@ -27,7 +27,7 @@ const VIA_ICON = { phone: Phone, channel: MessageSquare, email: Mail } as const;
 /** English fallbacks live next to the keys they back, so a missing locale still reads. */
 const ACTION_FALLBACK: Record<FollowUpRecommendation['action'], string> = {
   confirm_request: 'Confirm or decline the slot they asked for',
-  win_back_cancelled: 'Offer them a new time — their booking was cancelled',
+  win_back_cancelled: 'Offer them a new time - their booking was cancelled',
   check_in_after_visit: 'Check they were happy with the visit',
   offer_a_time: 'Get back to them with a time',
   ask_what_they_need: 'Ask what they need',
@@ -78,7 +78,7 @@ export const LeadFollowUp: React.FC<{ followUp: FollowUpRecommendation | null | 
           <p className="text-text-muted">
             {t('leads.followUp.advisory', {
               defaultValue:
-                'Worked out from this lead’s own details. Nothing has been sent — this is a suggestion only.',
+                'Worked out from this lead’s own details. Nothing has been sent - this is a suggestion only.',
             })}
           </p>
         </div>

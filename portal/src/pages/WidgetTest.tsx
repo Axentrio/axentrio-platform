@@ -137,7 +137,7 @@ function ChatWidget({
                 How can we help?
               </p>
               <p className="text-xs text-[#9c9584] mt-0.5 max-w-[200px]">
-                Ask us anything — we typically reply in under a minute.
+                Ask us anything - we typically reply in under a minute.
               </p>
             </div>
           )}

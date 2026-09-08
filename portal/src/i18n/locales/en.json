@@ -65,7 +65,7 @@
   },
   "bookings": {
     "title": "Bookings",
-    "intro": "Let your chatbot schedule appointments — it checks real-time availability and books right inside the conversation.",
+    "intro": "Let your chatbot schedule appointments - it checks real-time availability and books right inside the conversation.",
     "readiness": {
       "title": "Booking readiness",
       "subtitleLive": "Booking is live. Finish the items below to unlock more.",
@@ -97,18 +97,18 @@
       "oneLiner": "Unlock AI Bookings with Pro and let customers schedule appointments directly through chat.",
       "bullets": {
         "1": "Real-time availability synced with your Cal.com calendar.",
-        "2": "Bot collects name, email, phone, and notes — booked in under a minute.",
+        "2": "Bot collects name, email, phone, and notes - booked in under a minute.",
         "3": "Confirmation emails, reminders, and reschedule links sent automatically."
       }
     }
   },
   "leads": {
     "title": "Leads",
-    "intro": "Every contact your chatbot has captured — from the website widget, your connected channels (WhatsApp, Messenger, and more), and appointment bookings.",
+    "intro": "Every contact your chatbot has captured - from the website widget, your connected channels (WhatsApp, Messenger, and more), and appointment bookings.",
     "loadMore": "Load more",
     "empty": {
       "title": "No leads yet",
-      "body": "When a visitor shares an email or phone — or reaches out on a connected channel — they'll show up here.",
+      "body": "When a visitor shares an email or phone - or reaches out on a connected channel - they'll show up here.",
       "filtered": "No leads match this filter"
     },
     "table": {
@@ -143,14 +143,14 @@
     },
     "followUp": {
       "becauseLabel": "Because",
-      "advisory": "Worked out from this lead’s own details. Nothing has been sent — this is a suggestion only.",
+      "advisory": "Worked out from this lead’s own details. Nothing has been sent - this is a suggestion only.",
       "priority": {
         "now": "Today",
         "soon": "This week"
       },
       "actions": {
         "confirm_request": "Confirm or decline the slot they asked for",
-        "win_back_cancelled": "Offer them a new time — their booking was cancelled",
+        "win_back_cancelled": "Offer them a new time - their booking was cancelled",
         "check_in_after_visit": "Check they were happy with the visit",
         "offer_a_time": "Get back to them with a time",
         "ask_what_they_need": "Ask what they need"
@@ -242,21 +242,21 @@
     "add": {
       "button": "Add lead",
       "title": "Add a lead",
-      "body": "For a customer who called or walked in. An email or phone number is required — it is how we recognise them if they contact you again.",
+      "body": "For a customer who called or walked in. An email or phone number is required - it is how we recognise them if they contact you again.",
       "name": "Name",
       "email": "Email",
       "phone": "Phone",
       "notes": "What do they need?",
       "save": "Add lead",
       "created": "Lead added",
-      "merged": "We already had this contact — your notes were added to them.",
+      "merged": "We already had this contact - your notes were added to them.",
       "error": "Could not add the lead"
     },
     "import": {
       "button": "Import CSV",
       "title": "Import leads",
       "summary": "{{total}} rows: {{create}} new, {{merge}} will be added to contacts you already have, {{reject}} skipped.",
-      "rejectedRow": "Line {{line}} skipped — {{reason}}",
+      "rejectedRow": "Line {{line}} skipped - {{reason}}",
       "confirm": "Import",
       "done": "{{created}} added, {{merged}} merged into existing leads.",
       "truncated": "Only the first rows of this file will be imported.",
@@ -264,7 +264,7 @@
     },
     "sync": {
       "sent": "Sent to your CRM {{when}}",
-      "failed": "Could not be sent to your CRM — last try {{when}}",
+      "failed": "Could not be sent to your CRM - last try {{when}}",
       "neverSent": "Not sent to your CRM yet",
       "retrying": "Still trying to send to your CRM"
     },
@@ -284,7 +284,7 @@
   "socialMedia": {
     "locked": {
       "title": "Social Media",
-      "oneLiner": "Reach customers where they already are — connect every messaging channel in one inbox.",
+      "oneLiner": "Reach customers where they already are - connect every messaging channel in one inbox.",
       "bullets": {
         "1": "Facebook Messenger, Instagram, WhatsApp, and Telegram in one place.",
         "2": "AI bot answers and human handoff work across every channel.",
@@ -427,7 +427,7 @@
       "defaultTakeover": {
         "title": "Default takeover duration",
         "description": "Preselects the Take Over menu. You can still pick a different duration each time.",
-        "indefinite": "Until I hand back — AI stays blocked",
+        "indefinite": "Until I hand back - AI stays blocked",
         "hours_one": "{{count}} hour",
         "hours_other": "{{count}} hours"
       },
@@ -468,7 +468,7 @@
       },
       "displayName": {
         "title": "Business Name",
-        "description": "Your organization / business name — shown in the chat widget and used by your AI assistants. Renaming also updates your account organization.",
+        "description": "Your organization / business name - shown in the chat widget and used by your AI assistants. Renaming also updates your account organization.",
         "label": "Business name",
         "placeholder": "Your business name",
         "adminOnly": "Only admins can change the business name."
@@ -483,7 +483,7 @@
       "embed": {
         "title": "Embed Widget",
         "deployTitle": "Deploy",
-        "description": "Add this snippet to your website's HTML, just before the closing </body> tag. The widget id is public and visible in DevTools; chat is authorized by a short-lived session token from Axentrio. Restrict which sites can embed it with Allowed websites — leave empty to allow every website.",
+        "description": "Add this snippet to your website's HTML, just before the closing </body> tag. The widget id is public and visible in DevTools; chat is authorized by a short-lived session token from Axentrio. Restrict which sites can embed it with Allowed websites - leave empty to allow every website.",
         "copied": "Copied to clipboard",
         "copyTitle": "Copy snippet",
         "statusActive": "Active",
@@ -505,7 +505,7 @@
           "confirmDescription": "A new key is issued immediately. The previous key stays valid for 30 days so existing websites keep working. Rotating again while a grace window is active invalidates the older key immediately.",
           "confirmAction": "Rotate key",
           "graceBanner": "Previous key still valid until {{date}}.",
-          "graceNeverUsed": "The old key has not been used since rotation — safe to end early.",
+          "graceNeverUsed": "The old key has not been used since rotation - safe to end early.",
           "graceLastUsed": "Last used {{date}}.",
           "endEarly": "End early",
           "endEarlyConfirmTitle": "End previous key now?",
@@ -757,7 +757,7 @@
             "sessions": "Unlimited sessions",
             "llmCalls": "Platform LLM included",
             "channels": "All channels (unified inbox)",
-            "insights": "AI Insights — what your bot can't answer",
+            "insights": "AI Insights - what your bot can't answer",
             "uploadsHandoff": "File uploads & human handoff"
           }
         },
@@ -796,15 +796,15 @@
         "none": "No plan"
       },
       "trial": {
-        "endsInDays_one": "Trial ends {{date}} — {{count}} day left",
-        "endsInDays_other": "Trial ends {{date}} — {{count}} days left"
+        "endsInDays_one": "Trial ends {{date}} - {{count}} day left",
+        "endsInDays_other": "Trial ends {{date}} - {{count}} days left"
       },
       "currentPlan": {
         "title": "Current plan",
         "renewsOn": "Renews on {{date}}",
-        "cancellingOn": "Cancelling on {{date}} — you'll drop to Free after that.",
+        "cancellingOn": "Cancelling on {{date}} - you'll drop to Free after that.",
         "switchingTo": "Switching to {{plan}} on {{date}}",
-        "pastDueWarning": "Payment failed — update your payment method to keep your subscription active."
+        "pastDueWarning": "Payment failed - update your payment method to keep your subscription active."
       },
       "manage": {
         "title": "Manage subscription",
@@ -848,7 +848,7 @@
       },
       "loadError": "Couldn't load billing state: {{error}}",
       "unknownError": "unknown error",
-      "subscribedJustNow": "Subscription received — waiting for Stripe to confirm. This page will update automatically.",
+      "subscribedJustNow": "Subscription received - waiting for Stripe to confirm. This page will update automatically.",
       "tokens": {
         "title": "AI usage",
         "usedOfAllowance": "{{used}} of {{allowance}} tokens used this period",
@@ -862,14 +862,14 @@
     },
     "webhooks": {
       "title": "Send leads to your CRM",
-      "subtitle": "Push new and updated leads to any URL — connect HubSpot, Salesforce, Odoo, Zoho or Pipedrive via Zapier, Make or n8n. This is a one-way send, not a two-way sync.",
+      "subtitle": "Push new and updated leads to any URL - connect HubSpot, Salesforce, Odoo, Zoho or Pipedrive via Zapier, Make or n8n. This is a one-way send, not a two-way sync.",
       "empty": "No endpoints yet.",
       "add": "Add endpoint",
       "remove": "Remove endpoint",
       "saved": "Webhooks saved",
       "error": "Could not save webhooks",
-      "deletedWarning": "Without lead.deleted, your CRM keeps its copy when a customer asks to be erased — you would have to delete it there manually.",
-      "secretSet": "Signing secret set — type to replace",
+      "deletedWarning": "Without lead.deleted, your CRM keeps its copy when a customer asks to be erased - you would have to delete it there manually.",
+      "secretSet": "Signing secret set - type to replace",
       "secretNew": "Signing secret (generated if left blank)"
     }
   },
@@ -936,7 +936,7 @@
           "label": "Business Name",
           "placeholder": "Your business name",
           "helper": "Trading name this bot uses in its replies ({businessName}).",
-          "helperInherit": "Leave blank to use your organization name ({{name}}). Set a value to override it for this bot — useful for a separate commercial or social brand."
+          "helperInherit": "Leave blank to use your organization name ({{name}}). Set a value to override it for this bot - useful for a separate commercial or social brand."
         },
         "supportEmail": {
           "label": "Support Email",
@@ -946,7 +946,7 @@
         },
         "voiceTone": {
           "label": "Voice tone",
-          "helper": "Your bot's voice — applies across all its specialities."
+          "helper": "Your bot's voice - applies across all its specialities."
         },
         "tones": {
           "friendly": "Friendly",
@@ -1003,7 +1003,7 @@
         "latest": "Auto-update to latest version",
         "pinTo": "Pin to v{{version}}",
         "versionHelper": "Auto-update applies admin improvements automatically; pinning keeps the bot's behavior fixed to one version.",
-        "noneAvailable": "No bot templates are available to you yet. Your platform admin assigns these — contact them to get one set up.",
+        "noneAvailable": "No bot templates are available to you yet. Your platform admin assigns these - contact them to get one set up.",
         "preview": "Template preview (read-only)",
         "previewEmpty": "This template adds no base instructions.",
         "warnings": {
@@ -1018,11 +1018,11 @@
         "title": "Additional instructions",
         "description": "Extra guidance layered on top of the selected template. Leave blank to use the template as-is.",
         "placeholder": "e.g. Always mention our weekend promotion.",
-        "scopeNote": "Add business-specific notes only. This can't override the template's tone, safety rules, or escalation policy — those are set by platform admins."
+        "scopeNote": "Add business-specific notes only. This can't override the template's tone, safety rules, or escalation policy - those are set by platform admins."
       },
       "operational": {
         "title": "Operational settings",
-        "description": "Your business's day-to-day controls — these stay with you, not the template.",
+        "description": "Your business's day-to-day controls - these stay with you, not the template.",
         "escalationKeywords": {
           "label": "Escalation keywords",
           "placeholder": "e.g. refund, complaint, manager",
@@ -1335,7 +1335,7 @@
       "newChat": "New chat",
       "newChatHint": "Start a new conversation",
       "errors": {
-        "emptyResponse": "(No response — check your brand voice and guardrails configuration)",
+        "emptyResponse": "(No response - check your brand voice and guardrails configuration)",
         "sendFailed": "Something went wrong. Check your API key and model configuration."
       }
     },
@@ -1474,7 +1474,7 @@
           "label": "Content",
           "placeholder": "Hello {{customer_name}}, how can I help?",
           "helperPrefix": "Available variables:",
-          "helperSuffix": "— or add your own like"
+          "helperSuffix": "- or add your own like"
         },
         "category": {
           "label": "Category",
@@ -1526,9 +1526,9 @@
       "chooseSection": "Choose a section"
     },
     "drawer": {
-      "title": "AI Bot — FAQ",
+      "title": "AI Bot - FAQ",
       "subtitle": "Common questions about bot instructions and behaviour",
-      "ariaLabel": "AI Bot — Frequently Asked Questions",
+      "ariaLabel": "AI Bot - Frequently Asked Questions",
       "closeLabel": "Close FAQ",
       "browseAll": "Browse all FAQs"
     },
@@ -1562,7 +1562,7 @@
       }
     },
     "observability": {
-      "title": "Rollout Health — last {{days}} days",
+      "title": "Rollout Health - last {{days}} days",
       "split": "{{enforced}} enforced · {{shadow}} shadow",
       "openHandoffs": "{{count}} open",
       "enforcingTenants": "{{count}} tenant(s) currently enforcing guardrails",
@@ -1651,7 +1651,7 @@
         "key": "Key (slug)",
         "displayName": "Display name",
         "category": "Vertical",
-        "categoryHint": "Lowercase slug like plumber — optional here, also editable on the template page.",
+        "categoryHint": "Lowercase slug like plumber - optional here, also editable on the template page.",
         "availableToAll": "Available to all tenants"
       },
       "detail": {
@@ -1682,23 +1682,23 @@
       },
       "editor": {
         "newTitle": "New draft version",
-        "prefilledFrom": "Prefilled from v{{version}} — edit and publish as a new version.",
+        "prefilledFrom": "Prefilled from v{{version}} - edit and publish as a new version.",
         "editTitle": "Edit draft v{{version}}",
         "viewTitle": "Version v{{version}} (read-only)",
         "body": "Prompt body",
         "bodyHint": "Supports placeholders like {botName}, {businessName}, {tone}, {services}, {openingHours}. Max 20,000 characters.",
         "expectedModules": "Expected modules",
-        "expectedModulesHint": "Declares what this template needs to work fully — tenants must enable these. Preview the effect with the scenario controls on the right.",
+        "expectedModulesHint": "Declares what this template needs to work fully - tenants must enable these. Preview the effect with the scenario controls on the right.",
         "noModules": "No modules available.",
         "generalPrompt": "General prompt",
-        "generalPromptHint": "Personality and tone only. What the bot can do comes from the modules below — don't claim capabilities here. Supports placeholders like {botName}, {businessName}, {tone}.",
+        "generalPromptHint": "Personality and tone only. What the bot can do comes from the modules below - don't claim capabilities here. Supports placeholders like {botName}, {businessName}, {tone}.",
         "modules": "Modules",
-        "modulesHint": "Pick one or more modules — this template composes their prose, and the resolver combines their bound skills.",
-        "noModulesPublished": "No skills are available yet — skills are defined in code and appear here once registered.",
-        "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
+        "modulesHint": "Pick one or more modules - this template composes their prose, and the resolver combines their bound skills.",
+        "noModulesPublished": "No skills are available yet - skills are defined in code and appear here once registered.",
+        "unknownPlaceholders": "Unknown placeholders: {{placeholders}} - fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",
         "configTitle": "Guardrails",
-        "configHint": "Owned by this template — applies to every bot bound to it. Tenants no longer set these.",
+        "configHint": "Owned by this template - applies to every bot bound to it. Tenants no longer set these.",
         "tone": "Voice tone",
         "tones": {
           "friendly": "Friendly",
@@ -1716,7 +1716,7 @@
         "fallbackMessage": "Fallback message",
         "fallbackSuggested": "Sorry, I don't have enough information to answer that confidently. Please contact {businessName}, or ask me another question.",
         "offHoursMessage": "Off-hours message",
-        "offHoursSuggested": "Thanks for reaching out. {businessName} is currently closed — leave your details and the team will follow up during business hours.",
+        "offHoursSuggested": "Thanks for reaching out. {businessName} is currently closed - leave your details and the team will follow up during business hours.",
         "topicsToAvoid": "Topics to avoid",
         "topicsPlaceholder": "Type a topic and press Enter",
         "topicsAddCommon": "Add common topics",
@@ -1745,17 +1745,17 @@
         "testPlaceholder": "Type a visitor message…",
         "testSend": "Send",
         "testThinking": "Thinking…",
-        "testError": "Test failed — check the platform API key.",
-        "testHint": "Tests the prompt wording only — no tools, booking, or knowledge base. A real bot also uses those."
+        "testError": "Test failed - check the platform API key.",
+        "testHint": "Tests the prompt wording only - no tools, booking, or knowledge base. A real bot also uses those."
       },
       "confirm": {
         "archiveTitle": "Archive this template?",
         "unpublishTitle": "Unpublish this version?",
         "ungrantTitle": "Remove tenant access?",
-        "reassign": "{{count}} bound bot(s) will be moved to the blank base template — they'll lose this template's tone, guardrails, greeting/fallback/off-hours messages, and prompt body, and fall back to platform defaults until an admin rebinds them. Continue?",
+        "reassign": "{{count}} bound bot(s) will be moved to the blank base template - they'll lose this template's tone, guardrails, greeting/fallback/off-hours messages, and prompt body, and fall back to platform defaults until an admin rebinds them. Continue?",
         "deleteTitle": "Delete version v{{version}}?",
         "deleteBody": "This permanently removes this version. This can't be undone.",
-        "deleteReassign": "{{count}} bot(s) pin this version — they'll be unpinned to the latest published version, then it's deleted. Continue?",
+        "deleteReassign": "{{count}} bot(s) pin this version - they'll be unpinned to the latest published version, then it's deleted. Continue?",
         "discardTitle": "Discard unsaved changes?",
         "discardBody": "You have unsaved edits to this version. Close without saving?",
         "proceed": "Proceed"
@@ -1766,7 +1766,7 @@
       "health": {
         "title": "Template health",
         "subtitle": "Bots whose bound template is missing, archived, or has no published version. Each falls back to the generic assistant until you fix it.",
-        "allClear": "Every bound template resolves — no bots are stranded.",
+        "allClear": "Every bound template resolves - no bots are stranded.",
         "loadError": "Couldn't check template health.",
         "stranded": "{{count}} stranded",
         "columns": {
@@ -1958,12 +1958,12 @@
       "tierDialog": {
         "title": "Set tier (manual override)",
         "descriptionBefore": "Pick a target tier for",
-        "descriptionAfter": ". This is a manual override — it bypasses Stripe and writes a manual primary billing row. Use it for comps, sales-managed Enterprise, or refund-driven downgrades.",
+        "descriptionAfter": ". This is a manual override - it bypasses Stripe and writes a manual primary billing row. Use it for comps, sales-managed Enterprise, or refund-driven downgrades.",
         "updating": "Updating tier…",
         "current": "current",
         "selected": "selected",
         "tierDescriptions": {
-          "free": "No plan — abuse / refund downgrade",
+          "free": "No plan - abuse / refund downgrade",
           "essential": "Essential entitlements, comped (no Stripe)",
           "pro": "Pro entitlements, comped (no Stripe)",
           "enterprise": "Sales-managed, unlimited"
@@ -1975,7 +1975,7 @@
           "explainer": "this override won't cancel it, so the customer keeps being charged on a Free plan. Choose what happens to it:",
           "will_cancel": "I have cancelled / will cancel it in the Stripe dashboard",
           "leave_active": "Leave the subscription active intentionally",
-          "reasonPlaceholder": "Why is the subscription staying active? (required — recorded in the audit log)"
+          "reasonPlaceholder": "Why is the subscription staying active? (required - recorded in the audit log)"
         },
         "setTo": "Set to {{tier}}",
         "pickATier": "Pick a tier"
@@ -2098,7 +2098,7 @@
       }
     },
     "impersonationBanner": {
-      "message": "You are impersonating <strong>{{tenant}}</strong> — return to your own account when finished.",
+      "message": "You are impersonating <strong>{{tenant}}</strong> - return to your own account when finished.",
       "exitButton": "Exit"
     },
     "faq": {
@@ -2154,7 +2154,7 @@
         "title": "Title",
         "question": "Question",
         "answer": "Answer",
-        "optionalPlaceholder": "Optional — falls back to English when empty."
+        "optionalPlaceholder": "Optional - falls back to English when empty."
       },
       "errors": {
         "load": "Could not load FAQs.",
@@ -2278,7 +2278,7 @@
     },
     "takeover": {
       "button": "Take Over",
-      "indefinite": "Block AI — until I release",
+      "indefinite": "Block AI - until I release",
       "forHours_one": "Return to AI in {{count}} hour",
       "forHours_other": "Return to AI in {{count}} hours",
       "changeDuration": "Change duration",
@@ -2364,7 +2364,7 @@
       "title": "Transfer to teammate",
       "prompt": "Select an agent to transfer this conversation to:",
       "noAgents": "No other teammates are online. Take over this conversation yourself, or try again later.",
-      "agentStats": "{{current}}/{{max}} chats — {{status}}"
+      "agentStats": "{{current}}/{{max}} chats - {{status}}"
     },
     "toasts": {
       "loadFailed": "Failed to load chat",
@@ -2577,8 +2577,8 @@
     },
     "agentsEmpty": {
       "title": "No agents yet",
-      "agents": "Agents are humans who take over conversations when the AI hands off. Most teams run fine without any — add one only if you want live takeover.",
-      "shifts": "Shifts let you schedule when each agent is available — add an agent first.",
+      "agents": "Agents are humans who take over conversations when the AI hands off. Most teams run fine without any - add one only if you want live takeover.",
+      "shifts": "Shifts let you schedule when each agent is available - add an agent first.",
       "performance": "Agent performance appears here once agents are handling handed-off conversations."
     }
   },
@@ -2594,16 +2594,16 @@
     "meta": {
       "refreshed": "Last analysed {{ago}}",
       "pending": "Press Analyse to update",
-      "pendingAutomatic": "Analysis runs automatically throughout the day — insights appear after your chats are reviewed",
-      "incomplete": "Insights incomplete — still analysing recent chats"
+      "pendingAutomatic": "Analysis runs automatically throughout the day - insights appear after your chats are reviewed",
+      "incomplete": "Insights incomplete - still analysing recent chats"
     },
     "card": {
       "stats": "{{visitors}} customers asked without getting an answer ({{count}} conversations) · last {{ago}}"
     },
     "status": {
       "dormant": "Dormant",
-      "resolvedData": "Resolved — confirmed by chats",
-      "resolvedManual": "Resolved — marked fixed"
+      "resolvedData": "Resolved - confirmed by chats",
+      "resolvedManual": "Resolved - marked fixed"
     },
     "actions": {
       "resolve": "I fixed this",
@@ -2624,19 +2624,19 @@
       },
       "wins": {
         "title": "No wins yet",
-        "description": "Resolved gaps land here — fix a gap by adding the answer to your knowledge base."
+        "description": "Resolved gaps land here - fix a gap by adding the answer to your knowledge base."
       }
     },
     "locked": {
       "title": "AI Insights",
       "oneLiner": "See what customers ask that your assistant can't answer yet.",
       "bullet1": "Topics customers keep asking about, ranked by how many asked",
-      "bullet2": "Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically",
+      "bullet2": "Fix a gap by adding the answer to your knowledge base - wins are confirmed automatically",
       "bullet3": "Press Analyse now to update from your real conversations"
     },
     "experiments": {
       "title": "Experiments",
-      "empty": "Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.",
+      "empty": "Patterns we spot in your conversations - correlations and sentiment themes - appear here as they emerge.",
       "dismiss": "Dismiss",
       "dismissedToast": "Dismissed"
     },
@@ -2664,7 +2664,7 @@
     "demand": {
       "title": "What customers are asking for",
       "denominator": "Of the {{classified}} of {{total}} leads we could match to a service, over the last {{days}} days.",
-      "noServices": "No service could be matched to a lead yet — this fills in as customers book.",
+      "noServices": "No service could be matched to a lead yet - this fills in as customers book.",
       "tagsTitle": "Topics mentioned (AI-derived)",
       "tagsDenominator": "From the {{tagged}} conversations we were able to analyse."
     },
@@ -2672,7 +2672,7 @@
       "run": "Analyse now",
       "running": "Analysing…",
       "failed": "Analysis could not be completed",
-      "automatic": "Your plan analyses conversations continuously — nothing to run by hand.",
+      "automatic": "Your plan analyses conversations continuously - nothing to run by hand.",
       "notEnoughChats": "{{count}} of {{min}} new conversations. Analysis needs enough of them to find a pattern rather than a coincidence.",
       "coolingDown": "Already analysed recently. You can run it again in {{hours}} hours.",
       "started": "Analysis started. It will appear here when it finishes.",
@@ -2843,9 +2843,9 @@
   "copilot": {
     "launcher": {
       "tooltip": "Ask the AI Platform Assistant",
-      "tooltipWithSuggestions_one": "Ask the AI Platform Assistant — {{count}} suggestion available",
-      "tooltipWithSuggestions_other": "Ask the AI Platform Assistant — {{count}} suggestions available",
-      "tooltipLocked": "AI Platform Assistant — included with Pro"
+      "tooltipWithSuggestions_one": "Ask the AI Platform Assistant - {{count}} suggestion available",
+      "tooltipWithSuggestions_other": "Ask the AI Platform Assistant - {{count}} suggestions available",
+      "tooltipLocked": "AI Platform Assistant - included with Pro"
     },
     "drawer": {
       "title": "AI Platform Assistant",
@@ -2856,11 +2856,11 @@
       "placeholder": "Ask about your bot, plan, leads, or how to do anything in Axentrio…",
       "sendAria": "Send message",
       "thinking": "Thinking…",
-      "rateLimited": "You're sending too quickly — try again in {{seconds}} seconds.",
+      "rateLimited": "You're sending too quickly - try again in {{seconds}} seconds.",
       "toolBadgeTooltip": "The assistant looked up {{name}}",
       "welcome": {
         "title": "Hi there 👋",
-        "body": "Ask me about your bot, your plan, your leads, or how to do anything in Axentrio. I can answer from the documentation and look at your tenant's data — but I can't change anything for you.",
+        "body": "Ask me about your bot, your plan, your leads, or how to do anything in Axentrio. I can answer from the documentation and look at your tenant's data - but I can't change anything for you.",
         "examples": [
           "What plan am I on, and when does it renew?",
           "How many leads did we capture this week?",
@@ -2878,11 +2878,11 @@
     },
     "locked": {
       "title": "Unlock the AI Platform Assistant",
-      "oneLiner": "An in-portal AI that answers your platform questions and surfaces your tenant's data — included with Pro and Enterprise.",
+      "oneLiner": "An in-portal AI that answers your platform questions and surfaces your tenant's data - included with Pro and Enterprise.",
       "bullets": [
         "Ask anything about your bot, plan, leads, or integrations",
         "Get instant answers grounded in Axentrio's documentation",
-        "See live stats — \"how many leads this week?\""
+        "See live stats - \"how many leads this week?\""
       ],
       "historyNote": "Your previous chats are preserved and will be available again as soon as you upgrade."
     },
@@ -2931,7 +2931,7 @@
     "quota": {
       "usage": "{{used}} of {{limit}} used",
       "usageUnlimited": "{{used}} bots",
-      "upgradeCta": "You've reached your plan's bot limit — upgrade to add more."
+      "upgradeCta": "You've reached your plan's bot limit - upgrade to add more."
     },
     "create": {
       "title": "Create a new bot",
@@ -3047,7 +3047,7 @@
       },
       "proactiveLeadCapture": {
         "label": "Ask for missing details",
-        "description": "Let your bot politely ask for a phone number or email when it doesn't have one. Off by default — your bot always saves details a customer offers on their own."
+        "description": "Let your bot politely ask for a phone number or email when it doesn't have one. Off by default - your bot always saves details a customer offers on their own."
       },
       "leadEnrichment": {
         "label": "Structured lead data",
@@ -3113,7 +3113,7 @@
         "body": "Enter your VAT number and we'll fill in the rest from the official register.",
         "vatLabel": "VAT number",
         "lookup": "Look up",
-        "lookingUp": "Checking the register — this can take a few seconds.",
+        "lookingUp": "Checking the register - this can take a few seconds.",
         "lookupFailed": "Lookup failed. You can fill the company details yourself.",
         "lookupRateLimited": "Too many lookups. Try again in a minute.",
         "lookupStatus": {
@@ -3121,7 +3121,7 @@
           "not_found": "That number isn't registered. Check it, or fill the details in yourself.",
           "invalid_format": "That VAT number isn't in a valid format. Example: BE 0400.378.485",
           "unsupported": "We can't look this VAT number up automatically. Fill in the company details yourself.",
-          "unavailable": "The register isn't responding right now. Fill the details in yourself and carry on — you can verify later."
+          "unavailable": "The register isn't responding right now. Fill the details in yourself and carry on - you can verify later."
         },
         "nameLabel": "Company name",
         "legalFormLabel": "Legal form",
@@ -3133,8 +3133,8 @@
         "presence": {
           "label": "How do customers reach you?",
           "helper": "Online shops never get a physical address forced onto the bot. A physical business can give the bot its own address later.",
-          "physical": "Physical business — customers visit or we visit them",
-          "online": "Online business — no premises to quote"
+          "physical": "Physical business - customers visit or we visit them",
+          "online": "Online business - no premises to quote"
         }
       },
       "logo": {
@@ -3269,7 +3269,7 @@
       },
       "plan": {
         "title": "Choose your plan",
-        "body": "Pro is recommended if you take appointments — it includes a 14-day trial. Essential is the chatbot without bookings.",
+        "body": "Pro is recommended if you take appointments - it includes a 14-day trial. Essential is the chatbot without bookings.",
         "choose": "Choose this plan",
         "recommended": "Recommended",
         "trialLength": "Includes a 14-day free trial"

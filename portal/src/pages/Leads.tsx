@@ -104,7 +104,7 @@ function bookingVariant(status: string): 'success' | 'warning' | 'secondary' {
  * pricing to their operator.
  */
 function priceLabel(lead: Lead): string {
-  if (lead.servicePrice == null) return '—';
+  if (lead.servicePrice == null) return '-';
   const amount = new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: 'EUR',
@@ -199,7 +199,7 @@ function LeadWaitingCell({ lead, days }: { lead: Lead; days: number | null }) {
   return (
     <TableCell className="whitespace-nowrap tabular-nums">
       {days == null ? (
-        <span className="text-text-muted">—</span>
+        <span className="text-text-muted">-</span>
       ) : (
         <>
           <span
@@ -247,7 +247,7 @@ function LeadEnrichmentCells({ lead }: { lead: Lead }) {
             )}
           </span>
         ) : (
-          <span className="text-text-muted">—</span>
+          <span className="text-text-muted">-</span>
         )}
       </TableCell>
     </>
@@ -385,7 +385,7 @@ function LeadRow({
       {/* Model-authored free text: rendered as text only, never as markup. */}
       <TableCell className="text-text-secondary">
         <span className="block max-w-[18rem] truncate" title={lead.notes ?? undefined}>
-          {lead.notes || <span className="text-text-muted">—</span>}
+          {lead.notes || <span className="text-text-muted">-</span>}
         </span>
       </TableCell>
       <LeadWaitingCell lead={lead} days={daysWaiting(lead)} />
@@ -860,7 +860,7 @@ export default function Leads() {
               <p className="text-center text-xs text-text-muted">
                 {t('leads.loadMoreCapped', {
                   defaultValue:
-                    'Showing the first {{count}} leads — use the filters or export to reach older ones.',
+                    'Showing the first {{count}} leads - use the filters or export to reach older ones.',
                   count: allLeads.length,
                 })}
               </p>

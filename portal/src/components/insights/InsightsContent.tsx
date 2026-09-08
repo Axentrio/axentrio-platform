@@ -225,8 +225,8 @@ function GapBadges({ gap }: { gap: GapRow }) {
       {(gap.status === 'resolved_data' || gap.status === 'resolved_manual') && (
         <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/40">
           {gap.status === 'resolved_data'
-            ? t('insights.status.resolvedData', { defaultValue: 'Resolved — confirmed by chats' })
-            : t('insights.status.resolvedManual', { defaultValue: 'Resolved — marked fixed' })}
+            ? t('insights.status.resolvedData', { defaultValue: 'Resolved - confirmed by chats' })
+            : t('insights.status.resolvedManual', { defaultValue: 'Resolved - marked fixed' })}
         </Badge>
       )}
       {gap.priorityScore != null && (
@@ -541,7 +541,7 @@ function ExperimentsSection() {
       ) : experiments.length === 0 ? (
         <p className="text-xs text-text-muted">
           {t('insights.experiments.empty', {
-            defaultValue: 'Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.',
+            defaultValue: 'Patterns we spot in your conversations - correlations and sentiment themes - appear here as they emerge.',
           })}
         </p>
       ) : (
@@ -677,7 +677,7 @@ function LeadDemandSection() {
             <p className="text-xs text-text-muted">
               {t('insights.demand.noServices', {
                 defaultValue:
-                  'No service could be matched to a lead yet — this fills in as customers book.',
+                  'No service could be matched to a lead yet - this fills in as customers book.',
               })}
             </p>
           )}
@@ -718,7 +718,7 @@ function DigestMetric({ label, current, previous }: { label: string; current: nu
       <span className="text-xs text-text-muted">{label}</span>
       <span className={cn('flex items-center gap-0.5 text-xs', tone)}>
         <Icon className="h-3 w-3" />
-        {delta == null ? '—' : delta === 0 ? '0%' : `${Math.abs(delta)}%`}
+        {delta == null ? '-' : delta === 0 ? '0%' : `${Math.abs(delta)}%`}
       </span>
     </div>
   );
@@ -832,7 +832,7 @@ export function InsightsContent() {
               })
             : t(automatic ? 'insights.meta.pendingAutomatic' : 'insights.meta.pending', {
                 defaultValue: automatic
-                  ? 'Analysis runs automatically throughout the day — insights appear after your chats are reviewed'
+                  ? 'Analysis runs automatically throughout the day - insights appear after your chats are reviewed'
                   : 'Press Analyse to update',
               })}
         </span>
@@ -840,7 +840,7 @@ export function InsightsContent() {
           <span className="flex items-center gap-1.5 text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5" />
             {t('insights.meta.incomplete', {
-              defaultValue: 'Insights incomplete — still analysing recent chats',
+              defaultValue: 'Insights incomplete - still analysing recent chats',
             })}
           </span>
         )}
@@ -885,7 +885,7 @@ export function InsightsContent() {
               <p className="text-sm">{t('insights.empty.wins.title', { defaultValue: 'No wins yet' })}</p>
               <p className="text-xs mt-1">
                 {t('insights.empty.wins.description', {
-                  defaultValue: 'Resolved gaps land here — fix a gap by adding the answer to your knowledge base.',
+                  defaultValue: 'Resolved gaps land here - fix a gap by adding the answer to your knowledge base.',
                 })}
               </p>
             </div>

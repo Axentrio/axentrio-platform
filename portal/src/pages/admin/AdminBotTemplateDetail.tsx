@@ -528,7 +528,7 @@ const PreviewRail: React.FC<{
           <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
         </div>
       </div>
-      <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
+      <p className="text-xs text-text-tertiary">Simulated - what a bot on this template would receive. Not this bot’s real settings.</p>
 
       <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-3">
         <div>
@@ -570,7 +570,7 @@ const PreviewRail: React.FC<{
                       {on
                         ? <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-online/15"><Check className="h-2.5 w-2.5 text-status-online" /></span>
                         : <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-away/15"><TriangleAlert className="h-2.5 w-2.5 text-status-away" /></span>}
-                      <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
+                      <span>{cap.label}{!on && cap.whenAbsent ? ` - ${cap.whenAbsent}` : ''}</span>
                     </div>
                   );
                 })}
@@ -622,7 +622,7 @@ const PreviewRail: React.FC<{
                         ))}
                       </div>
                     )}
-                    <div className="font-mono text-text-secondary"><span className="mb-1 block text-2xs uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
+                    <div className="font-mono text-text-secondary"><span className="mb-1 block text-2xs uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '-'}</div>
                   </TooltipProvider>
                 </AccordionContent>
               </AccordionItem>
@@ -632,7 +632,7 @@ const PreviewRail: React.FC<{
       })() : !isPending ? (
         <div className="rounded-xl border border-dashed border-edge px-4 py-8 text-center">
           <Eye className="mx-auto mb-2 h-5 w-5 text-text-muted" />
-          <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
+          <p className="text-xs text-text-tertiary">Write the prompt - a preview of what the bot can do appears here.</p>
         </div>
       ) : null}
     </aside>
@@ -1350,7 +1350,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4 text-amber-400" />Template variables</DialogTitle>
                   <DialogDescription>
-                    The blanks tenants fill in — any <span className="font-mono text-amber-300">{'{placeholder}'}</span> you use in the prompt or a module’s prose. Tenants complete them when they adopt this template.
+                    The blanks tenants fill in - any <span className="font-mono text-amber-300">{'{placeholder}'}</span> you use in the prompt or a module’s prose. Tenants complete them when they adopt this template.
                   </DialogDescription>
                 </DialogHeader>
                 <TooltipProvider delayDuration={150}>
@@ -1392,7 +1392,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                                 </div>
                                 <div className="grid gap-x-2 gap-y-0 sm:grid-cols-2">
                                   <div>
-                                    <FieldHint label="Label" tip="The friendly name tenants see for this blank instead of the raw {key} — e.g. 'Cancellation policy'." />
+                                    <FieldHint label="Label" tip="The friendly name tenants see for this blank instead of the raw {key} - e.g. 'Cancellation policy'." />
                                     <Input value={v.label ?? ''} placeholder={prettifyKey(key)} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
                                   </div>
                                   <div>
@@ -1402,7 +1402,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                                 </div>
                                 <div>
                                   <FieldHint label="Help text" tip="A short hint shown to the tenant under this field, telling them what to enter." />
-                                  <Input value={v.help ?? ''} placeholder="Optional — shown to tenants" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
+                                  <Input value={v.help ?? ''} placeholder="Optional - shown to tenants" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
                                 </div>
                               </div>
                             );

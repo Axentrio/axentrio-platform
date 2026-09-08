@@ -141,7 +141,7 @@ function useCalendarOAuthReturnToast(
     }
     if (params.get('teams') === 'unavailable') {
       toast.warning(
-        "Connected a personal Microsoft account — video bookings won't get a Teams meeting link. Reconnect a work or school account to enable video links.",
+        "Connected a personal Microsoft account - video bookings won't get a Teams meeting link. Reconnect a work or school account to enable video links.",
       );
       params.delete('teams');
       changed = true;
@@ -695,7 +695,7 @@ const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-status-busy flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — the link to Google has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - the link to Google has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
         </span>
         <Button
           variant="outline"
@@ -713,7 +713,7 @@ const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-text-secondary flex items-center gap-2">
           <Check className="w-4 h-4 text-status-online" />
-          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to your calendar and the bot won't double-book over your events.
         </span>
         <Button
           variant="outline"
@@ -743,7 +743,7 @@ const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connec
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-status-busy flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — the link to Outlook has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+          Reconnect needed{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - the link to Outlook has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
         </span>
         <Button
           variant="outline"
@@ -762,7 +762,7 @@ const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connec
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm text-text-secondary flex items-center gap-2">
             <Check className="w-4 h-4 text-status-online" />
-            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to your calendar and the bot won't double-book over your events.
           </span>
           <Button
             variant="outline"
@@ -776,7 +776,7 @@ const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connec
         {status.data?.supportsOnlineMeetings === false ? (
           <span className="text-sm text-status-busy flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            This is a personal Microsoft account, which can't host Teams meetings — video bookings won't get a join link. Reconnect a work or school account to enable video links.
+            This is a personal Microsoft account, which can't host Teams meetings - video bookings won't get a join link. Reconnect a work or school account to enable video links.
           </span>
         ) : null}
       </>
@@ -823,7 +823,7 @@ const AvailabilitySection: React.FC<{
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {([
           { mode: 'business_hours' as const, title: 'Set business hours', desc: 'The assistant offers slots only within the weekly hours below.' },
-          { mode: 'always_open' as const, title: 'Always open (24/7)', desc: "Bookable around the clock — only your calendar's busy times limit slots." },
+          { mode: 'always_open' as const, title: 'Always open (24/7)', desc: "Bookable around the clock - only your calendar's busy times limit slots." },
         ]).map(({ mode, title, desc }) => (
           <button
             key={mode}
@@ -855,7 +855,7 @@ const AvailabilitySection: React.FC<{
         <div>
           <span className="mb-1 block text-sm text-text-secondary">Timezone</span>
           <span className="text-sm text-text-primary">
-            {config?.availability?.timezone ?? '—'}
+            {config?.availability?.timezone ?? '-'}
           </span>
         </div>
         <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
@@ -883,7 +883,7 @@ const AvailabilitySection: React.FC<{
         </div>
       ) : (
         <p className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2 text-xs text-text-muted">
-          Open 24/7 — the assistant can offer any time, limited only by your connected calendar's busy
+          Open 24/7 - the assistant can offer any time, limited only by your connected calendar's busy
           periods and each service's notice/buffer settings. Use date overrides below to close specific days.
         </p>
       )}
@@ -899,7 +899,7 @@ const BookingRulesSection: React.FC<{
   <div className="space-y-3 border-t border-edge pt-4">
     <h3 className="text-sm font-medium text-text-primary">Booking rules</h3>
     <p className="text-xs text-text-muted">
-      Limits for this bot as a whole, on top of each service's own settings — whichever is stricter wins.
+      Limits for this bot as a whole, on top of each service's own settings - whichever is stricter wins.
       Leave a field empty for no limit.
     </p>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -933,7 +933,7 @@ const BookingRulesSection: React.FC<{
     </div>
 
     <p className="pt-2 text-xs text-text-muted">
-      Defaults for new services. A service that sets its own value keeps it — these
+      Defaults for new services. A service that sets its own value keeps it - these
       only fill the fields a service leaves blank, so you can change your notice
       period or buffers once instead of on every service.
     </p>
@@ -1109,7 +1109,7 @@ const VenueRoleCopy: React.FC<{ workLocation: WorkLocation }> = ({ workLocation 
       <>
         Where your working day starts. Travel time measures the first job of a day
         from here, so an early job an hour away is not offered against a start you
-        could not make — leave it empty and the day's first job is not measured
+        could not make - leave it empty and the day's first job is not measured
         from anywhere.
       </>
     );
@@ -1119,7 +1119,7 @@ const VenueRoleCopy: React.FC<{ workLocation: WorkLocation }> = ({ workLocation 
       <>
         Two jobs for one address: customers come here for the services you do on
         site, and it is where your working day starts for the ones you travel to.
-        It goes on the calendar invite for the first kind — leave it empty and the
+        It goes on the calendar invite for the first kind - leave it empty and the
         invite simply won't mention a place.
       </>
     );
@@ -1128,7 +1128,7 @@ const VenueRoleCopy: React.FC<{ workLocation: WorkLocation }> = ({ workLocation 
     return (
       <>
         None of your services happen anywhere in particular, so nothing here is
-        used. It is still shown because you have an address stored — clear the
+        used. It is still shown because you have an address stored - clear the
         fields if you would rather it went away.
       </>
     );
@@ -1136,7 +1136,7 @@ const VenueRoleCopy: React.FC<{ workLocation: WorkLocation }> = ({ workLocation 
   return (
     <>
       Where customers come to you. This goes on the calendar invite so they can
-      find you — leave it empty and the invite simply won't mention a place.
+      find you - leave it empty and the invite simply won't mention a place.
     </>
   );
 };
@@ -1230,7 +1230,7 @@ const NeverAskedWarning: React.FC<{ names: string[] }> = ({ names }) => {
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
       <span>
         This address is going on the invite for{' '}
-        {names.join(', ')} — {one ? 'that service was' : 'those services were'}{' '}
+        {names.join(', ')} - {one ? 'that service was' : 'those services were'}{' '}
         created before we asked where each one happens, so nobody has chosen. If{' '}
         {one ? 'it is' : 'any of them are'} a phone or video
         call, open {one ? 'it' : 'them'} above and pick the
@@ -1402,7 +1402,7 @@ const TravelSection: React.FC<{
         {/*
           The single-driver assumption, stated before the switch rather than after it.
           A two-person business that turns this on gets slots stripped for journeys
-          neither of them makes — the one configuration where the feature makes a
+          neither of them makes - the one configuration where the feature makes a
           business worse off than not having it.
         */}
         <p className="text-xs text-text-muted mt-1">
@@ -1564,7 +1564,7 @@ const DateOverridesSection: React.FC<{
             {/*
               An optional end date, so a fortnight's holiday is ONE row.
               Without it an owner date-picked fourteen rows, and only the
-              first eight upcoming closures ever reach the bot — so from day
+              first eight upcoming closures ever reach the bot - so from day
               nine it went back to quoting the weekly hours.
             */}
             <span className="text-xs text-text-muted">to</span>

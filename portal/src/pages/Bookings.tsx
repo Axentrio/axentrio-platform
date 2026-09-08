@@ -326,7 +326,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
             <AlertDialogDescription>
               {cancelTarget && (
                 <>
-                  {cancelTarget.attendeeName || cancelTarget.attendeeEmail} —{' '}
+                  {cancelTarget.attendeeName || cancelTarget.attendeeEmail} -{' '}
                   {dayLabel(cancelTarget.startTime, timezone)} at {timeLabel(cancelTarget.startTime, timezone)}.
                   The attendee will get a cancellation email and the calendar event will be removed.
                 </>
@@ -419,7 +419,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
             <AlertDialogDescription>
               {declineTarget && (
                 <>
-                  {declineTarget.attendeeName || declineTarget.attendeeEmail} —{' '}
+                  {declineTarget.attendeeName || declineTarget.attendeeEmail} -{' '}
                   {dayLabel(declineTarget.startTime, timezone)} at {timeLabel(declineTarget.startTime, timezone)}.
                   {declineTarget.requestKind === 'reschedule'
                     ? 'This closes the move request. The original appointment stays as it is.'
@@ -560,14 +560,14 @@ function BookingRowNotices({ booking, isRequest }: { booking: AdminBooking; isRe
       {booking.serviceAreaMatch === 'outside' && (
         <div className="mt-1 text-xs text-amber-400">
           {isRequest
-            ? 'Outside your service area — you have not committed to this one.'
-            : 'Outside your service area — accepted anyway.'}
+            ? 'Outside your service area - you have not committed to this one.'
+            : 'Outside your service area - accepted anyway.'}
         </div>
       )}
       {booking.serviceAreaMatch === 'unknown' && (
         <div className="mt-1 text-xs text-amber-400">
           {isRequest
-            ? 'Address could not be matched to your service area — worth checking before you confirm.'
+            ? 'Address could not be matched to your service area - worth checking before you confirm.'
             : 'Address could not be matched to your service area.'}
         </div>
       )}
@@ -612,10 +612,10 @@ function BookingRowTravelCheck({
     <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-400" data-testid="travel-captured">
       <span>
         {booking.travelCheck === 'overridden'
-          ? 'Travel could not clear this time — accepted anyway.'
+          ? 'Travel could not clear this time - accepted anyway.'
           : isRequest
             ? 'Travel could not clear this time. Check the journey before accepting.'
-            : 'Travel could not clear this time — the journey was never verified.'}
+            : 'Travel could not clear this time - the journey was never verified.'}
       </span>
       {/* A verdict IS Google-derived content, even on a row carrying no distance. */}
       <GoogleAttribution />
@@ -924,7 +924,7 @@ function RescheduleSlotButton({
       disabled={disabled}
       title={
         verdict === 'unreachable'
-          ? 'Too far from the job before or after it — this drive does not fit'
+          ? 'Too far from the job before or after it - this drive does not fit'
           : verdict === 'requestable'
             ? 'The drive may not fit; nothing has measured it'
             : undefined
@@ -1089,7 +1089,7 @@ function RescheduleDialog({
             {booking && (
               <>
                 Currently {dayLabel(booking.startTime, timezone)} at{' '}
-                {timeLabel(booking.startTime, timezone)}. Pick a new time — the attendee gets an updated
+                {timeLabel(booking.startTime, timezone)}. Pick a new time - the attendee gets an updated
                 invite.
               </>
             )}

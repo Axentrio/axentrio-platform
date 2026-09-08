@@ -42,7 +42,7 @@ function useReasonText(status: AnalysisStatus | undefined): string | null {
       });
     case 'automatic':
       return t('insights.analysis.automatic', {
-        defaultValue: 'Your plan analyses conversations continuously — nothing to run by hand.',
+        defaultValue: 'Your plan analyses conversations continuously - nothing to run by hand.',
       });
     case 'not_enough_chats':
       return t('insights.analysis.notEnoughChats', {

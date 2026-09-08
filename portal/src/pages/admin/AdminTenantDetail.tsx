@@ -148,7 +148,7 @@ function statusBadgeClass(status: string): string {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
@@ -259,7 +259,7 @@ const LegalInvoicesCard: React.FC<{
               return (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono text-xs">
-                    {row.billitInvoiceNumber ?? '—'}
+                    {row.billitInvoiceNumber ?? '-'}
                   </TableCell>
                   <TableCell>
                     <LegalInvoiceStatusPills
@@ -269,9 +269,9 @@ const LegalInvoicesCard: React.FC<{
                     />
                   </TableCell>
                   <TableCell className="text-xs text-status-busy max-w-[200px]">
-                    {row.lastError ?? '—'}
+                    {row.lastError ?? '-'}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{row.stripeInvoiceId ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{row.stripeInvoiceId ?? '-'}</TableCell>
                   <TableCell className="text-right">
                     {canRetry ? (
                       <Button
@@ -927,7 +927,7 @@ const AdminTenantDetail: React.FC = () => {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-text-muted text-xs font-mono max-w-[200px] truncate">
-                    {log.metadata ? JSON.stringify(log.metadata) : '—'}
+                    {log.metadata ? JSON.stringify(log.metadata) : '-'}
                   </TableCell>
                 </TableRow>
               ))}

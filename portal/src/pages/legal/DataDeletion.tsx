@@ -36,7 +36,7 @@ const DataDeletion: React.FC = () => {
             with the subject line <strong>&ldquo;Data Deletion Request&rdquo;</strong>.
           </li>
           <li>
-            Tell us how you used the Service so we can locate your data — for example,
+            Tell us how you used the Service so we can locate your data - for example,
             the Facebook Page, Instagram account, or WhatsApp number you messaged, and
             the name or contact details you used in the conversation.
           </li>

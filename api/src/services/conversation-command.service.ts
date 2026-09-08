@@ -28,7 +28,7 @@
  * watermark columns can never be clobbered by a stale in-memory entity.
  */
 
-import { EntityManager } from 'typeorm';
+import { EntityManager, IsNull } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession, SessionStatus, SessionOwnership } from '../database/entities/ChatSession';
@@ -37,6 +37,7 @@ import { NotificationOutbox, HANDOFF_OUTBOX_GRACE_MS } from '../database/entitie
 import { ConversationCommand } from '../database/entities/ConversationCommand';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
+import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { Agent } from '../database/entities/Agent';
 import { User } from '../database/entities/User';
 import { deriveStatusFromOwnership } from './session-ownership';
@@ -207,6 +208,13 @@ export interface TransferResult {
   replayed?: boolean;
 }
 
+export interface IngestPageHumanReplyResult {
+  outcome: 'ingested' | 'duplicate' | 'ignored';
+  conversation: ConversationSummary;
+  message?: { id: string; createdAt: string };
+  replayed?: boolean;
+}
+
 type CommandName =
   | 'request_handoff'
   | 'claim'
@@ -215,7 +223,8 @@ type CommandName =
   | 'cancel_handoff'
   | 'close'
   | 'reset'
-  | 'transfer';
+  | 'transfer'
+  | 'ingest_page_reply';
 
 interface CommandOpts {
   /** Tenant scoping; when set the session must belong to it (404 otherwise, no
@@ -520,6 +529,32 @@ async function applyClaim(
   return open?.id ?? null;
 }
 
+/** Page-inbox echo: HUMAN_OWNED with no assignee so any tenant operator can
+ *  pick it up. Completes an open requested handoff the same way applyClaim does. */
+async function applyUnassignedHumanPause(
+  manager: EntityManager,
+  session: ChatSession,
+  eventText: string,
+): Promise<string | null> {
+  const now = new Date();
+  const open = await lockHandoff(manager, session.id, ['requested']);
+  if (open) {
+    await manager.update(HandoffRequest, open.id, {
+      status: 'accepted',
+      assignedAgentId: null,
+      acceptedAt: now,
+      waitTimeSeconds: Math.max(0, Math.floor((now.getTime() - new Date(open.requestedAt).getTime()) / 1000)),
+    });
+  }
+  await applyOwnershipTransition(manager, session, 'human_owned', {
+    assignedAgentId: null,
+    ...humanControlColumns({ mode: 'indefinite' }),
+  });
+  await syncHumanControlTimestamps(manager, session);
+  await persistSystemEvent(manager, session, eventText);
+  return open?.id ?? null;
+}
+
 /** Shared HUMAN_OWNED -> BOT_OWNED transition, used by releaseConversation and
  *  releaseExpiredHumanControl. SAME rules either way: complete the accepted
  *  handoff, clear assignment + human-control, bump the version, one event.
@@ -711,50 +746,52 @@ export const conversationCommands = {
 
       if (session.ownership === 'closed') throw new ConversationClosedError();
       if (session.ownership === 'human_owned') {
-        if (session.assignedAgentId === agentId) {
-          if (opts.updatePolicyIfOwned) {
-            // Codex review fix 2 (no resurrection): an EXPIRED timed control
-            // cannot be silently renewed. If the locked row's deadline has
-            // already passed ON THE DB CLOCK, the old control is over -
-            // materialize the expiry and make the new policy a FRESH takeover
-            // instead of an in-place rewrite.
-            if (
-              session.humanControlMode === 'timed' &&
-              session.humanControlUntil &&
-              (await timedDeadlinePassed(manager, session.id))
-            ) {
-              await applyRelease(manager, session, EXPIRY_EVENT_TEXT);
-              const handoffId = await applyClaim(manager, session, agentId, policy);
-              logger.info(
-                `Conversation ${session.id} re-claimed fresh by agent ${agentId} after timed expiry`,
-                { policy: policy.mode },
-              );
-              return { outcome: 'claimed' as const, conversation: summarize(session, handoffId) };
-            }
-
-            const columns = humanControlColumns(policy);
-            await manager.update(
-              ChatSession,
-              session.id,
-              columns as QueryDeepPartialEntity<ChatSession>,
-            );
-            // Plain values sync directly; the DB-computed timestamps re-read.
-            session.humanControlMode = policy.mode;
-            session.humanControlDurationHours = policy.mode === 'timed' ? policy.hours : undefined;
-            await syncHumanControlTimestamps(manager, session);
-            logger.info(`Conversation ${session.id} human-control policy updated by agent ${agentId}`, {
-              policy: policy.mode,
-            });
-            return {
-              outcome: 'already_owned' as const,
-              policyUpdated: true,
-              conversation: summarize(session, null),
-            };
-          }
-          // Same operator re-claiming: idempotent by state — no re-apply.
-          return { outcome: 'already_owned' as const, conversation: summarize(session, null) };
+        if (session.assignedAgentId && session.assignedAgentId !== agentId) {
+          throw new ConversationAlreadyClaimedError(session.assignedAgentId);
         }
-        throw new ConversationAlreadyClaimedError(session.assignedAgentId);
+        if (!session.assignedAgentId) {
+          await manager.update(ChatSession, session.id, { assignedAgentId: agentId });
+          session.assignedAgentId = agentId;
+        }
+        if (opts.updatePolicyIfOwned) {
+          // Codex review fix 2 (no resurrection): an EXPIRED timed control
+          // cannot be silently renewed. If the locked row's deadline has
+          // already passed ON THE DB CLOCK, the old control is over -
+          // materialize the expiry and make the new policy a FRESH takeover
+          // instead of an in-place rewrite.
+          if (
+            session.humanControlMode === 'timed' &&
+            session.humanControlUntil &&
+            (await timedDeadlinePassed(manager, session.id))
+          ) {
+            await applyRelease(manager, session, EXPIRY_EVENT_TEXT);
+            const handoffId = await applyClaim(manager, session, agentId, policy);
+            logger.info(
+              `Conversation ${session.id} re-claimed fresh by agent ${agentId} after timed expiry`,
+              { policy: policy.mode },
+            );
+            return { outcome: 'claimed' as const, conversation: summarize(session, handoffId) };
+          }
+
+          const columns = humanControlColumns(policy);
+          await manager.update(
+            ChatSession,
+            session.id,
+            columns as QueryDeepPartialEntity<ChatSession>,
+          );
+          session.humanControlMode = policy.mode;
+          session.humanControlDurationHours = policy.mode === 'timed' ? policy.hours : undefined;
+          await syncHumanControlTimestamps(manager, session);
+          logger.info(`Conversation ${session.id} human-control policy updated by agent ${agentId}`, {
+            policy: policy.mode,
+          });
+          return {
+            outcome: 'already_owned' as const,
+            policyUpdated: true,
+            conversation: summarize(session, null),
+          };
+        }
+        return { outcome: 'already_owned' as const, conversation: summarize(session, null) };
       }
 
       const handoffId = await applyClaim(manager, session, agentId, policy);
@@ -808,8 +845,12 @@ export const conversationCommands = {
 
       let autoClaimed = false;
       if (session.ownership === 'human_owned') {
-        if (session.assignedAgentId !== agentId) {
+        if (session.assignedAgentId && session.assignedAgentId !== agentId) {
           throw new ConversationAlreadyClaimedError(session.assignedAgentId);
+        }
+        if (!session.assignedAgentId) {
+          await manager.update(ChatSession, session.id, { assignedAgentId: agentId });
+          session.assignedAgentId = agentId;
         }
         // Committed human reply slides a TIMED deadline; indefinite stays put.
         // Codex review fixes 1+2: the slide condition AND the new deadline are
@@ -910,6 +951,95 @@ export const conversationCommands = {
     });
   },
 
+  /**
+   * Native Messenger/IG page-inbox reply: persist as an agent message and pause
+   * the Agent (unassigned indefinite human_owned). No operator auth — the page
+   * is the actor. Does not outbound-route; the customer already has the text.
+   */
+  async ingestPageHumanReply(
+    sessionId: string,
+    input: { content: string; externalMessageId: string; channel: 'messenger' | 'instagram' },
+    opts: CommandOpts = {},
+  ): Promise<IngestPageHumanReplyResult> {
+    return withConversation(sessionId, 'ingest_page_reply', undefined, opts, async (manager, session) => {
+      if (session.ownership === 'closed') {
+        return { outcome: 'ignored' as const, conversation: summarize(session, null) };
+      }
+
+      const dup = (await manager.query(
+        `SELECT id FROM messages
+          WHERE session_id = $1 AND metadata->>'externalMessageId' = $2
+          LIMIT 1`,
+        [session.id, input.externalMessageId],
+      )) as Array<{ id: string }>;
+      if (dup.length) {
+        return { outcome: 'duplicate' as const, conversation: summarize(session, null) };
+      }
+
+      const delivered = await manager.findOne(MessageDelivery, {
+        where: { platformMessageId: input.externalMessageId },
+      });
+      if (delivered) {
+        return { outcome: 'ignored' as const, conversation: summarize(session, null) };
+      }
+
+      if (session.ownership === 'bot_owned' || session.ownership === 'handoff_requested') {
+        const source = input.channel === 'instagram' ? 'Instagram' : 'Messenger';
+        await applyUnassignedHumanPause(
+          manager,
+          session,
+          `A teammate replied from ${source}; the assistant is paused until you return it.`,
+        );
+      }
+
+      let participant = await manager.findOne(Participant, {
+        where: { sessionId: session.id, type: 'agent', userId: IsNull(), isDeleted: false },
+      });
+      if (!participant) {
+        participant = await manager.save(
+          Participant,
+          manager.create(Participant, {
+            sessionId: session.id,
+            type: 'agent',
+            name: input.channel === 'instagram' ? 'Instagram' : 'Messenger',
+            isAnonymous: false,
+            joinedAt: new Date(),
+          }),
+        );
+      }
+
+      const saved = await manager.save(
+        Message,
+        manager.create(Message, {
+          sessionId: session.id,
+          tenantId: session.tenantId,
+          participantId: participant.id,
+          type: 'text' as Message['type'],
+          content: encrypt(input.content),
+          contentEncrypted: true,
+          status: 'sent' as Message['status'],
+          sentAt: new Date(),
+          metadata: {
+            externalMessageId: input.externalMessageId,
+            source: 'page_echo',
+          } as unknown as Message['metadata'],
+        }),
+      );
+      await manager.query(
+        `UPDATE chat_sessions
+            SET message_count = message_count + 1, last_activity_at = now()
+          WHERE id = $1`,
+        [session.id],
+      );
+
+      return {
+        outcome: 'ingested' as const,
+        conversation: summarize(session, null),
+        message: { id: saved.id, createdAt: saved.createdAt.toISOString() },
+      };
+    });
+  },
+
   /** HUMAN_OWNED -> BOT_OWNED: clear assignment + human-control, complete the
    *  accepted handoff, one event. Only the assigned operator may release. */
   async releaseConversation(
@@ -929,7 +1059,7 @@ export const conversationCommands = {
       if (session.ownership !== 'human_owned') {
         throw new InvalidOwnershipTransitionError(session.ownership, 'release');
       }
-      if (session.assignedAgentId !== agentId) throw new NotConversationOwnerError();
+      if (session.assignedAgentId && session.assignedAgentId !== agentId) throw new NotConversationOwnerError();
 
       await applyRelease(
         manager,

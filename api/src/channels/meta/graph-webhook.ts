@@ -79,6 +79,9 @@ export class GraphWebhookVerifier implements WebhookVerifier {
 export interface GraphWebhookEvent {
   event: NormalizedEvent;
   recipientId: string;
+  /** Page/IG/phone id used to resolve the ChannelConnection. Echoes set this
+   *  to the Page id (`messaging.sender.id`); WhatsApp omits it and resolve uses recipientId. */
+  connectionAccountId?: string;
   channel: ChannelType;
 }
 
@@ -136,9 +139,9 @@ export function createGraphWebhookRouter(config: GraphWebhookConfig): Router {
     let inlineChain = Promise.resolve();
 
 
-    for (const { event, recipientId, channel } of config.normalize(payload)) {
+    for (const { event, recipientId, connectionAccountId, channel } of config.normalize(payload)) {
       try {
-        const connection = await config.resolve(recipientId, channel);
+        const connection = await config.resolve(connectionAccountId ?? recipientId, channel);
         if (!connection) continue;
 
         // Dedupe via INSERT ... ON CONFLICT DO NOTHING. Meta delivers webhooks

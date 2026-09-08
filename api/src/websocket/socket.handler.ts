@@ -519,6 +519,88 @@ function handleAgentLeave(socket: TenantSocket, data: { sessionId: string }): vo
   logger.debug(`Agent ${socket.data.user?.id} left session ${data.sessionId}`);
 }
 
+async function handleAgentSocketSend(socket: TenantSocket, data: MessageSendData): Promise<void> {
+  const { sessionId, content, metadata } = data;
+  const user = socket.data.user;
+  const tenantId = socket.data.tenantId;
+  if (!tenantId || !user?.id) {
+    socket.emit('error', { message: 'Invalid message data' });
+    return;
+  }
+
+  try {
+    const { randomUUID } = await import('crypto');
+    const { conversationCommands } = await import('../services/conversation-command.service');
+    const { deliverOperatorReply } = await import('../channels/delivery-state');
+    const { emitMessageCreated, emitConversationUpsert } = await import('../realtime/conversation-events');
+
+    const clientMessageId =
+      typeof metadata?.clientMessageId === 'string' && metadata.clientMessageId
+        ? metadata.clientMessageId
+        : randomUUID();
+
+    const result = await conversationCommands.sendHumanMessage(
+      sessionId,
+      user.id,
+      clientMessageId,
+      content,
+      null,
+      { tenantId },
+    );
+
+    const session = await sessionRepository.findOne({ where: { id: sessionId, tenantId } });
+    if (!session) return;
+
+    const messageData = {
+      id: result.message.id,
+      sessionId,
+      chatId: sessionId,
+      type: 'text' as const,
+      content,
+      status: 'sent',
+      createdAt: result.message.createdAt,
+      sender: 'agent' as const,
+      senderType: 'agent' as const,
+      timestamp: new Date().toISOString(),
+      metadata: { clientMessageId },
+    };
+    const roomName = `${tenantId}:${sessionId}`;
+    io?.to(roomName).emit('message:receive', messageData);
+    io?.to(`agents:${tenantId}`).emit('message:new', { sessionId, message: messageData });
+    if (result.autoClaimed) {
+      io?.to(`agents:${tenantId}`).emit('handoff:assigned', { sessionId, agentId: user.id });
+    }
+    emitMessageCreated(session, {
+      id: result.message.id,
+      sessionId,
+      type: 'text',
+      content,
+      senderType: 'agent',
+      status: 'sent',
+      createdAt: result.message.createdAt,
+      metadata: { clientMessageId },
+    });
+    await emitConversationUpsert(session, { lastMessage: { content, senderType: 'agent' } });
+
+    if (result.outcome === 'sent' && session.channel && session.channel !== 'widget') {
+      void deliverOperatorReply({
+        sessionId,
+        tenantId,
+        messageId: result.message.id,
+        clientMessageId,
+        content,
+        createdAt: result.message.createdAt,
+        type: 'text',
+        metadata: { clientMessageId },
+        attachment: null,
+      });
+    }
+  } catch (error) {
+    logger.error('Error handling agent message:send:', error);
+    socket.emit('error', { message: 'Failed to send message' });
+  }
+}
+
 /**
  * Handle message send event.
  * Exported for the realtime-emit integration tests (B-PR3a) — production wiring
@@ -538,6 +620,11 @@ export async function handleMessageSend(socket: TenantSocket, data: MessageSendD
   // every AI-scheduling ingress enforces the same bound). See chat.schema.
   if (content.length > MAX_MESSAGE_CONTENT_CHARS) {
     socket.emit('error', { message: 'Message too long' });
+    return;
+  }
+
+  if (user?.type === 'agent') {
+    await handleAgentSocketSend(socket, data);
     return;
   }
 

@@ -1,5 +1,6 @@
 import { NormalizedEvent, EventNormalizer } from '../types';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
+import { config } from '../../config/environment';
 import crypto from 'crypto';
 
 /**
@@ -40,6 +41,7 @@ interface MetaMessage {
   attachments?: MetaAttachment[];
   quick_reply?: { payload: string };
   is_echo?: boolean;
+  app_id?: number | string;
   reply_to?: { mid: string };
 }
 
@@ -86,11 +88,13 @@ interface MetaReaction {
 export function normalizeMetaPayload(payload: MetaWebhookPayload): Array<{
   event: NormalizedEvent;
   recipientId: string;
+  connectionAccountId: string;
   channel: 'messenger' | 'instagram';
 }> {
   const results: Array<{
     event: NormalizedEvent;
     recipientId: string;
+    connectionAccountId: string;
     channel: 'messenger' | 'instagram';
   }> = [];
 
@@ -101,17 +105,30 @@ export function normalizeMetaPayload(payload: MetaWebhookPayload): Array<{
     if (!entry.messaging) continue;
 
     for (const messaging of entry.messaging) {
-      // Skip echo events (our own messages sent back)
-      if (messaging.message?.is_echo) continue;
+      const isEcho = !!messaging.message?.is_echo;
+      if (isEcho && !shouldIngestPageEcho(messaging.message)) continue;
 
       const normalized = normalizeMessagingEvent(messaging, entry, channel);
-      if (normalized) {
-        results.push({
-          event: normalized,
-          recipientId: messaging.recipient.id,
-          channel,
-        });
+      if (!normalized) continue;
+
+      if (isEcho) {
+        const customerId = messaging.recipient.id;
+        normalized.sender = {
+          externalUserId: customerId,
+          externalThreadId: customerId,
+          platformData: { channel },
+        };
+        normalized.rawEventType = 'message.echo';
+        normalized.externalMessageId = messaging.message!.mid;
       }
+
+      const connectionAccountId = isEcho ? messaging.sender.id : messaging.recipient.id;
+      results.push({
+        event: normalized,
+        recipientId: messaging.recipient.id,
+        connectionAccountId,
+        channel,
+      });
     }
   }
 
@@ -126,9 +143,19 @@ export function normalizeMetaPayload(payload: MetaWebhookPayload): Array<{
 export class MetaEventNormalizer implements EventNormalizer {
   normalize(rawPayload: unknown, connection: ChannelConnection): NormalizedEvent[] {
     return normalizeMetaPayload(rawPayload as MetaWebhookPayload)
-      .filter((r) => r.channel === connection.channel && r.recipientId === connection.platformAccountId)
+      .filter((r) => r.channel === connection.channel && r.connectionAccountId === connection.platformAccountId)
       .map((r) => r.event);
   }
+}
+
+/** Our Send API echoes (bot + portal) must not pause the Agent. Empty META_APP_ID
+ *  fail-closes: skip every echo. A foreign or missing app_id is a page-inbox reply. */
+function shouldIngestPageEcho(msg: MetaMessage | undefined): boolean {
+  if (!msg) return false;
+  const ourAppId = config.meta.appId;
+  if (!ourAppId) return false;
+  if (msg.app_id != null && String(msg.app_id) === ourAppId) return false;
+  return true;
 }
 
 function normalizeMessagingEvent(
@@ -250,7 +277,6 @@ function normalizeMetaMessageEvent(
   sender: NormalizedEvent['sender'],
 ): NormalizedEvent | null {
   if (msg.text && !msg.attachments?.length) {
-    // Pure text message
     return {
       type: 'message',
       message: {
@@ -262,11 +288,11 @@ function normalizeMetaMessageEvent(
       dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
       timestamp: new Date(messaging.timestamp),
       rawEventType: 'message.text',
+      externalMessageId: msg.mid,
     };
   }
 
   if (msg.attachments && msg.attachments.length > 0) {
-    // Use first attachment (most common case)
     const att = msg.attachments[0];
     const type = metaAttachmentType(att.type);
 
@@ -286,10 +312,10 @@ function normalizeMetaMessageEvent(
       dedupeKey: `meta:${channel}:${entry.id}:${messaging.sender.id}:${msg.mid}`,
       timestamp: new Date(messaging.timestamp),
       rawEventType: `message.${att.type}`,
+      externalMessageId: msg.mid,
     };
   }
 
-  // Message with no text or attachments — skip
   return null;
 }
 

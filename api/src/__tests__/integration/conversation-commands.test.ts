@@ -447,6 +447,103 @@ describe('sendHumanMessage — auto-claim + dedupe + conflict', () => {
   });
 });
 
+describe('page-echo pause and portal claim', () => {
+  it('a portal reply on a messenger session auto-claims; the next customer turn is noop', async () => {
+    const tenant = await makeTenantWithAi();
+    const { agent } = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'messenger', source: 'messenger' });
+    const visitor = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+
+    const sent = await conversationCommands.sendHumanMessage(
+      session.id, agent.id, 'msgr-1', 'I will take this', null, { tenantId: tenant.id },
+    );
+    expect(sent.autoClaimed).toBe(true);
+    expect(await stateOf(session.id)).toMatchObject({
+      ownership: 'human_owned',
+      human_control_mode: 'indefinite',
+      assigned_agent_id: agent.id,
+    });
+
+    const pending = await createTestMessage(session.id, tenant.id, visitor.id, { content: 'still here?' });
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(await runTurn(fresh, pending)).toBe('noop');
+    const bots = await messageRepo.find({ where: { sessionId: session.id } });
+    expect(bots.filter((m) => m.type !== 'system' && m.type !== 'text')).toHaveLength(0);
+    const botParts = await AppDataSource.query(
+      `SELECT m.id FROM messages m JOIN participants p ON p.id = m.participant_id
+        WHERE m.session_id = $1 AND p.type = 'bot'`,
+      [session.id],
+    );
+    expect(botParts).toHaveLength(0);
+  });
+
+  it('ingestPageHumanReply pauses unassigned; first portal send takes assignment; second operator 409s', async () => {
+    const tenant = await makeTenantWithAi();
+    const a = await makeOperator(tenant.id);
+    const b = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'messenger', source: 'messenger' });
+
+    const ingested = await conversationCommands.ingestPageHumanReply(
+      session.id,
+      { content: 'Hi from the Page Inbox', externalMessageId: 'm_page_1', channel: 'messenger' },
+      { tenantId: tenant.id },
+    );
+    expect(ingested.outcome).toBe('ingested');
+    expect(await stateOf(session.id)).toMatchObject({
+      ownership: 'human_owned',
+      assigned_agent_id: null,
+      human_control_mode: 'indefinite',
+    });
+
+    const sent = await conversationCommands.sendHumanMessage(
+      session.id, a.agent.id, 'take-1', 'I have it', null, { tenantId: tenant.id },
+    );
+    expect(sent.outcome).toBe('sent');
+    expect(await stateOf(session.id)).toMatchObject({ assigned_agent_id: a.agent.id });
+
+    await expect(
+      conversationCommands.sendHumanMessage(session.id, b.agent.id, 'take-2', 'nope', null, { tenantId: tenant.id }),
+    ).rejects.toBeInstanceOf(ConversationAlreadyClaimedError);
+
+    const released = await conversationCommands.releaseConversation(session.id, a.agent.id, undefined, { tenantId: tenant.id });
+    expect(released.outcome).toBe('released');
+    expect(await stateOf(session.id)).toMatchObject({ ownership: 'bot_owned' });
+  });
+
+  it('any tenant operator can release an unassigned page-echo pause', async () => {
+    const tenant = await makeTenantWithAi();
+    const other = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'messenger' });
+
+    await conversationCommands.ingestPageHumanReply(
+      session.id,
+      { content: 'page', externalMessageId: 'm_page_rel', channel: 'messenger' },
+      { tenantId: tenant.id },
+    );
+    const released = await conversationCommands.releaseConversation(
+      session.id, other.agent.id, undefined, { tenantId: tenant.id },
+    );
+    expect(released.outcome).toBe('released');
+    expect(await stateOf(session.id)).toMatchObject({ ownership: 'bot_owned' });
+  });
+
+  it('forwardMessageToN8n no-ops when ownership is human_owned even if status is bot', async () => {
+    const tenant = await makeTenantWithAi();
+    const { agent } = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const visitor = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    await AppDataSource.query(
+      `UPDATE chat_sessions SET ownership = 'human_owned', assigned_agent_id = $2 WHERE id = $1`,
+      [session.id, agent.id],
+    );
+    const pending = await createTestMessage(session.id, tenant.id, visitor.id, { content: 'hey' });
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    initializeAgentService({ run: vi.fn() } as unknown as AgentService);
+    expect(await forwardMessageToN8n(fresh, pending)).toBe(false);
+  });
+});
+
+
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('REST command routes', () => {

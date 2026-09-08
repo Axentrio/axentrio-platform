@@ -1554,6 +1554,26 @@ describe('ListBookingsTool', () => {
         guidance: expect.stringMatching(/cannot be cancelled[\s\S]*CHANGE_NOT_ALLOWED/),
       }),
     );
+    const guidance = (result.data as { guidance?: string } | undefined)?.guidance ?? '';
+    expect(guidance).toMatch(/do not offer to connect them with the team/i);
+    expect(guidance).toMatch(/not a request for a person/);
+  });
+
+  it('tells the model when a listed booking cannot be rescheduled', async () => {
+    const tool = new ListBookingsTool();
+    mockListBookings.mockResolvedValue({
+      bookings: [
+        { id: 'bk-1', status: 'confirmed', reschedule: 'not_allowed', cancel: 'request' },
+      ],
+    });
+
+    const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
+
+    expect(result.success).toBe(true);
+    const guidance = (result.data as { guidance?: string } | undefined)?.guidance ?? '';
+    expect(guidance).toMatch(/cannot be rescheduled[\s\S]*CHANGE_NOT_ALLOWED/);
+    expect(guidance).toMatch(/do not offer to connect them with the team/i);
+    expect(guidance).toMatch(/not a request for a person/);
   });
 
   it('tells the model when cancel is blocked by a cutoff, not by policy', async () => {
@@ -1684,7 +1704,9 @@ describe('RescheduleBookingTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).toMatch(/do not offer to connect them with the team/i);
     expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(result.error).not.toMatch(/keep insisting after you have explained the cutoff/);
     expect(mockRescheduleBooking).not.toHaveBeenCalled();
   });
 
@@ -1803,7 +1825,9 @@ describe('CancelBookingTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(result.error).toMatch(/do not offer to connect them with the team/i);
     expect(result.error).not.toMatch(/CONFIRMATION_REQUIRED/);
+    expect(result.error).not.toMatch(/keep insisting after you have explained the cutoff/);
     expect(mockCancelBooking).not.toHaveBeenCalled();
   });
 

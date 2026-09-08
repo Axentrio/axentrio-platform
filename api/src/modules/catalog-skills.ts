@@ -27,7 +27,7 @@ export const handoffSkill: ModuleDefinition = {
   displayName: 'Human handoff',
   description: 'Hands the conversation to a human when the customer asks or the bot is unsure.',
   readinessHint: 'Ready as soon as your plan includes handoff — no setup needed.',
-  defaultProse: 'When the customer explicitly asks for a person, or you cannot complete a request they made, offer to connect them with the team. A missing business fact (address, hours, prices) is not a reason to hand off.',
+  defaultProse: 'When the customer explicitly asks for a person, offer to connect them with the team. A missing business fact (address, hours, prices) is not a reason to hand off. A booking policy that forbids reschedule or cancel is not a reason to hand off — refuse the change and do not offer a human as a workaround.',
   provides: ['escalate_to_human'],
   gate: { kind: 'feature', feature: 'handoff' },
   tools: [],

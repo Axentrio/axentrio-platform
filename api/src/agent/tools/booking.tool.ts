@@ -14,7 +14,11 @@ import {
   peekCustomerChange,
   BookingError,
 } from '../../booking/booking.service';
-import { customerChangeNotAllowedError, spokenChangeCutoff } from '../../booking/customer-change-policy';
+import {
+  customerChangeNotAllowedError,
+  policyChangeNotAllowedNoHandoffTail,
+  spokenChangeCutoff,
+} from '../../booking/customer-change-policy';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
@@ -536,7 +540,7 @@ function mergeBlockedReschedule(
   const cutoff = blocked.find((b) => b.rescheduleCutoff)?.rescheduleCutoff;
   const blockedGuidance = cutoff
     ? `The customer has an existing appointment that cannot be rescheduled this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.`
-    : 'The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.';
+    : `The customer has an existing appointment that cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time for that appointment, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here. ${policyChangeNotAllowedNoHandoffTail('reschedule')}`;
   return {
     cannotReschedule: blocked,
     guidance: blockedGuidance,
@@ -696,7 +700,7 @@ function alreadyHeldNote(
       suggestedAction: 'confirm_existing',
       guidance: cutoff
         ? `The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment this close to the start — the cutoff is ${cutoff}. Tell them plainly it is not possible to reschedule ${cutoff}. Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.`
-        : 'The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here.',
+        : `The customer already has a confirmed appointment in this range (see alreadyHeld). Do not say that time is unavailable. They already hold it. Do not create a second booking. They cannot reschedule this appointment (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule this appointment here. ${policyChangeNotAllowedNoHandoffTail('reschedule')}`,
     };
   }
   const capped = moveTargets.length > MOVE_TARGET_CAP;
@@ -1575,7 +1579,7 @@ function listedChangeGuidance(
   }
   if (bookings.some((b) => b.reschedule === 'not_allowed' && !b.rescheduleCutoff)) {
     parts.push(
-      'An appointment in this list cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here.',
+      `An appointment in this list cannot be rescheduled (CHANGE_NOT_ALLOWED). Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot reschedule that appointment here. ${policyChangeNotAllowedNoHandoffTail('reschedule')}`,
     );
   }
   if (bookings.some((b) => b.cancelCutoff)) {
@@ -1585,7 +1589,7 @@ function listedChangeGuidance(
   }
   if (bookings.some((b) => b.cancel === 'not_allowed' && !b.cancelCutoff)) {
     parts.push(
-      'An appointment in this list cannot be cancelled (CHANGE_NOT_ALLOWED). Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot cancel that appointment here.',
+      `An appointment in this list cannot be cancelled (CHANGE_NOT_ALLOWED). Do not call cancel_booking, do not call request_appointment, and never claim a request was submitted. Politely explain they cannot cancel that appointment here. ${policyChangeNotAllowedNoHandoffTail('cancel')}`,
     );
   }
   return parts.join(' ');
@@ -1594,7 +1598,7 @@ function listedChangeGuidance(
 
 export class ListBookingsTool implements ToolAdapter {
   name = 'list_bookings';
-  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancelCutoff or rescheduleCutoff is set, tell them immediately it is not possible that close to the appointment, naming the cutoff — do not ask whether to proceed, do not tell them to contact the business, and do not call escalate_to_human unless they keep insisting after that. If cancel or reschedule is not_allowed with no cutoff, tell them immediately they cannot do that here — do not ask whether to proceed and do not call the matching tool.';
+  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancelCutoff or rescheduleCutoff is set, tell them immediately it is not possible that close to the appointment, naming the cutoff — do not ask whether to proceed, do not tell them to contact the business, and do not call escalate_to_human unless they keep insisting after that. If cancel or reschedule is not_allowed with no cutoff, tell them immediately they cannot do that here — do not ask whether to proceed, and do not offer a human or call escalate_to_human; insisting on the change is not a request for a person. Do not call the matching tool.';
   parameters = {
     type: 'object',
     properties: {
@@ -1625,7 +1629,7 @@ export class ListBookingsTool implements ToolAdapter {
 export class RescheduleBookingTool implements ToolAdapter {
   name = 'reschedule_booking';
   description =
-    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to reschedule that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot reschedule here — do not ask for confirmation.';
+    'Reschedule an existing booking to a new time, or to a new appointment address. Changing the address is a reschedule: pass customerAddress and the time they confirmed (the existing time if they are not also moving it). Do not pick a different time than the one they named. Never use this to add an email, phone, name, note, or file. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to reschedule that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot reschedule here — do not ask for confirmation, and do not offer a human or imply the team may still change it.';
   parameters = {
     type: 'object',
     properties: {
@@ -1678,7 +1682,7 @@ export class RescheduleBookingTool implements ToolAdapter {
 
 export class CancelBookingTool implements ToolAdapter {
   name = 'cancel_booking';
-  description = 'Cancel an existing booking. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to cancel that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot cancel here — do not ask for confirmation.';
+  description = 'Cancel an existing booking. If it returns CHANGE_NOT_ALLOWED naming a cutoff, tell them it is not possible to cancel that close to the appointment (name the cutoff). Do not hand off unless they keep insisting after that. If it returns CHANGE_NOT_ALLOWED with no cutoff, tell them they cannot cancel here — do not ask for confirmation, and do not offer a human or imply the team may still change it.';
   parameters = {
     type: 'object',
     properties: {

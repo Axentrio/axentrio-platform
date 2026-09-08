@@ -23,6 +23,7 @@ import { composeSystemPrompt } from '../../llm/compose-system-prompt';
 import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
 import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 import type { ServiceType } from '../../database/entities/ServiceType';
+import { handoffSkill } from '../../modules/catalog-skills';
 
 const svc = (over: Partial<ServiceType> = {}): ServiceType =>
   ({
@@ -40,6 +41,15 @@ const svc = (over: Partial<ServiceType> = {}): ServiceType =>
   }) as ServiceType;
 
 const RANGE = { durationMode: 'range' as const, minDurationMin: 30, maxDurationMin: 90 };
+
+describe('handoff skill default prose', () => {
+  it('offers a human only when explicitly asked, not when a booking change is forbidden', () => {
+    const prose = handoffSkill.defaultProse!;
+    expect(prose).toMatch(/explicitly asks for a person/);
+    expect(prose).toMatch(/forbids reschedule or cancel is not a reason to hand off/);
+    expect(prose).not.toMatch(/cannot complete a request they made/);
+  });
+});
 
 describe('an existing address binding reaches the model', () => {
   it('says the selected address is already known and must not be requested again', () => {
@@ -411,6 +421,8 @@ describe('customer change policy — catalog line and rules', () => {
     expect(p).toMatch(/tell them immediately/i);
     expect(p).toMatch(/do not ask whether to proceed/i);
     expect(p).toMatch(/CHANGE_NOT_ALLOWED/);
+    expect(p).toMatch(/do not offer to connect them with the team/i);
+    expect(p).toMatch(/Insisting on the move or cancel is not a request for a person/);
   });
 
   it('names a cutoff as the reason and only hands off after insistence', () => {
@@ -457,6 +469,7 @@ describe('after a booking exists — extra info vs reschedule vs price', () => {
     const p = buildServicesSection([svc({ rescheduleMode: 'not_allowed' })])!;
     expect(p).toMatch(/follow that appointment's reschedule:/);
     expect(p).toMatch(/not_allowed means refuse/);
+    expect(p).toMatch(/do not offer a human as a workaround/);
     expect(line(p)).toContain('reschedule: not_allowed');
   });
 

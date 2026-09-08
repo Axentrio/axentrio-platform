@@ -126,7 +126,11 @@ describe('customerChangeNotAllowedError', () => {
     const err = customerChangeNotAllowedError(undefined, 'cancel');
     expect(err.message).toMatch(/cannot cancel this appointment here/);
     expect(err.message).toMatch(/Do not invent a deadline/);
+    expect(err.message).toMatch(/do not call escalate_to_human/);
+    expect(err.message).toMatch(/do not offer to connect them with the team/i);
+    expect(err.message).toMatch(/insisting on the cancel is not a request for a person/);
     expect(err.message).not.toMatch(/the cutoff is/);
+    expect(err.message).not.toMatch(/keep insisting after you have explained the cutoff/);
     expect(err.details).toEqual({ action: 'cancel' });
   });
 

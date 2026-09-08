@@ -187,7 +187,9 @@ Base is the day's first-opening departure when enabled. Return-home is never gat
 
 New Service: reschedule and cancel default to `request`. Missing mode reads as `request`. Auto-book of the original is not a change grant.
 
-`not_allowed`: refuse immediately. Do not ask, do not summarise, do not call the tool. Name the cutoff if there is one. Do not send them to the business on the first refusal. If they keep insisting, ask whether they want a human.
+Policy `not_allowed` (no cutoff): refuse immediately. Do not ask, do not summarise, do not call the tool. Do not offer a human and do not imply the team may still change it. Handoff only if they separately ask to speak with a person, or another rule requires escalation. Insisting on the change is not a request for a person.
+
+Cutoff (auto/request demoted): name the cutoff. Do not send them to the business on the first refusal. If they keep insisting after the cutoff is explained, ask whether they want a human.
 
 `request`: capture a change Request; original Booking stays put.
 
@@ -249,6 +251,6 @@ Unconfigured booking (no hours / no Service) drops booking tools while skill-sta
 | create/request contact errors | ask, don't Request |
 | timing PUT | explicit `null` inherits; explicit `0` is zero |
 | travel | grouping does not refuse; only `maxTravelMin` refuses a long drive |
-| reschedule/cancel | default `request`; `not_allowed` never pretends a Request was filed |
+| reschedule/cancel | default `request`; `not_allowed` never pretends a Request was filed **and never offers a human on the policy refusal** |
 
 Pin new behaviour at the seam the live bug used (tool result, chips, prompt line), not a mock of empty `slots` when the diary had times.

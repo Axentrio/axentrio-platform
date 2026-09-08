@@ -119,6 +119,19 @@ export function catalogChangeClause(
   return cutoff ? `${label}: ${resolved} ${cutoff}` : `${label}: ${resolved}`;
 }
 
+export function policyChangeNotAllowedGuidance(action: 'reschedule' | 'cancel'): string {
+  const verb = action === 'reschedule' ? 'reschedule' : 'cancel';
+  return `This appointment does not allow customers to ${verb} through the booking system. There is no cutoff and no number of days. Do not invent a deadline. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here. Do not tell them to contact the business and do not call escalate_to_human. Do not offer to connect them with the team and do not ask whether they want a human. This policy is final — do not imply the team may still change the appointment. If they separately ask to speak with a person, follow ESCALATION; insisting on the ${verb} is not a request for a person.`;
+}
+
+/** Tail from policyChangeNotAllowedGuidance for context-specific lead-ins that already carry refuse/no-request clauses. */
+export function policyChangeNotAllowedNoHandoffTail(action: 'reschedule' | 'cancel'): string {
+  const marker = 'Do not tell them to contact the business';
+  const guidance = policyChangeNotAllowedGuidance(action);
+  const idx = guidance.indexOf(marker);
+  return idx >= 0 ? guidance.slice(idx) : guidance;
+}
+
 /** Same refusal the write path and the agent confirmation gate must raise. */
 export function customerChangeNotAllowedError(
   serviceName: string | undefined,
@@ -138,8 +151,12 @@ export function customerChangeNotAllowedError(
       `This appointment cannot be ${past} online this close to the start (${spoken}). Please contact the business directly.`,
     );
   }
+  const tail = policyChangeNotAllowedGuidance(action).replace(
+    /^This appointment does not allow customers to \w+ through the booking system\. /,
+    '',
+  );
   return new BookingError(
-    `${who} does not allow customers to ${verb} through the booking system. There is no cutoff and no number of days. Do not invent a deadline. Do not modify or cancel the appointment, do not call request_appointment, and do not tell the customer that a request was submitted. Politely explain they cannot ${verb} this appointment here.`,
+    `${who} does not allow customers to ${verb} through the booking system. ${tail}`,
     'CHANGE_NOT_ALLOWED',
     403,
     { action },

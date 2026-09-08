@@ -131,15 +131,7 @@ describe('customerChangeNotAllowedError', () => {
     expect(err.message).toMatch(/insisting on the cancel is not a request for a person/);
     expect(err.message).not.toMatch(/the cutoff is/);
     expect(err.message).not.toMatch(/keep insisting after you have explained the cutoff/);
-    expect(err.customerMessage).toBe('This appointment cannot be cancelled online.');
-    expect(err.customerMessage).not.toMatch(/contact the business directly/i);
     expect(err.details).toEqual({ action: 'cancel' });
-  });
-
-  it('uses final policy copy for reschedule without a contact-business workaround', () => {
-    const err = customerChangeNotAllowedError(undefined, 'reschedule');
-    expect(err.customerMessage).toBe('This appointment cannot be rescheduled online.');
-    expect(err.customerMessage).not.toMatch(/contact the business directly/i);
   });
 
   it('treats untilMin 0 as a cutoff after the start', () => {

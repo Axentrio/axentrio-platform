@@ -26,6 +26,7 @@ import {
   requireClerkAuth,
   autoProvision,
 } from "../middleware/clerk.middleware";
+import { resolveTenantContext } from "../middleware/super-admin.middleware";
 import { updateClerkOrganization } from "../services/clerk-sync.service";
 import { logger } from "../utils/logger";
 import { invalidate } from "../utils/cache";
@@ -313,14 +314,17 @@ async function applyTenantMePatch(
 
 const router = Router();
 
+// Super-admin impersonation (X-Tenant-Context) must run after autoProvision so
+// it overwrites the JWT home tenant. Team invite/members/GET /me used to ignore
+// the header and mutate the caller's workspace.
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
+
 /**
  * Get current tenant
  * GET /api/v1/tenants/me
  */
 router.get(
   "/me",
-  requireClerkAuth,
-  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const isAdmin =
@@ -392,8 +396,6 @@ router.get(
  */
 router.patch(
   "/me",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
@@ -455,16 +457,12 @@ router.patch(
 
 router.get(
   "/me/users",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   listTenantUsers,
 );
 
 router.post(
   "/me/users",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   createTenantUser,
 );
@@ -475,8 +473,6 @@ router.post(
  */
 router.get(
   "/me/stats",
-  requireClerkAuth,
-  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
 
@@ -539,87 +535,65 @@ router.get(
 
 router.post(
   "/me/webhook-test",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   testTenantWebhook,
 );
 
 router.post(
   "/me/webhook-secret/regenerate",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   regenerateTenantWebhookSecret,
 );
 
 router.post(
   "/me/invite",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   inviteTenantUser,
 );
 
 router.patch(
   "/me/users/:userId",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   updateTenantUserRole,
 );
 
 router.post(
   "/me/users/:userId/deactivate",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   deactivateTenantUser,
 );
 
 router.post(
   "/me/users/:userId/reactivate",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   reactivateTenantUser,
 );
 
 router.get(
   "/me/pending-invites",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   listPendingInvites,
 );
 
 router.post(
   "/me/pending-invites/:id/resend",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   resendPendingInvite,
 );
 
 router.delete(
   "/me/pending-invites/:id",
-  requireClerkAuth,
-  autoProvision,
   requireAdmin,
   cancelPendingInvite,
 );
 
 router.get(
   "/me/onboarding-status",
-  requireClerkAuth,
-  autoProvision,
   getTenantOnboardingStatus,
 );
 
 router.get(
   "/me/available-tools",
-  requireClerkAuth,
-  autoProvision,
   getTenantAvailableTools,
 );
 

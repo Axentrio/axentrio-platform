@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireClerkAuth, autoProvision } from '../../middleware/clerk.middleware';
+import { resolveTenantContext } from '../../middleware/super-admin.middleware';
 import { logger } from '../../utils/logger';
 import { config } from '../../config/environment';
 import {
@@ -28,6 +29,7 @@ import { ERROR_CODES } from '../../middleware/error-codes';
 import { sanitizeGraphError } from '../../utils/axios-error';
 
 const router = Router();
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 // Separate router for the callback — mounted before Clerk middleware
 export const metaOAuthCallbackRouter = Router();
@@ -38,8 +40,6 @@ export const metaOAuthCallbackRouter = Router();
  */
 router.get(
   '/url',
-  requireClerkAuth,
-  autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = (req as any).user?.tenantId;
     if (!tenantId) {
@@ -142,8 +142,6 @@ metaOAuthCallbackRouter.get(
  */
 router.post(
   '/connect',
-  requireClerkAuth,
-  autoProvision,
   asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     const tenantId = (req as any).user?.tenantId;
     if (!tenantId) {

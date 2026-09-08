@@ -89,6 +89,7 @@ import skillsRoutes from "./routes/skills.routes";
 import automationsRoutes from "./routes/automations.routes";
 import sessionManagementRoutes from "./routes/session-management.routes";
 import { requireClerkAuth, autoProvision } from "./middleware/clerk.middleware";
+import { resolveTenantContext } from "./middleware/super-admin.middleware";
 
 // Webhook integration
 import { initializeAgentService } from "./services/message-forwarding.service";
@@ -412,6 +413,7 @@ apiRouter.use(
   "/tenants/me/webhooks",
   requireClerkAuth,
   autoProvision,
+  resolveTenantContext,
   webhookAdminRoutes,
 );
 apiRouter.use("/admin", adminRoutes);

@@ -14,7 +14,9 @@ import { describe, it, expect } from 'vitest';
 import {
   collapseAppointmentSpans,
   latestCustomerTimeText,
+  namesSingleOfferedSlot,
   namesSingleOfferedTime,
+  unofferedSingleNamedSlot,
   parseClockTimes,
   unofferedSingleTimeIn,
   unofferedTimesIn,
@@ -128,6 +130,34 @@ describe('when it must stay quiet', () => {
     // is inventing them outright. The caller only runs this where chips exist, so it cannot fire
     // in production today - but a future caller gets the safe answer rather than a permissive one.
     expect(unofferedTimesIn('I can do 09:00 or 10:00.', [])).toEqual(['09:00', '10:00']);
+  });
+});
+
+
+
+describe('date-aware named slot matching', () => {
+  const TZ = 'Europe/Brussels';
+  const NOW = new Date('2026-09-08T01:33:00.000Z'); // 03:33 Brussels on 2026-09-08
+
+  const SLOTS = [
+    { start: '2026-09-08T11:00:00.000Z' }, // 13:00 today
+    { start: '2026-09-08T23:00:00.000Z' }, // 01:00 tomorrow
+  ];
+
+  it('does not match vandaag om 01:00 via tomorrow or PM alt', () => {
+    const said = 'Ik wil vandaag om 01:00 een afspraak';
+    expect(namesSingleOfferedSlot(said, SLOTS, TZ, NOW)).toBe(false);
+    expect(unofferedSingleNamedSlot(said, SLOTS, TZ, NOW)).toBe('01:00');
+  });
+
+  it('still matches vandaag om 1:30 via PM alt on the same day', () => {
+    const slots = [{ start: '2026-09-08T11:30:00.000Z' }]; // 13:30 today
+    expect(namesSingleOfferedSlot('vandaag om 1:30', slots, TZ, NOW)).toBe(true);
+  });
+
+  it('ignores a past 01:00 on the anchored day', () => {
+    const slots = [{ start: '2026-09-07T23:00:00.000Z' }]; // 01:00 today Brussels, already past
+    expect(namesSingleOfferedSlot('vandaag om 01:00', slots, TZ, NOW)).toBe(false);
   });
 });
 

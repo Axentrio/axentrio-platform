@@ -770,6 +770,37 @@ describe('CheckAvailabilityTool', () => {
     expect(data.guidance).toMatch(/never tell the customer it is available/i);
   });
 
+
+  it('does not mark vandaag om 01:00 as available when only later today is free', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-08T01:33:00.000Z'));
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({
+      slots: [
+        { start: '2026-09-08T11:00:00.000Z', end: '2026-09-08T11:30:00.000Z' },
+        { start: '2026-09-08T23:00:00.000Z', end: '2026-09-08T23:30:00.000Z' },
+      ],
+      timezone: 'Europe/Brussels',
+    });
+
+    const result = await tool.execute(
+      { startDate: '2026-09-08', endDate: '2026-09-09' },
+      makeCtx({
+        conversationHistory: [
+          { role: 'user', content: 'Ik wil vandaag om 01:00 een afspraak' },
+        ],
+      }),
+    );
+
+    const data = result.data as {
+      requestedTimeAvailable?: boolean;
+      requestedTimeUnavailable?: string;
+    };
+    expect(data.requestedTimeAvailable).toBeUndefined();
+    expect(data.requestedTimeUnavailable).toBe('01:00');
+    vi.useRealTimers();
+  });
+
   it('rolls later-at-midnight onto the next day when today has no 00:00', async () => {
     // Live WhatsApp, always-open 24/7: asked at 22:29 for midnight. Same-day read returned
     // 22:30 / 23:00 / 23:30 and the bot said midnight was unavailable today. Midnight is

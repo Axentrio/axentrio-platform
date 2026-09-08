@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
-import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseCalendarDates, parseClockTimes, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedSlot, namesSingleOfferedTime, parseCalendarDates, parseClockTimes, unofferedSingleNamedSlot, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import { isDayPartClockWindow, namedExactClock } from './day-part';
 import { resolveBotLanguage, slotChipQuickReply } from '../config/bot-language';
 import type { OfferMeasurement } from '../channels/response.types';
@@ -1952,8 +1952,16 @@ export class AgentService {
     // book, attaching hours again is how the WhatsApp loop starts: they tap the same chip,
     // we re-check, we re-attach the chips. A single time in the REPLY is not that — when
     // their own hour was ruled out, it is the refusal naming the day's opening.
-    const customerChoseFree = namesSingleOfferedTime(customerTimeText, times.confirmableLocal ?? []);
-    const customerNamedRuledOut = !!unofferedSingleTimeIn(customerTimeText, times.everyOfferableLocal ?? []);
+    const now = new Date();
+    const offerSlots = av
+      ? [...av.slots, ...(av.requestableSlots ?? [])]
+      : [];
+    const customerChoseFree = av
+      ? namesSingleOfferedSlot(customerTimeText, av.slots, av.timezone, now)
+      : namesSingleOfferedTime(customerTimeText, times.confirmableLocal ?? []);
+    const customerNamedRuledOut = av
+      ? !!unofferedSingleNamedSlot(customerTimeText, offerSlots, av.timezone, now)
+      : !!unofferedSingleTimeIn(customerTimeText, times.everyOfferableLocal ?? []);
     const alreadyChoseTime = !state.namedTimeRefused && !!times.confirmableLocal && (
       customerChoseFree ||
       (!customerNamedRuledOut && namesSingleOfferedTime(finalContent, times.confirmableLocal))

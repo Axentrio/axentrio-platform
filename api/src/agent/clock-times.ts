@@ -133,6 +133,134 @@ function offeredKeyFor(t: ClockTime, offered: Set<string>): string | null {
   return null;
 }
 
+const RELATIVE_DAY_NEEDLES: Array<{ needles: string[]; offsetDays: number }> = [
+  { needles: ['vandaag', 'today', "aujourd'hui", 'aujourdhui'], offsetDays: 0 },
+  { needles: ['morgen', 'tomorrow', 'demain'], offsetDays: 1 },
+  { needles: ['gisteren', 'yesterday', 'hier'], offsetDays: -1 },
+  { needles: ['overmorgen', 'day after tomorrow', 'après-demain', 'apres-demain'], offsetDays: 2 },
+];
+
+/** Relative calendar days named in customer text (`vandaag`, `tomorrow`, …). */
+export function parseRelativeCalendarDates(text: string, timezone: string, now: Date): string[] {
+  const lower = text.toLowerCase();
+  const today = DateTime.fromJSDate(now).setZone(timezone);
+  if (!today.isValid) return [];
+  const out: string[] = [];
+  for (const { needles, offsetDays } of RELATIVE_DAY_NEEDLES) {
+    if (needles.some((needle) => lower.includes(needle))) {
+      out.push(today.plus({ days: offsetDays }).toFormat('yyyy-MM-dd'));
+    }
+  }
+  return out;
+}
+
+/** Whether the customer anchored their hour to a specific calendar day or weekday. */
+export function hasNamedCalendarAnchor(text: string, timezone: string, now: Date): boolean {
+  const year = DateTime.fromJSDate(now).setZone(timezone).year;
+  return (
+    parseRelativeCalendarDates(text, timezone, now).length > 0 ||
+    parseCalendarDates(text, year).length > 0 ||
+    parseWeekdays(text).length > 0
+  );
+}
+
+function resolveNamedDates(text: string, timezone: string, now: Date): { dates: string[]; weekdays: number[] } {
+  const zoneToday = DateTime.fromJSDate(now).setZone(timezone);
+  const year = zoneToday.isValid ? zoneToday.year : now.getUTCFullYear();
+  const dates = [...new Set([...parseRelativeCalendarDates(text, timezone, now), ...parseCalendarDates(text, year)])];
+  return { dates, weekdays: parseWeekdays(text) };
+}
+
+function filterSlotsByNamedDay(
+  slots: Array<{ start: string }>,
+  timezone: string,
+  dates: string[],
+  weekdays: number[],
+): Array<{ start: string }> {
+  if (dates.length === 0 && weekdays.length === 0) return slots;
+  return slots.filter((slot) => {
+    const dt = DateTime.fromISO(slot.start).setZone(timezone);
+    if (!dt.isValid) return false;
+    if (dates.length > 0 && !dates.includes(dt.toFormat('yyyy-MM-dd'))) return false;
+    if (weekdays.length > 0 && !weekdays.includes(dt.weekday)) return false;
+    return true;
+  });
+}
+
+/** Zero-padded hours (`01:00`) are explicit AM; `1:30` may still mean PM. */
+function allowPmAltFor(clock: ClockTime): boolean {
+  if (!clock.ambiguous || clock.hour >= 12) return false;
+  const hourPart = clock.written.match(/^(\d{1,2})/)?.[1];
+  return !(hourPart && hourPart.length >= 2 && hourPart.startsWith('0'));
+}
+
+function offeredKeyForSlot(clock: ClockTime, slotClock: string, allowPmAlt: boolean): string | null {
+  if (slotClock === clock.key) return clock.key;
+  if (allowPmAlt && clock.ambiguous && clock.hour < 12) {
+    const alt = `${String(clock.hour + 12).padStart(2, '0')}:${String(clock.minute).padStart(2, '0')}`;
+    if (slotClock === alt) return alt;
+  }
+  return null;
+}
+
+/**
+ * The slot start matching one named clock, or null when none / only past matches exist.
+ *
+ * When the customer names a calendar day (`vandaag`, a date, a weekday), only slots on that
+ * day are considered — so tomorrow's 01:00 cannot satisfy "vandaag om 01:00".
+ */
+export function resolveNamedOfferedSlotStart(
+  text: string,
+  slots: Array<{ start: string }>,
+  timezone: string,
+  now: Date,
+): string | null {
+  const clock = singleNamedClockTime(text);
+  if (!clock || slots.length === 0) return null;
+  const anchored = hasNamedCalendarAnchor(text, timezone, now);
+  const { dates, weekdays } = resolveNamedDates(text, timezone, now);
+  const candidates = anchored ? filterSlotsByNamedDay(slots, timezone, dates, weekdays) : slots;
+  const allowPmAlt = !anchored || allowPmAltFor(clock);
+  const nowMs = now.getTime();
+  let pastMatch: string | null = null;
+  for (const slot of candidates) {
+    const dt = DateTime.fromISO(slot.start).setZone(timezone);
+    if (!dt.isValid) continue;
+    if (offeredKeyForSlot(clock, dt.toFormat('HH:mm'), allowPmAlt) === null) continue;
+    const startMs = new Date(slot.start).getTime();
+    if (startMs >= nowMs) return slot.start;
+    pastMatch = slot.start;
+  }
+  return pastMatch;
+}
+
+export function namesSingleOfferedSlot(
+  text: string,
+  slots: Array<{ start: string }>,
+  timezone: string,
+  now: Date,
+): boolean {
+  const match = resolveNamedOfferedSlotStart(text, slots, timezone, now);
+  return !!match && new Date(match).getTime() >= now.getTime();
+}
+
+/** The named hour when no future slot on the anchored day matches it. */
+export function unofferedSingleNamedSlot(
+  text: string,
+  slots: Array<{ start: string }>,
+  timezone: string,
+  now: Date,
+): string | null {
+  const clock = singleNamedClockTime(text);
+  if (!clock || (clock.dotted && clock.ambiguous)) return null;
+  if (namesSingleOfferedSlot(text, slots, timezone, now)) return null;
+  const anchored = hasNamedCalendarAnchor(text, timezone, now);
+  if (!anchored) {
+    return unofferedSingleTimeIn(text, localClockTimes(slots, timezone) ?? []);
+  }
+  return clock.written;
+}
+
 /**
  * "16:00 tot 17:00" is ONE appointment said in full. "9:00 tot 17:00" is when the shop is open.
  *

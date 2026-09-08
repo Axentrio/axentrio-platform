@@ -2873,6 +2873,20 @@ describe('InternalProvider.checkAvailability · a range the policy ruled out', (
     expect(res.slots.length).toBeGreaterThan(0);
     expect(res.emptyRange).toBeUndefined();
   });
+
+  it('reads today after hours as past, not as an empty diary', async () => {
+    // Live WhatsApp bug: Tue 21:55 Brussels, today's 09:00-17:00 hours are gone.
+    vi.setSystemTime(new Date('2026-09-08T19:55:00Z'));
+    configured({ minNoticeMin: 0 }, {
+      weeklyHours: {
+        tue: [{ start: '09:00', end: '17:00' }],
+        wed: [{ start: '09:00', end: '17:00' }],
+      },
+    });
+    const res = await provider.checkAvailability(ctx, '2026-09-08', '2026-09-08');
+    expect(res.slots).toEqual([]);
+    expect(res.emptyRange).toEqual({ reason: 'past', boundary: '2026-09-08T19:55:00.000Z' });
+  });
 });
 
 /**
@@ -2989,6 +3003,21 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
     serviceTypeFind.mockResolvedValue([soon]);
     await expect(ask('2026-06-05T10:00:00Z')).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
     expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('refuses a time that has already passed, and writes nothing', async () => {
+    // Model skipped check_availability and tried to capture yesterday's hour outright.
+    await expect(ask('2026-06-04T10:00:00Z')).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+    await expect(ask('2026-06-04T10:00:00Z')).rejects.toThrow(/already passed/i);
+    await expect(ask('2026-06-04T10:00:00Z')).rejects.toThrow(/startDate 2026-06-05 and endDate 2026-06-11/);
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('still captures a past time for a REQUEST-ONLY service', async () => {
+    const requestOnly = { ...EVENT_TYPE, bookingMode: 'request' };
+    eventTypeFindOne.mockResolvedValue(requestOnly);
+    serviceTypeFind.mockResolvedValue([requestOnly]);
+    await expect(ask('2026-06-04T10:00:00Z')).resolves.toMatchObject({ success: true, requested: true });
   });
 
   it('tells the model to go and find real times, not to hand over', async () => {

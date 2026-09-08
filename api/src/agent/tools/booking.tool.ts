@@ -36,7 +36,7 @@ import { getBookingCopy } from '../../booking/booking-copy';
 import { canRenderAddressControls } from '../../channels/address-controls';
 import { randomUUID } from 'crypto';
 import { contentToText } from '../../llm/llm.types';
-import { latestCustomerTimeText, localClockTimes, namesSingleOfferedTime, parseClockTimes, unofferedSingleTimeIn, upcomingMidnightDate } from '../clock-times';
+import { latestCustomerTimeText, localClockTimes, namesSingleOfferedSlot, parseClockTimes, unofferedSingleNamedSlot, unofferedSingleTimeIn, upcomingMidnightDate } from '../clock-times';
 import { rememberOfferedSlots, resolveBookingTime } from '../offered-slots-store';
 import { refuseUnlessConfirmed, refuseUnlessRescheduleConfirmed, refuseUnlessCancelConfirmed, refuseCreateWhileMovePending, isAffirmativeReply, isConfirmingChip, lastCustomerUtterance } from '../pending-booking-confirmation';
 import { DateTime } from 'luxon';
@@ -327,15 +327,21 @@ function wallClockSlots<T extends { start: string; end: string }>(slots: T[], ti
 function namedTimeGuidance(
   ctx: ToolContext,
   offered: { confirmable: string[]; requestable: string[] },
+  utcSlots: Array<{ start: string; end: string }>,
+  zone: string,
+  now: Date,
   guidance?: string,
   heldClocks: string[] = [],
 ): Record<string, unknown> {
   if (ctx.namedTimeRefused) return {};
   const known = [...offered.confirmable, ...offered.requestable, ...heldClocks];
-  if (known.length === 0) return {};
+  if (known.length === 0 && utcSlots.length === 0) return {};
   const said = lastCustomerText(ctx);
   const append = (line: string) => (guidance ? `${guidance} ${line}` : line);
-  if (namesSingleOfferedTime(said, offered.confirmable)) {
+  const confirmableSlots = utcSlots.filter((slot) =>
+    offered.confirmable.includes(DateTime.fromISO(slot.start).setZone(zone).toFormat('HH:mm')),
+  );
+  if (namesSingleOfferedSlot(said, confirmableSlots.length > 0 ? confirmableSlots : utcSlots, zone, now)) {
     const last = lastCustomerUtterance(ctx);
     const alreadyYes =
       isAffirmativeReply(last) ||
@@ -345,7 +351,9 @@ function namedTimeGuidance(
       guidance: append(alreadyYes ? NAMED_TIME_AFTER_YES : NAMED_TIME_GUIDANCE),
     };
   }
-  const ruledOut = unofferedSingleTimeIn(said, known);
+  const ruledOut =
+    unofferedSingleNamedSlot(said, utcSlots, zone, now) ??
+    (utcSlots.length === 0 ? unofferedSingleTimeIn(said, known) : null);
   if (ruledOut) {
     return { requestedTimeUnavailable: ruledOut, guidance: append(NAMED_TIME_UNAVAILABLE_GUIDANCE) };
   }
@@ -1053,7 +1061,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         mergeBlockedReschedule(
           {
             ...data,
-            ...namedTimeGuidance(ctx, offeredClocks, data.guidance as string | undefined, heldClocks),
+            ...namedTimeGuidance(ctx, offeredClocks, utcSlots, zone, new Date(), data.guidance as string | undefined, heldClocks),
           },
           blocked,
           !!heldNote.guidance,

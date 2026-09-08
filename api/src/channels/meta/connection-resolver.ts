@@ -40,10 +40,15 @@ export class MetaConnectionResolver implements ConnectionResolver {
 
   async resolve(req: Request): Promise<ChannelConnection | null> {
     const body = req.body as
-      | { entry?: Array<{ messaging?: Array<{ recipient?: { id?: string } }> }> }
+      | { entry?: Array<{ messaging?: Array<{
+          sender?: { id?: string };
+          recipient?: { id?: string };
+          message?: { is_echo?: boolean };
+        }> }> }
       | undefined;
-    const recipientId = body?.entry?.[0]?.messaging?.[0]?.recipient?.id;
-    if (!recipientId) return null;
-    return resolveMetaConnection(recipientId, this.channel);
+    const first = body?.entry?.[0]?.messaging?.[0];
+    const accountId = first?.message?.is_echo ? first?.sender?.id : first?.recipient?.id;
+    if (!accountId) return null;
+    return resolveMetaConnection(accountId, this.channel);
   }
 }

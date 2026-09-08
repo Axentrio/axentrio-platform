@@ -19,6 +19,7 @@ import { encrypt } from '../utils/encryption';
 import { MAX_MESSAGE_CONTENT_CHARS, classifyMessage } from '../guardrails/classify';
 import { isGuardrailsEnforcing } from '../guardrails/inbound-guardrails.service';
 import { scheduleTurn } from '../services/turn-coalescer';
+import { conversationCommands } from '../services/conversation-command.service';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { emitConversationUpsert, emitMessageCreated } from '../realtime/conversation-events';
 import { logger } from '../utils/logger';
@@ -87,6 +88,51 @@ export async function processInboundEvent(
       return;
     }
 
+
+    if (event.rawEventType === 'message.echo') {
+      const bindingRepo = getRepository(ConversationBinding);
+      const existing = await bindingRepo.findOne({
+        where: {
+          channelConnectionId: connection.id,
+          externalUserId: event.sender.externalUserId,
+          externalThreadId: event.sender.externalThreadId,
+        },
+        relations: ['session'],
+      });
+      const bound = existing?.session;
+      if (!bound || bound.status === 'closed') {
+        await markEventProcessed(eventLogRepo, event.dedupeKey);
+        return;
+      }
+      const echoChannel = connection.channel === 'instagram' ? 'instagram' as const : 'messenger' as const;
+      const echoContent = inboundEventContent(event).slice(0, MAX_MESSAGE_CONTENT_CHARS);
+      const result = await conversationCommands.ingestPageHumanReply(
+        bound.id,
+        {
+          content: echoContent,
+          externalMessageId: event.externalMessageId || event.dedupeKey,
+          channel: echoChannel,
+        },
+        { tenantId: connection.tenantId },
+      );
+      if (result.outcome === 'ingested' && result.message) {
+        const live = await getRepository(ChatSession).findOne({ where: { id: bound.id } });
+        if (live) {
+          emitMessageCreated(live, {
+            id: result.message.id,
+            sessionId: live.id,
+            type: 'text',
+            content: echoContent,
+            senderType: 'agent',
+            status: 'sent',
+            createdAt: result.message.createdAt,
+          });
+          await emitConversationUpsert(live, { lastMessage: { content: echoContent, senderType: 'agent' } });
+        }
+      }
+      await markEventProcessed(eventLogRepo, event.dedupeKey);
+      return;
+    }
     // ── 4. Message / postback events ─────────────────────────────────────
     if (needsMetaSenderName(event, connection)) {
       event = await attachMetaSenderName(event, connection);
@@ -176,7 +222,13 @@ export async function processInboundEvent(
     // channel-inbound processor's backpressure. Falls back to inline forwarding
     // when the coalescer is disabled or Redis is down.
     try {
-      await scheduleTurn(session, savedMessage);
+      const [live] = (await sessionRepo.query(
+        `SELECT ownership FROM chat_sessions WHERE id = $1`,
+        [session.id],
+      )) as Array<{ ownership: string }>;
+      if (live?.ownership === 'bot_owned') {
+        await scheduleTurn(session, savedMessage);
+      }
     } catch (err) {
       logger.error(`[inbound-pipeline] Error scheduling turn for session ${session.id}`, err);
     }

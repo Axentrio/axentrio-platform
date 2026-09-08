@@ -19,7 +19,6 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { useTenantSettings, useUpdateTenant } from '@/queries/useTenantQueries';
-import { TAKEOVER_HOURS } from '@utils/humanControl';
 
 type ResolvedNotificationPreferences = Required<NotificationPreferences>;
 
@@ -41,9 +40,6 @@ const NotificationSettings: React.FC = () => {
   const { isMuted, setMuted, volume, setVolume } = useNotificationSound();
   const { data: tenant } = useTenantSettings();
   const updateTenant = useUpdateTenant();
-  const storedDefault = tenant?.settings?.inbox?.defaultTakeoverHours;
-  const defaultTakeoverValue =
-    typeof storedDefault === 'number' ? String(storedDefault) : 'indefinite';
   const businessLanguageValue =
     typeof tenant?.settings?.businessLanguage === 'string' &&
     BUSINESS_LANGUAGES.some(({ code }) => code === tenant.settings.businessLanguage)
@@ -233,31 +229,6 @@ const NotificationSettings: React.FC = () => {
             </select>
           </div>
 
-          <div className="p-4 bg-surface-3 rounded-xl space-y-2">
-            <Label htmlFor="default-takeover-hours" className="text-text-primary">
-              {t('settings.notifications.defaultTakeover.title')}
-            </Label>
-            <p className="text-sm text-text-secondary">
-              {t('settings.notifications.defaultTakeover.description')}
-            </p>
-            <select
-              id="default-takeover-hours"
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
-              value={defaultTakeoverValue}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const defaultTakeoverHours = raw === 'indefinite' ? 'indefinite' : Number(raw);
-                updateTenant.mutate({ settings: { inbox: { defaultTakeoverHours } } });
-              }}
-            >
-              <option value="indefinite">{t('settings.notifications.defaultTakeover.indefinite')}</option>
-              {TAKEOVER_HOURS.map((hours) => (
-                <option key={hours} value={hours}>
-                  {t('settings.notifications.defaultTakeover.hours', { count: hours })}
-                </option>
-              ))}
-            </select>
-          </div>
 
           {/* Desktop notifications */}
           <div className="flex items-center justify-between gap-3 p-4 bg-surface-3 rounded-xl">

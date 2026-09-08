@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeMetaPayload } from '../../channels/meta/event-normalizer';
+import { describe, it, expect, vi } from 'vitest';
 
+vi.mock('../../config/environment', () => ({
+  config: { meta: { appId: '1548698999932589' } },
+}));
+
+import { normalizeMetaPayload } from '../../channels/meta/event-normalizer';
 describe('Meta Event Normalizer', () => {
   describe('Messenger text messages', () => {
     it('should normalize a text message', () => {
@@ -28,7 +32,7 @@ describe('Meta Event Normalizer', () => {
       expect(results[0].event.sender.externalUserId).toBe('USER_456');
     });
 
-    it('should skip echo messages', () => {
+    it('omits Send API echoes from our META_APP_ID', () => {
       const payload = {
         object: 'page' as const,
         entry: [{
@@ -38,13 +42,56 @@ describe('Meta Event Normalizer', () => {
             sender: { id: 'PAGE_123' },
             recipient: { id: 'USER_456' },
             timestamp: 1711756800000,
-            message: { mid: 'm_echo', text: 'Bot reply', is_echo: true },
+            message: { mid: 'm_echo', text: 'Bot reply', is_echo: true, app_id: '1548698999932589' },
+          }],
+        }],
+      };
+
+      expect(normalizeMetaPayload(payload)).toHaveLength(0);
+    });
+
+    it('emits a foreign page-inbox echo with the customer as sender and the Page as connectionAccountId', () => {
+      const payload = {
+        object: 'page' as const,
+        entry: [{
+          id: 'PAGE_123',
+          time: 1711756800,
+          messaging: [{
+            sender: { id: 'PAGE_123' },
+            recipient: { id: 'USER_456' },
+            timestamp: 1711756800000,
+            message: { mid: 'm_echo', text: 'Human from Page Inbox', is_echo: true, app_id: 999 },
           }],
         }],
       };
 
       const results = normalizeMetaPayload(payload);
-      expect(results).toHaveLength(0);
+      expect(results).toHaveLength(1);
+      expect(results[0].connectionAccountId).toBe('PAGE_123');
+      expect(results[0].event.rawEventType).toBe('message.echo');
+      expect(results[0].event.sender.externalUserId).toBe('USER_456');
+      expect(results[0].event.message?.content).toBe('Human from Page Inbox');
+      expect(results[0].event.externalMessageId).toBe('m_echo');
+    });
+
+    it('emits a page echo with missing app_id when META_APP_ID is set', () => {
+      const payload = {
+        object: 'page' as const,
+        entry: [{
+          id: 'PAGE_123',
+          time: 1711756800,
+          messaging: [{
+            sender: { id: 'PAGE_123' },
+            recipient: { id: 'USER_456' },
+            timestamp: 1711756800000,
+            message: { mid: 'm_echo_na', text: 'Page reply', is_echo: true },
+          }],
+        }],
+      };
+
+      const results = normalizeMetaPayload(payload);
+      expect(results).toHaveLength(1);
+      expect(results[0].event.rawEventType).toBe('message.echo');
     });
   });
 

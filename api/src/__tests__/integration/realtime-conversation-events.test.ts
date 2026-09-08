@@ -310,6 +310,41 @@ describe('customer message paths — write once, emit both events to the agents 
       lastMessageSender: 'user',
     });
   });
+
+  it('socket agent message claims the conversation', async () => {
+    const tenant = await makeTenantWithAi();
+    const { agent } = await makeOperator(tenant.id);
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+
+    const actual = await vi.importActual<typeof import('../../websocket/socket.handler')>(
+      '../../websocket/socket.handler',
+    );
+    const fakeSocket = {
+      data: {
+        user: { id: agent.id, email: '', role: 'admin', tenantId: tenant.id, type: 'agent' },
+        tenantId: tenant.id,
+      },
+      emit: vi.fn(),
+    };
+
+    await actual.handleMessageSend(fakeSocket as never, {
+      sessionId: session.id,
+      content: 'taking over from mobile',
+    });
+
+    expect(fakeSocket.emit).not.toHaveBeenCalledWith('error', expect.anything());
+    const [row] = await AppDataSource.query(
+      `SELECT ownership, assigned_agent_id, human_control_mode FROM chat_sessions WHERE id = $1`,
+      [session.id],
+    );
+    expect(row).toMatchObject({
+      ownership: 'human_owned',
+      assigned_agent_id: agent.id,
+      human_control_mode: 'indefinite',
+    });
+  });
+
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

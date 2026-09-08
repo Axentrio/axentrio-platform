@@ -374,6 +374,10 @@ export async function forwardMessageToN8n(
   // instead of waiting on the 60s expiry sweep.
   await releaseExpiredHumanControlOnInbound(session);
 
+  if (session.ownership !== 'bot_owned') {
+    return false;
+  }
+
   // Only forward visitor messages when session is in bot or waiting status
   if (session.status !== 'bot' && session.status !== 'waiting') {
     return false;

@@ -422,13 +422,6 @@
         "permissionDenied": "Les notifications de bureau n'ont pas été activées. Autorisez-les dans les paramètres de votre navigateur."
       },
       "saveFailed": "Échec de l'enregistrement des préférences de notification. Veuillez réessayer.",
-      "defaultTakeover": {
-        "title": "Durée de prise en charge par défaut",
-        "description": "Présélectionne le menu Prendre en charge. Vous pouvez toujours choisir une autre durée.",
-        "indefinite": "Jusqu'à ce que je la rende - l'IA reste bloquée",
-        "hours_one": "{{count}} heure",
-        "hours_other": "{{count}} heures"
-      },
       "businessLanguage": {
         "title": "Langue de l'entreprise",
         "description": "Les e-mails de notification internes utilisent cette langue. Les clients reçoivent toujours la leur."
@@ -1050,6 +1043,13 @@
           "city": "Ville",
           "country": "Code pays",
           "save": "Enregistrer l'adresse du bot"
+        },
+        "returnToAi": {
+          "label": "Retour à l'IA",
+          "helper": "Combien de temps un humain garde la conversation après l'avoir prise. Ensuite l'IA répond à nouveau. Vous pouvez toujours choisir une autre durée à chaque fois.",
+          "indefinite": "Jusqu'à ce que je la rende - l'IA reste en pause",
+          "hours_one": "{{count}} heure",
+          "hours_other": "{{count}} heures"
         }
       },
       "advanced": {

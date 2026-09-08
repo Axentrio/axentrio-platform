@@ -14,6 +14,7 @@ import { upsertLead } from '../../leads/lead-capture.service';
 import { createTestTenant, createTestAnchorBot } from '../helpers/factories';
 import type { NormalizedEvent } from '../../channels/types';
 import crypto from 'crypto';
+import { scheduleTurn } from '../../services/turn-coalescer';
 
 // Keep these tests about the inbound→lead wiring; stub the fire-and-forget fan-out.
 import { vi } from 'vitest';
@@ -325,5 +326,40 @@ describe('inbound-pipeline · Hook 1 channel lead capture', () => {
       [tenant.id],
     );
     expect(rows[0].n).toBe(1); // still exactly one lead
+  });
+});
+
+describe('inbound-pipeline · page echo pauses the Agent', () => {
+  it('ingests a message.echo on an existing thread as unassigned human_owned and does not scheduleTurn', async () => {
+    const tenant = await createTestTenant();
+    await createTestAnchorBot(tenant);
+    const connection = await createMessengerConnection(tenant.id);
+    const userId = `psid_echo_${crypto.randomBytes(4).toString('hex')}`;
+    const { session } = await findOrCreateConversation(messengerTextEvent(userId), connection);
+    vi.mocked(scheduleTurn).mockClear();
+
+    await processInboundEvent(
+      {
+        type: 'message',
+        message: { type: 'text', content: 'From the Page Inbox' },
+        sender: { externalUserId: userId, externalThreadId: userId },
+        dedupeKey: `echo:${userId}:${Date.now()}`,
+        timestamp: new Date(),
+        rawEventType: 'message.echo',
+        externalMessageId: `m_echo_${userId}`,
+      },
+      connection,
+    );
+
+    const [row] = await AppDataSource.query(
+      `SELECT ownership, assigned_agent_id, human_control_mode FROM chat_sessions WHERE id = $1`,
+      [session.id],
+    );
+    expect(row).toMatchObject({
+      ownership: 'human_owned',
+      assigned_agent_id: null,
+      human_control_mode: 'indefinite',
+    });
+    expect(scheduleTurn).not.toHaveBeenCalled();
   });
 });

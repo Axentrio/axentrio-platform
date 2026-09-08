@@ -424,13 +424,6 @@
         "permissionDenied": "Desktop notifications were not enabled. Please allow them in your browser settings."
       },
       "saveFailed": "Failed to save notification preferences. Please try again.",
-      "defaultTakeover": {
-        "title": "Default takeover duration",
-        "description": "Preselects the Take Over menu. You can still pick a different duration each time.",
-        "indefinite": "Until I hand back - AI stays blocked",
-        "hours_one": "{{count}} hour",
-        "hours_other": "{{count}} hours"
-      },
       "businessLanguage": {
         "title": "Business language",
         "description": "Internal notification emails use this language. Customers always get their own language."
@@ -1058,6 +1051,13 @@
           "city": "City",
           "country": "Country code",
           "save": "Save bot address"
+        },
+        "returnToAi": {
+          "label": "Return to AI",
+          "helper": "How long a human keeps the chat after taking over. After that the AI answers again. You can still pick a different duration each time.",
+          "indefinite": "Until I hand back - AI stays paused",
+          "hours_one": "{{count}} hour",
+          "hours_other": "{{count}} hours"
         }
       },
       "advanced": {

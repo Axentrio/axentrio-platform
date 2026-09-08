@@ -422,13 +422,6 @@
         "permissionDenied": "Desktopmeldingen zijn niet ingeschakeld. Sta ze toe in je browserinstellingen."
       },
       "saveFailed": "Meldingsvoorkeuren opslaan is mislukt. Probeer het opnieuw.",
-      "defaultTakeover": {
-        "title": "Standaard overnameduur",
-        "description": "Selecteert vooraf het Overnemen-menu. U kunt elke keer een andere duur kiezen.",
-        "indefinite": "Tot ik het teruggeef - de AI blijft geblokkeerd",
-        "hours_one": "{{count}} uur",
-        "hours_other": "{{count}} uur"
-      },
       "businessLanguage": {
         "title": "Taal van het bedrijf",
         "description": "Interne meldingsmails gebruiken deze taal. Klanten krijgen altijd hun eigen taal."
@@ -1051,6 +1044,13 @@
           "city": "Gemeente",
           "country": "Landcode",
           "save": "Botadres opslaan"
+        },
+        "returnToAi": {
+          "label": "Terug naar AI",
+          "helper": "Hoe lang een mens de chat houdt na overname. Daarna antwoordt de AI weer. U kunt elke keer nog een andere duur kiezen.",
+          "indefinite": "Tot ik het teruggeef - de AI blijft gepauzeerd",
+          "hours_one": "{{count}} uur",
+          "hours_other": "{{count}} uur"
         }
       },
       "advanced": {

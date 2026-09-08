@@ -8,15 +8,17 @@ const {
   mockMutate,
   mockBind,
   mockUpdateBot,
+  mockUpdateTenant,
   readinessState,
   botDetailState,
   accountInformationState,
   accountInformationQueryState,
+  tenantSettingsRef,
 } = vi.hoisted(() => ({
   mockMutate: vi.fn(),
   mockBind: vi.fn(),
   mockUpdateBot: vi.fn(),
-  // Entitled-but-undelivered skills returned by GET /bots/readiness — set per test.
+  mockUpdateTenant: vi.fn(),
   readinessState: { unselectedEntitledSkills: [] as { feature: string; skillId: string; skillName: string }[] },
   botDetailState: {
     businessHours: null as {
@@ -46,6 +48,9 @@ const {
     },
   },
   accountInformationQueryState: { isFetched: true },
+  tenantSettingsRef: {
+    current: { inbox: { defaultTakeoverHours: 'indefinite' as number | 'indefinite' } } as Record<string, unknown>,
+  },
 }));
 
 vi.mock('@/auth/useAppAuth', () => ({
@@ -108,6 +113,8 @@ vi.mock('@/queries/useTenantQueries', () => ({
     data: accountInformationState,
     isFetched: accountInformationQueryState.isFetched,
   }),
+  useTenantSettings: () => ({ data: { settings: tenantSettingsRef.current } }),
+  useUpdateTenant: () => ({ mutate: mockUpdateTenant }),
 }));
 
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
@@ -134,6 +141,8 @@ describe('AiBotForm', () => {
     mockMutate.mockReset();
     mockBind.mockReset();
     mockUpdateBot.mockReset().mockResolvedValue(undefined);
+    mockUpdateTenant.mockReset();
+    tenantSettingsRef.current = { inbox: { defaultTakeoverHours: 'indefinite' } };
     botDetailState.businessHours = null;
     botDetailState.quotedAddress = { enabled: false };
     accountInformationState.invoiceAddress.country = 'BE';
@@ -367,4 +376,20 @@ describe('AiBotForm', () => {
     expect(onGoToKnowledgeBase).not.toHaveBeenCalled();
     expect(mockMutate).not.toHaveBeenCalled();
   });
+
+  it('hydrates the return-to-AI duration from tenant settings and patches on change', async () => {
+    tenantSettingsRef.current = { inbox: { defaultTakeoverHours: 4 } };
+    const { user } = renderForm();
+    await user.click(screen.getByRole('button', { name: /operational/i }));
+
+    const trigger = await screen.findByRole('combobox', { name: 'Return to AI' });
+    expect(trigger).toHaveTextContent('4 hours');
+
+    await user.click(trigger);
+    await user.click(await screen.findByRole('option', { name: /Until I hand back/i }));
+    expect(mockUpdateTenant).toHaveBeenCalledWith({
+      settings: { inbox: { defaultTakeoverHours: 'indefinite' } },
+    });
+  });
+
 });

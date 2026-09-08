@@ -55,8 +55,9 @@ import { InlineError } from '@/components/ui/inline-error';
 import { SkillStateCard } from '@/components/SkillStateCard';
 import { SkillCoverageWarning } from '@/components/SkillCoverageWarning';
 import { useBotReadiness } from '@/queries/useReadinessQueries';
-import { useAccountInformation } from '@/queries/useTenantQueries';
+import { useAccountInformation, useTenantSettings, useUpdateTenant } from '@/queries/useTenantQueries';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
+import { TAKEOVER_HOURS } from '@utils/humanControl';
 import TagInput from './TagInput';
 
 interface AiBotFormProps {
@@ -1202,6 +1203,43 @@ const QuotedAddressCard: React.FC<{
   );
 };
 
+/** How long a human keeps the chat before the AI answers again. Tenant-level
+ *  (preselects the Inbox Take Over menu). Lives here, not Settings. */
+const DefaultTakeoverCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) => {
+  const { t } = useTranslation();
+  const { data: tenant } = useTenantSettings();
+  const updateTenant = useUpdateTenant();
+  const stored = tenant?.settings?.inbox?.defaultTakeoverHours;
+  const value = typeof stored === 'number' ? String(stored) : 'indefinite';
+  return (
+    <div className="space-y-2">
+      <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.returnToAi.label')}</Label>
+      <Select
+        value={value}
+        disabled={readOnly}
+        onValueChange={(v) => {
+          const defaultTakeoverHours = v === 'indefinite' ? 'indefinite' : Number(v);
+          updateTenant.mutate({ settings: { inbox: { defaultTakeoverHours } } });
+        }}
+      >
+        <SelectTrigger id="default-takeover-hours" className="h-9" aria-label={t('ai.bot.operational.returnToAi.label')}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="indefinite">{t('ai.bot.operational.returnToAi.indefinite')}</SelectItem>
+          {TAKEOVER_HOURS.map((hours) => (
+            <SelectItem key={hours} value={String(hours)}>
+              {t('ai.bot.operational.returnToAi.hours', { count: hours })}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-2xs text-text-muted">{t('ai.bot.operational.returnToAi.helper')}</p>
+    </div>
+  );
+};
+
+
 const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => {
   const { t } = useTranslation();
   const { isRole, tenantId } = useAppAuth();
@@ -1668,6 +1706,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               </div>
             </AccordionTrigger>
             <AccordionContent className="space-y-4">
+              <DefaultTakeoverCard readOnly={readOnly} />
+
               <div>
                 <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.escalationKeywords.label')}</Label>
                 <TagInput

@@ -130,6 +130,14 @@ export interface ListBookingsResult {
     rescheduleCutoff?: string;
     /** Spoken cutoff that blocked cancel, e.g. "1 hour before the appointment". */
     cancelCutoff?: string;
+    /** Pre-formatted business-local time the Agent must quote verbatim (never re-derive from startTime). */
+    displayTime?: string;
+    /** Open change Request on this appointment. Presence means the owner has not applied it yet. */
+    pendingRequest?: {
+      kind: 'reschedule' | 'cancel';
+      /** Set only for kind reschedule. */
+      requestedDisplayTime?: string;
+    };
   }>;
 }
 

@@ -441,6 +441,16 @@ describe('customer change policy — catalog line and rules', () => {
     expect(p).toMatch(/do NOT quote displayTime as a confirmed clock/i);
     expect(p).toMatch(/reschedule or cancel under a "request" customer-change policy/i);
   });
+
+  it('tells the model to list_bookings when asked if a change was approved', () => {
+    const p = buildServicesSection([svc()])!;
+    expect(p).toMatch(/STATUS:/);
+    expect(p).toMatch(/call list_bookings/);
+    expect(p).toMatch(/Do not call check_availability for that/);
+    expect(p).toMatch(/Do not say you cannot see the status/);
+    expect(p).toMatch(/pendingRequest/);
+    expect(p).toMatch(/only if it still finds nothing, ask whether they would like a human/i);
+  });
 });
 
 describe('after a booking exists — extra info vs reschedule vs price', () => {

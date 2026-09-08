@@ -1515,6 +1515,13 @@ describe('ListBookingsTool', () => {
     expect(tool.hasSideEffects).toBe(false);
   });
 
+  it('tells the model to list_bookings for approval questions', () => {
+    const tool = new ListBookingsTool();
+    expect(tool.description).toMatch(/approved or confirmed/);
+    expect(tool.description).toMatch(/Never say you cannot see the status/);
+    expect(tool.description).toMatch(/Never use check_availability/);
+  });
+
   it('execute calls listBookings with sessionId and attendeeEmail', async () => {
     const tool = new ListBookingsTool();
     const ctx = makeCtx({ sessionId: 'sess-3' });
@@ -1599,6 +1606,31 @@ describe('ListBookingsTool', () => {
     expect(guidance).toMatch(/do not tell them to contact the business/i);
     expect(guidance).toMatch(/keep insisting after you have explained the cutoff/);
     expect(guidance).not.toMatch(/Politely explain they cannot cancel that appointment here/);
+  });
+
+  it('tells the model to quote displayTime and not escalate on a listed booking', async () => {
+    const tool = new ListBookingsTool();
+    mockListBookings.mockResolvedValue({
+      bookings: [{ id: 'bk-1', status: 'confirmed', cancel: 'auto', reschedule: 'auto' }],
+    });
+
+    const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
+    const guidance = (result.data as { guidance?: string } | undefined)?.guidance ?? '';
+    expect(guidance).toMatch(/quote it exactly/);
+    expect(guidance).toMatch(/do not call escalate_to_human/i);
+  });
+
+  it('tells the model a pendingRequest is still pending', async () => {
+    const tool = new ListBookingsTool();
+    mockListBookings.mockResolvedValue({
+      bookings: [
+        { id: 'bk-1', status: 'confirmed', pendingRequest: { kind: 'reschedule' } },
+      ],
+    });
+
+    const result = await tool.execute({}, makeCtx({ sessionId: 'sess-3' }));
+    const guidance = (result.data as { guidance?: string } | undefined)?.guidance ?? '';
+    expect(guidance).toMatch(/still pending/);
   });
 
 

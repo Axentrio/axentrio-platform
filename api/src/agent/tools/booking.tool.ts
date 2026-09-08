@@ -1569,9 +1569,21 @@ function listedChangeGuidance(
     reschedule?: string;
     cancelCutoff?: string;
     rescheduleCutoff?: string;
+    pendingRequest?: { kind?: string };
+    displayTime?: string;
   }>,
 ): string {
   const parts: string[] = [];
+  if (bookings.length > 0) {
+    parts.push(
+      'Each booking.displayTime is the current confirmed appointment — quote it exactly, never convert startTime. If they asked whether a change was approved or to look in the calendar/agenda: a displayTime that matches the time they requested means the change is confirmed; pendingRequest means it is still pending and displayTime is the appointment that still stands; neither a match nor pendingRequest means the change was not applied. Do not say you cannot see the status. Do not call escalate_to_human. Do not call check_availability for this (it lists free slots, not this customer\'s appointment).',
+    );
+  }
+  if (bookings.some((b) => b.pendingRequest)) {
+    parts.push(
+      'A listed booking has pendingRequest: that change is still waiting for the owner. Tell the customer it is still pending. Quote that booking\'s displayTime as the appointment that still stands. Do not say the change is confirmed. Do not call escalate_to_human.',
+    );
+  }
   if (bookings.some((b) => b.rescheduleCutoff)) {
     parts.push(
       'An appointment in this list cannot be rescheduled because it is inside the cutoff (rescheduleCutoff). Tell the customer plainly it is not possible to reschedule that close to the appointment — name the cutoff. Do not offer a new time, do not call reschedule_booking, do not call request_appointment, and never claim a request was submitted. Do not tell them to contact the business and do not call escalate_to_human on this first refusal. If they keep insisting after you have explained the cutoff, ask whether they would like you to connect them with a human; only if they say yes, call escalate_to_human.',
@@ -1598,7 +1610,7 @@ function listedChangeGuidance(
 
 export class ListBookingsTool implements ToolAdapter {
   name = 'list_bookings';
-  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancelCutoff or rescheduleCutoff is set, tell them immediately it is not possible that close to the appointment, naming the cutoff — do not ask whether to proceed, do not tell them to contact the business, and do not call escalate_to_human unless they keep insisting after that. If cancel or reschedule is not_allowed with no cutoff, tell them immediately they cannot do that here — do not ask whether to proceed, and do not offer a human or call escalate_to_human; insisting on the change is not a request for a person. Do not call the matching tool.';
+  description = 'List this customer\'s existing bookings. Look them up by the email address they booked with. A customer who booked without an email address is found by this chat\'s identity instead - omit attendeeEmail in that case. Each booking includes reschedule and cancel as auto, request, or not_allowed (any cutoff already applied). If cancelCutoff or rescheduleCutoff is set, tell them immediately it is not possible that close to the appointment, naming the cutoff — do not ask whether to proceed, do not tell them to contact the business, and do not call escalate_to_human unless they keep insisting after that. If cancel or reschedule is not_allowed with no cutoff, tell them immediately they cannot do that here — do not ask whether to proceed, and do not offer a human or call escalate_to_human; insisting on the change is not a request for a person. Do not call the matching tool. When the customer asks whether a request, reschedule, or cancel was approved or confirmed, or asks you to look in the calendar/agenda, call this tool. Quote displayTime. pendingRequest means still pending. Never say you cannot see the status. Never call escalate_to_human for that. Never use check_availability to answer that question.';
   parameters = {
     type: 'object',
     properties: {

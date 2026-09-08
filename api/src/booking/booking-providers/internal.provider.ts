@@ -3089,7 +3089,10 @@ export class InternalProvider implements BookingProvider {
       : '';
     const listedColumns = `b.id, b.start_utc, b.end_utc, b.attendee_name, b.attendee_email, b.status,
        st.name AS service_name,
-       st.reschedule_mode, st.reschedule_until_min, st.cancel_mode, st.cancel_until_min`;
+       st.reschedule_mode, st.reschedule_until_min, st.cancel_mode, st.cancel_until_min,
+       req.id AS pending_request_id,
+       req.request_kind AS pending_request_kind,
+       req.start_utc AS pending_request_start_utc`;
     const rows: Array<{
       id: string;
       start_utc: Date;
@@ -3102,12 +3105,19 @@ export class InternalProvider implements BookingProvider {
       reschedule_until_min: number | null;
       cancel_mode: CustomerChangeMode | null;
       cancel_until_min: number | null;
+      pending_request_id: string | null;
+      pending_request_kind: 'reschedule' | 'cancel' | null;
+      pending_request_start_utc: Date | null;
     }> = visitor
       ? await AppDataSource.getRepository(Booking).query(
           `SELECT ${listedColumns}
              FROM chatbot_bookings b
              JOIN chat_sessions s ON s.id = b.session_id
              LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
+             LEFT JOIN chatbot_bookings req
+               ON req.related_booking_id = b.id
+              AND req.status = 'request_created'
+              AND req.request_kind IN ('reschedule', 'cancel')
             WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
               AND s.visitor_id = $3 ${visitorEmailClause}
             ORDER BY b.start_utc ASC`,
@@ -3119,6 +3129,10 @@ export class InternalProvider implements BookingProvider {
           `SELECT ${listedColumns}
              FROM chatbot_bookings b
              LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
+             LEFT JOIN chatbot_bookings req
+               ON req.related_booking_id = b.id
+              AND req.status = 'request_created'
+              AND req.request_kind IN ('reschedule', 'cancel')
             WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
               AND b.session_id = $3 ${sessionEmailClause}
             ORDER BY b.start_utc ASC`,
@@ -3126,6 +3140,8 @@ export class InternalProvider implements BookingProvider {
             ? [ctx.tenant.id, ctx.bot.id, ctx.session.id, email]
             : [ctx.tenant.id, ctx.bot.id, ctx.session.id],
         );
+    const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.bot.id } });
+    const timezone = rule?.timezone;
     return {
       bookings: rows.map((b) => {
         const start = new Date(b.start_utc);
@@ -3152,6 +3168,21 @@ export class InternalProvider implements BookingProvider {
           cancel,
           ...(rescheduleCutoff ? { rescheduleCutoff } : {}),
           ...(cancelCutoff ? { cancelCutoff } : {}),
+          displayTime: timezone ? formatBookingDisplayTime(start, timezone) : undefined,
+          ...(b.pending_request_id && (b.pending_request_kind === 'reschedule' || b.pending_request_kind === 'cancel')
+            ? {
+                pendingRequest: {
+                  kind: b.pending_request_kind,
+                  ...(b.pending_request_kind === 'reschedule' && b.pending_request_start_utc
+                    ? {
+                        requestedDisplayTime: timezone
+                          ? formatBookingDisplayTime(new Date(b.pending_request_start_utc), timezone)
+                          : undefined,
+                      }
+                    : {}),
+                },
+              }
+            : {}),
         };
       }),
     };

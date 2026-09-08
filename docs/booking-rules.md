@@ -192,6 +192,7 @@ Policy `not_allowed` (no cutoff): refuse immediately. Do not ask, do not summari
 Cutoff (auto/request demoted): name the cutoff. Do not send them to the business on the first refusal. If they keep insisting after the cutoff is explained, ask whether they want a human.
 
 `request`: capture a change Request; original Booking stays put.
+When they later ask if that Request was approved, list the Booking (`list_bookings`); do not hand off.
 
 `auto`: execute after confirmation.
 
@@ -216,6 +217,8 @@ Say free / €0 only when the line shows `free`, or it is the discounted final o
 ## Confirmation and honesty
 
 `requested: true` is not booked, moved, cancelled, or confirmed. The original appointment is unchanged. Do not quote `displayTime` as a confirmed clock.
+
+A later turn that asks whether that Request was approved calls `list_bookings`. Matching `displayTime` is confirmed; `pendingRequest` is still pending; otherwise quote the current `displayTime`. Do not escalate instead of listing. Do not use `check_availability` (slots, not this customer's Booking). The Booking row is the diary (Calendar Mirror follows; ADR-0021).
 
 `CONFIRMATION_REQUIRED` is not a Booking.
 
@@ -252,5 +255,6 @@ Unconfigured booking (no hours / no Service) drops booking tools while skill-sta
 | timing PUT | explicit `null` inherits; explicit `0` is zero |
 | travel | grouping does not refuse; only `maxTravelMin` refuses a long drive |
 | reschedule/cancel | default `request`; `not_allowed` never pretends a Request was filed **and never offers a human on the policy refusal** |
+| `list_bookings` / STATUS | `displayTime` quoted verbatim; open change Request is `pendingRequest`; approval questions do not hand off |
 
 Pin new behaviour at the seam the live bug used (tool result, chips, prompt line), not a mock of empty `slots` when the diary had times.

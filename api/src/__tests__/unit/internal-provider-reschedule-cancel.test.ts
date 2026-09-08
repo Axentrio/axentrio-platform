@@ -844,7 +844,77 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(res.bookings[0]).toMatchObject({ id: 'bk-1', status: 'confirmed' });
     const call = bookingQuery.mock.calls.at(-1)!;
     expect(String(call[0])).toMatch(/JOIN chat_sessions/);
+    expect(String(call[0])).toMatch(/LEFT JOIN chatbot_bookings req/);
     expect(call[1]).toContain('psid-1'); // scoped by the stable visitor id, not the session
+  });
+
+  it('formats listBookings displayTime in the business timezone and omits pendingRequest when none is open', async () => {
+    bookingQuery.mockResolvedValueOnce([
+      { id: 'bk-1', start_utc: new Date('2026-06-10T07:00:00Z'), end_utc: new Date('2026-06-10T07:30:00Z'), attendee_name: 'Ada', attendee_email: 'ada@example.com', status: 'confirmed' },
+    ]);
+    const res = await provider.listBookings(ctx, 'ada@example.com');
+    expect(res.bookings[0].displayTime).toContain('09:00');
+    expect(res.bookings[0].displayTime).not.toContain('7:00');
+    expect(res.bookings[0].pendingRequest).toBeUndefined();
+  });
+
+  it('attaches an open reschedule request to the listed booking', async () => {
+    bookingQuery.mockResolvedValueOnce([
+      {
+        id: 'bk-1',
+        start_utc: new Date('2026-06-10T07:00:00Z'),
+        end_utc: new Date('2026-06-10T07:30:00Z'),
+        attendee_name: 'Ada',
+        attendee_email: 'ada@example.com',
+        status: 'confirmed',
+        pending_request_id: 'req-1',
+        pending_request_kind: 'reschedule',
+        pending_request_start_utc: new Date('2026-06-10T12:00:00Z'),
+      },
+    ]);
+    const res = await provider.listBookings(ctx, 'ada@example.com');
+    expect(res.bookings[0].displayTime).toContain('09:00');
+    expect(res.bookings[0].pendingRequest?.kind).toBe('reschedule');
+    expect(res.bookings[0].pendingRequest?.requestedDisplayTime).toContain('14:00');
+  });
+
+  it('attaches an open cancel request without requestedDisplayTime', async () => {
+    bookingQuery.mockResolvedValueOnce([
+      {
+        id: 'bk-1',
+        start_utc: new Date('2026-06-10T07:00:00Z'),
+        end_utc: new Date('2026-06-10T07:30:00Z'),
+        attendee_name: 'Ada',
+        attendee_email: 'ada@example.com',
+        status: 'confirmed',
+        pending_request_id: 'req-1',
+        pending_request_kind: 'cancel',
+        pending_request_start_utc: new Date('2026-06-10T12:00:00Z'),
+      },
+    ]);
+    const res = await provider.listBookings(ctx, 'ada@example.com');
+    expect(res.bookings[0].pendingRequest).toEqual({ kind: 'cancel' });
+    expect(res.bookings[0].pendingRequest).not.toHaveProperty('requestedDisplayTime');
+  });
+
+  it('listBookings does not throw when AvailabilityRule is missing', async () => {
+    ruleFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValueOnce([
+      {
+        id: 'bk-1',
+        start_utc: new Date('2026-06-10T07:00:00Z'),
+        end_utc: new Date('2026-06-10T07:30:00Z'),
+        attendee_name: 'Ada',
+        attendee_email: 'ada@example.com',
+        status: 'confirmed',
+        pending_request_id: 'req-1',
+        pending_request_kind: 'reschedule',
+        pending_request_start_utc: new Date('2026-06-10T12:00:00Z'),
+      },
+    ]);
+    const res = await provider.listBookings(ctx, 'ada@example.com');
+    expect(res.bookings[0].displayTime).toBeUndefined();
+    expect(res.bookings[0].pendingRequest?.kind).toBe('reschedule');
   });
 
   it('lists the effective cancel and reschedule policy on each booking', async () => {

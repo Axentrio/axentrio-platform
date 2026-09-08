@@ -3,6 +3,7 @@ import { AppDataSource, runInTransaction } from '../database/data-source';
 import { DemandSignal } from '../database/entities/DemandSignal';
 import { Tenant } from '../database/entities/Tenant';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ApiError } from '../middleware/error-handler';
 import { validate } from '../middleware/validate';
 import { sendCreated } from '../utils/response';
@@ -11,7 +12,7 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 const RATE_LIMIT_COUNT = 10;
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h rolling window

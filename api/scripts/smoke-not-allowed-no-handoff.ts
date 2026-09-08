@@ -15,6 +15,7 @@
  *   SMOKE_SEED=1                   temporarily set rescheduleMode=not_allowed on the service (restored in finally)
  *   SMOKE_SKIP_E2E=1               skip tool execute against live DB
  *   SMOKE_SKIP_CONVERSATION=1      skip live AgentService conversation turn
+ *   LOCAL_REDIS_URL=redis://127.0.0.1:6379  override Railway internal Redis when running locally
  */
 import 'reflect-metadata';
 import { initializeDatabase, AppDataSource } from '../src/database/data-source';
@@ -39,6 +40,7 @@ import { MeteringService } from '../src/agent/metering.service';
 import { TraceLogger } from '../src/agent/trace-logger';
 import { forwardMessageToN8n, initializeAgentService } from '../src/services/message-forwarding.service';
 import { decrypt } from '../src/utils/encryption';
+import { invalidateEntitlements } from '../src/billing/entitlements';
 
 const NO_HANDOFF = /do not offer to connect them with the team/i;
 const INSIST_LADDER = /keep insisting after you have explained the cutoff/i;
@@ -51,7 +53,7 @@ function pass(label: string, detail?: string): void {
 
 function fail(label: string, detail?: string): never {
   console.error(`✗ ${label}${detail ? ` — ${detail}` : ''}`);
-  process.exit(1);
+  throw new Error(`smoke failed: ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
 function isWaterFixTenant(name: string | undefined | null): boolean {
@@ -110,12 +112,18 @@ async function pickConfirmedBookingForSeed(): Promise<Booking> {
       WHERE b.status = $1
         AND b.session_id IS NOT NULL
         AND lower(t.name) NOT LIKE $2
+        AND (
+          COALESCE((t.feature_toggles->>'bookings')::boolean, true) = true
+          OR t.feature_overrides ? 'bookings'
+        )
       ORDER BY b.created_at DESC
       LIMIT 1
     `,
     ['confirmed', '%waterfix%'],
   );
-  if (!rows[0]?.id) fail('SMOKE_SEED: no confirmed booking with session on a non-WaterFix tenant — set SMOKE_BOOKING_ID');
+  if (!rows[0]?.id) {
+    fail('SMOKE_SEED: no confirmed booking with session on a non-WaterFix tenant — set SMOKE_BOOKING_ID');
+  }
   return AppDataSource.getRepository(Booking).findOneOrFail({ where: { id: rows[0].id } });
 }
 
@@ -124,6 +132,15 @@ async function seedTemporaryNotAllowed(): Promise<PolicyForbiddenFixture> {
   const service = await AppDataSource.getRepository(ServiceType).findOne({ where: { id: booking.eventTypeId ?? '' } });
   if (!service) fail('SMOKE_SEED: service missing for booking', booking.eventTypeId ?? 'null');
   const tenant = await assertTenantAllowed(service.tenantId, 'SMOKE_SEED');
+
+  const originalTier = tenant.tier;
+  let tierSeeded = false;
+  if (tenant.tier === 'free') {
+    tenant.tier = 'pro';
+    await AppDataSource.getRepository(Tenant).save(tenant);
+    await invalidateEntitlements(tenant.id);
+    tierSeeded = true;
+  }
 
   const originalRescheduleMode = service.rescheduleMode;
   const originalCancelMode = service.cancelMode;
@@ -146,12 +163,18 @@ async function seedTemporaryNotAllowed(): Promise<PolicyForbiddenFixture> {
     service,
     tenant,
     kind,
-    restore: seeded
+    restore: seeded || tierSeeded
       ? async () => {
-          await AppDataSource.getRepository(ServiceType).update(service.id, {
-            rescheduleMode: originalRescheduleMode,
-            cancelMode: originalCancelMode,
-          });
+          if (seeded) {
+            await AppDataSource.getRepository(ServiceType).update(service.id, {
+              rescheduleMode: originalRescheduleMode,
+              cancelMode: originalCancelMode,
+            });
+          }
+          if (tierSeeded) {
+            await AppDataSource.getRepository(Tenant).update(tenant.id, { tier: originalTier });
+            await invalidateEntitlements(tenant.id);
+          }
         }
       : undefined,
   };
@@ -191,7 +214,7 @@ async function pickPolicyForbiddenBooking(): Promise<PolicyForbiddenFixture> {
     const kind = service.rescheduleMode === 'not_allowed' ? 'reschedule' : 'cancel';
     return { booking, service, tenant: tenant!, kind };
   }
-  fail('No confirmed booking on a policy not_allowed service (non-WaterFix) — set SMOKE_BOOKING_ID');
+  fail('No confirmed booking on a policy not_allowed service (non-WaterFix) — set SMOKE_BOOKING_ID or SMOKE_SEED=1');
 }
 
 function assertStaticSeams(): void {
@@ -268,10 +291,24 @@ async function assertConversationE2E(
 
   const session = await AppDataSource.getRepository(ChatSession).findOne({ where: { id: booking.sessionId } });
   if (!session) fail('booking session missing', booking.sessionId);
+
+  let restoreSession: (() => Promise<void>) | undefined;
   if (session.status !== 'bot' && session.status !== 'waiting') {
-    fail('session not bot-owned — pick another SMOKE_BOOKING_ID', session.status);
+    if (process.env.SMOKE_SEED !== '1') fail('session not bot-owned — pick another SMOKE_BOOKING_ID', session.status);
+    const originalStatus = session.status;
+    const originalOwnership = session.ownership;
+    session.status = 'bot';
+    session.ownership = 'bot_owned';
+    await AppDataSource.getRepository(ChatSession).save(session);
+    restoreSession = async () => {
+      await AppDataSource.getRepository(ChatSession).update(session.id, {
+        status: originalStatus,
+        ownership: originalOwnership,
+      });
+    };
   }
 
+  try {
   const handoffsBefore = await AppDataSource.getRepository(HandoffRequest).count({
     where: { sessionId: session.id, status: 'requested' as const },
   });
@@ -299,7 +336,74 @@ async function assertConversationE2E(
     AppDataSource.getRepository(Message).create({
       sessionId: session.id,
       tenantId: session.tenantId,
+      participantId: user.id,
+      type: 'text',
+      content: userText,
+      status: 'sent',
+    }),
+  );
 
-[You have received this identical output 3 times. Re-reading 'api/scripts/smoke-not-allowed-no-handoff.ts:raw' will not change it — use a narrower selector (path:A-B), or proceed with the edit.]
+  const freshSession = await AppDataSource.getRepository(ChatSession).findOneOrFail({ where: { id: session.id } });
+  const forwarded = await forwardMessageToN8n(freshSession, msg);
+  if (!forwarded) fail('forwardMessageToN8n returned false — AI off or agent not wired?');
 
-[Showing lines 1-300 of 367. Use :301 to continue]
+  const botMsg = await AppDataSource.getRepository(Message)
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .where('m.sessionId = :sessionId', { sessionId: session.id })
+    .andWhere("p.type = 'bot'")
+    .andWhere('m.createdAt > :since', { since: msg.createdAt })
+    .orderBy('m.createdAt', 'DESC')
+    .getOne();
+
+  const reply = botMsg ? (botMsg.contentEncrypted ? decrypt(botMsg.content) : botMsg.content) : '';
+  if (!reply.trim()) fail('no bot reply after conversation turn');
+  console.log(`Bot reply (${tenant.name}): ${reply.slice(0, 400)}${reply.length > 400 ? '...' : ''}`);
+
+  if (HANDOFF_OFFER.test(reply)) fail('bot offered human handoff on policy refusal', reply.slice(0, 300));
+
+  const handoffsAfter = await AppDataSource.getRepository(HandoffRequest).count({
+    where: { sessionId: session.id, status: 'requested' as const },
+  });
+  if (handoffsAfter > handoffsBefore) fail('handoff row opened during smoke conversation');
+
+  pass('live conversation: polite refusal without handoff offer');
+  } finally {
+    if (restoreSession) await restoreSession();
+  }
+}
+
+async function main(): Promise<void> {
+  if (process.env.LOCAL_REDIS_URL) process.env.REDIS_URL = process.env.LOCAL_REDIS_URL;
+
+  console.log('Smoke: policy not_allowed — no human handoff on first refusal\n');
+  assertStaticSeams();
+
+  await initializeDatabase();
+  await initializeRedis();
+  getRedisClient();
+
+  let restore: (() => Promise<void>) | undefined;
+  try {
+    const { booking, service, tenant, kind, restore: restoreSeed } = await pickPolicyForbiddenBooking();
+    restore = restoreSeed;
+    pass(
+      'template booking',
+      `${booking.id} · ${tenant.name} · ${service.name} · ${kind}=not_allowed${restoreSeed ? ' (seeded)' : ''}`,
+    );
+
+    await assertToolE2E(booking, tenant.id, kind);
+    await assertConversationE2E(booking, tenant, kind);
+    console.log('\nAll smoke checks passed.');
+  } finally {
+    if (restore) {
+      await restore();
+      pass('restored service customer-change policy after SMOKE_SEED');
+    }
+  }
+}
+
+main().catch((err) => {
+  logger.error('[smoke-not-allowed-no-handoff] failed', err);
+  process.exit(1);
+});

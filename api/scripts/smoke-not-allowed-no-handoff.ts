@@ -348,12 +348,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  await initializeDatabase();
-  await initializeRedis();
-  getRedisClient();
-
   let fixture: EphemeralFixture | undefined;
   try {
+    await initializeDatabase();
+    await initializeRedis();
+    getRedisClient();
+
     fixture = await createEphemeralFixture();
     pass(
       'ephemeral fixture',

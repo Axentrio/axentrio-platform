@@ -49,7 +49,7 @@ describe('AdminBotTemplates — template health panel (L9)', () => {
     state.health = { data: { bots: [], count: 0 }, isLoading: false, isError: false };
     renderPage();
     expect(screen.getByText('Template health')).toBeInTheDocument();
-    expect(screen.getByText('Every bound template resolves — no bots are stranded.')).toBeInTheDocument();
+    expect(screen.getByText('Every bound template resolves - no bots are stranded.')).toBeInTheDocument();
   });
 
   it('lists stranded bots with tenant, template, and the reason badge', () => {

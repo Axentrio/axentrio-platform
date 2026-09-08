@@ -121,12 +121,12 @@ export default function AdminGuardrailConversation() {
 
       <Card>
         <CardHeader className="font-medium">{t('admin.incident.inboundJournal')}</CardHeader>
-        <CardContent>{logTable(inbound, (r) => r.detectedCategory ?? '—')}</CardContent>
+        <CardContent>{logTable(inbound, (r) => r.detectedCategory ?? '-')}</CardContent>
       </Card>
 
       <Card>
         <CardHeader className="font-medium">{t('admin.incident.outputJournal')}</CardHeader>
-        <CardContent>{logTable(output, (r) => (r.families ?? []).join(', ') || '—')}</CardContent>
+        <CardContent>{logTable(output, (r) => (r.families ?? []).join(', ') || '-')}</CardContent>
       </Card>
 
       <Card>

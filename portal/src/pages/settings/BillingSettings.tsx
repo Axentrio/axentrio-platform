@@ -146,7 +146,7 @@ function StatusBadge({ status }: { status: BillingState['status'] }) {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, {
     year: 'numeric',

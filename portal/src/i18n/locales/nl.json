@@ -63,7 +63,7 @@
   },
   "bookings": {
     "title": "Boekingen",
-    "intro": "Laat je chatbot afspraken inplannen — hij controleert realtime beschikbaarheid en boekt direct in het gesprek.",
+    "intro": "Laat je chatbot afspraken inplannen - hij controleert realtime beschikbaarheid en boekt direct in het gesprek.",
     "readiness": {
       "title": "Gereedheid van boekingen",
       "subtitleLive": "Boeken is actief. Rond de onderstaande punten af om meer te ontgrendelen.",
@@ -95,18 +95,18 @@
       "oneLiner": "Ontgrendel AI-boekingen met Pro en laat klanten rechtstreeks via chat afspraken inplannen.",
       "bullets": {
         "1": "Realtime beschikbaarheid gesynchroniseerd met je Cal.com-agenda.",
-        "2": "De bot verzamelt naam, e-mail, telefoon en notities — geboekt in minder dan een minuut.",
+        "2": "De bot verzamelt naam, e-mail, telefoon en notities - geboekt in minder dan een minuut.",
         "3": "Bevestigingsmails, herinneringen en reschedule-links worden automatisch verstuurd."
       }
     }
   },
   "leads": {
     "title": "Leads",
-    "intro": "Elke contactpersoon die je chatbot heeft vastgelegd — via de websitewidget, je gekoppelde kanalen (WhatsApp, Messenger en meer) en afspraakboekingen.",
+    "intro": "Elke contactpersoon die je chatbot heeft vastgelegd - via de websitewidget, je gekoppelde kanalen (WhatsApp, Messenger en meer) en afspraakboekingen.",
     "loadMore": "Meer laden",
     "empty": {
       "title": "Nog geen leads",
-      "body": "Zodra een bezoeker een e-mailadres of telefoonnummer deelt — of contact opneemt via een gekoppeld kanaal — verschijnt deze hier.",
+      "body": "Zodra een bezoeker een e-mailadres of telefoonnummer deelt - of contact opneemt via een gekoppeld kanaal - verschijnt deze hier.",
       "filtered": "Geen leads met dit filter"
     },
     "table": {
@@ -141,14 +141,14 @@
     },
     "followUp": {
       "becauseLabel": "Omdat",
-      "advisory": "Afgeleid uit de gegevens van deze lead. Er is niets verstuurd — dit is alleen een suggestie.",
+      "advisory": "Afgeleid uit de gegevens van deze lead. Er is niets verstuurd - dit is alleen een suggestie.",
       "priority": {
         "now": "Vandaag",
         "soon": "Deze week"
       },
       "actions": {
         "confirm_request": "Bevestig of weiger het gevraagde tijdslot",
-        "win_back_cancelled": "Bied een nieuw tijdstip aan — hun afspraak is geannuleerd",
+        "win_back_cancelled": "Bied een nieuw tijdstip aan - hun afspraak is geannuleerd",
         "check_in_after_visit": "Vraag na of ze tevreden waren over het bezoek",
         "offer_a_time": "Kom bij hen terug met een tijdstip",
         "ask_what_they_need": "Vraag wat ze nodig hebben"
@@ -240,21 +240,21 @@
     "add": {
       "button": "Lead toevoegen",
       "title": "Lead toevoegen",
-      "body": "Voor een klant die belde of langskwam. Een e-mailadres of telefoonnummer is verplicht — daarmee herkennen we hen als ze opnieuw contact opnemen.",
+      "body": "Voor een klant die belde of langskwam. Een e-mailadres of telefoonnummer is verplicht - daarmee herkennen we hen als ze opnieuw contact opnemen.",
       "name": "Naam",
       "email": "E-mailadres",
       "phone": "Telefoon",
       "notes": "Wat hebben ze nodig?",
       "save": "Lead toevoegen",
       "created": "Lead toegevoegd",
-      "merged": "We hadden dit contact al — je notities zijn eraan toegevoegd.",
+      "merged": "We hadden dit contact al - je notities zijn eraan toegevoegd.",
       "error": "Kon de lead niet toevoegen"
     },
     "import": {
       "button": "CSV importeren",
       "title": "Leads importeren",
       "summary": "{{total}} rijen: {{create}} nieuw, {{merge}} worden toegevoegd aan bestaande contacten, {{reject}} overgeslagen.",
-      "rejectedRow": "Regel {{line}} overgeslagen — {{reason}}",
+      "rejectedRow": "Regel {{line}} overgeslagen - {{reason}}",
       "confirm": "Importeren",
       "done": "{{created}} toegevoegd, {{merged}} samengevoegd met bestaande leads.",
       "truncated": "Alleen de eerste rijen van dit bestand worden geïmporteerd.",
@@ -262,7 +262,7 @@
     },
     "sync": {
       "sent": "Naar je CRM gestuurd {{when}}",
-      "failed": "Kon niet naar je CRM worden gestuurd — laatste poging {{when}}",
+      "failed": "Kon niet naar je CRM worden gestuurd - laatste poging {{when}}",
       "neverSent": "Nog niet naar je CRM gestuurd",
       "retrying": "Nog bezig met verzenden naar je CRM"
     },
@@ -282,7 +282,7 @@
   "socialMedia": {
     "locked": {
       "title": "Social media",
-      "oneLiner": "Bereik klanten waar ze al zijn — verbind elk berichtenkanaal in één inbox.",
+      "oneLiner": "Bereik klanten waar ze al zijn - verbind elk berichtenkanaal in één inbox.",
       "bullets": {
         "1": "Facebook Messenger, Instagram, WhatsApp en Telegram op één plek.",
         "2": "AI-antwoorden en menselijke overdracht werken in elk kanaal.",
@@ -425,7 +425,7 @@
       "defaultTakeover": {
         "title": "Standaard overnameduur",
         "description": "Selecteert vooraf het Overnemen-menu. U kunt elke keer een andere duur kiezen.",
-        "indefinite": "Tot ik het teruggeef — de AI blijft geblokkeerd",
+        "indefinite": "Tot ik het teruggeef - de AI blijft geblokkeerd",
         "hours_one": "{{count}} uur",
         "hours_other": "{{count}} uur"
       },
@@ -466,7 +466,7 @@
       },
       "displayName": {
         "title": "Bedrijfsnaam",
-        "description": "Je organisatie- / bedrijfsnaam — getoond in de chatwidget en gebruikt door je AI-assistenten. Hernoemen werkt ook de organisatie van je account bij.",
+        "description": "Je organisatie- / bedrijfsnaam - getoond in de chatwidget en gebruikt door je AI-assistenten. Hernoemen werkt ook de organisatie van je account bij.",
         "label": "Bedrijfsnaam",
         "placeholder": "Je bedrijfsnaam",
         "adminOnly": "Alleen beheerders kunnen de bedrijfsnaam wijzigen."
@@ -480,7 +480,7 @@
       },
       "embed": {
         "title": "Widget insluiten",
-        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag. De widget-id is openbaar en zichtbaar in DevTools; chat wordt geautoriseerd met een kortlevend sessietoken van Axentrio. Beperk welke sites mogen insluiten via Toegestane websites — laat leeg om elke website toe te staan.",
+        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag. De widget-id is openbaar en zichtbaar in DevTools; chat wordt geautoriseerd met een kortlevend sessietoken van Axentrio. Beperk welke sites mogen insluiten via Toegestane websites - laat leeg om elke website toe te staan.",
         "copied": "Gekopieerd naar klembord",
         "copyTitle": "Codefragment kopiëren",
         "allowedOrigins": {
@@ -498,7 +498,7 @@
           "confirmDescription": "Er wordt meteen een nieuwe sleutel uitgegeven. De vorige blijft 30 dagen geldig zodat bestaande websites blijven werken. Opnieuw vernieuwen tijdens die periode maakt de oudere sleutel meteen ongeldig.",
           "confirmAction": "Sleutel vernieuwen",
           "graceBanner": "Vorige sleutel nog geldig tot {{date}}.",
-          "graceNeverUsed": "De oude sleutel is sinds de rotatie niet gebruikt — je kunt die nu stopzetten.",
+          "graceNeverUsed": "De oude sleutel is sinds de rotatie niet gebruikt - je kunt die nu stopzetten.",
           "graceLastUsed": "Laatst gebruikt {{date}}.",
           "endEarly": "Nu stopzetten",
           "endEarlyConfirmTitle": "Vorige sleutel nu stopzetten?",
@@ -750,7 +750,7 @@
             "sessions": "Onbeperkte sessies",
             "llmCalls": "Platform-LLM inbegrepen",
             "channels": "Alle kanalen (unified inbox)",
-            "insights": "AI-inzichten — wat je bot niet kan beantwoorden",
+            "insights": "AI-inzichten - wat je bot niet kan beantwoorden",
             "uploadsHandoff": "Bestandsuploads & menselijke overdracht"
           }
         },
@@ -789,15 +789,15 @@
         "none": "Geen abonnement"
       },
       "trial": {
-        "endsInDays_one": "Proefperiode eindigt {{date}} — nog {{count}} dag",
-        "endsInDays_other": "Proefperiode eindigt {{date}} — nog {{count}} dagen"
+        "endsInDays_one": "Proefperiode eindigt {{date}} - nog {{count}} dag",
+        "endsInDays_other": "Proefperiode eindigt {{date}} - nog {{count}} dagen"
       },
       "currentPlan": {
         "title": "Huidig abonnement",
         "renewsOn": "Verlengt op {{date}}",
-        "cancellingOn": "Wordt geannuleerd op {{date}} — daarna val je terug op Gratis.",
+        "cancellingOn": "Wordt geannuleerd op {{date}} - daarna val je terug op Gratis.",
         "switchingTo": "Wisselt op {{date}} naar {{plan}}",
-        "pastDueWarning": "Betaling mislukt — werk je betaalmethode bij om je abonnement actief te houden."
+        "pastDueWarning": "Betaling mislukt - werk je betaalmethode bij om je abonnement actief te houden."
       },
       "manage": {
         "title": "Abonnement beheren",
@@ -841,7 +841,7 @@
       },
       "loadError": "Facturatiestatus kon niet geladen worden: {{error}}",
       "unknownError": "onbekende fout",
-      "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt.",
+      "subscribedJustNow": "Abonnement ontvangen - wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt.",
       "tokens": {
         "title": "AI-gebruik",
         "usedOfAllowance": "{{used}} van {{allowance}} tokens gebruikt in deze periode",
@@ -855,14 +855,14 @@
     },
     "webhooks": {
       "title": "Leads naar je CRM sturen",
-      "subtitle": "Stuur nieuwe en bijgewerkte leads naar een URL — koppel HubSpot, Salesforce, Odoo, Zoho of Pipedrive via Zapier, Make of n8n. Dit is eenrichtingsverkeer, geen tweewegsynchronisatie.",
+      "subtitle": "Stuur nieuwe en bijgewerkte leads naar een URL - koppel HubSpot, Salesforce, Odoo, Zoho of Pipedrive via Zapier, Make of n8n. Dit is eenrichtingsverkeer, geen tweewegsynchronisatie.",
       "empty": "Nog geen endpoints.",
       "add": "Endpoint toevoegen",
       "remove": "Endpoint verwijderen",
       "saved": "Webhooks opgeslagen",
       "error": "Kon webhooks niet opslaan",
-      "deletedWarning": "Zonder lead.deleted houdt je CRM zijn kopie wanneer een klant om verwijdering vraagt — je zou die daar handmatig moeten wissen.",
-      "secretSet": "Ondertekeningssleutel ingesteld — typ om te vervangen",
+      "deletedWarning": "Zonder lead.deleted houdt je CRM zijn kopie wanneer een klant om verwijdering vraagt - je zou die daar handmatig moeten wissen.",
+      "secretSet": "Ondertekeningssleutel ingesteld - typ om te vervangen",
       "secretNew": "Ondertekeningssleutel (wordt gegenereerd indien leeg)"
     }
   },
@@ -929,7 +929,7 @@
           "label": "Bedrijfsnaam",
           "placeholder": "Je bedrijfsnaam",
           "helper": "Handelsnaam die deze bot in zijn antwoorden gebruikt ({businessName}).",
-          "helperInherit": "Laat leeg om je organisatienaam te gebruiken ({{name}}). Vul een waarde in om die voor deze bot te overschrijven — handig voor een aparte commerciële of social-merknaam."
+          "helperInherit": "Laat leeg om je organisatienaam te gebruiken ({{name}}). Vul een waarde in om die voor deze bot te overschrijven - handig voor een aparte commerciële of social-merknaam."
         },
         "supportEmail": {
           "label": "Support-e-mail",
@@ -939,7 +939,7 @@
         },
         "voiceTone": {
           "label": "Stemtoon",
-          "helper": "De stem van je bot — geldt voor al zijn specialiteiten."
+          "helper": "De stem van je bot - geldt voor al zijn specialiteiten."
         },
         "tones": {
           "friendly": "Vriendelijk",
@@ -996,7 +996,7 @@
         "latest": "Automatisch bijwerken naar nieuwste versie",
         "pinTo": "Vastzetten op v{{version}}",
         "versionHelper": "Automatisch bijwerken past adminverbeteringen automatisch toe; vastzetten houdt het gedrag van de bot op één versie.",
-        "noneAvailable": "Er zijn nog geen botsjablonen voor je beschikbaar. Je platformbeheerder wijst deze toe — neem contact op om er een in te stellen.",
+        "noneAvailable": "Er zijn nog geen botsjablonen voor je beschikbaar. Je platformbeheerder wijst deze toe - neem contact op om er een in te stellen.",
         "preview": "Sjabloonvoorbeeld (alleen-lezen)",
         "previewEmpty": "Dit sjabloon voegt geen basisinstructies toe.",
         "warnings": {
@@ -1011,11 +1011,11 @@
         "title": "Aanvullende instructies",
         "description": "Extra richtlijnen bovenop het gekozen sjabloon. Laat leeg om het sjabloon ongewijzigd te gebruiken.",
         "placeholder": "bijv. Vermeld altijd onze weekendactie.",
-        "scopeNote": "Voeg alleen bedrijfsspecifieke notities toe. Dit kan de toon, veiligheidsregels of escalatiebeleid van het sjabloon niet overschrijven — die worden ingesteld door platformbeheerders."
+        "scopeNote": "Voeg alleen bedrijfsspecifieke notities toe. Dit kan de toon, veiligheidsregels of escalatiebeleid van het sjabloon niet overschrijven - die worden ingesteld door platformbeheerders."
       },
       "operational": {
         "title": "Operationele instellingen",
-        "description": "De dagelijkse instellingen van je bedrijf — deze blijven bij jou, niet bij het sjabloon.",
+        "description": "De dagelijkse instellingen van je bedrijf - deze blijven bij jou, niet bij het sjabloon.",
         "escalationKeywords": {
           "label": "Escalatiewoorden",
           "placeholder": "bijv. terugbetaling, klacht, manager",
@@ -1042,7 +1042,7 @@
         },
         "quotedAddress": {
           "label": "Adres dat de bot noemt",
-          "helper": "Standaard aan — noemt het adres van het account, per bot aanpasbaar. Zet uit om geen adres te noemen (bijvoorbeeld voor een uitsluitend online bedrijf).",
+          "helper": "Standaard aan - noemt het adres van het account, per bot aanpasbaar. Zet uit om geen adres te noemen (bijvoorbeeld voor een uitsluitend online bedrijf).",
           "street": "Straat",
           "streetNumber": "Huisnummer",
           "boxNumber": "Busnummer",
@@ -1328,7 +1328,7 @@
       "newChat": "Nieuwe chat",
       "newChatHint": "Een nieuw gesprek starten",
       "errors": {
-        "emptyResponse": "(Geen antwoord — controleer je merkstem en vangrail-configuratie)",
+        "emptyResponse": "(Geen antwoord - controleer je merkstem en vangrail-configuratie)",
         "sendFailed": "Er ging iets mis. Controleer je API-sleutel en modelconfiguratie."
       }
     },
@@ -1467,7 +1467,7 @@
           "label": "Inhoud",
           "placeholder": "Hallo {{customer_name}}, hoe kan ik helpen?",
           "helperPrefix": "Beschikbare variabelen:",
-          "helperSuffix": "— of voeg je eigen toe zoals"
+          "helperSuffix": "- of voeg je eigen toe zoals"
         },
         "category": {
           "label": "Categorie",
@@ -1519,7 +1519,7 @@
       }
     },
     "observability": {
-      "title": "Uitrolstatus — laatste {{days}} dagen",
+      "title": "Uitrolstatus - laatste {{days}} dagen",
       "split": "{{enforced}} afgedwongen · {{shadow}} schaduw",
       "openHandoffs": "{{count}} open",
       "enforcingTenants": "{{count}} tenant(s) dwingen momenteel beveiliging af",
@@ -1636,7 +1636,7 @@
       },
       "editor": {
         "newTitle": "Nieuwe conceptversie",
-        "prefilledFrom": "Vooraf ingevuld vanaf v{{version}} — bewerk en publiceer als nieuwe versie.",
+        "prefilledFrom": "Vooraf ingevuld vanaf v{{version}} - bewerk en publiceer als nieuwe versie.",
         "editTitle": "Concept v{{version}} bewerken",
         "viewTitle": "Versie v{{version}} (alleen-lezen)",
         "body": "Prompt-inhoud",
@@ -1644,10 +1644,10 @@
         "expectedModules": "Verwachte modules",
         "expectedModulesHint": "Mogelijkheden die dit sjabloon nodig heeft; tenants moeten ze ingeschakeld hebben om het volledig te gebruiken.",
         "noModules": "Geen modules beschikbaar.",
-        "unknownPlaceholders": "Onbekende placeholders: {{placeholders}} — corrigeer of verwijder ze vóór publicatie (ze verschijnen anders als letterlijke tekst).",
+        "unknownPlaceholders": "Onbekende placeholders: {{placeholders}} - corrigeer of verwijder ze vóór publicatie (ze verschijnen anders als letterlijke tekst).",
         "changelog": "Wijzigingslog (optioneel)",
         "configTitle": "Richtlijnen",
-        "configHint": "Beheerd door deze sjabloon — geldt voor elke bot die eraan gekoppeld is. Tenants stellen deze niet meer in.",
+        "configHint": "Beheerd door deze sjabloon - geldt voor elke bot die eraan gekoppeld is. Tenants stellen deze niet meer in.",
         "tone": "Stemtoon",
         "tones": {
           "friendly": "Vriendelijk",
@@ -1665,7 +1665,7 @@
         "fallbackMessage": "Terugvalbericht",
         "fallbackSuggested": "Sorry, ik heb niet genoeg informatie om dat met zekerheid te beantwoorden. Neem contact op met {businessName} of stel een andere vraag.",
         "offHoursMessage": "Bericht buiten openingstijden",
-        "offHoursSuggested": "Bedankt voor je bericht. {businessName} is momenteel gesloten — laat je gegevens achter en het team neemt tijdens openingstijden contact op.",
+        "offHoursSuggested": "Bedankt voor je bericht. {businessName} is momenteel gesloten - laat je gegevens achter en het team neemt tijdens openingstijden contact op.",
         "topicsToAvoid": "Te vermijden onderwerpen",
         "topicsPlaceholder": "Typ een onderwerp en druk op Enter",
         "topicsAddCommon": "Veelvoorkomende onderwerpen toevoegen",
@@ -1687,7 +1687,7 @@
         "testPlaceholder": "Typ een bezoekersbericht…",
         "testSend": "Versturen",
         "testThinking": "Bezig…",
-        "testError": "Test mislukt — controleer de platform-API-sleutel.",
+        "testError": "Test mislukt - controleer de platform-API-sleutel.",
         "testHint": "Voert het huidige (niet-opgeslagen) concept uit op het platformmodel met voorbeeld-{botName}/{businessName}. Kennisbank niet inbegrepen.",
         "availableLabel": "Beschikbare placeholders"
       },
@@ -1695,10 +1695,10 @@
         "archiveTitle": "Dit sjabloon archiveren?",
         "unpublishTitle": "Deze versie niet meer publiceren?",
         "ungrantTitle": "Tenant-toegang verwijderen?",
-        "reassign": "{{count}} gekoppelde bot(s) worden verplaatst naar het lege basissjabloon — ze verliezen de toon, richtlijnen, begroetings-/terugval-/buiten-openingstijdenberichten en de prompt-inhoud van dit sjabloon, en vallen terug op platformstandaarden totdat een beheerder ze opnieuw koppelt. Doorgaan?",
+        "reassign": "{{count}} gekoppelde bot(s) worden verplaatst naar het lege basissjabloon - ze verliezen de toon, richtlijnen, begroetings-/terugval-/buiten-openingstijdenberichten en de prompt-inhoud van dit sjabloon, en vallen terug op platformstandaarden totdat een beheerder ze opnieuw koppelt. Doorgaan?",
         "deleteTitle": "Versie v{{version}} verwijderen?",
         "deleteBody": "Dit verwijdert deze versie permanent. Dit kan niet ongedaan worden gemaakt.",
-        "deleteReassign": "{{count}} bot(s) zetten deze versie vast — ze worden losgekoppeld naar de nieuwste gepubliceerde versie en daarna wordt deze verwijderd. Doorgaan?",
+        "deleteReassign": "{{count}} bot(s) zetten deze versie vast - ze worden losgekoppeld naar de nieuwste gepubliceerde versie en daarna wordt deze verwijderd. Doorgaan?",
         "discardTitle": "Niet-opgeslagen wijzigingen weggooien?",
         "discardBody": "Je hebt niet-opgeslagen wijzigingen aan deze versie. Sluiten zonder opslaan?",
         "proceed": "Doorgaan"
@@ -1884,12 +1884,12 @@
       "tierDialog": {
         "title": "Tier instellen (handmatige override)",
         "descriptionBefore": "Kies een doeltier voor",
-        "descriptionAfter": ". Dit is een handmatige override — Stripe wordt overgeslagen en er wordt een handmatige primaire billing-regel weggeschreven. Gebruik dit voor comps, sales-managed Enterprise of downgrades na een refund.",
+        "descriptionAfter": ". Dit is een handmatige override - Stripe wordt overgeslagen en er wordt een handmatige primaire billing-regel weggeschreven. Gebruik dit voor comps, sales-managed Enterprise of downgrades na een refund.",
         "updating": "Tier bijwerken…",
         "current": "huidig",
         "selected": "geselecteerd",
         "tierDescriptions": {
-          "free": "Geen plan — misbruik / downgrade na refund",
+          "free": "Geen plan - misbruik / downgrade na refund",
           "essential": "Essential-rechten, comped (geen Stripe)",
           "pro": "Pro-rechten, comped (geen Stripe)",
           "enterprise": "Sales-managed, onbeperkt"
@@ -1901,7 +1901,7 @@
           "explainer": "deze actie annuleert het niet, dus de klant wordt nog steeds gefactureerd op een Gratis abonnement. Kies wat ermee gebeurt:",
           "will_cancel": "Ik heb het abonnement geannuleerd / ga het annuleren in het Stripe dashboard",
           "leave_active": "Het abonnement bewust actief laten",
-          "reasonPlaceholder": "Waarom blijft het abonnement actief? (verplicht — vastgelegd in het auditlogboek)"
+          "reasonPlaceholder": "Waarom blijft het abonnement actief? (verplicht - vastgelegd in het auditlogboek)"
         },
         "setTo": "Instellen op {{tier}}",
         "pickATier": "Kies een tier"
@@ -2024,7 +2024,7 @@
       }
     },
     "impersonationBanner": {
-      "message": "Je personifieert <strong>{{tenant}}</strong> — keer terug naar je eigen account zodra je klaar bent.",
+      "message": "Je personifieert <strong>{{tenant}}</strong> - keer terug naar je eigen account zodra je klaar bent.",
       "exitButton": "Verlaten"
     },
     "faq": {
@@ -2080,7 +2080,7 @@
         "title": "Titel",
         "question": "Vraag",
         "answer": "Antwoord",
-        "optionalPlaceholder": "Optioneel — valt terug op Engels indien leeg."
+        "optionalPlaceholder": "Optioneel - valt terug op Engels indien leeg."
       },
       "errors": {
         "load": "Kan FAQs niet laden.",
@@ -2136,9 +2136,9 @@
       "chooseSection": "Kies een sectie"
     },
     "drawer": {
-      "title": "AI-bot — FAQ",
+      "title": "AI-bot - FAQ",
       "subtitle": "Veelgestelde vragen over botinstructies en -gedrag",
-      "ariaLabel": "AI-bot — Veelgestelde vragen",
+      "ariaLabel": "AI-bot - Veelgestelde vragen",
       "closeLabel": "FAQ sluiten",
       "browseAll": "Alle FAQ's bekijken"
     },
@@ -2239,7 +2239,7 @@
     },
     "takeover": {
       "button": "Overnemen",
-      "indefinite": "Blokkeer AI — tot ik het vrijgeef",
+      "indefinite": "Blokkeer AI - tot ik het vrijgeef",
       "forHours_one": "Terug naar AI over {{count}} uur",
       "forHours_other": "Terug naar AI over {{count}} uur",
       "changeDuration": "Duur wijzigen",
@@ -2325,7 +2325,7 @@
       "title": "Overdragen aan een teamgenoot",
       "prompt": "Selecteer een agent om dit gesprek aan over te dragen:",
       "noAgents": "Geen andere teamgenoten zijn online. Neem het gesprek zelf over, of probeer het later opnieuw.",
-      "agentStats": "{{current}}/{{max}} gesprekken — {{status}}"
+      "agentStats": "{{current}}/{{max}} gesprekken - {{status}}"
     },
     "toasts": {
       "loadFailed": "Gesprek laden mislukt",
@@ -2538,8 +2538,8 @@
     },
     "agentsEmpty": {
       "title": "Nog geen agenten",
-      "agents": "Agenten zijn mensen die gesprekken overnemen wanneer de AI ze doorgeeft. De meeste teams hebben er geen nodig — voeg er alleen een toe als je live overname wilt.",
-      "shifts": "Met diensten plan je wanneer elke agent beschikbaar is — voeg eerst een agent toe.",
+      "agents": "Agenten zijn mensen die gesprekken overnemen wanneer de AI ze doorgeeft. De meeste teams hebben er geen nodig - voeg er alleen een toe als je live overname wilt.",
+      "shifts": "Met diensten plan je wanneer elke agent beschikbaar is - voeg eerst een agent toe.",
       "performance": "Agentprestaties verschijnen hier zodra agenten doorgegeven gesprekken afhandelen."
     }
   },
@@ -2555,16 +2555,16 @@
     "meta": {
       "refreshed": "Laatst geanalyseerd {{ago}}",
       "pending": "Druk op Analyseren om bij te werken",
-      "pendingAutomatic": "De analyse draait automatisch gedurende de dag — inzichten verschijnen nadat je gesprekken zijn beoordeeld",
-      "incomplete": "Inzichten onvolledig — recente gesprekken worden nog geanalyseerd"
+      "pendingAutomatic": "De analyse draait automatisch gedurende de dag - inzichten verschijnen nadat je gesprekken zijn beoordeeld",
+      "incomplete": "Inzichten onvolledig - recente gesprekken worden nog geanalyseerd"
     },
     "card": {
       "stats": "{{visitors}} klanten vroegen iets zonder antwoord te krijgen ({{count}} gesprekken) · laatst {{ago}}"
     },
     "status": {
       "dormant": "Sluimerend",
-      "resolvedData": "Opgelost — bevestigd door gesprekken",
-      "resolvedManual": "Opgelost — gemarkeerd als verholpen"
+      "resolvedData": "Opgelost - bevestigd door gesprekken",
+      "resolvedManual": "Opgelost - gemarkeerd als verholpen"
     },
     "actions": {
       "resolve": "Ik heb dit opgelost",
@@ -2585,19 +2585,19 @@
       },
       "wins": {
         "title": "Nog geen successen",
-        "description": "Opgeloste hiaten komen hier terecht — los een hiaat op door het antwoord aan je kennisbank toe te voegen."
+        "description": "Opgeloste hiaten komen hier terecht - los een hiaat op door het antwoord aan je kennisbank toe te voegen."
       }
     },
     "locked": {
       "title": "AI-inzichten",
       "oneLiner": "Zie wat klanten vragen waar je assistent nog geen antwoord op heeft.",
       "bullet1": "Onderwerpen waar klanten naar blijven vragen, gerangschikt op aantal",
-      "bullet2": "Los een hiaat op via je kennisbank — successen worden automatisch bevestigd",
+      "bullet2": "Los een hiaat op via je kennisbank - successen worden automatisch bevestigd",
       "bullet3": "Druk op Nu analyseren om te verversen vanuit je echte gesprekken"
     },
     "experiments": {
       "title": "Experimenten",
-      "empty": "Patronen die we in je gesprekken zien — correlaties en sentimentthema's — verschijnen hier zodra ze opduiken.",
+      "empty": "Patronen die we in je gesprekken zien - correlaties en sentimentthema's - verschijnen hier zodra ze opduiken.",
       "dismiss": "Negeren",
       "dismissedToast": "Genegeerd"
     },
@@ -2625,7 +2625,7 @@
     "demand": {
       "title": "Waar klanten om vragen",
       "denominator": "Van de {{classified}} van {{total}} leads die we aan een dienst konden koppelen, over de laatste {{days}} dagen.",
-      "noServices": "Nog geen dienst aan een lead gekoppeld — dit vult zich aan naarmate klanten boeken.",
+      "noServices": "Nog geen dienst aan een lead gekoppeld - dit vult zich aan naarmate klanten boeken.",
       "tagsTitle": "Genoemde onderwerpen (door AI afgeleid)",
       "tagsDenominator": "Uit de {{tagged}} gesprekken die we konden analyseren."
     },
@@ -2633,7 +2633,7 @@
       "run": "Nu analyseren",
       "running": "Bezig met analyseren…",
       "failed": "De analyse kon niet worden voltooid",
-      "automatic": "Uw abonnement analyseert gesprekken doorlopend — u hoeft niets handmatig te starten.",
+      "automatic": "Uw abonnement analyseert gesprekken doorlopend - u hoeft niets handmatig te starten.",
       "notEnoughChats": "{{count}} van {{min}} nieuwe gesprekken. Er zijn er genoeg nodig om een patroon te zien in plaats van toeval.",
       "coolingDown": "Onlangs al geanalyseerd. Over {{hours}} uur kunt u opnieuw analyseren.",
       "started": "Analyse gestart. Het resultaat verschijnt hier zodra het klaar is.",
@@ -2804,9 +2804,9 @@
   "copilot": {
     "launcher": {
       "tooltip": "Vraag het de AI-platformassistent",
-      "tooltipWithSuggestions_one": "Vraag het de AI-platformassistent — {{count}} suggestie beschikbaar",
-      "tooltipWithSuggestions_other": "Vraag het de AI-platformassistent — {{count}} suggesties beschikbaar",
-      "tooltipLocked": "AI-platformassistent — inbegrepen bij Pro"
+      "tooltipWithSuggestions_one": "Vraag het de AI-platformassistent - {{count}} suggestie beschikbaar",
+      "tooltipWithSuggestions_other": "Vraag het de AI-platformassistent - {{count}} suggesties beschikbaar",
+      "tooltipLocked": "AI-platformassistent - inbegrepen bij Pro"
     },
     "drawer": {
       "title": "AI-platformassistent",
@@ -2817,11 +2817,11 @@
       "placeholder": "Vraag iets over je bot, abonnement, leads of hoe je iets doet in Axentrio…",
       "sendAria": "Bericht verzenden",
       "thinking": "Aan het nadenken…",
-      "rateLimited": "Je stuurt te snel — probeer het opnieuw over {{seconds}} seconden.",
+      "rateLimited": "Je stuurt te snel - probeer het opnieuw over {{seconds}} seconden.",
       "toolBadgeTooltip": "De assistent zocht {{name}} op",
       "welcome": {
         "title": "Hallo 👋",
-        "body": "Vraag me over je bot, abonnement, leads of hoe je iets doet in Axentrio. Ik kan antwoorden op basis van de documentatie en de gegevens van je tenant — maar ik kan niets voor je wijzigen.",
+        "body": "Vraag me over je bot, abonnement, leads of hoe je iets doet in Axentrio. Ik kan antwoorden op basis van de documentatie en de gegevens van je tenant - maar ik kan niets voor je wijzigen.",
         "examples": [
           "Op welk abonnement zit ik en wanneer wordt het verlengd?",
           "Hoeveel leads hebben we deze week verzameld?",
@@ -2839,11 +2839,11 @@
     },
     "locked": {
       "title": "Ontgrendel de AI-platformassistent",
-      "oneLiner": "Een AI in het portaal die je platformvragen beantwoordt en de gegevens van je tenant toont — inbegrepen bij Pro en Enterprise.",
+      "oneLiner": "Een AI in het portaal die je platformvragen beantwoordt en de gegevens van je tenant toont - inbegrepen bij Pro en Enterprise.",
       "bullets": [
         "Stel vragen over je bot, abonnement, leads of integraties",
         "Krijg directe antwoorden gebaseerd op de Axentrio-documentatie",
-        "Bekijk live statistieken — \"hoeveel leads deze week?\""
+        "Bekijk live statistieken - \"hoeveel leads deze week?\""
       ],
       "historyNote": "Je eerdere gesprekken blijven bewaard en zijn weer beschikbaar zodra je upgradet."
     },
@@ -2892,7 +2892,7 @@
     "quota": {
       "usage": "{{used}} van {{limit}} gebruikt",
       "usageUnlimited": "{{used}} bots",
-      "upgradeCta": "Je hebt de botlimiet van je abonnement bereikt — upgrade om meer toe te voegen."
+      "upgradeCta": "Je hebt de botlimiet van je abonnement bereikt - upgrade om meer toe te voegen."
     },
     "create": {
       "title": "Maak een nieuwe bot",
@@ -3008,7 +3008,7 @@
       },
       "proactiveLeadCapture": {
         "label": "Vraag om ontbrekende gegevens",
-        "description": "Laat je bot vriendelijk om een telefoonnummer of e-mailadres vragen wanneer het die nog niet heeft. Standaard uit — je bot bewaart altijd gegevens die een klant zelf geeft."
+        "description": "Laat je bot vriendelijk om een telefoonnummer of e-mailadres vragen wanneer het die nog niet heeft. Standaard uit - je bot bewaart altijd gegevens die een klant zelf geeft."
       },
       "leadEnrichment": {
         "label": "Gestructureerde leadgegevens",
@@ -3074,7 +3074,7 @@
         "body": "Vul je btw-nummer in, dan halen we de rest uit het officiële register.",
         "vatLabel": "Btw-nummer",
         "lookup": "Opzoeken",
-        "lookingUp": "We raadplegen het register — dit kan enkele seconden duren.",
+        "lookingUp": "We raadplegen het register - dit kan enkele seconden duren.",
         "lookupFailed": "Opzoeken mislukt. Je kunt de bedrijfsgegevens zelf invullen.",
         "lookupRateLimited": "Te veel opzoekingen. Probeer het over een minuut opnieuw.",
         "lookupStatus": {
@@ -3082,7 +3082,7 @@
           "not_found": "Dat nummer is niet geregistreerd. Controleer het, of vul de gegevens zelf in.",
           "invalid_format": "Dit btw-nummer heeft geen geldig formaat. Voorbeeld: BE 0400.378.485",
           "unsupported": "We kunnen dit btw-nummer niet automatisch opzoeken. Vul de bedrijfsgegevens zelf in.",
-          "unavailable": "Het register reageert momenteel niet. Vul de gegevens zelf in en ga verder — verifiëren kan later."
+          "unavailable": "Het register reageert momenteel niet. Vul de gegevens zelf in en ga verder - verifiëren kan later."
         },
         "nameLabel": "Bedrijfsnaam",
         "legalFormLabel": "Rechtsvorm",
@@ -3094,8 +3094,8 @@
         "presence": {
           "label": "Hoe bereiken klanten je?",
           "helper": "Online winkels krijgen nooit een fysiek adres op de bot. Een fysiek bedrijf kan later een eigen adres voor de bot instellen.",
-          "physical": "Fysiek bedrijf — klanten komen langs of wij komen langs",
-          "online": "Online bedrijf — geen vestiging om te noemen"
+          "physical": "Fysiek bedrijf - klanten komen langs of wij komen langs",
+          "online": "Online bedrijf - geen vestiging om te noemen"
         }
       },
       "logo": {
@@ -3230,7 +3230,7 @@
       },
       "plan": {
         "title": "Kies je abonnement",
-        "body": "Pro is aanbevolen als je afspraken aanneemt — 14 dagen proef. Essential is de chatbot zonder boekingen.",
+        "body": "Pro is aanbevolen als je afspraken aanneemt - 14 dagen proef. Essential is de chatbot zonder boekingen.",
         "choose": "Kies dit abonnement",
         "recommended": "Aanbevolen",
         "trialLength": "Inclusief 14 dagen gratis proberen"

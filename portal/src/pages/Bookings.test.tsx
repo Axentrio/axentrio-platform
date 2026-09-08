@@ -409,7 +409,7 @@ describe('Bookings — Accept move passes requestKind so the toast can name the 
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith('/scheduler/bookings/req-move/accept', {});
     });
-    expect(toast.success).toHaveBeenCalledWith('Request accepted — appointment moved');
-    expect(toast.success).not.toHaveBeenCalledWith('Request accepted — appointment confirmed');
+    expect(toast.success).toHaveBeenCalledWith('Request accepted - appointment moved');
+    expect(toast.success).not.toHaveBeenCalledWith('Request accepted - appointment confirmed');
   });
 });

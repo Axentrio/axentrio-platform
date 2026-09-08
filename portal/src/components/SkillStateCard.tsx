@@ -17,8 +17,8 @@ const REMEDY_TEXT: Record<SkillState, string> = {
   unentitled: 'Upgrade plan',
   disabled: 'Enable in settings',
   unconfigured: 'Finish setup',
-  absent: '—',
-  error: '—',
+  absent: '-',
+  error: '-',
 };
 
 // The status ramp, one hue per meaning: green = live, amber = needs a tenant

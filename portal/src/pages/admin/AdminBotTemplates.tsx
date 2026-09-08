@@ -26,9 +26,9 @@ import { useAdminBotTemplates, useCreateBotTemplate, useDuplicateBotTemplate, us
  * and quiet; the tier identity lives entirely in the rail + header.
  */
 const TIERS: { id: TemplateTier; label: string; blurb: string; rail: string; chip: string }[] = [
-  { id: 'essential', label: 'Essential', blurb: 'Entry tier — the baseline catalogue.', rail: 'bg-edge-light', chip: 'border-edge text-text-secondary' },
-  { id: 'pro', label: 'Pro', blurb: 'Mid tier — for growing teams.', rail: 'bg-primary-500', chip: 'border-primary-500/40 bg-primary-500/10 text-primary-300' },
-  { id: 'enterprise', label: 'Enterprise', blurb: 'Top tier — full-capability templates.', rail: 'bg-gradient-to-b from-primary-400 to-violet-500', chip: 'border-violet-500/40 bg-violet-500/10 text-violet-300' },
+  { id: 'essential', label: 'Essential', blurb: 'Entry tier - the baseline catalogue.', rail: 'bg-edge-light', chip: 'border-edge text-text-secondary' },
+  { id: 'pro', label: 'Pro', blurb: 'Mid tier - for growing teams.', rail: 'bg-primary-500', chip: 'border-primary-500/40 bg-primary-500/10 text-primary-300' },
+  { id: 'enterprise', label: 'Enterprise', blurb: 'Top tier - full-capability templates.', rail: 'bg-gradient-to-b from-primary-400 to-violet-500', chip: 'border-violet-500/40 bg-violet-500/10 text-violet-300' },
 ];
 
 const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
@@ -195,7 +195,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
               </Table>
             ) : (
               <div className="p-5 text-center text-sm text-text-muted">
-                No {tier.label} templates yet —{' '}
+                No {tier.label} templates yet -{' '}
                 <button type="button" onClick={() => openCreate(tier.id)} className="text-primary-300 hover:underline">create one</button>.
               </div>
             )}
@@ -352,7 +352,7 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
               <Label htmlFor="dup-key">{t('admin.botTemplates.create.key')}</Label>
               <Input id="dup-key" value={dupForm.key} onChange={(e) => setDupForm((f) => ({ ...f, key: e.target.value }))} />
               <p className="text-xs text-text-muted">
-                {t('admin.botTemplates.duplicate.keyHint', { defaultValue: 'Must be unique — the copy cannot share the original’s key.' })}
+                {t('admin.botTemplates.duplicate.keyHint', { defaultValue: 'Must be unique - the copy cannot share the original’s key.' })}
               </p>
             </div>
             <div className="space-y-1.5">

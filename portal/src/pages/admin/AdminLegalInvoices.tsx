@@ -155,7 +155,7 @@ function InvoiceRow({ row, focused }: { row: AdminLegalInvoice; focused: boolean
         <p className="text-xs text-text-muted font-mono">{row.documentKind}</p>
       </TableCell>
       <TableCell className="font-mono text-xs">
-        {row.billitInvoiceNumber ?? '—'}
+        {row.billitInvoiceNumber ?? '-'}
         <p className="text-xs text-text-muted">{row.stripeInvoiceId ?? row.stripeRefundId ?? ''}</p>
       </TableCell>
       <TableCell className="font-mono text-xs">{formatMoney(row.amountInclCents, row.currency)}</TableCell>
@@ -172,7 +172,7 @@ function InvoiceRow({ row, focused }: { row: AdminLegalInvoice; focused: boolean
             {row.lastError}
           </Badge>
         ) : (
-          <span className="text-text-muted">—</span>
+          <span className="text-text-muted">-</span>
         )}
       </TableCell>
       <TableCell className="text-xs text-text-secondary whitespace-nowrap">{formatWhen(row.createdAt)}</TableCell>

@@ -108,7 +108,7 @@ export const EventWebhooksCard: React.FC = () => {
         <p className="text-sm text-text-secondary mt-1">
           {t('settings.webhooks.subtitle', {
             defaultValue:
-              'Push new and updated leads to any URL — connect HubSpot, Salesforce, Odoo, Zoho or Pipedrive via Zapier, Make or n8n. This is a one-way send, not a two-way sync.',
+              'Push new and updated leads to any URL - connect HubSpot, Salesforce, Odoo, Zoho or Pipedrive via Zapier, Make or n8n. This is a one-way send, not a two-way sync.',
           })}
         </p>
       </CardHeader>
@@ -162,7 +162,7 @@ export const EventWebhooksCard: React.FC = () => {
                   <p className="text-xs text-status-away">
                     {t('settings.webhooks.deletedWarning', {
                       defaultValue:
-                        'Without lead.deleted, your CRM keeps its copy when a customer asks to be erased — you would have to delete it there manually.',
+                        'Without lead.deleted, your CRM keeps its copy when a customer asks to be erased - you would have to delete it there manually.',
                     })}
                   </p>
                 )}
@@ -174,7 +174,7 @@ export const EventWebhooksCard: React.FC = () => {
                     value={row.secret ?? ''}
                     placeholder={
                       row.hasSecret
-                        ? t('settings.webhooks.secretSet', { defaultValue: 'Signing secret set — type to replace' })
+                        ? t('settings.webhooks.secretSet', { defaultValue: 'Signing secret set - type to replace' })
                         : t('settings.webhooks.secretNew', { defaultValue: 'Signing secret (generated if left blank)' })
                     }
                     onChange={(e) => update(i, { secret: e.target.value })}

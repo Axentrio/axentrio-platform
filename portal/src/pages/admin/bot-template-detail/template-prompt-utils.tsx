@@ -35,7 +35,7 @@ export function renderPromptWithVars(body: string): React.ReactNode {
     return (
       <span
         key={i}
-        title={known ? 'Filled in per business' : 'Unknown variable — will not resolve'}
+        title={known ? 'Filled in per business' : 'Unknown variable - will not resolve'}
         className={`rounded px-1 font-medium ${known ? 'bg-primary-500/10 text-primary-300' : 'bg-amber-500/10 text-amber-300'}`}
       >
         {part}

@@ -88,7 +88,7 @@ export const BLOCK_INFO: Record<string, string> = {
   EXTRA_INFO: 'Extra background the tenant adds on the bot (reference only).',
   AVAILABLE_SKILLS: 'The skills the bound bot has enabled.',
   ESCALATION: 'Lets the bot hand the conversation off to a human.',
-  BOOKING: 'Booking behaviour and tools — check availability and create a booking.',
+  BOOKING: 'Booking behaviour and tools - check availability and create a booking.',
 };
 export function getBlockInfo(key: string): string {
   if (BLOCK_INFO[key]) return BLOCK_INFO[key];

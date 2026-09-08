@@ -88,7 +88,7 @@ export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }
                 disabled={updateBot.isPending}
               />
               <p className="text-2xs text-text-muted">
-                {t('bots.rename.nameHelper', { defaultValue: 'Only you see this — it labels the bot in this list.' })}
+                {t('bots.rename.nameHelper', { defaultValue: 'Only you see this - it labels the bot in this list.' })}
               </p>
             </div>
             <div className="space-y-2">

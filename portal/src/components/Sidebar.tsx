@@ -192,7 +192,7 @@ const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount })
         )
       }
       aria-label={
-        isLocked ? `${label} — ${t('sidebar.lockTooltip')}` : undefined
+        isLocked ? `${label} - ${t('sidebar.lockTooltip')}` : undefined
       }
     >
       <Tooltip>

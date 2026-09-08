@@ -326,7 +326,7 @@ export function useRollbackTemplate(id: string) {
     mutationFn: (fromVersion: number) => api.post<{ version: BotTemplateVersion }>(`/admin/bot-templates/${id}/rollback`, { fromVersion }),
     onSuccess: (res) => {
       invalidate(id);
-      toast.success(`Rolled back — published v${res.version.version}`);
+      toast.success(`Rolled back - published v${res.version.version}`);
     },
   });
 }

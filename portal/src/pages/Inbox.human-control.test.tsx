@@ -251,7 +251,7 @@ describe('Inbox takeover duration menu', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
     const [url, body] = apiPost.mock.calls[0];
@@ -314,7 +314,7 @@ describe('Inbox change duration', () => {
     // re-claim would not update the policy).
     apiPost.mockResolvedValueOnce(claimedResponse({ mode: 'indefinite' }));
     await user.click(screen.getByRole('button', { name: /Change duration/ }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2));
     expect(apiPost).toHaveBeenNthCalledWith(2, '/chats/c1/takeover', {
@@ -470,7 +470,7 @@ describe('Inbox takeover failure toasts', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.error).toHaveBeenCalledWith(
@@ -486,7 +486,7 @@ describe('Inbox takeover failure toasts', () => {
     renderInbox(makeChat({ ownership: 'handoff_requested' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.error).toHaveBeenCalledWith(
@@ -500,7 +500,7 @@ describe('Inbox takeover failure toasts', () => {
     renderInbox(makeChat({ ownership: 'bot_owned', status: 'bot' }));
 
     await user.click(await screen.findByRole('button', { name: /Take Over/ }));
-    await user.click(await screen.findByText('Block AI — until I release'));
+    await user.click(await screen.findByText('Block AI - until I release'));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(toast.error).toHaveBeenCalledWith('This conversation is closed.');

@@ -34,7 +34,7 @@ export const LeadSyncRow: React.FC<{ leadId: string }> = ({ leadId }) => {
       })
     : failed
       ? t('leads.sync.failed', {
-          defaultValue: 'Could not be sent to your CRM — last try {{when}}',
+          defaultValue: 'Could not be sent to your CRM - last try {{when}}',
           when: data.lastAttemptAt ? new Date(data.lastAttemptAt).toLocaleString() : '',
         })
       : data.status === 'never_sent'

@@ -267,7 +267,7 @@ export const CannedResponsesContent: React.FC = () => {
                   <TableCell>
                     <code className="text-xs bg-surface-3 px-1.5 py-0.5 rounded">/{cr.shortcut}</code>
                   </TableCell>
-                  <TableCell>{cr.category ?? '—'}</TableCell>
+                  <TableCell>{cr.category ?? '-'}</TableCell>
                   <TableCell>
                     <Badge variant={cr.scope === 'shared' ? 'default' : 'secondary'}>
                       {t(`ai.canned.scope.${cr.scope}`, { defaultValue: cr.scope })}

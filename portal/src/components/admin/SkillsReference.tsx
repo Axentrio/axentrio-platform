@@ -36,9 +36,9 @@ export function SkillsReference() {
   return (
     <section className="space-y-4">
       <p className="max-w-2xl text-sm text-text-secondary">
-        Skills are the platform’s built-in capabilities — the tools and readiness that make an action real.
+        Skills are the platform’s built-in capabilities - the tools and readiness that make an action real.
         They’re defined in code, so you can’t author them. To use one,{' '}
-        <span className="text-text-primary">bind it to a template</span> (a skill is a module) — or apply it to a whole tier below.
+        <span className="text-text-primary">bind it to a template</span> (a skill is a module) - or apply it to a whole tier below.
       </p>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -120,7 +120,7 @@ export function SkillsReference() {
             <div className="space-y-3 text-sm">
               {willApply.length === 0 ? (
                 <p className="text-text-secondary">
-                  Nothing to apply — every <span className="capitalize">{pending.tier}</span> template either already has this skill or has no published version.
+                  Nothing to apply - every <span className="capitalize">{pending.tier}</span> template either already has this skill or has no published version.
                 </p>
               ) : (
                 <>

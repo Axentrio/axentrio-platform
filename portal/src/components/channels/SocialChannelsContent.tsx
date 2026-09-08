@@ -211,7 +211,7 @@ function MetaPageSelectionCard({
                 <SiInstagram className="h-3 w-3 mr-1" />
                 @{page.instagramAccount.username}
                 {!instagramEntitled &&
-                  ` — ${t('ai.social.metaPages.igLocked', { defaultValue: 'locked on your plan' })}`}
+                  ` - ${t('ai.social.metaPages.igLocked', { defaultValue: 'locked on your plan' })}`}
               </Badge>
             )}
           </label>
@@ -251,7 +251,7 @@ function ConnectionRowIdentity({
           {planLocked && (
             <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/40">
               <Lock className="h-3 w-3 mr-1" />
-              {t('ai.social.planLocked', { defaultValue: 'Plan locked — upgrade to reactivate' })}
+              {t('ai.social.planLocked', { defaultValue: 'Plan locked - upgrade to reactivate' })}
             </Badge>
           )}
         </p>
@@ -612,7 +612,7 @@ export function SocialChannelsContent() {
   const anyMetaAvailable = channelAvailable('messenger') || channelAvailable('instagram');
   const anyMetaOff = anyMetaEntitled && !anyMetaAvailable;
   // Hint copy shared by the connect buttons.
-  const offHint = t('ai.social.offHint', { defaultValue: 'Turned off — enable in Settings → Features' });
+  const offHint = t('ai.social.offHint', { defaultValue: 'Turned off - enable in Settings → Features' });
   const lockedHint = t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' });
   const metaGate: ChannelGate = {
     entitled: anyMetaEntitled,

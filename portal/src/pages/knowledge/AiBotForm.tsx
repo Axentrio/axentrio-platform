@@ -578,7 +578,7 @@ const BoundTemplateList: React.FC<{
 
       {bindings.length === 0 && (
         <div className="rounded-lg border border-dashed border-edge bg-surface-2 p-3 text-xs text-text-muted">
-          {t('ai.bot.template.none', { defaultValue: 'No speciality bound — this bot answers generically from your knowledge base only. Add one above to give it skills like booking, lead capture, or handoff.' })}
+          {t('ai.bot.template.none', { defaultValue: 'No speciality bound - this bot answers generically from your knowledge base only. Add one above to give it skills like booking, lead capture, or handoff.' })}
         </div>
       )}
 
@@ -759,7 +759,7 @@ const TemplateVariablesSection: React.FC<{
     <Section
       icon={PenLine}
       title={t('ai.bot.templateDetails.title', { defaultValue: 'Your template details' })}
-      description={t('ai.bot.templateDetails.subtitle', { defaultValue: "Your bot's template asks for a few details — they're filled into its prompt where the template expects them." })}
+      description={t('ai.bot.templateDetails.subtitle', { defaultValue: "Your bot's template asks for a few details - they're filled into its prompt where the template expects them." })}
     >
       <div className="space-y-3">
         {variables.map((v) => {
@@ -780,7 +780,7 @@ const TemplateVariablesSection: React.FC<{
                 className={`w-full rounded-lg border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-50 ${missing ? 'border-amber-500/50' : 'border-edge'}`}
               />
               {v.help && <p className="text-xs text-text-muted">{v.help}</p>}
-              {missing && <p className="text-xs text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
+              {missing && <p className="text-xs text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required - your bot needs this to answer correctly.' })}</p>}
             </div>
           );
         })}
@@ -852,7 +852,7 @@ const SocialSection: React.FC<{
     >
       {!socialOverride.enabled ? (
         <p className="text-xs text-text-muted">
-          {t('ai.bot.social.off', { defaultValue: 'Off — messaging channels use the same voice and length as your widget, plus the built-in short-reply rule.' })}
+          {t('ai.bot.social.off', { defaultValue: 'Off - messaging channels use the same voice and length as your widget, plus the built-in short-reply rule.' })}
         </p>
       ) : (
         <div className="space-y-4">
@@ -902,7 +902,7 @@ const SocialSection: React.FC<{
               className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
             />
             <p className="mt-1 text-2xs text-text-muted">
-              {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule — it can't be removed, only tightened." })}
+              {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule - it can't be removed, only tightened." })}
             </p>
           </div>
         </div>

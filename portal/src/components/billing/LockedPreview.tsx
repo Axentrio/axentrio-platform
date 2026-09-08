@@ -193,7 +193,7 @@ function TierStrip({
           {t('lockedPreview.tierStrip.yourPlan')}
         </span>
         <span className="font-medium text-text-primary">
-          {currentPlan?.displayName ?? '—'}
+          {currentPlan?.displayName ?? '-'}
         </span>
       </div>
       <div className="flex items-center justify-between">

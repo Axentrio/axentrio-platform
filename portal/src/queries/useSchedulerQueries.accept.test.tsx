@@ -77,25 +77,25 @@ beforeEach(() => {
 
 describe('acceptSuccessMessage', () => {
   it('names a move, not a confirmation', () => {
-    expect(acceptSuccessMessage('reschedule')).toBe('Request accepted — appointment moved');
+    expect(acceptSuccessMessage('reschedule')).toBe('Request accepted - appointment moved');
   });
 
   it('names a cancellation', () => {
-    expect(acceptSuccessMessage('cancel')).toBe('Request accepted — appointment cancelled');
+    expect(acceptSuccessMessage('cancel')).toBe('Request accepted - appointment cancelled');
   });
 
   it('keeps the existing confirmation copy for a new request', () => {
-    expect(acceptSuccessMessage('new')).toBe('Request accepted — appointment confirmed');
-    expect(acceptSuccessMessage(null)).toBe('Request accepted — appointment confirmed');
-    expect(acceptSuccessMessage(undefined)).toBe('Request accepted — appointment confirmed');
+    expect(acceptSuccessMessage('new')).toBe('Request accepted - appointment confirmed');
+    expect(acceptSuccessMessage(null)).toBe('Request accepted - appointment confirmed');
+    expect(acceptSuccessMessage(undefined)).toBe('Request accepted - appointment confirmed');
   });
 });
 
 describe('useAcceptRequest', () => {
   it.each([
-    ['reschedule', 'Request accepted — appointment moved'],
-    ['cancel', 'Request accepted — appointment cancelled'],
-    ['new', 'Request accepted — appointment confirmed'],
+    ['reschedule', 'Request accepted - appointment moved'],
+    ['cancel', 'Request accepted - appointment cancelled'],
+    ['new', 'Request accepted - appointment confirmed'],
   ] as const)('toasts %s-specific success copy', async (requestKind, message) => {
     const { result } = renderHook(() => useAcceptRequest(), { wrapper: wrapperFor(makeClient()) });
     await result.current.mutateAsync({ id: 'req-1', requestKind });
@@ -139,7 +139,7 @@ describe('useAcceptRequest', () => {
 
     release();
     await pending;
-    expect(toastSuccess).toHaveBeenCalledWith('Request accepted — appointment moved');
+    expect(toastSuccess).toHaveBeenCalledWith('Request accepted - appointment moved');
   });
 
   it('writes the moved slot into inactive Upcoming cache before toasting', async () => {
@@ -196,7 +196,7 @@ describe('useAcceptRequest', () => {
     await waitFor(() => {
       expect(queryClient.getQueryData(['scheduler', 'bookings', 'upcoming'])).toEqual(FRIDAY);
     });
-    expect(toastSuccess).toHaveBeenCalledWith('Request accepted — appointment moved');
+    expect(toastSuccess).toHaveBeenCalledWith('Request accepted - appointment moved');
     const fridayAt = toastSuccess.mock.invocationCallOrder[0];
     const upcomingGets = apiGet.mock.calls
       .map((call, i) => ({ url: String(call[0]), order: apiGet.mock.invocationCallOrder[i] }))

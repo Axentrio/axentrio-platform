@@ -57,7 +57,7 @@ const ANSWERS: Array<{
   {
     value: 'no_location',
     label: 'No location',
-    hint: 'Online only — nothing happens anywhere in particular.',
+    hint: 'Online only - nothing happens anywhere in particular.',
     settled: 'None of your services happen anywhere in particular.',
     // Nothing. There is no service shape meaning "we do not go anywhere", so inventing a
     // placeholder the owner then has to delete would be worse than an empty catalog.
@@ -113,8 +113,8 @@ export function WorkLocationPicker({ workLocation, services, onCreateService, di
       if (starters.length) {
         toast.success(
           starters.length > 1
-            ? 'Two services created — rename and price them below.'
-            : 'A service was created — rename and price it below.'
+            ? 'Two services created - rename and price them below.'
+            : 'A service was created - rename and price it below.'
         );
       } else {
         toast.success('Noted. You can add services below whenever you need them.');

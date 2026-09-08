@@ -136,7 +136,7 @@ function outcomeStatCards(args: {
   return [
     {
       label: t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' }),
-      value: cur ? cur.conversations.total.toLocaleString() : '—',
+      value: cur ? cur.conversations.total.toLocaleString() : '-',
       change: formatDelta(cur?.conversations.total, prev?.conversations.total),
       icon: MessageSquare,
       color: 'text-primary-400',
@@ -146,7 +146,7 @@ function outcomeStatCards(args: {
     ...(hasBookings
       ? [{
           label: t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' }),
-          value: cur ? cur.bookings.total.toLocaleString() : '—',
+          value: cur ? cur.bookings.total.toLocaleString() : '-',
           change: formatDelta(cur?.bookings.total, prev?.bookings.total),
           icon: CalendarCheck,
           color: 'text-status-online',
@@ -156,7 +156,7 @@ function outcomeStatCards(args: {
       : []),
     {
       label: t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' }),
-      value: cur ? cur.leads.total.toLocaleString() : '—',
+      value: cur ? cur.leads.total.toLocaleString() : '-',
       change: formatDelta(cur?.leads.total, prev?.leads.total),
       icon: UserPlus,
       color: 'text-accent-400',

@@ -283,7 +283,7 @@ function GroupedOverrideRows({
                         <p className="text-sm text-text-primary">{meta?.label ?? key}</p>
                         <p className="text-xs text-text-muted">
                           {!parentOn ? (
-                            <>off — requires {taxonomy[meta!.requires!]?.label ?? meta!.requires}</>
+                            <>off - requires {taxonomy[meta!.requires!]?.label ?? meta!.requires}</>
                           ) : (
                             <>
                               Tier default ({data.tier}): {data.tierDefaults[key] ? 'on' : 'off'}
@@ -376,7 +376,7 @@ function ModuleRow({
       {m.setBy && (
         <p className="text-xs text-text-muted">
           {m.enabled ? 'Enabled' : 'Disabled'} by {m.setBy}
-          {m.reason ? ` — "${m.reason}"` : ''}
+          {m.reason ? ` - "${m.reason}"` : ''}
         </p>
       )}
       <Input placeholder="Reason (required for changes)" value={reason} onChange={(e) => setReason(e.target.value)} />

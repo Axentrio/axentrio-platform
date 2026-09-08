@@ -63,7 +63,7 @@
   },
   "bookings": {
     "title": "Réservations",
-    "intro": "Laissez votre chatbot planifier des rendez-vous — il vérifie les disponibilités en temps réel et réserve directement dans la conversation.",
+    "intro": "Laissez votre chatbot planifier des rendez-vous - il vérifie les disponibilités en temps réel et réserve directement dans la conversation.",
     "readiness": {
       "title": "Préparation des réservations",
       "subtitleLive": "Les réservations sont actives. Terminez les éléments ci-dessous pour en débloquer davantage.",
@@ -95,18 +95,18 @@
       "oneLiner": "Débloquez les réservations IA avec Pro et laissez les clients planifier des rendez-vous directement via le chat.",
       "bullets": {
         "1": "Disponibilité en temps réel synchronisée avec votre agenda Cal.com.",
-        "2": "Le bot recueille nom, e-mail, téléphone et notes — réservé en moins d'une minute.",
+        "2": "Le bot recueille nom, e-mail, téléphone et notes - réservé en moins d'une minute.",
         "3": "E-mails de confirmation, rappels et liens de replanification envoyés automatiquement."
       }
     }
   },
   "leads": {
     "title": "Leads",
-    "intro": "Chaque contact capturé par votre chatbot — depuis le widget du site web, vos canaux connectés (WhatsApp, Messenger, etc.) et les prises de rendez-vous.",
+    "intro": "Chaque contact capturé par votre chatbot - depuis le widget du site web, vos canaux connectés (WhatsApp, Messenger, etc.) et les prises de rendez-vous.",
     "loadMore": "Charger plus",
     "empty": {
       "title": "Aucun lead pour l'instant",
-      "body": "Dès qu'un visiteur partage un e-mail ou un téléphone — ou vous contacte sur un canal connecté — il apparaîtra ici.",
+      "body": "Dès qu'un visiteur partage un e-mail ou un téléphone - ou vous contacte sur un canal connecté - il apparaîtra ici.",
       "filtered": "Aucun lead ne correspond à ce filtre"
     },
     "table": {
@@ -141,14 +141,14 @@
     },
     "followUp": {
       "becauseLabel": "Parce que",
-      "advisory": "Déduit des informations de ce lead. Rien n’a été envoyé — il s’agit uniquement d’une suggestion.",
+      "advisory": "Déduit des informations de ce lead. Rien n’a été envoyé - il s’agit uniquement d’une suggestion.",
       "priority": {
         "now": "Aujourd’hui",
         "soon": "Cette semaine"
       },
       "actions": {
         "confirm_request": "Confirmez ou refusez le créneau demandé",
-        "win_back_cancelled": "Proposez-lui un nouveau créneau — son rendez-vous a été annulé",
+        "win_back_cancelled": "Proposez-lui un nouveau créneau - son rendez-vous a été annulé",
         "check_in_after_visit": "Vérifiez que la visite s’est bien passée",
         "offer_a_time": "Recontactez-le avec un créneau",
         "ask_what_they_need": "Demandez-lui ce dont il a besoin"
@@ -240,21 +240,21 @@
     "add": {
       "button": "Ajouter un lead",
       "title": "Ajouter un lead",
-      "body": "Pour un client qui a appelé ou est passé. Un e-mail ou un numéro de téléphone est requis — c’est ainsi que nous le reconnaissons s’il vous recontacte.",
+      "body": "Pour un client qui a appelé ou est passé. Un e-mail ou un numéro de téléphone est requis - c’est ainsi que nous le reconnaissons s’il vous recontacte.",
       "name": "Nom",
       "email": "E-mail",
       "phone": "Téléphone",
       "notes": "De quoi ont-ils besoin ?",
       "save": "Ajouter le lead",
       "created": "Lead ajouté",
-      "merged": "Nous avions déjà ce contact — vos notes lui ont été ajoutées.",
+      "merged": "Nous avions déjà ce contact - vos notes lui ont été ajoutées.",
       "error": "Impossible d’ajouter le lead"
     },
     "import": {
       "button": "Importer un CSV",
       "title": "Importer des leads",
       "summary": "{{total}} lignes : {{create}} nouveaux, {{merge}} seront ajoutés à des contacts existants, {{reject}} ignorés.",
-      "rejectedRow": "Ligne {{line}} ignorée — {{reason}}",
+      "rejectedRow": "Ligne {{line}} ignorée - {{reason}}",
       "confirm": "Importer",
       "done": "{{created}} ajoutés, {{merged}} fusionnés avec des leads existants.",
       "truncated": "Seules les premières lignes de ce fichier seront importées.",
@@ -262,7 +262,7 @@
     },
     "sync": {
       "sent": "Envoyé à votre CRM {{when}}",
-      "failed": "Impossible d’envoyer à votre CRM — dernière tentative {{when}}",
+      "failed": "Impossible d’envoyer à votre CRM - dernière tentative {{when}}",
       "neverSent": "Pas encore envoyé à votre CRM",
       "retrying": "Envoi vers votre CRM toujours en cours"
     },
@@ -282,7 +282,7 @@
   "socialMedia": {
     "locked": {
       "title": "Réseaux sociaux",
-      "oneLiner": "Atteignez les clients là où ils sont déjà — connectez chaque canal de messagerie dans une seule boîte de réception.",
+      "oneLiner": "Atteignez les clients là où ils sont déjà - connectez chaque canal de messagerie dans une seule boîte de réception.",
       "bullets": {
         "1": "Facebook Messenger, Instagram, WhatsApp et Telegram au même endroit.",
         "2": "Le bot IA et la reprise humaine fonctionnent sur tous les canaux.",
@@ -425,7 +425,7 @@
       "defaultTakeover": {
         "title": "Durée de prise en charge par défaut",
         "description": "Présélectionne le menu Prendre en charge. Vous pouvez toujours choisir une autre durée.",
-        "indefinite": "Jusqu'à ce que je la rende — l'IA reste bloquée",
+        "indefinite": "Jusqu'à ce que je la rende - l'IA reste bloquée",
         "hours_one": "{{count}} heure",
         "hours_other": "{{count}} heures"
       },
@@ -466,7 +466,7 @@
       },
       "displayName": {
         "title": "Nom de l'entreprise",
-        "description": "Le nom de votre organisation / entreprise — affiché dans le widget de chat et utilisé par vos assistants IA. Le renommer met aussi à jour l'organisation de votre compte.",
+        "description": "Le nom de votre organisation / entreprise - affiché dans le widget de chat et utilisé par vos assistants IA. Le renommer met aussi à jour l'organisation de votre compte.",
         "label": "Nom de l'entreprise",
         "placeholder": "Le nom de votre entreprise",
         "adminOnly": "Seuls les administrateurs peuvent modifier le nom de l'entreprise."
@@ -480,7 +480,7 @@
       },
       "embed": {
         "title": "Intégrer le widget",
-        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio. Restreignez les sites autorisés via Sites autorisés — laissez vide pour autoriser tous les sites.",
+        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio. Restreignez les sites autorisés via Sites autorisés - laissez vide pour autoriser tous les sites.",
         "copied": "Copié dans le presse-papiers",
         "copyTitle": "Copier l'extrait",
         "allowedOrigins": {
@@ -498,7 +498,7 @@
           "confirmDescription": "Une nouvelle clé est émise immédiatement. L'ancienne reste valable 30 jours pour que les sites existants continuent de fonctionner. Une nouvelle rotation pendant cette période invalide immédiatement la plus ancienne.",
           "confirmAction": "Régénérer la clé",
           "graceBanner": "Ancienne clé encore valable jusqu'au {{date}}.",
-          "graceNeverUsed": "L'ancienne clé n'a pas été utilisée depuis la rotation — vous pouvez l'arrêter maintenant.",
+          "graceNeverUsed": "L'ancienne clé n'a pas été utilisée depuis la rotation - vous pouvez l'arrêter maintenant.",
           "graceLastUsed": "Dernière utilisation {{date}}.",
           "endEarly": "Arrêter maintenant",
           "endEarlyConfirmTitle": "Arrêter l'ancienne clé maintenant ?",
@@ -750,7 +750,7 @@
             "sessions": "Sessions illimitées",
             "llmCalls": "LLM de plateforme inclus",
             "channels": "Tous les canaux (boîte unifiée)",
-            "insights": "AI Insights — ce que votre bot ne sait pas répondre",
+            "insights": "AI Insights - ce que votre bot ne sait pas répondre",
             "uploadsHandoff": "Téléversements & transfert vers humain"
           }
         },
@@ -789,15 +789,15 @@
         "none": "Aucun plan"
       },
       "trial": {
-        "endsInDays_one": "Essai se termine {{date}} — {{count}} jour restant",
-        "endsInDays_other": "Essai se termine {{date}} — {{count}} jours restants"
+        "endsInDays_one": "Essai se termine {{date}} - {{count}} jour restant",
+        "endsInDays_other": "Essai se termine {{date}} - {{count}} jours restants"
       },
       "currentPlan": {
         "title": "Plan actuel",
         "renewsOn": "Renouvellement le {{date}}",
-        "cancellingOn": "Annulation le {{date}} — vous repasserez en Gratuit ensuite.",
+        "cancellingOn": "Annulation le {{date}} - vous repasserez en Gratuit ensuite.",
         "switchingTo": "Passage à {{plan}} le {{date}}",
-        "pastDueWarning": "Paiement échoué — mettez à jour votre moyen de paiement pour garder votre abonnement actif."
+        "pastDueWarning": "Paiement échoué - mettez à jour votre moyen de paiement pour garder votre abonnement actif."
       },
       "manage": {
         "title": "Gérer l'abonnement",
@@ -840,7 +840,7 @@
       },
       "loadError": "Impossible de charger l'état de la facturation : {{error}}",
       "unknownError": "erreur inconnue",
-      "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement.",
+      "subscribedJustNow": "Abonnement reçu - en attente de confirmation Stripe. Cette page se mettra à jour automatiquement.",
       "tokens": {
         "title": "Usage IA",
         "usedOfAllowance": "{{used}} tokens utilisés sur {{allowance}} pour cette période",
@@ -854,14 +854,14 @@
     },
     "webhooks": {
       "title": "Envoyer les leads vers votre CRM",
-      "subtitle": "Envoyez les leads nouveaux et mis à jour vers une URL — connectez HubSpot, Salesforce, Odoo, Zoho ou Pipedrive via Zapier, Make ou n8n. Il s’agit d’un envoi unidirectionnel, pas d’une synchronisation bidirectionnelle.",
+      "subtitle": "Envoyez les leads nouveaux et mis à jour vers une URL - connectez HubSpot, Salesforce, Odoo, Zoho ou Pipedrive via Zapier, Make ou n8n. Il s’agit d’un envoi unidirectionnel, pas d’une synchronisation bidirectionnelle.",
       "empty": "Aucun endpoint pour le moment.",
       "add": "Ajouter un endpoint",
       "remove": "Supprimer l’endpoint",
       "saved": "Webhooks enregistrés",
       "error": "Impossible d’enregistrer les webhooks",
-      "deletedWarning": "Sans lead.deleted, votre CRM conserve sa copie lorsqu’un client demande l’effacement — vous devriez la supprimer manuellement.",
-      "secretSet": "Clé de signature définie — saisissez pour la remplacer",
+      "deletedWarning": "Sans lead.deleted, votre CRM conserve sa copie lorsqu’un client demande l’effacement - vous devriez la supprimer manuellement.",
+      "secretSet": "Clé de signature définie - saisissez pour la remplacer",
       "secretNew": "Clé de signature (générée si laissée vide)"
     }
   },
@@ -928,7 +928,7 @@
           "label": "Nom de l'entreprise",
           "placeholder": "Le nom de votre entreprise",
           "helper": "Nom commercial utilisé par ce bot dans ses réponses ({businessName}).",
-          "helperInherit": "Laissez vide pour utiliser le nom de votre organisation ({{name}}). Indiquez une valeur pour le remplacer pour ce bot — utile pour une marque commerciale ou sociale distincte."
+          "helperInherit": "Laissez vide pour utiliser le nom de votre organisation ({{name}}). Indiquez une valeur pour le remplacer pour ce bot - utile pour une marque commerciale ou sociale distincte."
         },
         "supportEmail": {
           "label": "E-mail de support",
@@ -938,7 +938,7 @@
         },
         "voiceTone": {
           "label": "Ton de la voix",
-          "helper": "La voix de votre bot — s'applique à toutes ses spécialités."
+          "helper": "La voix de votre bot - s'applique à toutes ses spécialités."
         },
         "tones": {
           "friendly": "Amical",
@@ -995,7 +995,7 @@
         "latest": "Mise à jour automatique vers la dernière version",
         "pinTo": "Épingler à v{{version}}",
         "versionHelper": "La mise à jour automatique applique les améliorations des admins automatiquement ; l'épinglage fige le comportement du bot sur une version.",
-        "noneAvailable": "Aucun modèle de bot ne vous est encore disponible. Votre admin de plateforme les attribue — contactez-le pour en configurer un.",
+        "noneAvailable": "Aucun modèle de bot ne vous est encore disponible. Votre admin de plateforme les attribue - contactez-le pour en configurer un.",
         "preview": "Aperçu du modèle (lecture seule)",
         "previewEmpty": "Ce modèle n'ajoute aucune instruction de base.",
         "warnings": {
@@ -1010,11 +1010,11 @@
         "title": "Instructions supplémentaires",
         "description": "Conseils supplémentaires ajoutés au modèle sélectionné. Laissez vide pour utiliser le modèle tel quel.",
         "placeholder": "ex. Mentionnez toujours notre promotion du week-end.",
-        "scopeNote": "Ajoutez uniquement des notes spécifiques à votre activité. Cela ne peut pas remplacer le ton, les règles de sécurité ni la politique d'escalade du modèle — ceux-ci sont définis par les admins de la plateforme."
+        "scopeNote": "Ajoutez uniquement des notes spécifiques à votre activité. Cela ne peut pas remplacer le ton, les règles de sécurité ni la politique d'escalade du modèle - ceux-ci sont définis par les admins de la plateforme."
       },
       "operational": {
         "title": "Paramètres opérationnels",
-        "description": "Les commandes quotidiennes de votre entreprise — elles vous appartiennent, pas au modèle.",
+        "description": "Les commandes quotidiennes de votre entreprise - elles vous appartiennent, pas au modèle.",
         "escalationKeywords": {
           "label": "Mots-clés d'escalade",
           "placeholder": "ex. remboursement, réclamation, responsable",
@@ -1041,7 +1041,7 @@
         },
         "quotedAddress": {
           "label": "Adresse citée par le bot",
-          "helper": "Activée par défaut — cite l’adresse du compte, modifiable par bot. Désactivez-la pour ne citer aucune adresse (par exemple, pour une entreprise uniquement en ligne).",
+          "helper": "Activée par défaut - cite l’adresse du compte, modifiable par bot. Désactivez-la pour ne citer aucune adresse (par exemple, pour une entreprise uniquement en ligne).",
           "street": "Rue",
           "streetNumber": "Numéro",
           "boxNumber": "Boîte",
@@ -1327,7 +1327,7 @@
       "newChat": "Nouveau chat",
       "newChatHint": "Démarrer une nouvelle conversation",
       "errors": {
-        "emptyResponse": "(Aucune réponse — vérifiez votre ton de marque et la configuration des garde-fous)",
+        "emptyResponse": "(Aucune réponse - vérifiez votre ton de marque et la configuration des garde-fous)",
         "sendFailed": "Une erreur s'est produite. Vérifiez votre clé API et la configuration du modèle."
       }
     },
@@ -1466,7 +1466,7 @@
           "label": "Contenu",
           "placeholder": "Bonjour {{customer_name}}, comment puis-je vous aider ?",
           "helperPrefix": "Variables disponibles :",
-          "helperSuffix": "— ou ajoutez les vôtres comme"
+          "helperSuffix": "- ou ajoutez les vôtres comme"
         },
         "category": {
           "label": "Catégorie",
@@ -1518,7 +1518,7 @@
       }
     },
     "observability": {
-      "title": "État du déploiement — {{days}} derniers jours",
+      "title": "État du déploiement - {{days}} derniers jours",
       "split": "{{enforced}} appliqués · {{shadow}} observés",
       "openHandoffs": "{{count}} en attente",
       "enforcingTenants": "{{count}} locataire(s) appliquent actuellement les garde-fous",
@@ -1635,7 +1635,7 @@
       },
       "editor": {
         "newTitle": "Nouvelle version brouillon",
-        "prefilledFrom": "Pré-rempli depuis la v{{version}} — modifiez et publiez comme nouvelle version.",
+        "prefilledFrom": "Pré-rempli depuis la v{{version}} - modifiez et publiez comme nouvelle version.",
         "editTitle": "Modifier le brouillon v{{version}}",
         "viewTitle": "Version v{{version}} (lecture seule)",
         "body": "Contenu du prompt",
@@ -1643,10 +1643,10 @@
         "expectedModules": "Modules attendus",
         "expectedModulesHint": "Capacités requises par ce modèle ; les locataires doivent les avoir activées pour l'utiliser pleinement.",
         "noModules": "Aucun module disponible.",
-        "unknownPlaceholders": "Variables inconnues : {{placeholders}} — corrigez-les ou supprimez-les avant de publier (elles apparaîtraient en texte brut).",
+        "unknownPlaceholders": "Variables inconnues : {{placeholders}} - corrigez-les ou supprimez-les avant de publier (elles apparaîtraient en texte brut).",
         "changelog": "Journal des modifications (facultatif)",
         "configTitle": "Garde-fous",
-        "configHint": "Géré par ce modèle — s'applique à tous les bots qui y sont liés. Les locataires ne les définissent plus.",
+        "configHint": "Géré par ce modèle - s'applique à tous les bots qui y sont liés. Les locataires ne les définissent plus.",
         "tone": "Ton de la voix",
         "tones": {
           "friendly": "Amical",
@@ -1664,7 +1664,7 @@
         "fallbackMessage": "Message de repli",
         "fallbackSuggested": "Désolé, je n'ai pas assez d'informations pour répondre avec certitude. Veuillez contacter {businessName} ou poser une autre question.",
         "offHoursMessage": "Message hors horaires",
-        "offHoursSuggested": "Merci de votre message. {businessName} est actuellement fermé — laissez vos coordonnées et l'équipe vous recontactera pendant les heures d'ouverture.",
+        "offHoursSuggested": "Merci de votre message. {businessName} est actuellement fermé - laissez vos coordonnées et l'équipe vous recontactera pendant les heures d'ouverture.",
         "topicsToAvoid": "Sujets à éviter",
         "topicsPlaceholder": "Saisissez un sujet et appuyez sur Entrée",
         "topicsAddCommon": "Ajouter les sujets courants",
@@ -1686,7 +1686,7 @@
         "testPlaceholder": "Saisissez un message visiteur…",
         "testSend": "Envoyer",
         "testThinking": "Réflexion…",
-        "testError": "Échec du test — vérifiez la clé API de la plateforme.",
+        "testError": "Échec du test - vérifiez la clé API de la plateforme.",
         "testHint": "Exécute le brouillon actuel (non enregistré) sur le modèle de la plateforme avec des {botName}/{businessName} d'exemple. Base de connaissances non incluse.",
         "availableLabel": "Espaces réservés disponibles"
       },
@@ -1694,10 +1694,10 @@
         "archiveTitle": "Archiver ce modèle ?",
         "unpublishTitle": "Dépublier cette version ?",
         "ungrantTitle": "Retirer l'accès du locataire ?",
-        "reassign": "{{count}} bot(s) lié(s) seront déplacé(s) vers le modèle de base vierge — ils perdront le ton, les garde-fous, les messages d'accueil/de repli/hors horaires et le corps du prompt de ce modèle, et reviendront aux valeurs par défaut de la plateforme jusqu'à ce qu'un admin les relie. Continuer ?",
+        "reassign": "{{count}} bot(s) lié(s) seront déplacé(s) vers le modèle de base vierge - ils perdront le ton, les garde-fous, les messages d'accueil/de repli/hors horaires et le corps du prompt de ce modèle, et reviendront aux valeurs par défaut de la plateforme jusqu'à ce qu'un admin les relie. Continuer ?",
         "deleteTitle": "Supprimer la version v{{version}} ?",
         "deleteBody": "Cela supprime définitivement cette version. Action irréversible.",
-        "deleteReassign": "{{count}} bot(s) épinglent cette version — ils seront désépinglés vers la dernière version publiée, puis elle sera supprimée. Continuer ?",
+        "deleteReassign": "{{count}} bot(s) épinglent cette version - ils seront désépinglés vers la dernière version publiée, puis elle sera supprimée. Continuer ?",
         "discardTitle": "Abandonner les modifications non enregistrées ?",
         "discardBody": "Vous avez des modifications non enregistrées sur cette version. Fermer sans enregistrer ?",
         "proceed": "Continuer"
@@ -1883,12 +1883,12 @@
       "tierDialog": {
         "title": "Définir le palier (remplacement manuel)",
         "descriptionBefore": "Choisissez un palier cible pour",
-        "descriptionAfter": ". Il s'agit d'un remplacement manuel — Stripe est contourné et une ligne de facturation principale manuelle est écrite. Utilisez-le pour les offres gratuites, les comptes Enterprise gérés par les ventes ou les rétrogradations suite à un remboursement.",
+        "descriptionAfter": ". Il s'agit d'un remplacement manuel - Stripe est contourné et une ligne de facturation principale manuelle est écrite. Utilisez-le pour les offres gratuites, les comptes Enterprise gérés par les ventes ou les rétrogradations suite à un remboursement.",
         "updating": "Mise à jour du palier…",
         "current": "actuel",
         "selected": "sélectionné",
         "tierDescriptions": {
-          "free": "Aucun plan — abus / rétrogradation suite à un remboursement",
+          "free": "Aucun plan - abus / rétrogradation suite à un remboursement",
           "essential": "Droits Essential, offerts (sans Stripe)",
           "pro": "Droits Pro, offerts (sans Stripe)",
           "enterprise": "Géré par les ventes, illimité"
@@ -1900,7 +1900,7 @@
           "explainer": "cette action ne l'annule pas, le client continue donc d'être facturé sur un palier Gratuit. Choisissez ce qu'il advient de l'abonnement :",
           "will_cancel": "J'ai annulé / vais annuler l'abonnement dans le dashboard Stripe",
           "leave_active": "Laisser l'abonnement actif intentionnellement",
-          "reasonPlaceholder": "Pourquoi l'abonnement reste-t-il actif ? (obligatoire — consigné dans le journal d'audit)"
+          "reasonPlaceholder": "Pourquoi l'abonnement reste-t-il actif ? (obligatoire - consigné dans le journal d'audit)"
         },
         "setTo": "Définir sur {{tier}}",
         "pickATier": "Choisissez un palier"
@@ -2023,7 +2023,7 @@
       }
     },
     "impersonationBanner": {
-      "message": "Vous empruntez l'identité de <strong>{{tenant}}</strong> — revenez à votre propre compte une fois terminé.",
+      "message": "Vous empruntez l'identité de <strong>{{tenant}}</strong> - revenez à votre propre compte une fois terminé.",
       "exitButton": "Quitter"
     },
     "faq": {
@@ -2079,7 +2079,7 @@
         "title": "Titre",
         "question": "Question",
         "answer": "Réponse",
-        "optionalPlaceholder": "Optionnel — retombe sur l'anglais si vide."
+        "optionalPlaceholder": "Optionnel - retombe sur l'anglais si vide."
       },
       "errors": {
         "load": "Impossible de charger les FAQ.",
@@ -2135,9 +2135,9 @@
       "chooseSection": "Choisissez une section"
     },
     "drawer": {
-      "title": "Bot IA — FAQ",
+      "title": "Bot IA - FAQ",
       "subtitle": "Questions fréquentes sur les instructions et le comportement du bot",
-      "ariaLabel": "Bot IA — Foire aux questions",
+      "ariaLabel": "Bot IA - Foire aux questions",
       "closeLabel": "Fermer la FAQ",
       "browseAll": "Parcourir toutes les FAQ"
     },
@@ -2238,7 +2238,7 @@
     },
     "takeover": {
       "button": "Prendre en charge",
-      "indefinite": "Bloquer l'IA — jusqu'à ce que je la rende",
+      "indefinite": "Bloquer l'IA - jusqu'à ce que je la rende",
       "forHours_one": "Retour à l'IA dans {{count}} heure",
       "forHours_other": "Retour à l'IA dans {{count}} heures",
       "changeDuration": "Modifier la durée",
@@ -2324,7 +2324,7 @@
       "title": "Transférer à un collègue",
       "prompt": "Sélectionnez un agent à qui transférer cette conversation :",
       "noAgents": "Aucun autre collègue n'est en ligne. Prenez la conversation en charge vous-même, ou réessayez plus tard.",
-      "agentStats": "{{current}}/{{max}} conversations — {{status}}"
+      "agentStats": "{{current}}/{{max}} conversations - {{status}}"
     },
     "toasts": {
       "loadFailed": "Échec du chargement de la conversation",
@@ -2537,8 +2537,8 @@
     },
     "agentsEmpty": {
       "title": "Pas encore d'agents",
-      "agents": "Les agents sont des humains qui reprennent les conversations transférées par l'IA. La plupart des équipes s'en passent — ajoutez-en un seulement si vous voulez une reprise en direct.",
-      "shifts": "Les plannings définissent la disponibilité de chaque agent — ajoutez d'abord un agent.",
+      "agents": "Les agents sont des humains qui reprennent les conversations transférées par l'IA. La plupart des équipes s'en passent - ajoutez-en un seulement si vous voulez une reprise en direct.",
+      "shifts": "Les plannings définissent la disponibilité de chaque agent - ajoutez d'abord un agent.",
       "performance": "Les performances des agents apparaissent ici dès qu'ils traitent des conversations transférées."
     }
   },
@@ -2554,16 +2554,16 @@
     "meta": {
       "refreshed": "Dernière analyse {{ago}}",
       "pending": "Appuyez sur Analyser pour mettre à jour",
-      "pendingAutomatic": "L'analyse s'exécute automatiquement tout au long de la journée — les insights apparaissent après l'examen de vos conversations",
-      "incomplete": "Insights incomplets — analyse des conversations récentes en cours"
+      "pendingAutomatic": "L'analyse s'exécute automatiquement tout au long de la journée - les insights apparaissent après l'examen de vos conversations",
+      "incomplete": "Insights incomplets - analyse des conversations récentes en cours"
     },
     "card": {
       "stats": "{{visitors}} clients ont demandé sans obtenir de réponse ({{count}} conversations) · dernière {{ago}}"
     },
     "status": {
       "dormant": "En sommeil",
-      "resolvedData": "Résolu — confirmé par les conversations",
-      "resolvedManual": "Résolu — marqué corrigé"
+      "resolvedData": "Résolu - confirmé par les conversations",
+      "resolvedManual": "Résolu - marqué corrigé"
     },
     "actions": {
       "resolve": "J'ai corrigé",
@@ -2584,19 +2584,19 @@
       },
       "wins": {
         "title": "Pas encore de victoires",
-        "description": "Les lacunes résolues arrivent ici — corrigez-en une en ajoutant la réponse à votre base de connaissances."
+        "description": "Les lacunes résolues arrivent ici - corrigez-en une en ajoutant la réponse à votre base de connaissances."
       }
     },
     "locked": {
       "title": "Insights IA",
       "oneLiner": "Découvrez ce que vos clients demandent sans obtenir de réponse.",
       "bullet1": "Les sujets récurrents, classés par nombre de clients",
-      "bullet2": "Corrigez une lacune en ajoutant la réponse à votre base — les victoires sont confirmées automatiquement",
+      "bullet2": "Corrigez une lacune en ajoutant la réponse à votre base - les victoires sont confirmées automatiquement",
       "bullet3": "Appuyez sur Analyser maintenant pour mettre à jour à partir de vos vraies conversations"
     },
     "experiments": {
       "title": "Expériences",
-      "empty": "Les tendances repérées dans vos conversations — corrélations et thèmes de sentiment — apparaissent ici au fil du temps.",
+      "empty": "Les tendances repérées dans vos conversations - corrélations et thèmes de sentiment - apparaissent ici au fil du temps.",
       "dismiss": "Ignorer",
       "dismissedToast": "Ignoré"
     },
@@ -2624,7 +2624,7 @@
     "demand": {
       "title": "Ce que demandent les clients",
       "denominator": "Sur les {{classified}} des {{total}} leads que nous avons pu associer à un service, ces {{days}} derniers jours.",
-      "noServices": "Aucun service associé à un lead pour l’instant — cela se remplit au fur et à mesure des réservations.",
+      "noServices": "Aucun service associé à un lead pour l’instant - cela se remplit au fur et à mesure des réservations.",
       "tagsTitle": "Sujets mentionnés (déduits par l’IA)",
       "tagsDenominator": "Sur les {{tagged}} conversations que nous avons pu analyser."
     },
@@ -2632,7 +2632,7 @@
       "run": "Analyser maintenant",
       "running": "Analyse en cours…",
       "failed": "L'analyse n'a pas pu être effectuée",
-      "automatic": "Votre formule analyse les conversations en continu — rien à lancer manuellement.",
+      "automatic": "Votre formule analyse les conversations en continu - rien à lancer manuellement.",
       "notEnoughChats": "{{count}} conversations sur {{min}}. Il en faut assez pour dégager une tendance et non une coïncidence.",
       "coolingDown": "Analyse déjà effectuée récemment. Vous pourrez relancer dans {{hours}} heures.",
       "started": "Analyse lancée. Le résultat s'affichera ici une fois terminé.",
@@ -2803,9 +2803,9 @@
   "copilot": {
     "launcher": {
       "tooltip": "Interroger l'assistant IA de la plateforme",
-      "tooltipWithSuggestions_one": "Interroger l'assistant IA de la plateforme — {{count}} suggestion disponible",
-      "tooltipWithSuggestions_other": "Interroger l'assistant IA de la plateforme — {{count}} suggestions disponibles",
-      "tooltipLocked": "Assistant IA de la plateforme — inclus avec Pro"
+      "tooltipWithSuggestions_one": "Interroger l'assistant IA de la plateforme - {{count}} suggestion disponible",
+      "tooltipWithSuggestions_other": "Interroger l'assistant IA de la plateforme - {{count}} suggestions disponibles",
+      "tooltipLocked": "Assistant IA de la plateforme - inclus avec Pro"
     },
     "drawer": {
       "title": "Assistant IA de la plateforme",
@@ -2816,11 +2816,11 @@
       "placeholder": "Posez une question sur votre bot, votre plan, vos leads ou comment faire quelque chose dans Axentrio…",
       "sendAria": "Envoyer le message",
       "thinking": "Réflexion…",
-      "rateLimited": "Vous envoyez trop vite — réessayez dans {{seconds}} secondes.",
+      "rateLimited": "Vous envoyez trop vite - réessayez dans {{seconds}} secondes.",
       "toolBadgeTooltip": "L'assistant a consulté {{name}}",
       "welcome": {
         "title": "Bonjour 👋",
-        "body": "Demandez-moi des informations sur votre bot, votre plan, vos leads ou comment faire quelque chose dans Axentrio. Je peux répondre à partir de la documentation et consulter les données de votre tenant — mais je ne peux rien modifier pour vous.",
+        "body": "Demandez-moi des informations sur votre bot, votre plan, vos leads ou comment faire quelque chose dans Axentrio. Je peux répondre à partir de la documentation et consulter les données de votre tenant - mais je ne peux rien modifier pour vous.",
         "examples": [
           "Sur quel plan suis-je et quand est-il renouvelé ?",
           "Combien de leads avons-nous capturés cette semaine ?",
@@ -2838,11 +2838,11 @@
     },
     "locked": {
       "title": "Débloquer l'assistant IA de la plateforme",
-      "oneLiner": "Une IA dans le portail qui répond à vos questions sur la plateforme et expose les données de votre tenant — inclus avec Pro et Enterprise.",
+      "oneLiner": "Une IA dans le portail qui répond à vos questions sur la plateforme et expose les données de votre tenant - inclus avec Pro et Enterprise.",
       "bullets": [
         "Posez des questions sur votre bot, votre plan, vos leads ou vos intégrations",
         "Obtenez des réponses instantanées basées sur la documentation Axentrio",
-        "Voyez les statistiques en direct — \"combien de leads cette semaine ?\""
+        "Voyez les statistiques en direct - \"combien de leads cette semaine ?\""
       ],
       "historyNote": "Vos conversations précédentes sont conservées et seront à nouveau disponibles dès que vous passerez à un plan supérieur."
     },
@@ -2891,7 +2891,7 @@
     "quota": {
       "usage": "{{used}} sur {{limit}} utilisés",
       "usageUnlimited": "{{used}} bots",
-      "upgradeCta": "Vous avez atteint la limite de bots de votre plan — passez à un plan supérieur pour en ajouter."
+      "upgradeCta": "Vous avez atteint la limite de bots de votre plan - passez à un plan supérieur pour en ajouter."
     },
     "create": {
       "title": "Créer un nouveau bot",
@@ -3007,7 +3007,7 @@
       },
       "proactiveLeadCapture": {
         "label": "Demander les informations manquantes",
-        "description": "Laissez votre bot demander poliment un numéro de téléphone ou un e-mail lorsqu'il n'en a pas. Désactivé par défaut — votre bot enregistre toujours les informations qu'un client donne de lui-même."
+        "description": "Laissez votre bot demander poliment un numéro de téléphone ou un e-mail lorsqu'il n'en a pas. Désactivé par défaut - votre bot enregistre toujours les informations qu'un client donne de lui-même."
       },
       "leadEnrichment": {
         "label": "Données de leads structurées",
@@ -3073,7 +3073,7 @@
         "body": "Indiquez votre numéro de TVA et nous remplissons le reste depuis le registre officiel.",
         "vatLabel": "Numéro de TVA",
         "lookup": "Rechercher",
-        "lookingUp": "Consultation du registre — cela peut prendre quelques secondes.",
+        "lookingUp": "Consultation du registre - cela peut prendre quelques secondes.",
         "lookupFailed": "Échec de la recherche. Vous pouvez saisir vous-même les informations de l'entreprise.",
         "lookupRateLimited": "Trop de recherches. Réessayez dans une minute.",
         "lookupStatus": {
@@ -3081,7 +3081,7 @@
           "not_found": "Ce numéro n'est pas enregistré. Vérifiez-le, ou saisissez les données vous-même.",
           "invalid_format": "Ce numéro de TVA n'a pas un format valide. Exemple : BE 0400.378.485",
           "unsupported": "Nous ne pouvons pas rechercher automatiquement ce numéro de TVA. Saisissez vous-même les informations de l'entreprise.",
-          "unavailable": "Le registre ne répond pas pour l'instant. Saisissez les données vous-même et continuez — la vérification pourra se faire plus tard."
+          "unavailable": "Le registre ne répond pas pour l'instant. Saisissez les données vous-même et continuez - la vérification pourra se faire plus tard."
         },
         "nameLabel": "Nom de l'entreprise",
         "legalFormLabel": "Forme juridique",
@@ -3093,8 +3093,8 @@
         "presence": {
           "label": "Comment les clients vous joignent-ils ?",
           "helper": "Une boutique en ligne n'aura jamais d'adresse physique forcée sur le bot. Une entreprise physique pourra plus tard donner au bot sa propre adresse.",
-          "physical": "Entreprise physique — les clients viennent ou nous nous déplaçons",
-          "online": "Entreprise en ligne — aucun local à citer"
+          "physical": "Entreprise physique - les clients viennent ou nous nous déplaçons",
+          "online": "Entreprise en ligne - aucun local à citer"
         }
       },
       "logo": {
@@ -3229,7 +3229,7 @@
       },
       "plan": {
         "title": "Choisissez votre formule",
-        "body": "Pro est recommandé si vous prenez rendez-vous — essai de 14 jours. Essential est le chatbot sans rendez-vous.",
+        "body": "Pro est recommandé si vous prenez rendez-vous - essai de 14 jours. Essential est le chatbot sans rendez-vous.",
         "choose": "Choisir cette formule",
         "recommended": "Recommandé",
         "trialLength": "Comprend 14 jours d'essai gratuit"

@@ -33,7 +33,7 @@ export default function SuccessMeter() {
             defaultValue: 'Topics customers keep asking about, ranked by how many asked',
           }),
           t('insights.locked.bullet2', {
-            defaultValue: 'Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically',
+            defaultValue: 'Fix a gap by adding the answer to your knowledge base - wins are confirmed automatically',
           }),
           t('insights.locked.bullet3', {
             defaultValue: 'Press Analyse now to update from your real conversations',

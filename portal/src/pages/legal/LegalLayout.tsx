@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { AxentrioLogo } from '@/components/brand/AxentrioMark';
 
 interface LegalLayoutProps {
   title: string;
@@ -19,8 +20,8 @@ const LegalLayout: React.FC<LegalLayoutProps> = ({ title, lastUpdated, children 
     <div className="min-h-screen bg-surface-1 text-text-primary">
       <header className="border-b border-edge">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">
-          <a href="https://axentrio.com" className="text-lg font-bold tracking-tight">
-            Axentrio
+          <a href="https://axentrio.com" className="inline-flex shrink-0 items-center">
+            <AxentrioLogo variant="onDark" />
           </a>
           <nav className="flex gap-5 text-sm text-text-secondary">
             <Link to="/privacy" className="hover:text-text-primary">Privacy</Link>

@@ -286,7 +286,12 @@ const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <ClerkProvider
       publishableKey={CLERK_PUBLISHABLE_KEY}
       appearance={{
-        layout: { logoImageUrl: '/favicon.svg' },
+        layout: {
+          logoImageUrl:
+            mode === 'dark'
+              ? '/axentrio-wordmark-on-dark.svg'
+              : '/axentrio-wordmark.svg',
+        },
         variables: {
           colorBackground: palette.background,
           colorInputBackground: palette.inputBackground,

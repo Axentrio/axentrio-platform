@@ -221,7 +221,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ) {
         new Notification('New handoff request', {
           body: `A visitor needs assistance (${handoff.reason || 'escalation'})`,
-          icon: '/favicon.ico',
+          icon: '/favicon.png',
         });
       }
     });

@@ -1,6 +1,6 @@
 import { useSignIn } from '@clerk/expo';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type Step = 'credentials' | 'mfa';
@@ -72,7 +72,12 @@ export default function SignInScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-1 justify-center gap-4 p-6">
-        <Text className="text-3xl font-bold">Axentrio</Text>
+        <Image
+          source={require('../../assets/images/axentrio-logo.png')}
+          accessibilityLabel="Axentrio"
+          resizeMode="contain"
+          style={{ width: 220, height: 56 }}
+        />
 
         {step === 'credentials' ? (
           <>

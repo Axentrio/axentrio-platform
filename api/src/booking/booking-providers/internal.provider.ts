@@ -130,6 +130,7 @@ import {
   SLOT_NOT_OFFERABLE,
   SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
   SLOT_TAKEN_ON_RESCHEDULE,
+  requestInPast,
   requestTooSoon,
   requestTooFar,
   requestClosedDay,
@@ -2410,10 +2411,15 @@ export class InternalProvider implements BookingProvider {
     const canAuto =
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
-      const { earliestMs, latestMs } = bookableWindow(service, new Date());
+      const now = new Date();
+      const { earliestMs, latestMs } = bookableWindow(service, now);
       const startMs = start.getTime();
       // The RANGE goes into the message, never the bound: it is a policy instant, not an opening
       // time - see the note on `requestTooSoon`.
+      if (startMs < now.getTime()) {
+        const { startDate, endDate } = retryRange('past', new Date(earliestMs).toISOString(), rule.timezone);
+        throw new BookingError(requestInPast(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
       if (startMs < earliestMs) {
         const { startDate, endDate } = retryRange('too_soon', new Date(earliestMs).toISOString(), rule.timezone);
         throw new BookingError(requestTooSoon(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);

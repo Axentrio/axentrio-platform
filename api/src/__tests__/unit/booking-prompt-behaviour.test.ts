@@ -1088,9 +1088,10 @@ describe('check_availability — a range the policy ruled out is not an empty di
   const tooSoon = { reason: 'too_soon', boundary: '2026-08-26T19:02:00.000Z' };
   // Report 2: the last bookable instant is Tue 8 Sep at 21:02 Brussels.
   const tooFar = { reason: 'too_far', boundary: '2026-09-08T19:02:00.000Z' };
+  const past = { reason: 'past', boundary: '2026-08-25T19:02:00.000Z' };
 
   it('sends the model back to check_availability, never to a request', async () => {
-    for (const range of [tooSoon, tooFar]) {
+    for (const range of [tooSoon, tooFar, past]) {
       const res = await load(range);
       expect(res.success, range.reason).toBe(true);
       expect(res.data.suggestedAction, range.reason).toBe('check_availability');
@@ -1105,7 +1106,7 @@ describe('check_availability — a range the policy ruled out is not an empty di
   it('refuses the manual-confirmation offer in so many words', async () => {
     // What the bot actually did. "Do not hand off" did not cover it: offering to have the team
     // confirm the appointment by hand is a surrender that never mentions a human.
-    for (const range of [tooSoon, tooFar]) {
+    for (const range of [tooSoon, tooFar, past]) {
       const res = await load(range);
       expect(res.data.guidance, range.reason).toMatch(/confirm the appointment by hand/i);
       expect(res.data.guidance, range.reason).toMatch(/books automatically/i);
@@ -1135,7 +1136,7 @@ describe('check_availability — a range the policy ruled out is not an empty di
     // the business cannot take, and it comes from the server, so the model repeats it over its
     // own guess. `namedTimeGuidance` cannot save this turn either: it returns nothing when a
     // call offered no clock times, which is exactly what an out-of-window range is.
-    for (const range of [tooSoon, tooFar]) {
+    for (const range of [tooSoon, tooFar, past]) {
       const res = await load(range);
       expect(res.data.emptyRange, range.reason).toBeUndefined();
       // THE WHOLE PAYLOAD, not the two fields that happened to come to mind. `modelResult`
@@ -1150,6 +1151,15 @@ describe('check_availability — a range the policy ruled out is not an empty di
       expect(payload, range.reason).not.toContain('21:02');
       expect(payload, range.reason).not.toContain('19:02');
     }
+  });
+
+  it('sends the model back to check_availability for a past range, never to a request', async () => {
+    const res = await load(past);
+    expect(res.success).toBe(true);
+    expect(res.data.suggestedAction).toBe('check_availability');
+    expect(res.data.guidance).toMatch(/already passed|gone by/i);
+    expect(res.data.guidance).toContain('startDate 2026-08-25 and endDate 2026-08-31');
+    expect(res.data.guidance).toMatch(/do NOT capture it with request_appointment/);
   });
 });
 

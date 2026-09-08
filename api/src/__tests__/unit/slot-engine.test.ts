@@ -351,13 +351,51 @@ describe('slot-engine · diagnoseEmptyRange', () => {
     expect(diagnoseEmptyRange(straddling)).toBeNull();
   });
 
-  it('says nothing about a range wholly in the past', () => {
+  it('reads a range wholly in the past as past, not as a full day', () => {
     const past = input({
       weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
       now: new Date('2026-06-20T00:00:00Z'),
     });
     expect(computeSlots(past)).toEqual([]);
-    expect(diagnoseEmptyRange(past)).toBeNull();
+    expect(diagnoseEmptyRange(past)).toEqual({
+      reason: 'past',
+      boundary: '2026-06-20T00:00:00.000Z',
+    });
+  });
+
+  it('reads today after hours as past on a live Brussels diary', () => {
+    const afterHours = input({
+      weeklyHours: {
+        tue: [{ start: '09:00', end: '17:00' }],
+        wed: [{ start: '09:00', end: '17:00' }],
+      },
+      now: new Date('2026-09-08T19:55:00Z'), // Tue 21:55 Brussels
+      rangeStart: '2026-09-07T22:00:00Z',
+      rangeEnd: '2026-09-08T22:00:00Z',
+    });
+    expect(computeSlots(afterHours)).toEqual([]);
+    expect(diagnoseEmptyRange(afterHours)).toEqual({
+      reason: 'past',
+      boundary: '2026-09-08T19:55:00.000Z',
+    });
+  });
+
+  it('reads mixed past and inside-notice as too_soon, not past', () => {
+    const mixed = input({
+      weeklyHours: {
+        tue: [{ start: '09:00', end: '17:00' }],
+        wed: [{ start: '09:00', end: '17:00' }],
+      },
+      eventType: { durationMin: 30, bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 1440, maxHorizonDays: 60 },
+      now: new Date('2026-09-08T19:55:00Z'),
+      rangeStart: '2026-09-07T22:00:00Z',
+      rangeEnd: '2026-09-09T22:00:00Z',
+    });
+    expect(computeSlots(mixed)).toEqual([]);
+    expect(diagnoseEmptyRange(mixed)).toEqual({
+      reason: 'too_soon',
+      boundary: '2026-09-09T19:55:00.000Z',
+    });
   });
 });
 

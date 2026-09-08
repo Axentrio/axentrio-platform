@@ -227,6 +227,8 @@ export interface TravelFilterSummary {
  */
 export interface EmptyRangeDiagnosis {
   /**
+   * `past`: every would-be start in range is earlier than `now` (the day's hours have gone by,
+   * or the date has passed).
    * `too_soon`: every start in range is inside the minimum notice.
    * `too_far`: past the horizon.
    * `service_day_full`: this service has already reached maxBookingsPerDay for the
@@ -234,10 +236,11 @@ export interface EmptyRangeDiagnosis {
    * `closed`: no day in the range has opening hours, and the next 7 days do
    * (weekly grid or a date-override closure). Never-open is ordinary empty.
    */
-  reason: 'too_soon' | 'too_far' | 'service_day_full' | 'closed';
+  reason: 'past' | 'too_soon' | 'too_far' | 'service_day_full' | 'closed';
   /**
-   * The bound the range fell outside, as a UTC ISO instant. For `too_soon`, the earliest a
-   * booking may start; for `too_far`, the last instant this business takes bookings for.
+   * The bound the range fell outside, as a UTC ISO instant. For `past` and `too_soon`, the
+   * earliest a booking may start (`now + minNotice`). For `too_far`, the last instant this
+   * business takes bookings for.
    * For `service_day_full` and `closed`, the exclusive end of the queried range (the next
    * local midnight), so the retry starts the day after the refused one. Never a bookable
    * clock time.

@@ -851,6 +851,17 @@ function outOfWindowGuidance(
       ' - there are times this customer can book, and your job is to find them and offer them now.'
     );
   }
+  if (outOfWindow.reason === 'past') {
+    return (
+      'That range has already passed: every time in it is earlier than now, so nothing in it can be booked - not the hour they asked for and not another hour on that date.' +
+      retryCall +
+      ' SAY THE REASON: tell the customer plainly that those hours have already gone by. Do NOT say the business is closed or fully booked, and do NOT offer another time on that same date.' +
+      ' Checking the same range again returns the same nothing, so do not repeat it.' +
+      ' Offer ONLY times that call gives you.' +
+      autoBook +
+      ' - there are times this customer can book, and your job is to find them and offer them now.'
+    );
+  }
   return (
     (outOfWindow.reason === 'too_soon'
       ? 'That range is too soon: this business needs more notice than that.'

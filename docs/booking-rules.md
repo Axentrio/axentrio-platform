@@ -29,6 +29,7 @@ These are **not** Requests on an Auto-book Service. Check the date they named, r
 - named date that is closed all day (`closed`) — offer **another date**, never another hour that same day
 - minimum notice (`too_soon`)
 - max horizon (`too_far`)
+- named hour/date already passed (`past`) — offer **another date**, never that day
 - this Service's daily cap (`service_day_full`) — offer **another date**, never another hour that same day
 - `CAPACITY_REACHED` on create — offer a different time; never retry the refused one; never say closed
 - `PHONE_REQUIRED` / `EMAIL_REQUIRED` / `ADDRESS_REQUIRED` / `FILE_REQUIRED` — ask for the missing field, keep the named hour, retry. Missing contact is not "unavailable"
@@ -126,6 +127,7 @@ Pinned: `buildSlotQuickReplies` in `agent.service.ts`; `address-picker-affordanc
 
 | `emptyRange.reason` | meaning | next |
 |---|---|---|
+| `past` | every would-be start is before now (hours gone by, or date passed) | retry [today, +6]; say hours passed; Auto-book |
 | `too_soon` | whole range inside minimum notice | retry later range; Auto-book |
 | `too_far` | whole range past horizon | retry earlier range; Auto-book |
 | `service_day_full` | only this Service's daily cap emptied the day | retry the **next** day; say the cap; Auto-book |

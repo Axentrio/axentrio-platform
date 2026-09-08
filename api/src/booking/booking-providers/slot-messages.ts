@@ -90,6 +90,9 @@ export const SLOT_TAKEN_ON_RESCHEDULE =
  * invented-time guard is blind here because a refused turn offers no clock times to judge
  * against. So these name a RANGE to search and nothing else.
  */
+export const requestInPast = (startDate: string, endDate: string): string =>
+  `That time has already passed, so it cannot be booked OR requested - there is nothing for the business to confirm. Do NOT capture it and do NOT tell the customer the team will come back on it. Tell the customer plainly that those hours have already gone by. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the customer the times it returns, and book one outright: this service books automatically. Offer ONLY times that call gives you - do not work out the next date yourself and do not name one to the customer.`;
+
 export const requestTooSoon = (startDate: string, endDate: string): string =>
   `That time is sooner than the notice this business needs, so it cannot be booked OR requested ` +
   `- they have already said they do not take appointments at that notice, so there is nothing ` +

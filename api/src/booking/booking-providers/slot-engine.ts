@@ -391,6 +391,10 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
     if (slots.length === 0) return null;
     const { earliestMs, latestMs } = bookableWindow(input.eventType, input.now);
     const starts = slots.map((s) => new Date(s.start).getTime());
+    const nowMs = input.now.getTime();
+    if (starts.every((ms) => ms < nowMs)) {
+      return { reason: 'past', boundary: new Date(earliestMs).toISOString() };
+    }
     if (starts.every((ms) => ms < earliestMs)) {
       return { reason: 'too_soon', boundary: new Date(earliestMs).toISOString() };
     }
@@ -402,6 +406,7 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
 
   const wouldBe = computeSlots({
     ...input,
+    now: new Date(input.rangeStart),
     eventType: { ...input.eventType, minNoticeMin: 0, maxHorizonDays: NO_HORIZON_DAYS },
   });
   const fromWindow = windowReason(wouldBe);
@@ -422,6 +427,7 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
     const fromCapWindow = windowReason(
       computeSlots({
         ...input,
+        now: new Date(input.rangeStart),
         eventType: {
           ...input.eventType,
           maxBookingsPerDay: 0,
@@ -439,7 +445,7 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
       return { reason: 'closed', boundary: new Date(input.rangeEnd).toISOString() };
     }
   }
-  return null; // full, mixed, never-open, or entirely in the past
+  return null; // full, mixed, or never-open
 }
 
 /**

@@ -18,6 +18,7 @@ import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
 import { DEFAULT_ESCALATION_KEYWORDS } from '../config/default-bot-settings';
 import { ensureAnchorBot } from '../services/bot-config.service';
+import { generatePublicKey } from '../services/bot-key-rotation.service';
 import { logger } from '../utils/logger';
 import type { RequestUser, UserRole } from '../types';
 import {
@@ -265,7 +266,7 @@ async function provisionTenant(clerkOrgId: string, tenantRepo: Repository<Tenant
   const orgName = await fetchClerkOrgName(clerkOrgId);
 
   const slug = await ensureUniqueSlug(orgName, tenantRepo);
-  const apiKey = crypto.randomBytes(32).toString('hex');
+  const apiKey = generatePublicKey();
 
   try {
     const tenant = await insertTenantAndBootstrap(clerkOrgId, orgName, slug, apiKey);

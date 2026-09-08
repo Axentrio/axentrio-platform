@@ -68,6 +68,12 @@ vi.mock('../../knowledge/attach-shared-kb', () => ({
   ensureSharedKbAttached: vi.fn(),
 }));
 
+const mockGeneratePublicKey = vi.fn(() => 'bk_MockShortKey1234');
+
+vi.mock('../../services/bot-key-rotation.service', () => ({
+  generatePublicKey: () => mockGeneratePublicKey(),
+}));
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import type { NextFunction, Response } from 'express';
@@ -233,6 +239,7 @@ describe('autoProvision', () => {
     const { next, done } = run('org_new', 'clerk_user_new');
     await done;
 
+    expect(mockGeneratePublicKey).toHaveBeenCalledTimes(1);
     expect(mockRunInTransaction).toHaveBeenCalledTimes(1);
     expect(next).toHaveBeenCalledTimes(1);
     const err = next.mock.calls[0][0];

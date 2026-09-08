@@ -38,6 +38,7 @@ import { validate } from '../../middleware/validate';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import { createTenantSchema } from '../../schemas';
 import { ensureAnchorBot } from '../../services/bot-config.service';
+import { generatePublicKey } from '../../services/bot-key-rotation.service';
 import { rotateBotKey } from '../../services/bot-key-rotation.service';
 import { config } from '../../config/environment';
 
@@ -413,7 +414,7 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
 
   // Step 2: Create local Tenant record
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const apiKey = `ak_${crypto.randomUUID().replace(/-/g, '')}`;
+  const apiKey = generatePublicKey();
 
   let tenant: Tenant;
   try {

@@ -29,6 +29,7 @@ import {
   BotNotFoundConfigError,
   AnchorBotMissingError,
 } from '../../services/bot-config.service';
+import { generatePublicKey } from '../../services/bot-key-rotation.service';
 import {
   createTestTenant,
   createTestAnchorBot,
@@ -112,7 +113,9 @@ describe('getBotConfigForSession', () => {
 
 describe('getAnchorBotConfig', () => {
   it('creates the anchor from tenant settings when no anchor exists', async () => {
+    const widgetId = generatePublicKey();
     const tenant = await createTestTenant({
+      apiKey: widgetId,
       settings: {
         theme: { primaryColor: '#abcdef' },
         ai: { enabled: true, apiKey: 'sk-tenant-only' },
@@ -128,6 +131,7 @@ describe('getAnchorBotConfig', () => {
       status: 'active',
       isDefault: true,
     });
+    expect(bot.publicKey).toMatch(/^bk_[A-Za-z0-9_-]{16}$/);
     expect(settings.theme?.primaryColor).toBe('#abcdef');
     expect((settings.ai as any)?.apiKey).toBeUndefined();
   });

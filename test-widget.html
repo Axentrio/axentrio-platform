@@ -60,7 +60,7 @@
     // load the widget from the API's /widget.js route instead of the local file.
     (function () {
       var apiKey = localStorage.getItem('cb_test_api_key');
-      var apiUrl = localStorage.getItem('cb_test_api_url') || 'https://chatbot-api-production-37df.up.railway.app';
+      var apiUrl = localStorage.getItem('cb_test_api_url') || 'https://api.axentrio.com';
       var widgetSrc = localStorage.getItem('cb_test_widget_src') || '/chatbot-platform/api/public/widget.js';
 
       if (!apiKey) {

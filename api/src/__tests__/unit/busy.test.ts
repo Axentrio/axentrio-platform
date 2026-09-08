@@ -53,6 +53,26 @@ describe('loadAllBusy — minimum gap', () => {
     ]);
   });
 
+  it('widens the external fetch when rangeStart equals the event end (agent narrow startDate)', async () => {
+    // Agent path: LLM passes the named 10:30 as rangeStart (08:30Z). Without widening,
+    // Google would not return an event ending exactly at timeMin and 10:30 looks free.
+    getBusy.mockResolvedValue([
+      { start: new Date('2026-09-23T08:00:00Z'), end: new Date('2026-09-23T08:30:00Z') },
+    ]);
+    const rangeStart = '2026-09-23T08:30:00.000Z';
+    const rangeEnd = '2026-09-23T22:00:00.000Z';
+    const busy = await loadAllBusy(ctx, 'cal-1', rangeStart, rangeEnd, 'Europe/Brussels');
+    expect(getBusy).toHaveBeenCalledWith(
+      'bot-1',
+      '2026-09-23T08:00:00.000Z',
+      '2026-09-23T22:30:00.000Z',
+      'Europe/Brussels',
+    );
+    expect(busy).toEqual([
+      { start: new Date('2026-09-23T07:30:00.000Z'), end: new Date('2026-09-23T09:00:00.000Z') },
+    ]);
+  });
+
   it('pads internal and external once each, not the merged array', async () => {
     bookingQuery.mockResolvedValue([{ s: '2026-09-23T07:00:00.000Z', e: '2026-09-23T08:00:00.000Z' }]);
     getBusy.mockResolvedValue([

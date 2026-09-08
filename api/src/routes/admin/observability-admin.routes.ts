@@ -32,7 +32,15 @@ import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { Tenant } from '../../database/entities/Tenant';
 import { PLATFORM_TENANT_SENTINEL } from '../../database/entities/LlmUsageDaily';
 import { AgentTrace } from '../../database/entities/AgentTrace';
-import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
+import { asyncHandler, NotFoundError, BadRequestError } from '../../middleware/error-handler';
+import { Bot } from '../../database/entities/Bot';
+import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
+import { isUuid } from '../../utils/uuid';
+import { loadBusy, loadAllBusy } from '../../booking/booking-providers/busy';
+import { loadBusinessRules } from '../../booking/booking-providers/capacity';
+import { resolveCalendarProvider } from '../../scheduler/calendar-provider';
+import { resolveItineraryKey } from '../../scheduler/itinerary-key';
+import type { BookingContext } from '../../booking/booking-providers/types';
 
 /** The parts of the persisted `trace` jsonb this endpoint reads. */
 interface TraceShape {
@@ -495,6 +503,69 @@ router.get(
   }),
 );
 
+function isoInterval(iv: { start: Date; end: Date }) {
+  return { start: iv.start.toISOString(), end: iv.end.toISOString() };
+}
+
+/** Read-only busy snapshot for gap / external-calendar QA (super-admin). */
+router.get(
+  '/observability/busy',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { botId, startDate, endDate } = req.query as Record<string, string | undefined>;
+    if (!isUuid(botId)) throw new BadRequestError('botId must be a UUID');
+    if (!startDate || Number.isNaN(Date.parse(startDate))) {
+      throw new BadRequestError('startDate must be a parseable ISO date');
+    }
+    if (!endDate || Number.isNaN(Date.parse(endDate))) {
+      throw new BadRequestError('endDate must be a parseable ISO date');
+    }
+
+    const bot = await AppDataSource.getRepository(Bot).findOne({
+      where: { id: botId },
+      relations: ['tenant'],
+    });
+    if (!bot) throw new NotFoundError('Bot not found');
+
+    const ctx: BookingContext = {
+      session: { id: bot.id, tenantId: bot.tenantId, botId: bot.id } as ChatSession,
+      tenant: bot.tenant,
+      bot,
+      botSettings: bot.settings ?? {},
+    };
+    const itineraryKey = await resolveItineraryKey(bot.id);
+    const timezone =
+      (await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } }))
+        ?.timezone ?? bot.businessTimezone ?? 'UTC';
+
+    const internal = (await loadBusy(itineraryKey, startDate, endDate)).map(isoInterval);
+
+    let external: { start: string; end: string }[] | null | { error: string } = null;
+    try {
+      const provider = await resolveCalendarProvider(bot.id);
+      if (!provider) {
+        external = null;
+      } else {
+        const raw = await provider.getBusy(bot.id, startDate, endDate, timezone);
+        external = raw ? raw.map(isoInterval) : [];
+      }
+    } catch (err) {
+      external = { error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const padded = (await loadAllBusy(ctx, itineraryKey, startDate, endDate, timezone)).map(isoInterval);
+
+    sendSuccess(res, {
+      itineraryKey,
+      minGapMin: (await loadBusinessRules(bot.id)).minGapMin,
+      timezone,
+      internal,
+      external,
+      padded,
+    });
+  }),
+);
+
+
 const MEMORY_RUN_STATES: CustomerMemoryRunState[] = [
   'pending',
   'claimed',
@@ -819,4 +890,63 @@ router.get(
   }),
 );
 
+/** Serialize busy intervals for JSON — dates only, no widening. */
+function serializeBusyIntervals(intervals: Array<{ start: Date; end: Date }>) {
+  return intervals.map((iv) => ({ start: iv.start.toISOString(), end: iv.end.toISOString() }));
+}
+
+/**
+ * Read-only busy snapshot for gap/calendar diagnostics. `external` is raw
+ * `getBusy(startDate, endDate)` — never widened — so a narrow agent window
+ * that misses an event ending at timeMin shows up here. `padded` goes through
+ * `loadAllBusy` (widening + minGap padding) and matches the slot engine.
+ */
+router.get(
+  '/observability/busy',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { botId, startDate, endDate } = req.query as Record<string, string | undefined>;
+    if (!botId || !isUuid(botId)) throw new BadRequestError('botId must be a UUID');
+    if (!startDate || Number.isNaN(Date.parse(startDate))) {
+      throw new BadRequestError('startDate must be a parseable ISO date');
+    }
+    if (!endDate || Number.isNaN(Date.parse(endDate))) {
+      throw new BadRequestError('endDate must be a parseable ISO date');
+    }
+
+    const bot = await AppDataSource.getRepository(Bot).findOne({
+      where: { id: botId },
+      relations: ['tenant'],
+    });
+    if (!bot) throw new NotFoundError('Bot not found');
+
+    const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId } });
+    const timezone = rule?.timezone;
+    const itineraryKey = await resolveItineraryKey(botId);
+    const { minGapMin } = await loadBusinessRules(botId);
+
+    const ctx = { bot, tenant: bot.tenant } as BookingContext;
+    const internal = serializeBusyIntervals(await loadBusy(itineraryKey, startDate, endDate));
+
+    let external:
+      | Array<{ start: string; end: string }>
+      | { error: string }
+      | null = null;
+    try {
+      const provider = await resolveCalendarProvider(botId);
+      if (provider) {
+        const raw = await provider.getBusy(botId, startDate, endDate, timezone);
+        external = raw ? serializeBusyIntervals(raw) : null;
+      }
+    } catch (err) {
+      external = { error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const padded = serializeBusyIntervals(
+      await loadAllBusy(ctx, itineraryKey, startDate, endDate, timezone),
+    );
+
+    sendSuccess(res, { itineraryKey, minGapMin, timezone: timezone ?? null, internal, external, padded });
+  }),
+);
 export default router;
+

@@ -479,6 +479,42 @@ describe('InternalProvider.createBooking', () => {
     getGoogleBusyForBot.mockResolvedValue(null);
   });
 
+  it('date-only vs zoneless named-time range: same min-gap outcome on 23 Sep external event', async () => {
+    // Pin before blaming agent args: tool schema asks for date-only; zoneless
+    // `2026-09-23T10:30:00` narrows normalizeDateRange to a window starting at 10:30 local.
+    vi.setSystemTime(new Date('2026-09-20T00:00:00Z'));
+    ruleFindOne.mockResolvedValue({
+      ...RULE,
+      weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
+    });
+    bookingSettingsFindOne.mockResolvedValue({ minGapMin: 30 } as any);
+    const external = [
+      { start: new Date('2026-09-23T08:00:00Z'), end: new Date('2026-09-23T08:30:00Z') },
+    ];
+    getGoogleBusyForBot.mockResolvedValue(external);
+
+    const dateOnly = await provider.checkAvailability(ctx, '2026-09-23', '2026-09-23');
+    const dateStarts = dateOnly.slots.map((s: { start: string }) => s.start);
+    expect(dateStarts).not.toContain('2026-09-23T08:30:00.000Z'); // 10:30 Brussels
+    expect(dateStarts).toContain('2026-09-23T09:00:00.000Z'); // 11:00 earliest
+    const dateOnlyBusyCall = getGoogleBusyForBot.mock.calls[0];
+    expect(dateOnlyBusyCall?.[1]).toBe('2026-09-22T21:30:00.000Z'); // day start minus minGap padding
+    getGoogleBusyForBot.mockClear();
+    getGoogleBusyForBot.mockResolvedValue(external);
+
+    const zoneless = await provider.checkAvailability(
+      ctx,
+      '2026-09-23T10:30:00',
+      '2026-09-23T10:30:00',
+    );
+    const zonelessStarts = zoneless.slots.map((s: { start: string }) => s.start);
+    expect(zonelessStarts).not.toContain('2026-09-23T08:30:00.000Z');
+    const zonelessBusyCall = getGoogleBusyForBot.mock.calls[0];
+    expect(zonelessBusyCall?.[1]).toBe('2026-09-23T08:00:00.000Z'); // widened from 10:30 local
+    expect(getGoogleBusyForBot).toHaveBeenCalledOnce();
+    getGoogleBusyForBot.mockResolvedValue(null);
+  });
+
   it('still drops the own mirror when a minimum gap pads external busy', async () => {
     // Filter is on the raw interval. Padding first would miss the match and keep the
     // inflated mirror, so a nearby reschedule target would look busy against itself.

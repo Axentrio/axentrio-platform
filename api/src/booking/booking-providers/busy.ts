@@ -85,11 +85,25 @@ export async function loadAllBusy(
   let internal = await loadBusy(itineraryKey, rangeStartIso, rangeEndIso, excludeId);
   const { minGapMin } = await loadBusinessRules(ctx.bot.id);
   let external: BusyInterval[] | null = null;
+  // Widen the external fetch by the minimum gap so an event that ENDS exactly at
+  // rangeStart is still returned. Google/events.list uses half-open overlap; when
+  // the agent passes a narrow startDate (e.g. the customer's named 10:30 as
+  // rangeStart), an external 10:00–10:30 block ends at that instant and would
+  // otherwise be missed — so minGap padding never runs and the named slot looks free.
+  const gapMs = minGapMin > 0 ? minGapMin * 60_000 : 0;
+  const externalRangeStart =
+    gapMs > 0
+      ? new Date(new Date(rangeStartIso).getTime() - gapMs).toISOString()
+      : rangeStartIso;
+  const externalRangeEnd =
+    gapMs > 0 ? new Date(new Date(rangeEndIso).getTime() + gapMs).toISOString() : rangeEndIso;
   try {
     const provider = await resolveCalendarProvider(ctx.bot.id);
     // Pass the rule timezone so the provider anchors all-day events to the
     // business's local day rather than UTC midnight.
-    external = provider ? await provider.getBusy(ctx.bot.id, rangeStartIso, rangeEndIso, timezone) : null;
+    external = provider
+      ? await provider.getBusy(ctx.bot.id, externalRangeStart, externalRangeEnd, timezone)
+      : null;
   } catch (err) {
     logger.warn('[Booking] external calendar free/busy unavailable — failing closed', {
       botId: ctx.bot.id,
@@ -119,7 +133,6 @@ export async function loadAllBusy(
   // would double it. Pad after the self-exclude so a reschedule still matches
   // the raw mirror.
   if (minGapMin > 0) {
-    const gapMs = minGapMin * 60_000;
     const pad = (iv: BusyInterval): BusyInterval => ({
       start: new Date(iv.start.getTime() - gapMs),
       end: new Date(iv.end.getTime() + gapMs),

@@ -134,6 +134,7 @@ import {
   requestTooSoon,
   requestTooFar,
   requestClosedDay,
+  requestBeforeCheck,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
 import { resolveContactFields, assertRequiredPhone, assertRequiredAddress, resolveCustomerEmail, normalizeCustomerEmail, resolveUpdatedCustomerEmail, cleanContact, isCompleteCustomerAddress } from './contact';
@@ -150,6 +151,7 @@ import {
 } from './capacity';
 import { loadAllBusy, loadDayLedger } from './busy';
 import { evaluateServiceArea, assertInServiceArea } from './service-area-gate';
+import { availabilityCheckedFor } from './availability-checked';
 import {
   assertPlaceableForTravel,
   travelCandidatePoint,
@@ -2402,7 +2404,8 @@ export class InternalProvider implements BookingProvider {
     // The same skip then captured a request after CAPACITY_REACHED on an auto-book service
     // with two jobs and a cap of two. It then offered a request for Thursday 10:00 on a
     // service whose Thursday is closed and whose Friday was open. The gate has to be here,
-    // because the tool the model chose never looked at a slot.
+    // because the tool the model chose never looked at a slot. The description no longer
+    // invites it, and `REQUEST_BEFORE_CHECK` below refuses the skip outright.
     //
     // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
     // capturing exactly as before - a request is the RIGHT answer for those - and so does any
@@ -2435,6 +2438,9 @@ export class InternalProvider implements BookingProvider {
         throw new BookingError(requestClosedDay(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       await enforceServiceDayCapacity(null, service, start, rule.timezone);
+      if (await this.requestNeedsCheckFirst(ctx, service, extras, day.toFormat('yyyy-MM-dd'))) {
+        throw new BookingError(requestBeforeCheck(day.toFormat('yyyy-MM-dd')), 'REQUEST_BEFORE_CHECK', 409);
+      }
     }
 
     // Dedup on the PARSED time (#35): a rapid re-confirm in another turn resolves to
@@ -2465,6 +2471,16 @@ export class InternalProvider implements BookingProvider {
     }
 
     return this.createRequest(ctx, idempotencyKey, service, itineraryKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras, effectiveDuration);
+  }
+
+  /** True when this Request must be refused because nothing ever looked at that date. Exemptions are the documented no-check Request reasons. */
+  private async requestNeedsCheckFirst(ctx: BookingContext, service: ServiceType, extras: BookingExtras | undefined, localDate: string): Promise<boolean> {
+    if (service.priceDisplayType === 'on_request') return false;                       // owner must quote
+    if (service.durationMode === 'range' && typeof extras?.durationMin !== 'number') return false; // choose-length refusal (rule 7c)
+    const { match } = await evaluateServiceArea(ctx, service, extras?.customerAddress ?? null);
+    if (match === 'outside' || match === 'unknown') return false;                       // out of area / unplaceable
+    const checked = await availabilityCheckedFor(ctx.session.id, localDate);
+    return checked === false;                                                          // null = store down → fail open
   }
 
   /**

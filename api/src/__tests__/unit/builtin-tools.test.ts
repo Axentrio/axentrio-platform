@@ -394,6 +394,14 @@ describe('an email the confirmation cannot reach', () => {
   });
 });
 
+describe('RequestAppointmentTool description', () => {
+  it('request_appointment no longer invites itself for urgent or uncertain jobs', () => {
+    const d = new RequestAppointmentTool().description;
+    expect(d).not.toMatch(/urgent\/risky|not confident/);
+    expect(d).toMatch(/ONLY after check_availability/);
+  });
+});
+
 describe('CheckAvailabilityTool', () => {
   beforeEach(() => vi.clearAllMocks());
 

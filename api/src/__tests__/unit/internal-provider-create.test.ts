@@ -212,6 +212,13 @@ vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
   return { ...actual, driveLookupFor: () => (leg: unknown) => driveAnswer(leg) };
 });
 
+const availabilityCheckedFor = vi.hoisted(() => vi.fn(async (): Promise<boolean | null> => null));
+vi.mock('../../booking/booking-providers/availability-checked', () => ({
+  availabilityCheckedFor,
+  rememberAvailabilityChecked: vi.fn(async () => undefined),
+  peekAvailabilityChecked: vi.fn(async () => null),
+}));
+
 import type { BookingPlacement } from '../../booking/travel/booking-place';
 import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 import {
@@ -3178,6 +3185,123 @@ describe('InternalProvider.requestAppointment · the bookable window', () => {
     await expect(ask('2026-06-11T08:00:00Z')).resolves.toMatchObject({ success: true, requested: true });
   });
 
+});
+
+/**
+ * An auto-book Request with no check behind it must not write.
+ *
+ * BK 2026-09-08: first reply offered a same-day appointment as a request for the owner
+ * to review — zero tool calls, open day, free times. Window/closed/cap gates cannot see
+ * it because the time is inside the window.
+ */
+describe('InternalProvider.requestAppointment · check before capture', () => {
+  let provider: InternalProvider;
+  const INSIDE_WINDOW = '2026-06-10T07:00:00Z';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    availabilityCheckedFor.mockResolvedValue(null);
+    bookingSettingsFindOne.mockResolvedValue(null);
+    getReadyFileIds.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE]);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValue([]);
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    managerQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const ask = (when: string, extras?: Record<string, unknown>) =>
+    provider.requestAppointment(
+      ctx,
+      `idem-c-${when}`,
+      when,
+      { name: 'Ada', email: 'ada@example.com' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      extras,
+    );
+
+  it('refuses when nothing checked that date', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    await expect(ask(INSIDE_WINDOW)).rejects.toMatchObject({ code: 'REQUEST_BEFORE_CHECK' });
+    await expect(ask(INSIDE_WINDOW)).rejects.toThrow(/startDate 2026-06-10 and endDate 2026-06-10/);
+    await expect(ask(INSIDE_WINDOW)).rejects.toThrow(/do NOT capture it/i);
+    expect(managerQuery).not.toHaveBeenCalled();
+    expect(availabilityCheckedFor).toHaveBeenCalledWith('sess-1', '2026-06-10');
+  });
+
+  it('captures when that date was already checked', async () => {
+    availabilityCheckedFor.mockResolvedValue(true);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
+
+  it('still captures a REQUEST-ONLY service with no check', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    const requestOnly = { ...EVENT_TYPE, bookingMode: 'request' };
+    eventTypeFindOne.mockResolvedValue(requestOnly);
+    serviceTypeFind.mockResolvedValue([requestOnly]);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
+
+  it('still captures when no calendar can auto-confirm', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    hasHealthyCalendarConnection.mockResolvedValue(false);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
+
+  it('still captures a price-on-request service with no check', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    const onRequest = { ...EVENT_TYPE, priceDisplayType: 'on_request' };
+    eventTypeFindOne.mockResolvedValue(onRequest);
+    serviceTypeFind.mockResolvedValue([onRequest]);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
+
+  it('still captures a choose-length service with no durationMin', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    const ranged = { ...EVENT_TYPE, durationMode: 'range' };
+    eventTypeFindOne.mockResolvedValue(ranged);
+    serviceTypeFind.mockResolvedValue([ranged]);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
+
+  it('refuses a choose-length service once durationMin is known', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    const ranged = { ...EVENT_TYPE, durationMode: 'range' };
+    eventTypeFindOne.mockResolvedValue(ranged);
+    serviceTypeFind.mockResolvedValue([ranged]);
+    await expect(ask(INSIDE_WINDOW, { durationMin: 60 })).rejects.toMatchObject({ code: 'REQUEST_BEFORE_CHECK' });
+  });
+
+  it('still captures an address outside the service area', async () => {
+    availabilityCheckedFor.mockResolvedValue(false);
+    const mobile = { ...EVENT_TYPE, customerAddressRequired: true };
+    eventTypeFindOne.mockResolvedValue(mobile);
+    serviceTypeFind.mockResolvedValue([mobile]);
+    bookingSettingsFindOne.mockResolvedValue({
+      serviceArea: [{ kind: 'province', id: '40000', label: 'Oost-Vlaanderen' }],
+    });
+    await expect(
+      ask(INSIDE_WINDOW, { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }),
+    ).resolves.toMatchObject({ requested: true });
+  });
+
+  it('still captures when the store is down', async () => {
+    availabilityCheckedFor.mockResolvedValue(null);
+    await expect(ask(INSIDE_WINDOW)).resolves.toMatchObject({ requested: true });
+  });
 });
 
 /**

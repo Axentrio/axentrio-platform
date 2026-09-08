@@ -14,6 +14,12 @@ const refusedNamed = vi.hoisted(() => ({
   clearRefusedNamedTime: vi.fn(async () => undefined),
 }));
 vi.mock('../../agent/refused-named-time', () => refusedNamed);
+const availabilityChecked = vi.hoisted(() => ({
+  peekAvailabilityChecked: vi.fn(async (): Promise<string[] | null> => []),
+  rememberAvailabilityChecked: vi.fn(async () => undefined),
+  availabilityCheckedFor: vi.fn(async (): Promise<boolean | null> => null),
+}));
+vi.mock('../../booking/booking-providers/availability-checked', () => availabilityChecked);
 const tokenBudget = vi.hoisted(() => ({
   isTokenBudgetExhausted: vi.fn().mockResolvedValue(false),
   recordTokenUsage: vi.fn().mockResolvedValue(undefined),
@@ -96,6 +102,7 @@ describe('AgentService', () => {
     tokenBudget.isTokenBudgetExhausted.mockResolvedValue(false);
     mockGetToolsForTenant.mockResolvedValue([mockKbSearch]);
     refusedNamed.refusedNamedTimeStillApplies.mockResolvedValue(false);
+    availabilityChecked.peekAvailabilityChecked.mockResolvedValue([]);
   });
 
   it('returns a text response when LLM finishes with stop', async () => {
@@ -1969,6 +1976,77 @@ describe('AgentService', () => {
     const corrections = mockTraceSave.mock.calls.at(-1)?.[0]?.corrections;
     expect(corrections).toContain('availability_unchecked_claim');
     expect(corrections).toContain('availability_unchecked_claim_forced_check');
+  });
+
+  it('nudges a first reply that offers a request with no check', async () => {
+    const loadSpy = vi
+      .spyOn(AgentService.prototype as unknown as { loadBookingRuleContext: (...a: never[]) => Promise<unknown> }, 'loadBookingRuleContext')
+      .mockResolvedValue({
+        bookingTimezone: 'Europe/Brussels',
+        bookingConfigured: true,
+        bookingServices: '',
+        bookingHours: '',
+        hasTravelServices: false,
+        openingHours: '',
+        allServicesAutoBook: true,
+      });
+    try {
+      const slots = [
+        { start: '2026-09-08T10:00:00.000Z', end: '2026-09-08T10:30:00.000Z' },
+        { start: '2026-09-08T10:30:00.000Z', end: '2026-09-08T11:00:00.000Z' },
+        { start: '2026-09-08T11:00:00.000Z', end: '2026-09-08T11:30:00.000Z' },
+      ];
+      const execute = vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels' },
+        availability: { slots, timezone: 'Europe/Brussels' },
+      });
+      mockGetToolsForTenant.mockResolvedValueOnce([
+        {
+          name: 'check_availability',
+          description: 'Check slots',
+          parameters: { type: 'object', properties: {} },
+          hasSideEffects: false,
+          execute,
+        } as ToolAdapter,
+      ]);
+      vi.mocked(mockProvider.chat)
+        .mockResolvedValueOnce({
+          content: 'Ik kan de afspraak als aanvraag indienen; die wordt pas bevestigd zodra WaterFix ze beoordeelt.',
+          usage: { promptTokens: 50, completionTokens: 10 },
+          finishReason: 'stop',
+        })
+        .mockResolvedValueOnce({
+          content: '',
+          usage: { promptTokens: 60, completionTokens: 10 },
+          finishReason: 'tool_calls',
+          toolCalls: [{
+            id: 'tc_1',
+            name: 'check_availability',
+            arguments: { startDate: '2026-09-08', endDate: '2026-09-08' },
+          }],
+        })
+        .mockResolvedValueOnce({
+          content: 'Dinsdag 8 september kan om 12:00, 12:30 of 13:00.',
+          usage: { promptTokens: 70, completionTokens: 10 },
+          finishReason: 'stop',
+        });
+
+      const result = await agent.run(
+        'Ik wil vandaag een afspraak maken voor Booking test. Jan Test, jan.test@example.org',
+        { id: 's1', tenantId: 't1', status: 'bot' } as ChatSession,
+        { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as Tenant,
+        [],
+      );
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(result.type).toBe('response');
+      const corrections = mockTraceSave.mock.calls.at(-1)?.[0]?.corrections;
+      expect(corrections).toContain('request_offer_without_check');
+      expect(corrections).not.toContain('availability_unchecked_claim');
+    } finally {
+      loadSpy.mockRestore();
+    }
   });
 
   it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {

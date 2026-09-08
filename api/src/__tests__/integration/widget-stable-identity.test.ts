@@ -112,6 +112,22 @@ describe('stable widget identity - /widget/init resolve-or-create', () => {
     expect(await openSessions(tenant.id, visitorId)).toHaveLength(1);
   });
 
+  it('missing settings.ai.enabled starts in bot; explicit false waits', async () => {
+    const missingTenant = await createTestTenant({ tier: 'pro' });
+    const missingBot = await createTestAnchorBot(missingTenant, { settings: {} as Bot['settings'] });
+    const missingInit = await init(missingBot.publicKey, `miss-${crypto.randomBytes(4).toString('hex')}`);
+    expect(missingInit.status).toBe(200);
+    expect(missingInit.body.data.session.status).toBe('bot');
+
+    const offTenant = await createTestTenant({ tier: 'pro' });
+    const offBot = await createTestAnchorBot(offTenant, {
+      settings: { ai: { enabled: false } } as unknown as Bot['settings'],
+    });
+    const offInit = await init(offBot.publicKey, `off-${crypto.randomBytes(4).toString('hex')}`);
+    expect(offInit.status).toBe(200);
+    expect(offInit.body.data.session.status).toBe('waiting');
+  });
+
   it('resolves a session parked in handoff too - every non-closed state counts', async () => {
     const { tenant, bot } = await makeAiTenant();
     const visitorId = `handoff-${crypto.randomBytes(4).toString('hex')}`;

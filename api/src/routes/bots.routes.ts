@@ -33,7 +33,7 @@ import {
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { config } from '../config/environment';
-import { defaultBotSettings } from '../config/default-bot-settings';
+import { defaultBotSettings, isBotAiEnabled } from '../config/default-bot-settings';
 import { createBotSchema, updateBotSchema } from '../schemas/bot.schema';
 import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { enforceCountLimit } from '../billing/enforce';
@@ -83,7 +83,7 @@ function toListItem(bot: Bot) {
     previousKey: previousKeyView(bot),
     // Surfaced so the (relocated) onboarding checklist can read the default
     // bot's AI-enabled state without a second per-bot ai-settings fetch.
-    aiEnabled: bot.settings?.ai?.enabled ?? false,
+    aiEnabled: isBotAiEnabled(bot),
     // The customer-facing persona name, so the rename dialog can show what the
     // bot actually calls itself without a second per-bot ai-settings fetch.
     // Empty when unset — the composer falls back to the tenant name at runtime.

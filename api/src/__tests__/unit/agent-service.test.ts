@@ -1776,7 +1776,56 @@ describe('AgentService', () => {
     }
   });
 
-  it('offers Auto-book chips when a named clock misses a later-opening weekday', async () => {
+  it('offers post-refusal chips after 10:30 on a week-wide probe (QA min-gap)', async () => {
+    const slots = [
+      '2026-09-22T22:00:00.000Z', '2026-09-22T22:30:00.000Z', '2026-09-22T23:00:00.000Z', '2026-09-22T23:30:00.000Z',
+      '2026-09-23T01:30:00.000Z', '2026-09-23T02:00:00.000Z', '2026-09-23T02:30:00.000Z', '2026-09-23T03:00:00.000Z',
+      '2026-09-23T03:30:00.000Z', '2026-09-23T04:00:00.000Z', '2026-09-23T04:30:00.000Z', '2026-09-23T05:00:00.000Z',
+      '2026-09-23T05:30:00.000Z', '2026-09-23T06:00:00.000Z', '2026-09-23T06:30:00.000Z', '2026-09-23T07:00:00.000Z',
+      '2026-09-23T09:00:00.000Z', '2026-09-23T09:30:00.000Z', '2026-09-23T10:00:00.000Z', '2026-09-23T10:30:00.000Z',
+      '2026-09-23T11:00:00.000Z', '2026-09-23T11:30:00.000Z',
+    ].map((start) => ({ start, end: start }));
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots, timezone: 'Europe/Brussels', serviceName: 'Booking test' },
+        availability: { slots, timezone: 'Europe/Brussels', serviceName: 'Booking test' },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: '2026-09-22', endDate: '2026-09-23' } }],
+      })
+      .mockResolvedValueOnce({
+        content: '10:30 is niet beschikbaar door een andere afspraak.',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken. Tom GapTest, 0470 00 02 01, achraflamranim@gmail.com.',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o', language: 'nl' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies?.length).toBeGreaterThan(0);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).toMatch(/11:00/);
+      expect(result.quickReplies!.map((c) => c.title).join(' ')).not.toMatch(/00:00/);
+    }
+  });
+
+    it('offers Auto-book chips when a named clock misses a later-opening weekday', async () => {
     // Live: Auto-book, Monday 09:00–17:00 / Tuesday 12:00–18:00 Brussels, asked for Tuesday
     // 8 Sept 2026 10:00. Tuesday opens at 12:00 (10:00 UTC that day). The model treated 10:00
     // as morning (00:00–12:00), that window matched nothing, chips were withheld, and the

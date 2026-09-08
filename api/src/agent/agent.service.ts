@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import type { OfferScoring } from '../booking/travel/score-offer';
-import { collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedSlot, namesSingleOfferedTime, parseCalendarDates, parseClockTimes, unofferedSingleNamedSlot, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
+import { chipCandidateSlots, collapseAppointmentSpans, latestCustomerTimeText, localClockTimes, namesSingleOfferedSlot, namesSingleOfferedTime, parseCalendarDates, parseClockTimes, unofferedSingleNamedSlot, unofferedSingleTimeIn, unofferedTimesIn } from './clock-times';
 import { isDayPartClockWindow, namedExactClock } from './day-part';
 import { resolveBotLanguage, slotChipQuickReply } from '../config/bot-language';
 import type { OfferMeasurement } from '../channels/response.types';
@@ -291,10 +291,15 @@ function buildSlotQuickReplies(
   av: PendingAvailability | null,
   language: ReturnType<typeof resolveBotLanguage>,
   exactClock = false,
+  customerTimeText?: string,
+  now = new Date(),
 ): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
   if (av.clockWindow && !av.clockWindow.matched && isDayPartClockWindow(av.clockWindow) && !exactClock) return undefined;
-  return av.slots.slice(0, 8).map((s) =>
+  const candidates = customerTimeText
+    ? chipCandidateSlots(customerTimeText, av.slots, av.timezone, now)
+    : av.slots;
+  return candidates.slice(0, 8).map((s) =>
     slotChipQuickReply(s.start, av.timezone, language, av.serviceName),
   );
 }
@@ -1979,7 +1984,13 @@ export class AgentService {
     );
     const slotChips = alreadyChoseTime
       ? undefined
-      : buildSlotQuickReplies(av, resolveBotLanguage(ctx.aiSettings?.language), namedExactClock(customerTimeText));
+      : buildSlotQuickReplies(
+          av,
+          resolveBotLanguage(ctx.aiSettings?.language),
+          namedExactClock(customerTimeText),
+          customerTimeText,
+          now,
+        );
     const safeContent = await this.safeReplyContent({
       ctx, finalContent, av, times, customerTimeText, onScreen: !!slotChips?.length,
     });

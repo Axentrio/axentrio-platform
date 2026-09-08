@@ -273,6 +273,45 @@ export function unofferedSingleNamedSlot(
 }
 
 /**
+ * Slots to turn into quick-reply chips when the customer named an exact hour that
+ * was refused on an anchored day. Without this, a week-wide probe's `slice(0, 8)`
+ * surfaces midnight–05:00 Brussels while 11:00 sits at index 16.
+ */
+export function chipCandidateSlots(
+  text: string,
+  slots: Array<{ start: string }>,
+  timezone: string,
+  now: Date,
+): Array<{ start: string }> {
+  if (!unofferedSingleNamedSlot(text, slots, timezone, now)) return slots;
+  const clock = singleNamedClockTime(text);
+  if (!clock || !hasNamedCalendarAnchor(text, timezone, now)) return slots;
+
+  const refusedMinutes = clock.hour * 60 + clock.minute;
+  const { dates, weekdays } = resolveNamedDates(text, timezone, now);
+  const daySlots = filterSlotsByNamedDay(slots, timezone, dates, weekdays);
+  if (daySlots.length === 0) return slots;
+
+  const earliestChipMinute = Math.max(0, refusedMinutes - 30);
+  const nearRefusal = daySlots.filter((slot) => {
+    const dt = DateTime.fromISO(slot.start).setZone(timezone);
+    if (!dt.isValid) return false;
+    return dt.hour * 60 + dt.minute > earliestChipMinute;
+  });
+  if (nearRefusal.length === 0) return daySlots;
+
+  // Week-wide probes list midnight first; drop early-day slots that would steal slice(0, 8).
+  const earlyStealsChips = daySlots.some((slot) => {
+    const idx = slots.indexOf(slot);
+    if (idx < 0 || idx >= 8) return false;
+    const dt = DateTime.fromISO(slot.start).setZone(timezone);
+    if (!dt.isValid) return false;
+    return dt.hour * 60 + dt.minute <= refusedMinutes;
+  });
+  return earlyStealsChips ? nearRefusal : daySlots;
+}
+
+/**
  * "16:00 tot 17:00" is ONE appointment said in full. "9:00 tot 17:00" is when the shop is open.
  *
  * Both are two clock times in one sentence, and the difference decides whether a guard may read

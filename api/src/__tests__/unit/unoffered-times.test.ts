@@ -20,6 +20,7 @@ import {
   unofferedSingleNamedSlot,
   parseClockTimes,
   unofferedSingleTimeIn,
+  chipCandidateSlots,
   unofferedTimesIn,
   upcomingMidnightDate,
 } from '../../agent/clock-times';
@@ -213,6 +214,38 @@ describe('date-aware named slot matching', () => {
       expect(namesSingleOfferedSlot(said, slots, TZ, NOW)).toBe(false);
       expect(unofferedSingleNamedSlot(said, slots, TZ, NOW)).toBe('10:30');
     }
+  });
+
+  it('horizon retry: keeps week-wide alternatives when the anchored day has no slots', () => {
+    const said = 'Ik wil maandag 14 september 2026 om 10:00 een booking waterfix boeken.';
+    const retrySlots = [
+      { start: '2026-09-08T08:00:00.000Z' },
+      { start: '2026-09-08T08:30:00.000Z' },
+    ];
+    expect(chipCandidateSlots(said, retrySlots, TZ, NOW)).toEqual(retrySlots);
+  });
+
+    it('QA min-gap: chip candidates skip midnight and start after the refused 10:30', () => {
+    const said =
+      'Ik wil woensdag 23 september 2026 om 10:30 een Booking test boeken. Tom GapTest, 0470 00 02 01, achraflamranim@gmail.com.';
+    const LIVE_PROBE_FULL_DAY = [
+      '2026-09-22T22:00:00.000Z', '2026-09-22T22:30:00.000Z', '2026-09-22T23:00:00.000Z', '2026-09-22T23:30:00.000Z',
+      '2026-09-23T01:30:00.000Z', '2026-09-23T02:00:00.000Z', '2026-09-23T02:30:00.000Z', '2026-09-23T03:00:00.000Z',
+      '2026-09-23T03:30:00.000Z', '2026-09-23T04:00:00.000Z', '2026-09-23T04:30:00.000Z', '2026-09-23T05:00:00.000Z',
+      '2026-09-23T05:30:00.000Z', '2026-09-23T06:00:00.000Z', '2026-09-23T06:30:00.000Z', '2026-09-23T07:00:00.000Z',
+      '2026-09-23T09:00:00.000Z', '2026-09-23T09:30:00.000Z', '2026-09-23T10:00:00.000Z', '2026-09-23T10:30:00.000Z',
+      '2026-09-23T11:00:00.000Z', '2026-09-23T11:30:00.000Z', '2026-09-23T12:00:00.000Z', '2026-09-23T12:30:00.000Z',
+      '2026-09-23T13:00:00.000Z', '2026-09-23T13:30:00.000Z', '2026-09-23T14:00:00.000Z', '2026-09-23T14:30:00.000Z',
+      '2026-09-23T15:00:00.000Z', '2026-09-23T15:30:00.000Z', '2026-09-23T16:00:00.000Z', '2026-09-23T16:30:00.000Z',
+      '2026-09-23T17:00:00.000Z', '2026-09-23T17:30:00.000Z', '2026-09-23T18:00:00.000Z', '2026-09-23T18:30:00.000Z',
+      '2026-09-23T19:00:00.000Z', '2026-09-23T19:30:00.000Z', '2026-09-23T20:00:00.000Z', '2026-09-23T20:30:00.000Z',
+      '2026-09-23T21:00:00.000Z', '2026-09-23T21:30:00.000Z',
+    ].map((start) => ({ start }));
+
+    const candidates = chipCandidateSlots(said, LIVE_PROBE_FULL_DAY, TZ, NOW);
+    expect(candidates[0]?.start).toBe('2026-09-23T09:00:00.000Z');
+    expect(candidates.slice(0, 8).some((s) => s.start === '2026-09-23T09:00:00.000Z')).toBe(true);
+    expect(candidates.slice(0, 8).some((s) => s.start === '2026-09-22T22:00:00.000Z')).toBe(false);
   });
 });
 

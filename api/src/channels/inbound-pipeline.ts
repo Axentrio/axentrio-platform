@@ -116,7 +116,7 @@ export async function processInboundEvent(
         { tenantId: connection.tenantId },
       );
       if (result.outcome === 'ingested' && result.message) {
-        const live = await getRepository(ChatSession).findOne({ where: { id: bound.id } });
+        const live = await AppDataSource.getRepository(ChatSession).findOne({ where: { id: bound.id } });
         if (live) {
           emitMessageCreated(live, {
             id: result.message.id,

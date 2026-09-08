@@ -722,8 +722,8 @@ describe('getBillingState — never-subscribed tenant', () => {
     expect(state.status).toBe('none');
     expect(state.planId).toBe('free');
     expect(state.hasStripeSubscription).toBe(false);
+    expect(state.graceEndsAt).toBeNull();
     expect(state.cancelAtPeriodEnd).toBe(false);
-    expect(state.pendingPlanId).toBeNull();
     expect(state.events).toEqual([]);
   });
 });
@@ -796,5 +796,47 @@ describe('onboarding Pro trial', () => {
     expect(entitlements).toMatchObject({ planId: 'free', billable: false });
     expect((await AppDataSource.getRepository(Tenant).findOneByOrFail({ id: tenant.id })).tier)
       .toBe('free');
+  });
+});
+
+describe('getBillingState — dunning grace', () => {
+  it('exposes graceEndsAt for a clocked past_due row and does not drop the plan', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const started = new Date('2026-04-01T00:00:00.000Z');
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      status: 'past_due',
+      currentPlanId: 'pro',
+      isPrimary: true,
+      customerId: 'cus_grace_state',
+      subscriptionId: 'sub_grace_state',
+      dunningStartedAt: started,
+    });
+
+    const state = await getBillingState(tenant.id);
+
+    expect(state.status).toBe('past_due');
+    expect(state.tier).toBe('pro');
+    expect(state.planId).toBe('pro');
+    expect(state.graceEndsAt?.toISOString()).toBe('2026-04-04T00:00:00.000Z');
+  });
+
+  it('grandfather past_due has null graceEndsAt and keeps the paid tier', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      status: 'past_due',
+      currentPlanId: 'pro',
+      isPrimary: true,
+      customerId: 'cus_grace_none',
+      subscriptionId: 'sub_grace_none',
+      dunningStartedAt: null,
+    });
+
+    const state = await getBillingState(tenant.id);
+
+    expect(state.status).toBe('past_due');
+    expect(state.tier).toBe('pro');
+    expect(state.graceEndsAt).toBeNull();
   });
 });

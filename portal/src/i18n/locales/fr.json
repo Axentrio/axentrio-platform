@@ -797,7 +797,8 @@
         "renewsOn": "Renouvellement le {{date}}",
         "cancellingOn": "Annulation le {{date}} - vous repasserez en Gratuit ensuite.",
         "switchingTo": "Passage à {{plan}} le {{date}}",
-        "pastDueWarning": "Paiement échoué - mettez à jour votre moyen de paiement pour garder votre abonnement actif."
+        "pastDueWarning": "Paiement échoué - mettez à jour votre moyen de paiement pour garder votre abonnement actif.",
+        "pastDueWarningWithDate": "Paiement échoué — mettez à jour votre moyen de paiement avant le {{date}} ou votre formule passera à Free."
       },
       "manage": {
         "title": "Gérer l'abonnement",

@@ -797,7 +797,8 @@
         "renewsOn": "Verlengt op {{date}}",
         "cancellingOn": "Wordt geannuleerd op {{date}} - daarna val je terug op Gratis.",
         "switchingTo": "Wisselt op {{date}} naar {{plan}}",
-        "pastDueWarning": "Betaling mislukt - werk je betaalmethode bij om je abonnement actief te houden."
+        "pastDueWarning": "Betaling mislukt - werk je betaalmethode bij om je abonnement actief te houden.",
+        "pastDueWarningWithDate": "Betaling mislukt — werk je betaalmethode bij vóór {{date}}, anders valt je abonnement terug op Free."
       },
       "manage": {
         "title": "Abonnement beheren",

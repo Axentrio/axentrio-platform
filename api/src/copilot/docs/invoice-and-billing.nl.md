@@ -14,7 +14,7 @@ Alles rond facturatie staat onder *Instellingen → Facturatie*.
 
 **Facturen terugvinden:** *Instellingen → Facturatie → Facturen*. De lijst toont elke factuur met datum, bedrag en status. Klik op een regel om de pdf te openen of het betalingsbewijs te downloaden.
 
-**Mislukte betalingen:** lukt een afschrijving niet (vervallen kaart, geweigerde transactie), dan krijg je een e-mail en een melding in het portaal. Pas je kaart aan onder *Instellingen → Facturatie → Betaalmiddel*. Stripe probeert het daarna automatisch opnieuw — je hoeft zelf niets te herstarten.
+**Mislukte betalingen:** lukt een afschrijving niet (vervallen kaart, geweigerde transactie), dan krijg je drie dagen lang dagelijks een e-mail en een melding in het portaal. Stripe probeert het daarna automatisch opnieuw — je hoeft zelf niets te herstarten. Is de factuur op dag 3 nog onbetaald, dan zeggen we het abonnement op en valt de workspace terug op Free. Pas je kaart aan onder *Instellingen → Facturatie → Betaalmiddel*.
 
 **Betaalmiddel wijzigen:** *Instellingen → Facturatie → Betaalmiddel*. Het beveiligde formulier van Stripe opent — pas je kaart aan en bevestig. Geplande betalingen gebruiken meteen de nieuwe kaart.
 

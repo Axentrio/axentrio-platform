@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { AppDataSource, runInTransaction } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { LegalInvoice } from '../../database/entities/LegalInvoice';

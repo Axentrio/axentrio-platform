@@ -1045,6 +1045,10 @@ async function startBackgroundJobs(): Promise<void> {
         ); // every 5 minutes
       }
 
+      const { runDunningSweep } = await import("./billing/dunning");
+      trackTimer(setTimeout(() => { void runDunningSweep().catch((error) => logger.error("Billing dunning sweep failed", { error })); }, 60_000));
+      trackTimer(setInterval(() => { void runDunningSweep().catch((error) => logger.error("Billing dunning sweep failed", { error })); }, 15 * 60 * 1000));
+
       // Nightly Insights refresh — judges closed/handoff sessions and
       // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
       // gapInsights Feature per ADR-0013).

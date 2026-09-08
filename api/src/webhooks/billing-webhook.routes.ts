@@ -49,6 +49,7 @@ import {
   getBillingProvider,
   isWebhookProvider,
 } from '../billing/provider-registry';
+import { sendDunningReminder } from '../billing/dunning';
 import { logger } from '../utils/logger';
 
 // Outcomes from handleNormalizedEvent that represent "applied normally"
@@ -107,6 +108,7 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
   // handler resolves it for mutation. NULL is acceptable.
   const metadataTenantId = readMetadataTenantId(normalized.raw);
 
+  let dunningTenantId: string | null = null;
   const outcome = await runStripeWebhookIdempotent({
     eventId: normalized.providerEventId,
     eventType: normalized.type,
@@ -157,6 +159,13 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
       // mutation can be applied.
 
       const handlerOutcome = await handleNormalizedEvent(manager, normalized, matched);
+      if (
+        resolvedTenantId &&
+        (handlerOutcome.outcome === 'marked_past_due' ||
+          handlerOutcome.outcome === 'past_due_grace')
+      ) {
+        dunningTenantId = resolvedTenantId;
+      }
 
       // Special case: checkout.session.completed unresolved-tenant path —
       // finalize the wrapper's chatbot_stripe_webhook_events row as 'processed' with
@@ -217,6 +226,17 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
         void scheduleFromInvoicePaid(normalized);
       } else if (normalized.type === 'refund.recorded') {
         void scheduleFromRefund(normalized);
+      }
+      if (
+        dunningTenantId &&
+        (outcome.outcome === 'marked_past_due' || outcome.outcome === 'past_due_grace')
+      ) {
+        void sendDunningReminder(dunningTenantId, 0).catch((error) =>
+          logger.error('Billing dunning day-0 email failed', {
+            error,
+            tenantId: dunningTenantId,
+          }),
+        );
       }
       res.status(200).json({ received: true, outcome: outcome.outcome });
       return;

@@ -301,7 +301,45 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
     const stripeRow = rows.find((r) => r.provider === 'stripe')!;
     expect(stripeRow.status).toBe('past_due');
     expect(stripeRow.currentPlanId).toBe('pro'); // preserved, not 'free'
+    expect(stripeRow.dunningStartedAt).not.toBeNull();
     expect(await loadTenantTier(tenantId)).toBe('pro'); // tier preserved
+  });
+
+  it('past_due without a subscription id does not start the dunning clock', async () => {
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'manual' },
+      { isPrimary: false },
+    );
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'stripe' },
+      {
+        subscriptionId: null,
+        status: 'active',
+        currentPlanId: 'pro',
+        isPrimary: true,
+        dunningStartedAt: null,
+      },
+    );
+
+    const event = makeSubscriptionEvent({
+      type: 'subscription.updated',
+      subscriptionId: '',
+      customerId: 'cus_test_setup',
+      stripeStatus: 'past_due',
+      priceId: PRO_PRICE,
+    });
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('past_due_grace');
+    });
+
+    const rows = await loadBilling(tenantId);
+    const stripeRow = rows.find((r) => r.provider === 'stripe')!;
+    expect(stripeRow.status).toBe('past_due');
+    expect(stripeRow.dunningStartedAt).toBeNull();
+    expect(await loadTenantTier(tenantId)).toBe('pro');
   });
 
   it('subscription.deleted on non-primary row cancels row-local fields but NOT Tenant.tier (PR9)', async () => {
@@ -532,6 +570,7 @@ describe('handleNormalizedEvent — invoice lifecycle', () => {
       isPrimary: true,
       customerId: 'cus_invoice',
       subscriptionId: 'sub_invoice',
+      dunningStartedAt: new Date('2026-04-01T00:00:00.000Z'),
     });
   });
 
@@ -554,13 +593,96 @@ describe('handleNormalizedEvent — invoice lifecycle', () => {
 
     const rows = await loadBilling(tenantId);
     expect(rows[0].status).toBe('active');
+    expect(rows[0].dunningStartedAt).toBeNull();
+  });
+
+  it('token-pack invoice.paid does not recover a past_due subscription', async () => {
+    const started = new Date('2026-04-01T00:00:00.000Z');
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_invoice_paid_token_pack',
+      type: 'invoice.paid',
+      customerId: 'cus_invoice',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      expect(matched?.tenantId).toBe(tenantId);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('invoice_paid_no_state_change');
+    });
+
+    const rows = await loadBilling(tenantId);
+    expect(rows[0].status).toBe('past_due');
+    expect(rows[0].dunningStartedAt?.toISOString()).toBe(started.toISOString());
+    expect(await loadTenantTier(tenantId)).toBe('pro');
+  });
+
+  it('subscription.updated to active before invoice.paid clears the clock; next failure starts a new one', async () => {
+    const oldClock = new Date('2026-04-01T00:00:00.000Z');
+    const updated = makeSubscriptionEvent({
+      type: 'subscription.updated',
+      subscriptionId: 'sub_invoice',
+      customerId: 'cus_invoice',
+      stripeStatus: 'active',
+    });
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, updated);
+      const outcome = await handleNormalizedEvent(manager, updated, matched);
+      expect(outcome.outcome).toBe('tier_cascaded');
+    });
+
+    let row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('active');
+    expect(row.dunningStartedAt).toBeNull();
+    expect(await loadTenantTier(tenantId)).toBe('pro');
+
+    const paid: NormalizedEvent = {
+      providerEventId: 'evt_invoice_paid_after_updated',
+      type: 'invoice.paid',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_invoice',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, paid);
+      const outcome = await handleNormalizedEvent(manager, paid, matched);
+      expect(outcome.outcome).toBe('invoice_paid_no_state_change');
+    });
+    expect((await loadBilling(tenantId))[0].dunningStartedAt).toBeNull();
+
+    const failed: NormalizedEvent = {
+      providerEventId: 'evt_invoice_failed_after_recovery',
+      type: 'invoice.payment_failed',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_invoice',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, failed);
+      const outcome = await handleNormalizedEvent(manager, failed, matched);
+      expect(outcome.outcome).toBe('marked_past_due');
+    });
+
+    row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('past_due');
+    expect(row.dunningStartedAt).not.toBeNull();
+    expect(row.dunningStartedAt?.toISOString()).not.toBe(oldClock.toISOString());
+    expect(await loadTenantTier(tenantId)).toBe('pro');
   });
 
   it('invoice.payment_failed marks an active row as past_due (tier preserved)', async () => {
     // Reset to active first.
     await AppDataSource.getRepository(TenantBillingAccount).update(
       { tenantId },
-      { status: 'active' },
+      { status: 'active', dunningStartedAt: null },
     );
     const event: NormalizedEvent = {
       providerEventId: 'evt_invoice_failed',
@@ -580,7 +702,204 @@ describe('handleNormalizedEvent — invoice lifecycle', () => {
 
     const rows = await loadBilling(tenantId);
     expect(rows[0].status).toBe('past_due');
+    expect(rows[0].dunningStartedAt).not.toBeNull();
     expect(await loadTenantTier(tenantId)).toBe('pro'); // tier preserved
+  });
+
+  it('second invoice.payment_failed does not move dunningStartedAt', async () => {
+    const started = new Date('2026-04-01T00:00:00.000Z');
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_invoice_failed_retry',
+      type: 'invoice.payment_failed',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_invoice',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('invoice_payment_failed_no_state_change');
+    });
+
+    const rows = await loadBilling(tenantId);
+    expect(rows[0].status).toBe('past_due');
+    expect(rows[0].dunningStartedAt?.toISOString()).toBe(started.toISOString());
+  });
+
+  it('invoice.payment_failed without subscriptionId does not start the clock', async () => {
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId },
+      { status: 'active', dunningStartedAt: null },
+    );
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_invoice_failed_token_pack',
+      type: 'invoice.payment_failed',
+      customerId: 'cus_invoice',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      expect(matched?.tenantId).toBe(tenantId);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('invoice_payment_failed_no_state_change');
+    });
+
+    const rows = await loadBilling(tenantId);
+    expect(rows[0].status).toBe('active');
+    expect(rows[0].dunningStartedAt).toBeNull();
+    expect(await loadTenantTier(tenantId)).toBe('pro');
+  });
+
+  it('stale invoice.payment_failed for an old subscription does not start dunning', async () => {
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId },
+      { status: 'active', dunningStartedAt: null, subscriptionId: 'sub_new' },
+    );
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_stale_failed',
+      type: 'invoice.payment_failed',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_old',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      expect(matched).toBeNull();
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('no_matching_row');
+    });
+
+    const row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('active');
+    expect(row.dunningStartedAt).toBeNull();
+    expect(row.subscriptionId).toBe('sub_new');
+    expect(await loadTenantTier(tenantId)).toBe('pro');
+  });
+
+  it('stale invoice.paid for an old subscription does not clear dunning', async () => {
+    const started = new Date('2026-04-01T00:00:00.000Z');
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId },
+      { subscriptionId: 'sub_new' },
+    );
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_stale_paid',
+      type: 'invoice.paid',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_old',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      expect(matched).toBeNull();
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('no_matching_row');
+    });
+
+    const row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('past_due');
+    expect(row.dunningStartedAt?.toISOString()).toBe(started.toISOString());
+    expect(row.subscriptionId).toBe('sub_new');
+    expect(await loadTenantTier(tenantId)).toBe('pro');
+  });
+
+  it('locked re-read rejects invoice.payment_failed when subscription ids differ', async () => {
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId },
+      { status: 'active', dunningStartedAt: null, subscriptionId: 'sub_new' },
+    );
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_stale_failed_reread',
+      type: 'invoice.payment_failed',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_old',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const row = await manager.getRepository(TenantBillingAccount).findOneByOrFail({
+        tenantId,
+        provider: 'stripe',
+      });
+      const outcome = await handleNormalizedEvent(manager, event, { row, tenantId });
+      expect(outcome).toEqual({
+        outcome: 'invoice_subscription_mismatch',
+        meta: { existing: 'sub_new', incoming: 'sub_old' },
+      });
+    });
+
+    const row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('active');
+    expect(row.dunningStartedAt).toBeNull();
+  });
+
+  it('locked re-read rejects invoice.paid when subscription ids differ', async () => {
+    const started = new Date('2026-04-01T00:00:00.000Z');
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId },
+      { subscriptionId: 'sub_new' },
+    );
+    const event: NormalizedEvent = {
+      providerEventId: 'evt_stale_paid_reread',
+      type: 'invoice.paid',
+      customerId: 'cus_invoice',
+      subscriptionId: 'sub_old',
+      subscription: null,
+      occurredAt: new Date(),
+      raw: { data: { object: {} } },
+    };
+
+    await runInTransaction(async (manager) => {
+      const row = await manager.getRepository(TenantBillingAccount).findOneByOrFail({
+        tenantId,
+        provider: 'stripe',
+      });
+      const outcome = await handleNormalizedEvent(manager, event, { row, tenantId });
+      expect(outcome.outcome).toBe('invoice_subscription_mismatch');
+    });
+
+    const row = (await loadBilling(tenantId))[0];
+    expect(row.status).toBe('past_due');
+    expect(row.dunningStartedAt?.toISOString()).toBe(started.toISOString());
+  });
+
+  it('subscription.deleted clears dunningStartedAt', async () => {
+    setStripeClient({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue({ id: 'sub_invoice', status: 'canceled' }),
+      },
+    } as never);
+
+    const event = makeSubscriptionEvent({
+      type: 'subscription.deleted',
+      subscriptionId: 'sub_invoice',
+      customerId: 'cus_invoice',
+      stripeStatus: 'canceled',
+    });
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('tenant_cancelled');
+    });
+
+    const rows = await loadBilling(tenantId);
+    expect(rows[0].status).toBe('cancelled');
+    expect(rows[0].dunningStartedAt).toBeNull();
   });
 });
 

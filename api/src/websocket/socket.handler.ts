@@ -2,7 +2,7 @@
  * WebSocket Handler
  * Socket.io with optional Redis adapter for multi-server scaling
  * Room format: `${tenantId}:${sessionId}`
- * Supports dual auth: JWT (portal agents) + API key (widget visitors)
+ * Supports dual auth: JWT (portal agents) + widget session token (widget visitors)
  */
 import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
@@ -39,7 +39,6 @@ import {
   BotNotFoundError,
   BotOriginNotAllowedError,
   assertOriginAllowed,
-  type ResolvedBot,
 } from '../services/bot-resolution.service';
 import { encrypt } from '../utils/encryption';
 import { routeOutboundMessage } from '../channels/outbound-router';
@@ -229,56 +228,10 @@ export async function applySocketTenantContext(
 }
 
 /**
- * Mode 2: Widget (API key in query). The key can be either a Bot.publicKey
- * (`bk_*`) or a legacy Tenant.apiKey. resolveBotKeyStrict throws on unknown
- * keys and on paused bots — both surface as auth errors that disconnect
- * the socket (#16b's natural wiring for websocket).
- */
-async function authenticateApiKey(socket: TenantSocket, apiKey: string): Promise<void> {
-  let resolved: ResolvedBot;
-  try {
-    resolved = await resolveBotKeyStrict(apiKey);
-    try {
-      assertOriginAllowed(resolved.bot, socket.handshake.headers.origin);
-    } catch (originErr) {
-      if (originErr instanceof BotOriginNotAllowedError) {
-        void recordOriginDenial(resolved.bot, resolved.tenant.id, socket.handshake.headers.origin).catch(
-          (err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            logger.warn('Failed to record origin denial', { botId: resolved.bot.id, error: message });
-          },
-        );
-        throw new Error('Authentication error: origin not allowed');
-      }
-      throw originErr;
-    }
-  } catch (err) {
-    if (err instanceof BotPausedError) {
-      throw new Error('Authentication error: Bot is paused');
-    }
-    if (err instanceof BotNotFoundError) {
-      throw new Error('Authentication error: Invalid API key');
-    }
-    throw err;
-  }
-
-  const { tenant, bot } = resolved;
-
-  socket.data.user = {
-    id: (socket.handshake.query.visitorId as string) || socket.id,
-    email: '',
-    role: 'agent' as const,
-    tenantId: tenant.id,
-    type: 'widget' as const,
-  };
-  socket.data.tenantId = tenant.id;
-  socket.data.botId = bot.id;
-}
-/**
  * Authenticate a socket connection (extracted for timeout wrapping).
  * Throws on failure instead of calling next() — the caller handles next().
  */
-async function authenticateSocket(socket: TenantSocket): Promise<void> {
+export async function authenticateSocket(socket: TenantSocket): Promise<void> {
   const widgetToken = socket.handshake.auth?.widgetToken as string | undefined;
 
   // Ambiguous: a Clerk agent token AND a widget token both present.
@@ -293,11 +246,6 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
 
   if (socket.handshake.auth?.token) {
     await authenticateClerkAgent(socket, socket.handshake.auth.token);
-    return;
-  }
-
-  if (socket.handshake.query?.apiKey) {
-    await authenticateApiKey(socket, socket.handshake.query.apiKey as string);
     return;
   }
 

@@ -573,14 +573,18 @@ export const placesRateLimiter = createRedisRateLimiter({
 
 function widgetKeyIdentifier(req: Request): string | undefined {
   const body = req.body;
-  let raw: unknown;
-  if (body && typeof body === 'object' && 'apiKey' in body) {
-    raw = body.apiKey;
-  } else {
-    raw = req.query.apiKey;
+  const candidates = [
+    body && typeof body === 'object' ? body.widgetId : undefined,
+    body && typeof body === 'object' ? body.apiKey : undefined,
+    req.query.widgetId,
+    req.query.apiKey,
+  ];
+  for (const raw of candidates) {
+    if (typeof raw === 'string' && raw.length > 0) {
+      return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+    }
   }
-  if (typeof raw !== 'string' || raw.length === 0) return undefined;
-  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  return undefined;
 }
 
 /** 1000 new sessions / 10 min per bot key — must exceed any tenant's peak new-visitor rate; the origin allow-list is the abuse gate */

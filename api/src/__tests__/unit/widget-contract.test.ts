@@ -122,7 +122,7 @@ import express from 'express';
 import request from 'supertest';
 import { widgetRouter } from '../../routes/widget';
 import { errorHandler } from '../../middleware/error-handler';
-import { generateWidgetToken } from '../../middleware/auth.middleware';
+import { generateWidgetToken, verifyToken } from '../../middleware/auth.middleware';
 
 function createApp() {
   const app = express();
@@ -144,10 +144,11 @@ beforeEach(() => {
 });
 
 describe('POST /widget/init — validation + key resolution', () => {
-  it('422s without apiKey or visitorId (ValidationError contract)', async () => {
+  it('422s without widget id or visitorId (ValidationError contract)', async () => {
     const app = createApp();
     expect((await request(app).post('/widget/init').send({ visitorId: 'v1' })).status).toBe(422);
     expect((await request(app).post('/widget/init').send({ apiKey: 'k' })).status).toBe(422);
+    expect((await request(app).post('/widget/init').send({ widgetId: 'k' })).status).toBe(422);
   });
 
   it('403s for a paused bot (not 400 — the widget shows an unavailable state)', async () => {
@@ -177,6 +178,21 @@ describe('POST /widget/init — validation + key resolution', () => {
       source: 'widget',
       status: 'bot', // AI enabled → bot, not waiting
     });
+  });
+
+  it('creates a session with widgetId only (no apiKey) and returns a widget JWT', async () => {
+    const res = await request(createApp())
+      .post('/widget/init')
+      .send({ widgetId: 'k', visitorId: 'v-widget-id' });
+    expect(res.status).toBeLessThan(300);
+    expect(res.body.data.session.id).toBe('sess-new');
+    expect(typeof res.body.data.token).toBe('string');
+
+    const claims = verifyToken(res.body.data.token);
+    expect(claims.type).toBe('widget');
+    expect(claims.sessionId).toBe('sess-new');
+    expect(claims.tenantId).toBe('tenant-1');
+    expect(claims.userId).toBe('v-widget-id');
   });
 
   it('reuses an active session for a returning visitor', async () => {

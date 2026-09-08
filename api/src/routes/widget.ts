@@ -94,9 +94,22 @@ interface ApiKeyValidationResult {
   originDenied?: boolean;
 }
 
+function readWidgetId(req: Request): string | undefined {
+  const candidates = [
+    req.body?.widgetId,
+    req.body?.apiKey,
+    req.query.widgetId,
+    req.query.apiKey,
+  ];
+  for (const raw of candidates) {
+    if (typeof raw === 'string' && raw.length > 0) return raw;
+  }
+  return undefined;
+}
+
 async function validateApiKey(apiKey: string, origin: string | undefined): Promise<ApiKeyValidationResult> {
   if (!apiKey) {
-    return { valid: false, error: 'API key is required' };
+    return { valid: false, error: 'Widget id is required' };
   }
   try {
     const resolved = await resolveBotKeyStrict(apiKey);
@@ -122,7 +135,7 @@ async function validateApiKey(apiKey: string, origin: string | undefined): Promi
       return { valid: false, error: 'This chatbot is currently paused', paused: true };
     }
     if (error instanceof BotNotFoundError) {
-      return { valid: false, error: 'Invalid API key' };
+      return { valid: false, error: 'Invalid widget id' };
     }
     return { valid: false, error: 'Internal error during validation' };
   }
@@ -183,13 +196,13 @@ router.get(
   '/config',
   widgetInitRateLimit,
   asyncHandler(async (req: Request, res: Response) => {
-    const apiKey = req.query.apiKey as string;
+    const widgetId = readWidgetId(req);
 
-    if (!apiKey) {
-      throw new ValidationError('API key is required');
+    if (!widgetId) {
+      throw new ValidationError('Widget id is required');
     }
 
-    const result = await validateApiKey(apiKey, req.headers.origin);
+    const result = await validateApiKey(widgetId, req.headers.origin);
 
     if (result.paused) {
       throw new ForbiddenError(result.error || 'This chatbot is currently paused');
@@ -198,7 +211,7 @@ router.get(
       throw new ForbiddenError(result.error || 'This chatbot is not allowed on this website.');
     }
     if (!result.valid || !result.tenant || !result.bot) {
-      throw new ValidationError(result.error || 'Invalid API key');
+      throw new ValidationError(result.error || 'Invalid widget id');
     }
 
     const tenant = result.tenant;
@@ -256,14 +269,15 @@ router.post(
   widgetInitRateLimit,
   widgetKeyInitRateLimiter,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const { apiKey, visitorId, metadata } = req.body;
+    const { visitorId, metadata } = req.body;
+    const widgetId = readWidgetId(req);
 
-    if (!apiKey || !visitorId) {
-      throw new ValidationError('API key and visitor ID are required');
+    if (!widgetId || !visitorId) {
+      throw new ValidationError('Widget id and visitor ID are required');
     }
     assertValidVisitorId(visitorId);
 
-    const result = await validateApiKey(apiKey, req.headers.origin);
+    const result = await validateApiKey(widgetId, req.headers.origin);
 
     if (result.paused) {
       throw new ForbiddenError(result.error || 'This chatbot is currently paused');
@@ -272,7 +286,7 @@ router.post(
       throw new ForbiddenError(result.error || 'This chatbot is not allowed on this website.');
     }
     if (!result.valid || !result.tenant || !result.bot) {
-      throw new ValidationError(result.error || 'Invalid API key');
+      throw new ValidationError(result.error || 'Invalid widget id');
     }
 
     const tenant = result.tenant;

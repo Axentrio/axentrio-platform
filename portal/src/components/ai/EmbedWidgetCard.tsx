@@ -77,7 +77,7 @@ export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({
   if (!apiKey) return null;
 
   const apiUrl = (import.meta.env.VITE_API_URL || '').replace('/api/v1', '') || window.location.origin;
-  const embedSnippet = `<script src="${apiUrl}/widget.js"\n  data-api-key="${apiKey}"></script>`;
+  const embedSnippet = `<script src="${apiUrl}/widget.js"\n  data-widget-id="${apiKey}"></script>`;
 
   return (
     <Card variant="glass" className="mb-6">

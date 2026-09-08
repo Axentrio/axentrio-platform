@@ -304,7 +304,7 @@ function DevPanel({
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const embedSnippet = `<script\n  src="${window.location.origin}/widget.js"\n  data-api-key="${apiKey}"\n  async\n></script>`;
+  const embedSnippet = `<script\n  src="${window.location.origin}/widget.js"\n  data-widget-id="${apiKey}"\n  async\n></script>`;
 
   return (
     <div className="h-full flex flex-col bg-[#faf9f7] border-l border-[#e8e5de]">

@@ -480,7 +480,7 @@
       },
       "embed": {
         "title": "Widget insluiten",
-        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag",
+        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag. De widget-id is openbaar en zichtbaar in DevTools; chat wordt geautoriseerd met een kortlevend sessietoken van Axentrio. Beperk welke sites mogen insluiten via Toegestane websites — laat leeg om elke website toe te staan.",
         "copied": "Gekopieerd naar klembord",
         "copyTitle": "Codefragment kopiëren",
         "allowedOrigins": {

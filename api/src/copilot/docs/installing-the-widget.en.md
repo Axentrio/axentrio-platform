@@ -21,3 +21,5 @@ The widget is a small JavaScript snippet you paste once into your website's HTML
 **Common issues:**
 - *No bubble appears:* check the snippet is before `</body>` and not blocked by an ad-blocker.
 - *Wrong bot replies:* the snippet is tenant-specific — make sure you copied yours, not a teammate's example.
+
+**Widget id:** the snippet uses `data-widget-id`. The older `data-api-key` attribute still works. The value is a public widget identifier, not a backend secret — chat requests are authorized with a short-lived session token issued by Axentrio when the widget loads.

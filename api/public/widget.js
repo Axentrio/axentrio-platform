@@ -38,6 +38,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     tenantId: null,
     botId: 'default',
     apiKey: null,
+    widgetId: null,
     
     // Widget Appearance
     position: 'right',
@@ -1409,6 +1410,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   class ChatbotWidget {
     constructor(config = {}) {
       this.config = { ...DEFAULT_CONFIG, ...config };
+      this.config.apiKey = this.config.widgetId || this.config.apiKey;
       this.isOpen = false;
       this.messages = [];
       this.socket = null;
@@ -1780,9 +1782,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           this._missingApiKeyWarned = true;
           // eslint-disable-next-line no-console
           console.warn(
-            '[axentrio-widget] Missing data-api-key attribute on the embed script. ' +
+            '[axentrio-widget] Missing data-widget-id attribute on the embed script. ' +
             'The widget will render but cannot connect to the chat backend. ' +
-            'Add data-api-key="<your-tenant-api-key>" to your <script> tag.',
+            'Add data-widget-id="<your-widget-id>" to your <script> tag (data-api-key still works).',
           );
         }
         this.setConnectionState('offline');
@@ -1857,6 +1859,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          widgetId: this.config.apiKey,
           apiKey: this.config.apiKey,
           visitorId: this.visitorId,
         }),
@@ -2064,10 +2067,6 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         transports: ['websocket', 'polling'],
         auth: {
           widgetToken: this.token,
-        },
-        query: {
-          apiKey: this.config.apiKey,
-          visitorId: this.visitorId,
         },
         reconnection: true,
         // Keep retrying indefinitely — a capped retry that exhausts leaves the
@@ -3454,7 +3453,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // Auto-initialization from data attributes
   // ==========================================================================
   function autoInit() {
-    const script = _cbCurrentScript || document.querySelector('script[src*="widget.js"][data-api-key]');
+    const script = _cbCurrentScript || document.querySelector('script[src*="widget.js"][data-widget-id], script[src*="widget.js"][data-api-key]');
     
     if (script) {
       const config = {};
@@ -3494,6 +3493,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       } else if (!Array.isArray(config.postmessageOrigins)) {
         config.postmessageOrigins = [];
       }
+
+      config.apiKey = config.widgetId || config.apiKey;
 
       // Initialize widget
       const widget = new ChatbotWidget(config);

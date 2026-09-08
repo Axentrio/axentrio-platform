@@ -483,7 +483,7 @@
       "embed": {
         "title": "Embed Widget",
         "deployTitle": "Deploy",
-        "description": "Add this snippet to your website's HTML, just before the closing </body> tag",
+        "description": "Add this snippet to your website's HTML, just before the closing </body> tag. The widget id is public and visible in DevTools; chat is authorized by a short-lived session token from Axentrio. Restrict which sites can embed it with Allowed websites — leave empty to allow every website.",
         "copied": "Copied to clipboard",
         "copyTitle": "Copy snippet",
         "statusActive": "Active",

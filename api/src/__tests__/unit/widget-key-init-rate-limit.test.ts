@@ -46,8 +46,8 @@ function hashedKey(apiKey: string): string {
   return `rl:widget-key-init:${crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16)}`;
 }
 
-function mockReq(apiKey: string): Request {
-  return { body: { apiKey }, query: {}, headers: {} } as Request;
+function mockReq(body: Record<string, string>): Request {
+  return { body, query: {}, headers: {} } as Request;
 }
 
 function mockRes(): Response & { headerStore: Record<string, string> } {
@@ -76,13 +76,21 @@ describe('widgetKeyInitRateLimiter', () => {
 
     const blockedNext = vi.fn();
     const blockedRes = mockRes();
-    await widgetKeyInitRateLimiter(mockReq(capped), blockedRes, blockedNext);
+    await widgetKeyInitRateLimiter(mockReq({ apiKey: capped }), blockedRes, blockedNext);
     expect(blockedNext.mock.calls[0][0]).toBeInstanceOf(RateLimitError);
     expect(blockedRes.headerStore['retry-after']).toBe('60');
 
     const okNext = vi.fn();
-    await widgetKeyInitRateLimiter(mockReq(other), mockRes(), okNext);
+    await widgetKeyInitRateLimiter(mockReq({ apiKey: other }), mockRes(), okNext);
     expect(okNext).toHaveBeenCalledOnce();
     expect(okNext.mock.calls[0][0]).toBeUndefined();
+  });
+
+  it('hashes widgetId the same as apiKey for the same value', async () => {
+    const key = 'bk_widget_id_key';
+    const okNext = vi.fn();
+    await widgetKeyInitRateLimiter(mockReq({ widgetId: key }), mockRes(), okNext);
+    expect(okNext).toHaveBeenCalledOnce();
+    expect(redisStore.has(hashedKey(key))).toBe(true);
   });
 });

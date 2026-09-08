@@ -70,7 +70,7 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 function embedSnippet(publicKey: string): string {
-  return `<script src="${config.api.url}/widget.js" data-api-key="${publicKey}" async></script>`;
+  return `<script src="${config.api.url}/widget.js" data-widget-id="${publicKey}" async></script>`;
 }
 
 function toListItem(bot: Bot) {

@@ -21,3 +21,5 @@ De widget is een klein stukje JavaScript dat je één keer in de HTML van je web
 **Veelvoorkomende problemen:**
 - *Geen bel te zien:* controleer of het fragment vóór `</body>` staat en niet geblokkeerd wordt door een adblocker.
 - *De verkeerde bot antwoordt:* het fragment is klantspecifiek — zorg dat je het jouwe hebt gekopieerd en niet het voorbeeld van een collega.
+
+**Widget-id:** het fragment gebruikt `data-widget-id`. Het oudere attribuut `data-api-key` werkt nog steeds. De waarde is een openbare widget-identificatie, geen backend-geheim — chatverzoeken worden geautoriseerd met een kortlevend sessietoken dat Axentrio uitgeeft wanneer de widget laadt.

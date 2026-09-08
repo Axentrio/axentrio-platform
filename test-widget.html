@@ -44,7 +44,7 @@
   </div>
 
   <div id="cb-test-setup" class="hint" style="display:none; background:#fff4e5; border-color:#f0c58d;">
-    <strong>Setup needed:</strong> set a tenant API key in localStorage before the widget can connect.
+    <strong>Setup needed:</strong> set a widget id in localStorage before the widget can connect.
     Open DevTools console and run:<br><br>
     <code>localStorage.setItem('cb_test_api_key', 'YOUR_TENANT_API_KEY')</code><br>
     <code>localStorage.setItem('cb_test_api_url', 'http://localhost:4081')</code> <em>(optional — defaults to Railway prod)</em><br>
@@ -72,6 +72,7 @@
       var script = document.createElement('script');
       script.src = widgetSrc;
       script.setAttribute('data-api-url', apiUrl);
+      script.setAttribute('data-widget-id', apiKey);
       script.setAttribute('data-api-key', apiKey);
       script.setAttribute('data-debug', 'true');
       document.body.appendChild(script);

@@ -21,3 +21,5 @@ Le widget est un petit script JavaScript que vous collez une seule fois dans le 
 **Problèmes fréquents :**
 - *Aucune bulle n'apparaît :* vérifiez que l'extrait se trouve avant `</body>` et qu'un bloqueur de publicité ne l'empêche pas de se charger.
 - *Le mauvais bot répond :* l'extrait est propre à votre compte — assurez-vous d'avoir copié le vôtre et non l'exemple d'un collègue.
+
+**Identifiant widget :** l'extrait utilise `data-widget-id`. L'ancien attribut `data-api-key` fonctionne toujours. La valeur est un identifiant public du widget, pas un secret backend — les requêtes de chat sont autorisées par un jeton de session de courte durée émis par Axentrio au chargement du widget.

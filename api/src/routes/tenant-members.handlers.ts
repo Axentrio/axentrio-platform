@@ -9,7 +9,7 @@ import { type Request, type Response } from "express";
 import { IsNull } from "typeorm";
 import { AppDataSource } from "../database/data-source";
 import { Tenant } from "../database/entities/Tenant";
-import { User } from "../database/entities/User";
+import { User, isTenantAssignableRole } from "../database/entities/User";
 import { Agent } from "../database/entities/Agent";
 import { PendingInvite } from "../database/entities/PendingInvite";
 import {
@@ -195,7 +195,7 @@ export const createTenantUser = asyncHandler(
       throw new ValidationError("Email and name are required");
     }
 
-    if (!role || !["admin", "supervisor", "agent"].includes(role)) {
+    if (!role || !isTenantAssignableRole(role)) {
       throw new ValidationError("Invalid role");
     }
 
@@ -221,6 +221,14 @@ export const createTenantUser = asyncHandler(
     });
 
     await userRepository.save(user);
+
+    // A tenant admin minting a seat is a privilege event: without this row there
+    // is no way to answer "who gave this person access, and when?" after the fact.
+    // The role is recorded because it is the thing that decides what they reach.
+    await logAudit(req.userId!, "user.created", "user", user.id, tenantId, {
+      role: user.role,
+      email: user.email,
+    });
 
     logger.info("Tenant user created", {
       tenantId,
@@ -248,7 +256,7 @@ export const updateTenantUserRole = asyncHandler(
   async (req: Request, res: Response) => {
     const { role } = req.body;
 
-    if (!role || !["admin", "supervisor", "agent"].includes(role)) {
+    if (!role || !isTenantAssignableRole(role)) {
       throw new ValidationError("Invalid role");
     }
 
@@ -262,8 +270,17 @@ export const updateTenantUserRole = asyncHandler(
       throw new NotFoundError("User not found in this tenant");
     }
 
+    const previousRole = user.role;
     user.role = role;
     await userRepo.save(user);
+
+    // Role changes are the other half of the escalation surface: a seat that
+    // cannot be CREATED as super_admin could still be moved there by an edit.
+    // Record both ends so the change is reconstructable.
+    await logAudit(req.userId!, "user.role_changed", "user", user.id, tenantId, {
+      from: previousRole,
+      to: role,
+    });
 
     // Invalidate autoProvision cache so role change takes effect immediately
     if (user.clerkUserId) {

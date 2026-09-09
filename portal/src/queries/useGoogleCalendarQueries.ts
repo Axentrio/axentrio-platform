@@ -25,6 +25,66 @@ export interface GoogleCalendarStatus {
  */
 const statusKey = (botId?: string) => ['google', 'status', botSegment(botId)] as const;
 
+/**
+ * One writable calendar the owner may send bookings to.
+ *
+ * `id` is Google's calendar id; `primary` marks the account's own calendar, which the server
+ * canonicalises to the literal `'primary'` on write so the stored value never carries the
+ * account's email (that would bypass the verified-id_token identity rule).
+ */
+export interface GoogleCalendarOption {
+  id: string;
+  summary: string;
+  primary: boolean;
+  accessRole: string;
+}
+
+/** Keyed by Agent for the same reason the status key is: these calendars belong to the
+ *  Agent's connected account, so a tenant-global key would show one Agent's calendars under
+ *  another Agent's name. */
+const calendarsKey = (botId?: string) => ['google', 'calendars', botSegment(botId)] as const;
+
+/**
+ * The writable calendars behind the picker.
+ *
+ * `enabled` matters here rather than being left to the caller: this endpoint calls Google, so
+ * asking for it on a disconnected Agent spends an external request to be told `[]`.
+ */
+export function useGoogleCalendars(botId?: string, enabled = true) {
+  return useQuery({
+    queryKey: calendarsKey(botId),
+    enabled,
+    queryFn: async () => {
+      const { calendars } = (await api.get<{ calendars: GoogleCalendarOption[] }>(
+        withBot('/integrations/google/calendars', botId)
+      )) as { calendars: GoogleCalendarOption[] };
+      return calendars;
+    },
+  });
+}
+
+/**
+ * Point this Agent's bookings at a different calendar.
+ *
+ * The server rekeys active future bookings as part of the write, so the status query is
+ * refetched too - otherwise the screen keeps showing the calendar the bookings no longer go to.
+ */
+export function useSetGoogleCalendar(botId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (calendarId: string) =>
+      api.put<{ calendarId: string }>(withBot('/integrations/google/calendar', botId), { calendarId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: statusKey(botId) });
+      queryClient.invalidateQueries({ queryKey: calendarsKey(botId) });
+      toast.success('Bookings will go to that calendar');
+    },
+    onError: (err: Any) => {
+      toast.error(extractApiErrorMessage(err) ?? 'Failed to change the calendar');
+    },
+  });
+}
+
 export function useGoogleCalendarStatus(botId?: string) {
   return useQuery({
     queryKey: statusKey(botId),

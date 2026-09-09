@@ -722,7 +722,7 @@ describe('SchedulerSettings — refuses to save what the API will reject', { tim
 describe('SchedulerSettings — one calendar per Agent', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function mockApis(over: { google?: object; outlook?: object } = {}) {
+  function mockApis(over: { google?: object; outlook?: object; calendars?: object[] } = {}) {
     apiGet.mockImplementation((url: string) => {
       if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
@@ -732,11 +732,49 @@ describe('SchedulerSettings — one calendar per Agent', { timeout: SLOW_FORM_TI
       if (url.includes('/integrations/google/status')) {
         return Promise.resolve({ connected: false, accountEmail: null, needsReauth: false, ...over.google });
       }
+      if (url.includes('/integrations/google/calendars')) {
+        return Promise.resolve({ calendars: over.calendars ?? [] });
+      }
       if (url.includes('/services')) return Promise.resolve({ services: [] });
       if (url.includes('/availability')) return Promise.resolve({ slots: [], timezone: 'Europe/Brussels' });
       return Promise.resolve({});
     });
   }
+
+  /**
+   * The write-target picker. Before it existed the endpoints were API-only, so an owner who
+   * wanted bookings off their primary calendar had no control at all.
+   */
+  it('writes the chosen Google calendar when the owner changes it', async () => {
+    mockApis({
+      google: { connected: true, accountEmail: 'owner@axentrio.com', calendarId: 'primary' },
+      calendars: [
+        { id: 'owner@axentrio.com', summary: 'Owner', primary: true, accessRole: 'owner' },
+        { id: 'bookings@axentrio.com', summary: 'Bookings', primary: false, accessRole: 'writer' },
+      ],
+    });
+    apiPut.mockResolvedValue({ calendarId: 'bookings@axentrio.com' });
+    renderUI();
+
+    const picker = await screen.findByLabelText('Bookings go to');
+    expect(picker).toHaveValue('primary');
+    expect(screen.getByRole('option', { name: 'Bookings' })).toBeInTheDocument();
+
+    fireEvent.change(picker, { target: { value: 'bookings@axentrio.com' } });
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith('/integrations/google/calendar', {
+        calendarId: 'bookings@axentrio.com',
+      }),
+    );
+  });
+
+  it('offers no picker until Google is connected', async () => {
+    mockApis({ google: { connected: false } });
+    renderUI();
+    await screen.findByText('One calendar per Agent. Connect Google or Outlook, not both.');
+    expect(screen.queryByLabelText('Bookings go to')).not.toBeInTheDocument();
+  });
 
   it('disables Google connect when Outlook is already connected', async () => {
     mockApis({ outlook: { connected: true, accountEmail: 'owner@outlook.com' } });

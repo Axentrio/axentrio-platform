@@ -17,6 +17,6 @@ const PHONE_IN_TEXT = /(?<![\d+])(?:\+\d{6,15}|0\d{7,14})(?!\d)/;
 export function containsContactData(text: string): boolean {
   if (!text) return false;
   if (EMAIL_IN_TEXT.test(text)) return true;
-  const digits = text.replace(/[\s().-]/g, '');
+  const digits = text.replace(/[\s().\/-]/g, '');
   return PHONE_IN_TEXT.test(digits);
 }

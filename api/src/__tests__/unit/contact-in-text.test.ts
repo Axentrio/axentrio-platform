@@ -22,6 +22,14 @@ describe('containsContactData', () => {
     expect(containsContactData('Ring 02 123 45 67 before noon.')).toBe(true);
   });
 
+  it('finds a domestic mobile number written with the Belgian slash', () => {
+    expect(containsContactData('Call the customer back on 0470/12.34.56 about the quote.')).toBe(true);
+  });
+
+  it('finds a domestic landline number written with the Belgian slash', () => {
+    expect(containsContactData('Ring 02/123.45.67 before noon.')).toBe(true);
+  });
+
   it('passes an aggregate figure and an ISO date', () => {
     expect(
       containsContactData('Between 2026-09-01 and 2026-09-07 you handled 1 000 000 000 chats.'),

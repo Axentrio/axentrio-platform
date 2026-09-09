@@ -134,7 +134,9 @@ async function narrate(
     ),
     deltaPhrase("leads", metrics.leads.current, metrics.leads.previous),
     `${metrics.gapsOpened} new unanswered topics, ${metrics.gapsWon} resolved`,
-    topExperiment ? `notable pattern: ${topExperiment}` : null,
+    topExperiment && !containsContactData(topExperiment)
+      ? `notable pattern: ${topExperiment}`
+      : null,
   ]
     .filter(Boolean)
     .join("; ");

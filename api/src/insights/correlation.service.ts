@@ -236,10 +236,9 @@ async function upsertExperiment(tenantId: string, k: Candidate, rr: number): Pro
   const detail = `Worth a look — chats ${k.splitLabel} ${k.outcomeLabel} at ${rateA}% versus ${rateNotA}% otherwise. This is an observed pattern, not a proven cause.`;
   const severity = Math.abs(Math.log(rr)) >= Math.log(2) ? 'red' : 'orange';
   // title and detail come from fixed templates, so this is a guard, not a fix.
-  // Four writers create insight rows. The contact-data rule covers three of
-  // them: this experiment, the gap recommendation, and the digest narrative.
-  // The sentiment experiment title (sentiment-aggregation.service.ts) is not
-  // covered.
+  // Four writers create insight rows, and the contact-data rule covers all
+  // four: this experiment, the gap recommendation, the digest narrative, and
+  // the sentiment experiment title (sentiment-aggregation.service.ts).
   if (containsContactData(title) || containsContactData(detail)) return;
 
   const existing = await repo.findOne({ where: { tenantId, kind: 'correlation', fingerprint: k.fingerprint } });

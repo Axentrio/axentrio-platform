@@ -123,8 +123,16 @@ export async function generateGapRecommendations(
       const recommendation = oneSentence(response.content);
       if (!recommendation) continue;
       // The model can copy a contact value out of the evidence. An insight
-      // store is presented as aggregate, so drop the sentence instead.
-      if (containsContactData(recommendation)) continue;
+      // store is presented as aggregate, so the sentence is dropped, and any
+      // sentence already stored for this gap goes with it.
+      if (containsContactData(recommendation)) {
+        if (gap.recommendation) {
+          gap.recommendation = null;
+          gap.recommendationUpdatedAt = null;
+          await gapRepo.save(gap);
+        }
+        continue;
+      }
       gap.recommendation = recommendation;
       gap.recommendationUpdatedAt = now;
       await gapRepo.save(gap);

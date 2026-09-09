@@ -99,7 +99,7 @@ describe('generateGapRecommendations', () => {
     expect(tally).toEqual({ promptTokens: 12, completionTokens: 7, calls: 1 });
   });
 
-  it('does not store a recommendation that carries a contact value', async () => {
+  it('clears the stored suggestion when the new one carries a contact value', async () => {
     state.gaps = [
       {
         id: 'open',
@@ -119,7 +119,55 @@ describe('generateGapRecommendations', () => {
 
     await generateGapRecommendations('tenant-1', undefined, NOW);
 
-    expect(state.gaps[0].recommendation).toBe('Previous safe suggestion.');
+    expect(state.gaps[0].recommendation).toBeNull();
+    expect(state.gaps[0].recommendationUpdatedAt).toBeNull();
+    expect(state.saved).toHaveLength(1);
+  });
+
+  it('removes a tainted suggestion stored before the guard existed', async () => {
+    state.gaps = [
+      {
+        id: 'legacy',
+        tenantId: 'tenant-1',
+        canonicalTopicId: 'topic-pricing',
+        status: 'open',
+        occurrences: 5,
+        recommendation: 'Email jane@x.com to explain pricing.',
+        recommendationUpdatedAt: new Date('2026-08-01T12:00:00Z'),
+      },
+    ];
+    state.judgments = [{ reasoning: 'The Agent could not answer what the service costs.' }];
+    chatMock.mockResolvedValue({
+      content: 'Email jane@x.com to explain pricing.',
+      usage: { promptTokens: 12, completionTokens: 7 },
+    });
+
+    await generateGapRecommendations('tenant-1', undefined, NOW);
+
+    expect(state.gaps[0].recommendation).toBeNull();
+    expect(state.saved[0].recommendation).toBeNull();
+  });
+
+  it('writes nothing when a gap without a stored suggestion draws a tainted one', async () => {
+    state.gaps = [
+      {
+        id: 'fresh-gap',
+        tenantId: 'tenant-1',
+        canonicalTopicId: 'topic-pricing',
+        status: 'open',
+        occurrences: 5,
+        recommendation: null,
+      },
+    ];
+    state.judgments = [{ reasoning: 'The Agent could not answer what the service costs.' }];
+    chatMock.mockResolvedValue({
+      content: 'Email jane@x.com to explain pricing.',
+      usage: { promptTokens: 12, completionTokens: 7 },
+    });
+
+    await generateGapRecommendations('tenant-1', undefined, NOW);
+
+    expect(state.gaps[0].recommendation).toBeNull();
     expect(state.saved).toHaveLength(0);
   });
 

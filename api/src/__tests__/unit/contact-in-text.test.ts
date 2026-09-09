@@ -30,6 +30,10 @@ describe('containsContactData', () => {
     expect(containsContactData('Ring 02/123.45.67 before noon.')).toBe(true);
   });
 
+  it('passes a sentence naming two dd/mm/yyyy dates', () => {
+    expect(containsContactData('Bookings ran 09/09/2026 through 10/09/2026.')).toBe(false);
+  });
+
   it('passes an aggregate figure and an ISO date', () => {
     expect(
       containsContactData('Between 2026-09-01 and 2026-09-07 you handled 1 000 000 000 chats.'),

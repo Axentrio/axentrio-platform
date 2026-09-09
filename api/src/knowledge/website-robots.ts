@@ -46,6 +46,23 @@ export function pathFromPageUrl(pageUrl: string): string {
   }
 }
 
+/**
+ * The forms a robots rule can name this page by. `canonicalSourceUrl` removes
+ * a trailing slash, so the page queued as "/my-account" is the directory URL
+ * that a "Disallow: /my-account/" rule names. Both forms are matched.
+ */
+function robotsPathsFor(pageUrl: string): string[] {
+  const path = pathFromPageUrl(pageUrl);
+  let parsed: URL;
+  try {
+    parsed = new URL(pageUrl);
+  } catch {
+    return [path];
+  }
+  if (parsed.pathname.endsWith("/")) return [path];
+  return [path, `${parsed.pathname}/${parsed.search}`];
+}
+
 const REDIRECT_STATUS = [301, 302, 303, 307, 308];
 
 /**
@@ -93,5 +110,6 @@ export async function fetchRobotsAllows(
 
   if (body === null) return allowAll;
   const robots = parseRobotsTxt(body);
-  return async (pageUrl: string) => robots.allows(pathFromPageUrl(pageUrl));
+  return async (pageUrl: string) =>
+    robotsPathsFor(pageUrl).every((path) => robots.allows(path));
 }

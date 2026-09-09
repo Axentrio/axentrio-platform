@@ -33,6 +33,11 @@ import {
   releaseLegalHold,
 } from "../compliance/legal-hold.service";
 import { getTermsStatus, recordTermsAcceptance } from "../compliance/terms.service";
+import {
+  getDeletionRequest,
+  requestTenantDeletion,
+  cancelTenantDeletion,
+} from "../tenants/tenant-deletion.service";
 import { updateClerkOrganization } from "../services/clerk-sync.service";
 import { logger } from "../utils/logger";
 import { invalidate } from "../utils/cache";
@@ -678,6 +683,38 @@ router.post(
       termsVersion: row.termsVersion,
       acceptedAt: row.acceptedAt.toISOString(),
     });
+  }),
+);
+
+/**
+ * Account deletion, self-service.
+ *
+ * GET is readable by any seat (the portal needs it to show the reactivation
+ * modal). POST and DELETE are admin-only: they schedule or cancel irreversible
+ * deletion of the whole workspace.
+ *
+ * `30 days` is a dormancy window measured from the REQUEST — see the service.
+ */
+router.get(
+  "/me/deletion",
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await getDeletionRequest(req.user!.tenantId));
+  }),
+);
+
+router.post(
+  "/me/deletion",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await requestTenantDeletion(req.user!.tenantId, req.userId!));
+  }),
+);
+
+router.delete(
+  "/me/deletion",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await cancelTenantDeletion(req.user!.tenantId, req.userId!));
   }),
 );
 

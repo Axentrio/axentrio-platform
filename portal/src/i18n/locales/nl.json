@@ -880,6 +880,23 @@
       "secretNew": "Ondertekeningssleutel (wordt gegenereerd indien leeg)"
     }
   },
+  "tenantDeletion": {
+    "title": "Deze werkruimte verwijderen",
+    "body": "Uw bots stoppen direct met antwoorden. Alles wordt 30 dagen bewaard voor het geval u van gedachten verandert en daarna permanent verwijderd: gesprekken, leads, boekingen, documenten en bestanden. Alleen de facturen die wij wettelijk moeten bewaren blijven.",
+    "button": "Deze werkruimte verwijderen",
+    "confirm": "Deze werkruimte verwijderen? Uw bots stoppen nu met antwoorden, alles wordt 30 dagen bewaard en daarna permanent verwijderd. Daarna kan het niet meer ongedaan worden gemaakt.",
+    "confirmYes": "Ja, mijn werkruimte verwijderen",
+    "pendingCard": "Gepland voor verwijdering op {{date}} — over {{days}} dagen. Tot die tijd kunt u uw account behouden en komt alles terug.",
+    "pendingTitle": "Deze werkruimte staat gepland voor verwijdering",
+    "pendingBody": "Het stopt direct met antwoorden aan klanten en alles wordt permanent verwijderd op {{date}} — over {{days}} dagen. Was dit niet de bedoeling, behoud dan nu uw account.",
+    "keepAccount": "Mijn account behouden",
+    "continueDeleting": "Doorgaan met verwijderen",
+    "adminOnly": "Alleen beheerders van de werkruimte kunnen dit wijzigen.",
+    "requested": "Uw werkruimte wordt over 30 dagen verwijderd.",
+    "requestError": "Kon de verwijdering niet plannen",
+    "reactivated": "Uw werkruimte blijft bestaan.",
+    "reactivateError": "Kon de werkruimte niet reactiveren"
+  },
   "ai": {
     "header": {
       "title": "AI & Inhoud",

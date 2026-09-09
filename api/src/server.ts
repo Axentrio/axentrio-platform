@@ -801,6 +801,15 @@ async function startBackgroundJobs(): Promise<void> {
       );
       startComplianceEventRetentionSweep().forEach(trackTimer);
 
+      // Account deletion. Executes the tenants whose 30-day dormancy has closed.
+      // Unflagged for the same reason as the retention sweeps: it is a no-op
+      // unless a customer asked to leave, and a promise to delete should not
+      // depend on remembering to enable the job that deletes.
+      const { startTenantDeletionSweep } = await import(
+        "./tenants/tenant-deletion.service"
+      );
+      startTenantDeletionSweep().forEach(trackTimer);
+
       // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
       // env flag, because it is a NO-OP for every tenant that has not chosen a period,
       // and a data-protection control should not depend on remembering to enable it.

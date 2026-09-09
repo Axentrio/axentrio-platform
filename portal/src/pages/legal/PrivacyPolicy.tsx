@@ -149,6 +149,14 @@ const PrivacyPolicy: React.FC = () => {
           described below. We delete or de-identify data when it is no longer needed,
           subject to legal retention requirements.
         </p>
+        <p className="mt-3">
+          A Customer can delete their workspace themselves from{' '}
+          <em>Settings &rarr; Data &amp; retention</em>. Answering stops immediately,
+          everything is kept for 30 days in case they change their mind, and it is then
+          permanently deleted. Invoices and accounting records are retained for the
+          period the law requires, which is why the workspace record itself survives
+          with no personal data left on it.
+        </p>
       </LegalSection>
 
       <LegalSection heading="Data deletion">

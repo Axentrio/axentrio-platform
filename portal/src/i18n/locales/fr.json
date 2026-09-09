@@ -879,6 +879,23 @@
       "secretNew": "Clé de signature (générée si laissée vide)"
     }
   },
+  "tenantDeletion": {
+    "title": "Supprimer cet espace de travail",
+    "body": "Vos bots cessent immédiatement de répondre. Tout est conservé 30 jours au cas où vous changeriez d’avis, puis définitivement supprimé : conversations, prospects, réservations, documents et fichiers. Seules les factures que la loi nous oblige à conserver survivent.",
+    "button": "Supprimer cet espace de travail",
+    "confirm": "Supprimer cet espace de travail ? Vos bots cessent de répondre immédiatement, tout est conservé 30 jours, puis définitivement supprimé. Cette action est irréversible ensuite.",
+    "confirmYes": "Oui, supprimer mon espace de travail",
+    "pendingCard": "Suppression prévue le {{date}} — dans {{days}} jours. D’ici là, vous pouvez conserver votre compte et tout sera rétabli.",
+    "pendingTitle": "Cet espace de travail est programmé pour suppression",
+    "pendingBody": "Il cesse immédiatement de répondre aux clients et tout sera définitivement supprimé le {{date}} — dans {{days}} jours. Si ce n’était pas votre intention, conservez votre compte maintenant.",
+    "keepAccount": "Conserver mon compte",
+    "continueDeleting": "Continuer la suppression",
+    "adminOnly": "Seuls les administrateurs de l’espace de travail peuvent modifier ceci.",
+    "requested": "Votre espace de travail sera supprimé dans 30 jours.",
+    "requestError": "Impossible de programmer la suppression",
+    "reactivated": "Votre espace de travail est conservé.",
+    "reactivateError": "Impossible de réactiver l’espace de travail"
+  },
   "ai": {
     "header": {
       "title": "IA & Contenu",

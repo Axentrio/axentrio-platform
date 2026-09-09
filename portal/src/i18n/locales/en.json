@@ -887,6 +887,23 @@
       "secretNew": "Signing secret (generated if left blank)"
     }
   },
+  "tenantDeletion": {
+    "title": "Delete this workspace",
+    "body": "Your bots stop answering immediately. Everything is kept for 30 days in case you change your mind, then permanently deleted: conversations, leads, bookings, documents and files. Only the invoices we are legally required to keep survive.",
+    "button": "Delete this workspace",
+    "confirm": "Delete this workspace? Your bots stop answering now, everything is kept for 30 days, then permanently deleted. This cannot be undone after that.",
+    "confirmYes": "Yes, delete my workspace",
+    "pendingCard": "Scheduled for deletion on {{date}} — {{days}} days from now. Until then you can keep your account and everything comes back.",
+    "pendingTitle": "This workspace is scheduled for deletion",
+    "pendingBody": "It stops answering customers straight away and everything is permanently deleted on {{date}} — {{days}} days from now. If you did not mean to do this, keep your account now.",
+    "keepAccount": "Keep my account",
+    "continueDeleting": "Continue deleting",
+    "adminOnly": "Only workspace admins can change this.",
+    "requested": "Your workspace will be deleted in 30 days.",
+    "requestError": "Could not schedule the deletion",
+    "reactivated": "Your workspace is staying.",
+    "reactivateError": "Could not reactivate the workspace"
+  },
   "ai": {
     "header": {
       "title": "AI & Content",

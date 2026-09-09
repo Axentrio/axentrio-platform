@@ -290,6 +290,30 @@ export class Tenant {
   @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
+  /**
+   * Account deletion, self-service. NULL means no request.
+   *
+   * Three columns rather than a status value on purpose: the state has to survive
+   * a status change made by an admin, and `deletion_scheduled_for` is the only
+   * thing the sweep needs to index.
+   */
+  @Column({ type: 'timestamptz', nullable: true, name: 'deletion_requested_at' })
+  deletionRequestedAt?: Date | null;
+
+  @Column({ type: 'uuid', nullable: true, name: 'deletion_requested_by' })
+  deletionRequestedBy?: string | null;
+
+  /** `deletion_requested_at` + the dormancy window. The clock starts at the REQUEST. */
+  @Column({ type: 'timestamptz', nullable: true, name: 'deletion_scheduled_for' })
+  deletionScheduledFor?: Date | null;
+
+  /**
+   * Bots paused BY the deletion request, so reactivation resumes exactly those
+   * and leaves a bot the owner had deliberately paused alone.
+   */
+  @Column({ type: 'uuid', array: true, nullable: true, name: 'deletion_paused_bot_ids' })
+  deletionPausedBotIds?: string[] | null;
+
   // Relationships
   @OneToMany(() => ChatSession, (session) => session.tenant)
   sessions!: ChatSession[];

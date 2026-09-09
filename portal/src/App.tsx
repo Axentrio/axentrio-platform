@@ -55,6 +55,7 @@ import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import DataRetentionSettings from '@pages/settings/DataRetentionSettings';
 import { TermsAcceptanceModal } from '@/components/tenant/TermsAcceptanceModal';
+import { DeletionPendingModal } from '@/components/tenant/DeletionPendingModal';
 import { IntegrationTab } from '@components/settings/IntegrationTab';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import { SocialChannelsContent } from '@components/channels/SocialChannelsContent';
@@ -499,6 +500,9 @@ const App: React.FC = () => {
                 {/* Global: acceptance is per person and per version, so it has to
                     be able to appear wherever the customer lands. */}
                 <TermsAcceptanceModal />
+                {/* Global: a workspace in its 30-day deletion window has to be
+                    able to change its mind from wherever the customer lands. */}
+                <DeletionPendingModal />
                 <OrganizationRequired>
                   <SetupGate>
                     <AppRoutes />

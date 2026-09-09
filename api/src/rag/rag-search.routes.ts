@@ -4,11 +4,11 @@
  * Auth: Bearer token using RAG_INTERNAL_SECRET (platform-level, not per-tenant).
  */
 
-import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { rateLimit } from 'express-rate-limit';
 import { config } from '../config/environment';
+import { matchRagToken } from './rag-auth';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { searchKnowledge } from '../llm/rag.service';
@@ -33,12 +33,18 @@ function verifyInternalAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  const authHeader = req.headers.authorization || '';
-  const expected = `Bearer ${secret}`;
-  if (authHeader.length !== expected.length ||
-      !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))) {
+  const matched = matchRagToken(req.headers.authorization || '', {
+    current: secret,
+    previous: config.n8n.ragInternalSecretPrevious,
+  });
+  if (!matched) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
+  }
+  if (matched === 'previous') {
+    // The rotation is not finished. Delete RAG_INTERNAL_SECRET_PREVIOUS once this
+    // stops appearing.
+    logger.warn('[RAG Search] authenticated with the PREVIOUS secret — finish the rotation');
   }
 
   next();

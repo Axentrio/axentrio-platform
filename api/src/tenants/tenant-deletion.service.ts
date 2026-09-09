@@ -44,8 +44,14 @@ import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
 import { logger } from '../utils/logger';
 
-/** How long the account stays recoverable. The clock starts at the request. */
-export const DELETION_DORMANCY_DAYS = 30;
+/**
+ * How long the account stays recoverable. The clock starts at the REQUEST, so the
+ * whole window has to fit inside the one month Art 12(3) allows.
+ *
+ * Configurable (`DELETION_DORMANCY_DAYS`) because the number is a legal decision;
+ * 30 is the largest round value that still fits.
+ */
+export const DELETION_DORMANCY_DAYS = config.tenantDeletion.dormancyDays;
 
 /** Purged by `tenant_id`. */
 export const PURGE_BY_TENANT_ID = [

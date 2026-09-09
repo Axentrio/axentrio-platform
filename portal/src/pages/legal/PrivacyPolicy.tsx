@@ -139,6 +139,47 @@ const PrivacyPolicy: React.FC = () => {
             protect the rights, safety, and security of users and the Service.
           </li>
         </ul>
+
+        <p className="mt-3">
+          <strong>Our sub-processors.</strong> A named list, because &ldquo;service
+          providers&rdquo; is not something a Customer can assess:
+        </p>
+        <ul className="list-disc space-y-2 pl-6">
+          <li>
+            <strong>Railway</strong> — application hosting, managed PostgreSQL and Redis.
+          </li>
+          <li>
+            <strong>Cloudflare</strong> — DNS, file storage (R2) and database backups.
+          </li>
+          <li>
+            <strong>OpenAI</strong> and <strong>Anthropic</strong> — language-model
+            inference for AI replies and insights.
+          </li>
+          <li>
+            <strong>Clerk</strong> — authentication and organisation management.
+          </li>
+          <li>
+            <strong>Stripe</strong> — payments, invoices and subscription billing.
+          </li>
+          <li>
+            <strong>Resend</strong> — transactional email.
+          </li>
+          <li>
+            <strong>Sentry</strong> — error monitoring.
+          </li>
+          <li>
+            <strong>Google</strong> and <strong>Microsoft</strong> — calendar, maps and
+            file integrations, used only when a Customer connects them.
+          </li>
+          <li>
+            <strong>Meta</strong> — WhatsApp, Instagram and Messenger delivery, used
+            only for the channels a Customer connects.
+          </li>
+        </ul>
+        <p className="mt-3">
+          We will tell Customers before adding a sub-processor that processes their end
+          users&rsquo; personal data.
+        </p>
       </LegalSection>
 
       <LegalSection heading="Data retention">

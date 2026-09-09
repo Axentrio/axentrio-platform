@@ -1011,25 +1011,14 @@ router.delete(
     const result = await eraseLead(AppDataSource, tenantId, req.params.id);
     if (!result) throw new NotFoundError('Lead not found');
 
+    // The `leads.erased` compliance event is written by `eraseLead` itself, so a
+    // sweep-driven erasure is recorded the same way and the post-restore replay
+    // finds it. This row is the SECURITY trail, and it is the only place that
+    // knows a super-admin was impersonating.
     await logAudit(req.userId!, 'leads.erased', 'lead', result.leadId, tenantId, {
       scrubbed: result.scrubbed,
       transcriptRetained: result.transcriptRetained,
       impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
-    });
-
-    // The single most-requested proof in a data-protection dispute: this person
-    // asked to be erased, and here is when and what went.
-    await logComplianceEvent({
-      actorId: req.userId!,
-      eventType: 'leads.erased',
-      tenantId,
-      subjectType: 'lead',
-      subjectId: result.leadId,
-      details: {
-        scrubbed: result.scrubbed,
-        transcriptRetained: result.transcriptRetained,
-        impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
-      },
     });
 
     sendSuccess(res, {

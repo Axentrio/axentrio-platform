@@ -52,6 +52,7 @@
 import type { DataSource } from 'typeorm';
 import { emitLeadDeleted } from './lead-capture.service';
 import { ERASED_PREFIX, isErasedDedupeKey } from './lead-tombstone';
+import { logComplianceEvent } from '../compliance/compliance-events.service';
 import { logger } from '../utils/logger';
 import { returningRows } from '../utils/raw-sql';
 
@@ -441,6 +442,18 @@ export async function eraseLead(
   });
 
   logger.info('[leads] erased', { tenantId, leadId, scrubbed: result.scrubbed });
+
+  // Recorded HERE, not in the route, so every path that erases — the API, the
+  // retention sweep, the post-restore replay — leaves the same evidence. A
+  // restore undoes this row's effect, and the replay finds it by this event.
+  await logComplianceEvent({
+    actorId: 'system',
+    eventType: 'leads.erased',
+    tenantId,
+    subjectType: 'lead',
+    subjectId: leadId,
+    details: { scrubbed: result.scrubbed, transcriptRetained: false },
+  });
 
   return { leadId, scrubbed: result.scrubbed, transcriptRetained: false };
 }

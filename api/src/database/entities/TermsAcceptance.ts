@@ -28,7 +28,7 @@ export class TermsAcceptance {
   @Column({ type: 'varchar', length: 32, name: 'terms_version' })
   termsVersion!: string;
 
-  @CreateDateColumn({ name: 'accepted_at' })
+  @CreateDateColumn({ type: 'timestamptz', name: 'accepted_at' })
   acceptedAt!: Date;
 
   /** Evidence of WHO accepted: an IP and a user agent are worth recording. */

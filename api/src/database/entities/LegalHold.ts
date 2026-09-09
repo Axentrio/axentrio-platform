@@ -47,7 +47,7 @@ export class LegalHold {
   @Column({ type: 'uuid', name: 'opened_by' })
   openedBy!: string;
 
-  @CreateDateColumn({ name: 'opened_at' })
+  @CreateDateColumn({ type: 'timestamptz', name: 'opened_at' })
   openedAt!: Date;
 
   /** A hold must be revisited by this date. Indefinite holds are the failure mode. */

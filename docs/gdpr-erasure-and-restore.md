@@ -50,33 +50,81 @@ A restore rolls the database back to the dump's timestamp. Everything erased
 between the dump and now comes back — including data subjects who asked to be
 forgotten. That is the failure this section exists for.
 
-1. Note the dump's `created_at` (R2 object metadata) — the point the restore
-   rewinds to.
-2. List the deletions that happened after it, which are the events kept for
-   exactly this reason:
+**Use the script.** `api/scripts/replay-erasures.ts` does the whole thing:
 
-   ```sql
-   SELECT event_type, tenant_id, subject_id, details, created_at
-     FROM compliance_events
-    WHERE event_type IN ('leads.erased', 'tenant.deleted')
-      AND created_at > '<dump timestamp>'
-    ORDER BY created_at;
-   ```
+```bash
+cd api
+# 1. see what would happen (changes nothing)
+npx ts-node scripts/replay-erasures.ts --since <dump created_at> --dry-run
+# 2. do it
+npx ts-node scripts/replay-erasures.ts --since <dump created_at>
+```
 
-3. Replay them:
-   - `leads.erased` → `eraseLead(dataSource, tenant_id, subject_id)` per row.
-   - `tenant.deleted` → `executeTenantDeletion(tenant_id)` per row.
-4. Re-check: the query in step 2 should now describe rows that are erased again.
-5. Record the replay itself as a compliance event (`erasure.replayed`) with the
-   dump timestamp and the number of subjects, so the next person can see it was
-   done.
+`--since` is the dump's `created_at` from the R2 object metadata — the point the
+restore rewinds to, not the time the restore finished.
+
+What it does, and why it is safe to re-run:
+
+- finds every `leads.erased` and `tenant.deleted` compliance event after `--since`;
+- calls `eraseLead` / `executeTenantDeletion` for each. `eraseLead` returns null
+  for an already-erased lead, so a subject who was never actually restored is a
+  no-op rather than an error;
+- writes an `erasure.replayed` compliance event naming the timestamp and the
+  counts, so the next person can see it was done;
+- does **not** run migrations — pointing it at a restored database must not change
+  its schema as a side effect.
+
+It only works because `eraseLead` itself writes the `leads.erased` event, not just
+the route: a sweep-driven erasure is recorded the same way and is therefore
+replayable too.
+
+By hand, the query is the same:
+
+```sql
+SELECT event_type, tenant_id, subject_id, details, created_at
+  FROM compliance_events
+ WHERE event_type IN ('leads.erased', 'tenant.deleted')
+   AND created_at > '<dump timestamp>'
+ ORDER BY created_at;
+```
 
 `compliance_events` survives a restore only if the dump predates the events — a
 restore to before an event loses the record of it. If the window matters, export
 the table before restoring.
 
+## The two periods, and where to change them
+
+| Period | Default | Where |
+|---|---|---|
+| Deletion dormancy (how long a deleted workspace stays recoverable) | 30 days | `DELETION_DORMANCY_DAYS` |
+| Compliance-event retention (the proof trail) | 2555 days (7 years) | `COMPLIANCE_EVENT_RETENTION_DAYS` |
+
+Both defaults are **provisional engineering values, not legal positions**. The
+30-day window is the largest round number that fits inside the one month Art 12(3)
+allows for a rights request, because the clock starts at the request; raising it
+means splitting the voluntary "delete my workspace" flow from the statutory
+deadline for a formal erasure request.
+
 ## Restore drill
 
 `db-restore-drill.yml` runs weekly and asserts the schema restores. It does **not**
-run the re-erase replay above. A restore that passes the drill can still resurrect
-erased people, so the replay is a manual step on purpose.
+run the re-erase replay above. A restore that passes the weekly drill can still
+resurrect erased people, so the replay is a manual step on purpose.
+
+## Rotating `RAG_INTERNAL_SECRET`
+
+That secret is a platform-wide shared bearer token for the internal RAG endpoint,
+and a leaked one is an Art 32 problem. It can now be rotated without a flag day:
+
+1. Set `RAG_INTERNAL_SECRET` to the new value and `RAG_INTERNAL_SECRET_PREVIOUS`
+   to the old one. Deploy. Both are accepted.
+2. Update the callers.
+3. Watch the logs for `authenticated with the PREVIOUS secret`. When it stops
+   appearing, delete `RAG_INTERNAL_SECRET_PREVIOUS` and deploy again.
+
+`matchRagToken` compares every candidate in constant time and does not
+short-circuit, so the work done does not reveal which secret was sent.
+
+**Not yet done:** the current production value has not been rotated. The mechanism
+exists; using it is an operational decision.
+

@@ -101,6 +101,12 @@ const envSchema = z.object({
   N8N_WEBHOOK_URL: z.string().optional(),
   N8N_DEFAULT_WEBHOOK_URL: z.string().optional(),
   RAG_INTERNAL_SECRET: z.string().optional(),
+  /**
+   * The secret being retired. Accepted alongside the current one so a rotation
+   * does not drop in-flight callers — see `matchRagToken`. Remove it once the
+   * logs stop showing authentications with it.
+   */
+  RAG_INTERNAL_SECRET_PREVIOUS: z.string().optional(),
   N8N_INBOUND_SECRET: z.string().optional(),
 
   // AWS S3
@@ -166,6 +172,17 @@ const envSchema = z.object({
   // dispute asks for months later. 7 years is a provisional engineering default —
   // the period itself is a legal decision, which is why it is env-configurable.
   COMPLIANCE_EVENT_RETENTION_DAYS: z.string().default('2555').transform(Number),
+
+  /**
+   * How long a deleted workspace stays recoverable before its content is purged.
+   *
+   * 30 is the largest round number that fits inside the one month Art 12(3)
+   * allows for a rights request, because the clock starts at the REQUEST — not at
+   * the next login. Raising it past 30 would need the two triggers split: a
+   * longer grace period for the voluntary "delete my workspace" button, and the
+   * statutory month for a formal erasure request.
+   */
+  DELETION_DORMANCY_DAYS: z.string().default('30').transform(Number),
 
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.string().default('3310').transform(Number),
@@ -508,6 +525,10 @@ export const config = {
     retentionDays: env.COMPLIANCE_EVENT_RETENTION_DAYS,
   },
 
+  tenantDeletion: {
+    dormancyDays: env.DELETION_DORMANCY_DAYS,
+  },
+
   clamav: {
     host: env.CLAMAV_HOST,
     port: env.CLAMAV_PORT,
@@ -520,6 +541,7 @@ export const config = {
     defaultWebhookUrl: env.N8N_DEFAULT_WEBHOOK_URL || env.WEBHOOK_URL || env.N8N_WEBHOOK_URL,
     enabled: !!(env.WEBHOOK_URL || env.N8N_WEBHOOK_URL || env.N8N_DEFAULT_WEBHOOK_URL),
     ragInternalSecret: env.RAG_INTERNAL_SECRET,
+    ragInternalSecretPrevious: env.RAG_INTERNAL_SECRET_PREVIOUS,
     inboundSecret: env.N8N_INBOUND_SECRET,
   },
 

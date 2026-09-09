@@ -47,6 +47,6 @@ export class ComplianceEvent {
   @Column({ type: 'jsonb', nullable: true })
   details?: Record<string, unknown> | null;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 }

@@ -32,9 +32,12 @@
  *    enumerates the real schema and fails if a tenant-scoped table is neither
  *    purged nor explicitly retained.
  */
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
+import { createS3Client } from '../config/s3.config';
+import { config } from '../config/environment';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
 import { logger } from '../utils/logger';
@@ -268,6 +271,10 @@ export async function cancelTenantDeletion(
 export async function executeTenantDeletion(tenantId: string): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
 
+  // Objects FIRST: the row is the only pointer to the key, so a purge that stops
+  // at the database leaves the customer's actual documents in the bucket.
+  counts.s3Objects = await purgeTenantObjects(tenantId);
+
   await AppDataSource.transaction(async (manager) => {
     const sessionSubquery = `SELECT id FROM chat_sessions WHERE tenant_id = $1`;
 
@@ -368,6 +375,68 @@ export async function executeTenantDeletion(tenantId: string): Promise<Record<st
 
   logger.info('[tenant-deletion] executed', { tenantId, purged });
   return counts;
+}
+
+/**
+ * Delete a set of storage keys, best-effort per key.
+ *
+ * Exported and injectable so the failure handling can be tested without a bucket.
+ * One missing key must not strand the rest: the caller still purges the rows, and
+ * a half-purged account that reports an error is worse than one that deletes what
+ * it can and says so.
+ */
+export async function purgeObjects(
+  keys: string[],
+  deps: { bucket: string; send: (key: string) => Promise<unknown> },
+): Promise<number> {
+  let deleted = 0;
+  for (const key of keys) {
+    try {
+      await deps.send(key);
+      deleted += 1;
+    } catch (error) {
+      logger.error('[tenant-deletion] object delete failed', {
+        key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return deleted;
+}
+
+/**
+ * Delete the tenant's stored objects.
+ *
+ * Chat uploads and knowledge documents both live in the bucket, and the database
+ * row is the only thing pointing at them. A purge that deletes the row and not the
+ * object reports success while the customer's files stay readable — the exact
+ * failure the erasure path already guards against elsewhere.
+ */
+async function purgeTenantObjects(tenantId: string): Promise<number> {
+  const bucket = config.s3?.bucket;
+  if (!bucket) {
+    logger.warn('[tenant-deletion] no S3 bucket configured; objects not purged', { tenantId });
+    return 0;
+  }
+
+  const rows: Array<{ key: string }> = await AppDataSource.query(
+    `SELECT storage_path AS key FROM file_uploads
+      WHERE tenant_id = $1 AND storage_path IS NOT NULL
+     UNION
+     SELECT storage_path AS key FROM knowledge_documents
+      WHERE "tenantId" = $1 AND storage_path IS NOT NULL`,
+    [tenantId],
+  );
+  if (rows.length === 0) return 0;
+
+  const client = createS3Client();
+  return purgeObjects(
+    rows.map((r) => r.key),
+    {
+      bucket,
+      send: (key) => client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+    },
+  );
 }
 
 /** Execute every tenant whose window has closed. */

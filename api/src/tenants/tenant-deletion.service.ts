@@ -38,6 +38,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { createS3Client } from '../config/s3.config';
 import { deleteClerkOrganization } from '../services/clerk-sync.service';
+import { cancelAtPeriodEnd } from '../billing/service';
 import { config } from '../config/environment';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
@@ -279,6 +280,22 @@ export async function executeTenantDeletion(tenantId: string): Promise<Record<st
     [tenantId],
   );
   const clerkOrgId = tenantRow?.clerk_org_id ?? null;
+
+  // Billing stops at the end of the period the customer already paid for, which
+  // is what the cancellation policy promises. `no_stripe_subscription` is the
+  // normal case for a free workspace, not a failure; anything else is logged and
+  // the deletion proceeds, because a billing hiccup must not keep customer data.
+  try {
+    await cancelAtPeriodEnd(tenantId);
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code !== 'no_stripe_subscription') {
+      logger.error('[tenant-deletion] billing cancel failed', {
+        tenantId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   // Objects FIRST: the row is the only pointer to the key, so a purge that stops
   // at the database leaves the customer's actual documents in the bucket.

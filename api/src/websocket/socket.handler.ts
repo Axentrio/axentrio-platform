@@ -227,7 +227,7 @@ export async function applySocketTenantContext(
   user.tenantId = tenant.id;
   socket.data.tenantId = tenant.id;
   logger.info('Super admin socket context switch', { userId: user.userId, targetTenantId: tenant.id });
-  await logAudit(user.userId ?? user.id, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
+  await logAudit(user.userId!, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
     homeTenantId,
     transport: 'socket',
   });

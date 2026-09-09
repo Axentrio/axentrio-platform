@@ -49,8 +49,8 @@ declare global {
   namespace Express {
     interface Request {
       tenantId?: string;
-      /** True once resolveTenantContext resolved a super-admin tenant switch. */
-      tenantContextResolved?: boolean;
+      /** True once resolveTenantContext wrote the audit row for the switch. */
+      tenantContextAudited?: boolean;
       userId?: string;
       requestId?: string;
       user?: RequestUser;

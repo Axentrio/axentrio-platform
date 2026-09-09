@@ -24,12 +24,14 @@ export function requireSuperAdmin(req: Request, _res: Response, next: NextFuncti
  * Super admins with header: tenantId is set to the target tenant.
  *
  * Routers mount on overlapping paths, so one request can run this middleware
- * several times. The switch resolves, and audits, on the first run only.
+ * several times, and `autoProvision` re-attaches the home tenant before each
+ * run. Every run must therefore resolve the switch again; only the audit row
+ * is written once.
  */
 export async function resolveTenantContext(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const targetTenantId = req.headers['x-tenant-context'] as string | undefined;
 
-  if (!targetTenantId || !req.user || req.user.role !== 'super_admin' || req.tenantContextResolved) {
+  if (!targetTenantId || !req.user || req.user.role !== 'super_admin') {
     next();
     return;
   }
@@ -57,7 +59,6 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
     const homeTenantId = req.user.tenantId;
     req.tenantId = tenant.id;
     req.user.tenantId = tenant.id;
-    req.tenantContextResolved = true;
     logger.info('Super admin context switch', {
       userId: req.userId,
       targetTenantId: tenant.id,
@@ -66,9 +67,12 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
     // The audit row, not the log line, is the record that proves who read a
     // controller's data. logAudit swallows database errors on purpose, so a
     // failed write never blocks the request.
-    await logAudit(req.userId!, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
-      homeTenantId,
-    });
+    if (!req.tenantContextAudited) {
+      req.tenantContextAudited = true;
+      await logAudit(req.userId!, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
+        homeTenantId,
+      });
+    }
 
     next();
   } catch (error) {

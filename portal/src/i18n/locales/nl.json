@@ -1978,7 +1978,7 @@
         },
         "delete": {
           "title": "Gebruiker permanent verwijderen",
-          "description": "Dit verwijdert en koppelt de gegevens van <strong>{{name}}</strong> permanent los. Dit kan niet ongedaan worden gemaakt.",
+          "description": "Dit verwijdert het gebruikersaccount van <strong>{{name}}</strong> en koppelt de login los. Dit kan niet ongedaan worden gemaakt.",
           "button": "Permanent verwijderen"
         }
       }

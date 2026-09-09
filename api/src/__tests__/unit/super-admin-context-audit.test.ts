@@ -55,16 +55,21 @@ describe('resolveTenantContext audit trail', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('audits once when overlapping router mounts run it again on the same request', async () => {
+  it('keeps the switch on every run and audits once when router mounts overlap', async () => {
     const req = requestFor('super_admin');
     const next = vi.fn() as unknown as NextFunction;
+    const autoProvision = () => {
+      req.tenantId = HOME_TENANT;
+      req.user = { id: 'actor-1', role: 'super_admin', tenantId: HOME_TENANT } as Request['user'];
+    };
 
-    await resolveTenantContext(req, {} as Response, next);
-    await resolveTenantContext(req, {} as Response, next);
-    await resolveTenantContext(req, {} as Response, next);
+    for (let mount = 0; mount < 3; mount += 1) {
+      autoProvision();
+      await resolveTenantContext(req, {} as Response, next);
+      expect(req.tenantId).toBe(TARGET_TENANT);
+      expect(req.user?.tenantId).toBe(TARGET_TENANT);
+    }
 
-    expect(req.tenantId).toBe(TARGET_TENANT);
-    expect(req.user?.tenantId).toBe(TARGET_TENANT);
     expect(logAuditMock).toHaveBeenCalledTimes(1);
     expect(logAuditMock.mock.calls[0][5]).toEqual({ homeTenantId: HOME_TENANT });
   });

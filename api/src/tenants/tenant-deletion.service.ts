@@ -37,6 +37,7 @@ import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { createS3Client } from '../config/s3.config';
+import { deleteClerkOrganization } from '../services/clerk-sync.service';
 import { config } from '../config/environment';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
@@ -271,6 +272,14 @@ export async function cancelTenantDeletion(
 export async function executeTenantDeletion(tenantId: string): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
 
+  // Captured before the scrub clears it: the Clerk org has to be removed after
+  // our own transaction commits, and the id is the only handle we have.
+  const [tenantRow]: Array<{ clerk_org_id: string | null }> = await AppDataSource.query(
+    `SELECT clerk_org_id FROM tenants WHERE id = $1`,
+    [tenantId],
+  );
+  const clerkOrgId = tenantRow?.clerk_org_id ?? null;
+
   // Objects FIRST: the row is the only pointer to the key, so a purge that stops
   // at the database leaves the customer's actual documents in the bucket.
   counts.s3Objects = await purgeTenantObjects(tenantId);
@@ -372,6 +381,23 @@ export async function executeTenantDeletion(tenantId: string): Promise<Record<st
     subjectId: tenantId,
     details: { purged, tables: Object.keys(counts).length },
   });
+
+  // The logins go with the workspace. Best-effort: a Clerk outage must not leave
+  // the content undeleted, and the org id is already cleared on our side.
+  if (clerkOrgId) {
+    try {
+      const removed = await deleteClerkOrganization(clerkOrgId);
+      if (!removed) {
+        logger.warn('[tenant-deletion] Clerk org not removed', { tenantId, clerkOrgId });
+      }
+    } catch (error) {
+      logger.error('[tenant-deletion] Clerk org removal threw', {
+        tenantId,
+        clerkOrgId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   logger.info('[tenant-deletion] executed', { tenantId, purged });
   return counts;

@@ -28,19 +28,20 @@ export const PORTAL_ROUTES: readonly PortalRoute[] = [
     path: '/ai',
     label: 'AI & Content',
     purpose:
-      'configure the assistant (name, tone, instructions, business hours), upload and manage knowledge documents, test the bot',
+      'configure the assistant (name, tone, instructions), set spoken opening hours, upload and manage knowledge documents, test the bot',
   },
   { path: '/analytics', label: 'Analytics', purpose: 'conversation volumes and trends' },
   {
     path: '/channels',
     label: 'Channels',
-    purpose: 'connect WhatsApp, Facebook Messenger, Instagram and Telegram',
+    purpose:
+      'CONNECT WhatsApp, Facebook Messenger, Instagram and Telegram. First-time channel setup lives here. Send "where do I connect WhatsApp" here, never to /settings/channels',
   },
   { path: '/leads', label: 'Leads', purpose: 'view, edit and export captured leads' },
   {
     path: '/bookings',
     label: 'Bookings',
-    purpose: 'connect a calendar, set availability and slot length, manage services and appointments',
+    purpose: 'connect a calendar, set bookable slot hours, manage services and appointments. Spoken opening hours for the bot are NOT here — those live on /ai',
   },
   {
     path: '/success-meter',
@@ -77,7 +78,8 @@ export const PORTAL_ROUTES: readonly PortalRoute[] = [
   {
     path: '/settings/channels',
     label: 'Settings → Channels',
-    purpose: 'per-channel message settings',
+    purpose:
+      'per-channel message settings after a channel is already connected. Not the place to connect WhatsApp',
   },
   {
     path: '/settings/billing',

@@ -1,4 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+
+const logAuditMock = vi.hoisted(() => vi.fn());
+vi.mock('../../utils/audit', () => ({ logAudit: logAuditMock }));
+
 import { applySocketTenantContext } from '../../websocket/socket.handler';
 import type { Tenant } from '../../database/entities/Tenant';
 import type { TenantSocket } from '../../middleware/tenant.middleware';
@@ -33,6 +37,11 @@ function mockSocket(opts: {
   } as TenantSocket;
 }
 
+beforeEach(() => {
+  logAuditMock.mockReset();
+  logAuditMock.mockResolvedValue(undefined);
+});
+
 describe('applySocketTenantContext', () => {
   it('super admin + valid UUID + active tenant -> overwrites tenantId', async () => {
     const socket = mockSocket({ role: 'super_admin', tenantContext: TARGET });
@@ -41,6 +50,34 @@ describe('applySocketTenantContext', () => {
     expect(socket.data.tenantId).toBe(TARGET);
     expect(socket.data.user?.tenantId).toBe(TARGET);
     expect(loadTenant).toHaveBeenCalledWith(TARGET);
+  });
+
+  it('writes one audit row naming the actor home tenant', async () => {
+    const socket = mockSocket({ role: 'super_admin', tenantContext: TARGET });
+    await applySocketTenantContext(socket, async () => ({ id: TARGET, status: 'active' }) as Tenant);
+    expect(logAuditMock).toHaveBeenCalledTimes(1);
+    expect(logAuditMock).toHaveBeenCalledWith(
+      'user-1',
+      'tenant.context_switched',
+      'tenant',
+      TARGET,
+      TARGET,
+      { homeTenantId: HOME, transport: 'socket' },
+    );
+  });
+
+  it('writes no audit row when the socket keeps its home tenant', async () => {
+    const socket = mockSocket({ role: 'admin', tenantContext: TARGET });
+    await applySocketTenantContext(socket, vi.fn());
+    expect(logAuditMock).not.toHaveBeenCalled();
+  });
+
+  it('writes no audit row when the target tenant is suspended', async () => {
+    const socket = mockSocket({ role: 'super_admin', tenantContext: TARGET });
+    await expect(
+      applySocketTenantContext(socket, async () => ({ id: TARGET, status: 'suspended' }) as Tenant),
+    ).rejects.toThrow('Authentication error: Tenant is suspended');
+    expect(logAuditMock).not.toHaveBeenCalled();
   });
 
   it('super admin + loadTenant null -> Tenant not found', async () => {

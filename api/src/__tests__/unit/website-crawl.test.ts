@@ -125,6 +125,51 @@ describe("fetchRobotsAllows", () => {
     expect(await allows("https://plumber.example/private/x")).toBe(true);
   });
 
+  it("follows one same-host redirect and honours the rules it finds", async () => {
+    const seen: string[] = [];
+    const allows = await fetchRobotsAllows("https://plumber.example/", async (url) => {
+      seen.push(url);
+      if (url === "https://plumber.example/robots.txt") {
+        return {
+          status: 301,
+          body: "",
+          location: "https://www.plumber.example/robots.txt",
+        };
+      }
+      return { status: 200, body: "User-agent: *\nDisallow: /private\n" };
+    });
+    expect(seen).toEqual([
+      "https://plumber.example/robots.txt",
+      "https://www.plumber.example/robots.txt",
+    ]);
+    expect(await allows("https://plumber.example/private/x")).toBe(false);
+    expect(await allows("https://plumber.example/services")).toBe(true);
+  });
+
+  it("refuses to follow a redirect that leaves the host", async () => {
+    const allows = await fetchRobotsAllows("https://plumber.example/", async (url) => {
+      if (url === "https://plumber.example/robots.txt") {
+        return { status: 302, body: "", location: "https://attacker.example/robots.txt" };
+      }
+      return { status: 200, body: "User-agent: *\nDisallow: /\n" };
+    });
+    expect(await allows("https://plumber.example/private/x")).toBe(true);
+  });
+
+  it("stops after one hop and allows everything on a redirect chain", async () => {
+    let calls = 0;
+    const allows = await fetchRobotsAllows("https://plumber.example/", async () => {
+      calls += 1;
+      return {
+        status: 301,
+        body: "",
+        location: `https://plumber.example/robots.txt?hop=${calls}`,
+      };
+    });
+    expect(calls).toBe(2);
+    expect(await allows("https://plumber.example/private/x")).toBe(true);
+  });
+
   it("allows everything for a non-https origin, which has no resolvable origin", async () => {
     const allows = await fetchRobotsAllows("http://example.com/", async () => ({
       status: 200,

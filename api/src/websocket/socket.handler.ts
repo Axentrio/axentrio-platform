@@ -8,6 +8,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Server as HttpServer } from 'http';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
 import { getPubClient, getSubClient, isRedisAvailable } from '../config/redis';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { isOriginAllowed, isWildcardCors } from '../security/cors';
@@ -222,9 +223,14 @@ export async function applySocketTenantContext(
   if (!tenant) throw new Error('Authentication error: Tenant not found');
   if (tenant.status === 'suspended') throw new Error('Authentication error: Tenant is suspended');
   if (tenant.status === 'cancelled') throw new Error('Authentication error: Tenant is cancelled');
+  const homeTenantId = user.tenantId;
   user.tenantId = tenant.id;
   socket.data.tenantId = tenant.id;
   logger.info('Super admin socket context switch', { userId: user.userId, targetTenantId: tenant.id });
+  await logAudit(user.userId ?? user.id, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
+    homeTenantId,
+    transport: 'socket',
+  });
 }
 
 /**

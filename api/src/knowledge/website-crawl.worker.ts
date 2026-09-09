@@ -130,6 +130,10 @@ export function createWebsiteCrawlProcessor(
           return {
             status: res.status,
             body: typeof res.data === "string" ? res.data : "",
+            location:
+              typeof res.headers?.location === "string"
+                ? res.headers.location
+                : undefined,
           };
         }),
         assertSafe: (safeUrl) => {

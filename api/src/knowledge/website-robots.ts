@@ -1,4 +1,4 @@
-import { originFromSourceUrl } from "./website-url";
+import { isSameHost, originFromSourceUrl } from "./website-url";
 
 export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 
@@ -46,26 +46,52 @@ export function pathFromPageUrl(pageUrl: string): string {
   }
 }
 
+const REDIRECT_STATUS = [301, 302, 303, 307, 308];
+
 /**
- * Builds the crawl's robots.txt predicate for one origin. A missing,
- * redirected, or unreachable robots.txt allows every path.
+ * Builds the crawl's robots.txt predicate for one origin. A missing or
+ * unreachable robots.txt allows every path. One same-host redirect hop is
+ * followed, because the apex host of a site usually redirects to `www`, and
+ * `isSameHost` lets the crawl reach both. Anything else allows every path.
  */
 export async function fetchRobotsAllows(
   originUrl: string,
-  get: (url: string) => Promise<{ status: number; body: string }>,
+  get: (
+    url: string,
+  ) => Promise<{ status: number; body: string; location?: string }>,
 ): Promise<(pageUrl: string) => Promise<boolean>> {
   const allowAll = async () => true;
   const origin = originFromSourceUrl(originUrl);
   if (!origin) return allowAll;
 
-  let response: { status: number; body: string };
-  try {
-    response = await get(`${origin}/robots.txt`);
-  } catch {
-    return allowAll;
-  }
-  if (response.status !== 200) return allowAll;
+  let robotsUrl = `${origin}/robots.txt`;
+  let body: string | null = null;
 
-  const robots = parseRobotsTxt(response.body);
+  for (let hop = 0; hop < 2 && body === null; hop += 1) {
+    let response: { status: number; body: string; location?: string };
+    try {
+      response = await get(robotsUrl);
+    } catch {
+      return allowAll;
+    }
+    if (response.status === 200) {
+      body = response.body;
+      break;
+    }
+    if (!REDIRECT_STATUS.includes(response.status) || !response.location) {
+      return allowAll;
+    }
+    let next: string;
+    try {
+      next = new URL(response.location, robotsUrl).toString();
+    } catch {
+      return allowAll;
+    }
+    if (!isSameHost(robotsUrl, next)) return allowAll;
+    robotsUrl = next;
+  }
+
+  if (body === null) return allowAll;
+  const robots = parseRobotsTxt(body);
   return async (pageUrl: string) => robots.allows(pathFromPageUrl(pageUrl));
 }

@@ -55,6 +55,20 @@ describe('resolveTenantContext audit trail', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
+  it('audits once when overlapping router mounts run it again on the same request', async () => {
+    const req = requestFor('super_admin');
+    const next = vi.fn() as unknown as NextFunction;
+
+    await resolveTenantContext(req, {} as Response, next);
+    await resolveTenantContext(req, {} as Response, next);
+    await resolveTenantContext(req, {} as Response, next);
+
+    expect(req.tenantId).toBe(TARGET_TENANT);
+    expect(req.user?.tenantId).toBe(TARGET_TENANT);
+    expect(logAuditMock).toHaveBeenCalledTimes(1);
+    expect(logAuditMock.mock.calls[0][5]).toEqual({ homeTenantId: HOME_TENANT });
+  });
+
   it('ignores the header for a normal admin and writes no audit row', async () => {
     const req = requestFor('admin');
     const next = vi.fn() as unknown as NextFunction;

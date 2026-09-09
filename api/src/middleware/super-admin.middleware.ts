@@ -22,11 +22,14 @@ export function requireSuperAdmin(req: Request, _res: Response, next: NextFuncti
  * Non-super-admin users: header is ignored entirely.
  * Super admins without header: tenantId stays as their own.
  * Super admins with header: tenantId is set to the target tenant.
+ *
+ * Routers mount on overlapping paths, so one request can run this middleware
+ * several times. The switch resolves, and audits, on the first run only.
  */
 export async function resolveTenantContext(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const targetTenantId = req.headers['x-tenant-context'] as string | undefined;
 
-  if (!targetTenantId || !req.user || req.user.role !== 'super_admin') {
+  if (!targetTenantId || !req.user || req.user.role !== 'super_admin' || req.tenantContextResolved) {
     next();
     return;
   }
@@ -54,6 +57,7 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
     const homeTenantId = req.user.tenantId;
     req.tenantId = tenant.id;
     req.user.tenantId = tenant.id;
+    req.tenantContextResolved = true;
     logger.info('Super admin context switch', {
       userId: req.userId,
       targetTenantId: tenant.id,

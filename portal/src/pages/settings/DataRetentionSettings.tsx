@@ -9,6 +9,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ConversationRetentionCard } from '@/components/conversations/ConversationRetentionCard';
+import { DeletionDangerZone } from '@/components/tenant/DeletionDangerZone';
 
 const DataRetentionSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -28,6 +29,7 @@ const DataRetentionSettings: React.FC = () => {
       </div>
 
       <ConversationRetentionCard />
+      <DeletionDangerZone />
     </div>
   );
 };

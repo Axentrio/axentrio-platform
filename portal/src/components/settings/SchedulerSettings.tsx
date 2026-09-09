@@ -15,6 +15,7 @@ import { AddressAutocomplete } from './AddressAutocomplete';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
+import { useAppAuth } from '@/auth/useAppAuth';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
@@ -748,7 +749,7 @@ const GoogleCalendarSection: React.FC<GoogleCalendarSectionProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm text-text-secondary flex items-center gap-2">
             <Check className="w-4 h-4 text-status-online" />
-            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to the calendar below, and the bot won't double-book over the events on it.
+            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to the calendar this Agent writes to, and the bot won't double-book over the events on that calendar.
           </span>
           <Button
             variant="outline"
@@ -794,6 +795,11 @@ function GoogleCalendarPicker({
   setCalendar: { mutate: (calendarId: string) => void; isPending: boolean };
   calendarId: string | null;
 }) {
+  // `PUT /integrations/google/calendar` is admin-only while `GET /calendars` also allows a
+  // supervisor, so a supervisor can read the list but not write the choice. Show it read-only
+  // rather than letting the write fail at the server.
+  const { isRole } = useAppAuth();
+  const canEdit = isRole('admin');
   const options = calendars.data ?? [];
   // No list means no picker: the query is still loading, or the reader may not call
   // `GET /integrations/google/calendars` (agent role). A control with nothing to choose
@@ -811,7 +817,7 @@ function GoogleCalendarPicker({
         className="w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
         value={value}
         onChange={(e) => setCalendar.mutate(e.target.value)}
-        disabled={setCalendar.isPending}
+        disabled={!canEdit || setCalendar.isPending}
       >
         {!valueIsListed ? (
           <option value={value}>Current calendar (no longer shared with this account)</option>
@@ -824,10 +830,14 @@ function GoogleCalendarPicker({
         ))}
       </select>
       <p className="text-xs text-text-secondary">
-        New bookings, their invites and any Meet link are written here. Only the events on this
-        calendar block a new slot, so events on your other calendars stop blocking once you
-        switch. Bookings made before the switch stay on the calendar they were created on.
+        New bookings, their invites and any Meet link are written here. Your own events block a
+        new slot only while they sit on this calendar, so events on the calendar you leave stop
+        blocking. Bookings the bot already made keep their slots blocked, and their events stay
+        on the calendar they were created on.
       </p>
+      {!canEdit ? (
+        <p className="text-xs text-text-muted">Only an admin can change this calendar.</p>
+      ) : null}
     </div>
   );
 }

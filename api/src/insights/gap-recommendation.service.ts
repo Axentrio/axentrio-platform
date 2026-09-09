@@ -102,7 +102,7 @@ export async function generateGapRecommendations(
             content:
               "Write one plain-English action sentence (maximum 160 characters) that helps a small-business owner close an unanswered customer topic. " +
               "Use only the supplied topic and evidence. Start with a verb. No greeting, markdown, or invented details. " +
-              "Never include a person's name, email, or phone number.",
+              "Never include an email address or phone number.",
           },
           {
             role: "user",

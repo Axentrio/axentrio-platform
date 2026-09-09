@@ -153,7 +153,7 @@ async function narrate(
             "You write a 2–3 sentence weekly business summary for a small-business owner from the figures provided. " +
             "Warm, plain English. Use ONLY the figures given — never invent numbers, never claim one thing caused another. " +
             "No greeting, no sign-off, no markdown headers. " +
-            "Never include a person's name, email, or phone number.",
+            "Never include an email address or phone number.",
         },
         { role: "user", content: facts },
       ],

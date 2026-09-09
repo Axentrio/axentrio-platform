@@ -356,6 +356,14 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
     user.email = `deleted_${user.id}@removed.local`;
     user.avatarUrl = null as unknown as string | undefined;
     user.clerkUserId = null as unknown as string | undefined;
+    // The row survives so audit rows and agents can still join to it, which means
+    // nothing personal may stay on it. An IP address is personal data, a password
+    // hash is a credential belonging to someone who no longer has an account here,
+    // and the notification preferences hold the address we used to email them.
+    user.password = null as unknown as string | undefined;
+    user.passwordChangedAt = null as unknown as Date | undefined;
+    user.lastLoginIp = null as unknown as string | undefined;
+    user.notificationPreferences = null;
     user.deletedAt = new Date();
     await manager.save(User, user);
 

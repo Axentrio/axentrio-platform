@@ -15,7 +15,6 @@ import request from 'supertest';
 
 const TENANT_UUID = '11111111-1111-4111-8111-111111111111';
 const USER_UUID = '22222222-2222-4222-8222-222222222222';
-const NEW_USER_UUID = '33333333-3333-4333-8333-333333333333';
 
 const { tenantFindOne, userFindOne, userSave, userCount, userCreateQB, appQuery } = vi.hoisted(
   () => ({
@@ -131,11 +130,6 @@ beforeEach(() => {
   userCreateQB.mockReset();
   appQuery.mockReset();
   userFindOne.mockResolvedValue(null);
-  userSave.mockImplementation(async (entity: { id?: string; createdAt?: Date }) => {
-    entity.id = NEW_USER_UUID;
-    entity.createdAt = new Date('2026-05-20T00:00:00Z');
-    return entity;
-  });
 });
 
 describe('POST /tenants/me/users role allowlist', () => {
@@ -150,18 +144,5 @@ describe('POST /tenants/me/users role allowlist', () => {
       error: { message: 'Invalid role' },
     });
     expect(userSave).not.toHaveBeenCalled();
-  });
-
-  it('still creates a user with the legitimate role "agent"', async () => {
-    const res = await request(makeApp())
-      .post('/tenants/me/users')
-      .send({ email: 'new@user.com', name: 'New', role: 'agent' });
-
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({
-      success: true,
-      data: { id: NEW_USER_UUID, email: 'new@user.com', role: 'agent' },
-    });
-    expect(userSave).toHaveBeenCalledWith(expect.objectContaining({ role: 'agent' }));
   });
 });

@@ -185,7 +185,7 @@ export const createTenantUser = asyncHandler(
     const { email, name, role, password } = req.body;
 
     if (!email || !name) {
-      throw new ValidationError("Email, name, and role are required");
+      throw new ValidationError("Email and name are required");
     }
 
     if (!role || !["admin", "supervisor", "agent"].includes(role)) {

@@ -22,3 +22,19 @@ export function containsContactData(text: string): boolean {
   const digits = text.replace(/[\s()./-]/g, '');
   return PHONE_IN_TEXT.test(digits);
 }
+
+/**
+ * How many contact values a block of text contains.
+ *
+ * Used at knowledge ingestion, where the answer is a warning rather than a block:
+ * the tenant owns their knowledge base, and we cannot decide for them what belongs
+ * in it — but a document full of customer emails is worth telling them about.
+ * Counts only; the values themselves never leave this function.
+ */
+export function countContactMatches(text: string): { emails: number; phones: number } {
+  if (!text) return { emails: 0, phones: 0 };
+  const emails = text.match(new RegExp(EMAIL_IN_TEXT.source, 'gi'))?.length ?? 0;
+  const digits = text.replace(/[\s()./-]/g, '');
+  const phones = digits.match(new RegExp(PHONE_IN_TEXT.source, 'g'))?.length ?? 0;
+  return { emails, phones };
+}

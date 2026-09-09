@@ -30,6 +30,7 @@ import { eraseLead } from './lead-erasure.service';
 import { notificationService } from '../services/notification.service';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
+import { holdPredicate } from '../compliance/legal-hold.service';
 import { logger } from '../utils/logger';
 
 /** Guard rails on what a tenant may configure. */
@@ -121,6 +122,8 @@ export async function sweepLeadRetention(
             )
             -- a human scored it, so the automatic policy defers
             AND l.readiness_override IS NULL
+            -- an open legal hold: the data is evidence in a live dispute
+            AND ${holdPredicate('l', 'id', 'leadIds')}
           ORDER BY l.created_at ASC
           LIMIT $3`,
         [tenant.id, String(days), batchLimit],

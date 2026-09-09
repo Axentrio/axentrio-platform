@@ -50,6 +50,10 @@ describe('DELETE /api/v1/admin/users/:id — what the deletion really does', () 
       name: 'Jane Doe',
       email: 'jane.doe@acme.com',
       isActive: false,
+      password: '$2b$10$notarealhash',
+      lastLoginIp: '203.0.113.9',
+      passwordChangedAt: new Date('2026-01-01T00:00:00Z'),
+      notificationPreferences: { email: true },
     });
     await createTestAgent(tenantId, target.id);
     // An action the person took before the deletion.
@@ -70,6 +74,14 @@ describe('DELETE /api/v1/admin/users/:id — what the deletion really does', () 
     expect(stored!.email).toBe(`deleted_${target.id}@removed.local`);
     expect(stored!.clerkUserId).toBeNull();
     expect(stored!.deletedAt).not.toBeNull();
+
+    // Nothing personal may survive on the husk either. It stays only so audit rows
+    // and agents can join to it — an IP address and a password hash are still the
+    // person's, and the row is the one thing left pointing at them.
+    expect(stored!.password).toBeNull();
+    expect(stored!.lastLoginIp).toBeNull();
+    expect(stored!.passwordChangedAt).toBeNull();
+    expect(stored!.notificationPreferences).toBeNull();
 
     // The person is NOT anonymised: the id survives, so every earlier action
     // still joins back to this one person.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containsContactData } from '../../insights/contact-in-text';
+import { containsContactData, countContactMatches } from '../../insights/contact-in-text';
 
 describe('containsContactData', () => {
   it('passes aggregate insight text', () => {
@@ -42,5 +42,28 @@ describe('containsContactData', () => {
 
   it('treats empty text as clean', () => {
     expect(containsContactData('')).toBe(false);
+  });
+});
+
+describe('countContactMatches', () => {
+  it('counts the values without ever returning them', () => {
+    const counts = countContactMatches(
+      'Mail jan@acme.com or sara@acme.com, or call 0470 12 34 56 and +32 470 11 22 33.',
+    );
+    expect(counts).toEqual({ emails: 2, phones: 2 });
+  });
+
+  it('counts nothing in clean text', () => {
+    expect(countContactMatches('Our opening hours are 9 to 6, closed on 2026-12-25.')).toEqual({
+      emails: 0,
+      phones: 0,
+    });
+    expect(countContactMatches('')).toEqual({ emails: 0, phones: 0 });
+  });
+
+  it('does not carry regex state between calls', () => {
+    const text = 'one@acme.com and two@acme.com';
+    expect(countContactMatches(text).emails).toBe(2);
+    expect(countContactMatches(text).emails).toBe(2);
   });
 });

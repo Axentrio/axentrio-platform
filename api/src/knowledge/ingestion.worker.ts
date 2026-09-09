@@ -2,6 +2,7 @@ import { DataSource } from "typeorm";
 import { KnowledgeDocument } from "../database/entities/KnowledgeDocument";
 import { KnowledgeBase } from "../database/entities/KnowledgeBase";
 import { extractText } from "./document-extractors/text.extractor";
+import { countContactMatches } from "../insights/contact-in-text";
 import { extractPdf } from "./document-extractors/pdf.extractor";
 import { extractDocx } from "./document-extractors/docx.extractor";
 import { chunkText } from "./chunking.service";
@@ -91,6 +92,20 @@ export function createIngestionProcessor(
         logger.warn(
           `Document ${documentId} text truncated to ${config.rag.maxExtractedChars} chars`,
         );
+      }
+
+      // A knowledge document is retrievable by the bot and embedded, so anything
+      // personal inside it is processed on every turn. We cannot decide for the
+      // tenant what belongs in their knowledge base, but we can tell them — and we
+      // never put the values themselves in the log.
+      const contacts = countContactMatches(text);
+      if (contacts.emails > 0 || contacts.phones > 0) {
+        logger.warn('[ingestion] document looks like it contains personal data', {
+          documentId,
+          tenantId,
+          emails: contacts.emails,
+          phones: contacts.phones,
+        });
       }
 
       // Preprocess: classify and transform content. A document marked

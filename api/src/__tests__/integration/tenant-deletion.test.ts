@@ -20,6 +20,7 @@ import {
   requestTenantDeletion,
   sweepDueTenantDeletions,
 } from '../../tenants/tenant-deletion.service';
+import { openLegalHold, releaseLegalHold } from '../../compliance/legal-hold.service';
 import {
   createTestAnchorBot,
   createTestMessage,
@@ -164,5 +165,42 @@ describe('sweepDueTenantDeletions', () => {
     expect(gone.name).toBe('Deleted workspace');
     expect(kept.name).not.toBe('Deleted workspace');
     expect((await getDeletionRequest(notYet.id)).scheduledFor).not.toBeNull();
+  });
+});
+
+describe('sweepDueTenantDeletions — a live dispute wins', () => {
+  it('skips a workspace whose window has closed while a legal hold is open', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestAnchorBot(tenant);
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    await requestTenantDeletion(tenant.id, admin.id);
+    await AppDataSource.query(
+      `UPDATE tenants SET deletion_scheduled_for = now() - interval '1 minute' WHERE id = $1`,
+      [tenant.id],
+    );
+    const hold = await openLegalHold({
+      tenantId: tenant.id,
+      reason: 'claim 1234 is live and needs this workspace',
+      scope: { all: true },
+      openedBy: admin.id,
+      reviewDueAt: new Date(Date.now() + 90 * 86_400_000),
+    });
+
+    await sweepDueTenantDeletions();
+
+    // The rows are evidence; deleting them would destroy what the hold preserves.
+    const [row] = await AppDataSource.query(`SELECT name FROM tenants WHERE id = $1`, [tenant.id]);
+    expect(row.name).not.toBe('Deleted workspace');
+
+    // Releasing the hold lets the next run proceed — nothing is lost by waiting.
+    await releaseLegalHold({
+      tenantId: tenant.id,
+      holdId: hold.id,
+      releasedBy: admin.id,
+      releaseReason: 'settled',
+    });
+    await sweepDueTenantDeletions();
+    const [after] = await AppDataSource.query(`SELECT name FROM tenants WHERE id = $1`, [tenant.id]);
+    expect(after.name).toBe('Deleted workspace');
   });
 });

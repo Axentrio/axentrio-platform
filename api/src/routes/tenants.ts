@@ -21,12 +21,18 @@ import {
   ApiError,
 } from "../middleware";
 import { ERROR_CODES } from "../middleware/error-codes";
-import { sendSuccess } from "../utils/response";
+import { sendSuccess, sendCreated } from "../utils/response";
 import {
   requireClerkAuth,
   autoProvision,
 } from "../middleware/clerk.middleware";
 import { resolveTenantContext } from "../middleware/super-admin.middleware";
+import {
+  listLegalHolds,
+  openLegalHold,
+  releaseLegalHold,
+} from "../compliance/legal-hold.service";
+import { getTermsStatus, recordTermsAcceptance } from "../compliance/terms.service";
 import {
   getDeletionRequest,
   requestTenantDeletion,
@@ -600,6 +606,84 @@ router.get(
 router.get(
   "/me/available-tools",
   getTenantAvailableTools,
+);
+
+/**
+ * Legal holds (Art 17(3)(e)).
+ *
+ * Admin-only: opening one suspends the retention sweeps for the rows it names, and
+ * releasing one lets them delete again. Both write a compliance event.
+ */
+router.get(
+  "/me/legal-holds",
+  asyncHandler(async (req: Request, res: Response) => {
+    const activeOnly = req.query.activeOnly === "true";
+    sendSuccess(res, await listLegalHolds(req.user!.tenantId, { activeOnly }));
+  }),
+);
+
+router.post(
+  "/me/legal-holds",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { reason, scope, reviewDueAt } = req.body ?? {};
+    if (typeof reason !== "string") throw new BadRequestError("reason is required");
+    if (!reviewDueAt || Number.isNaN(Date.parse(reviewDueAt))) {
+      throw new BadRequestError("reviewDueAt is required (ISO date)");
+    }
+    const hold = await openLegalHold({
+      tenantId: req.user!.tenantId,
+      reason,
+      scope: scope ?? {},
+      openedBy: req.userId!,
+      reviewDueAt: new Date(reviewDueAt),
+    });
+    sendCreated(res, hold);
+  }),
+);
+
+router.delete(
+  "/me/legal-holds/:id",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const hold = await releaseLegalHold({
+      tenantId: req.user!.tenantId,
+      holdId: req.params.id,
+      releasedBy: req.userId!,
+      releaseReason: typeof req.body?.releaseReason === "string" ? req.body.releaseReason : "",
+    });
+    if (!hold) throw new NotFoundError("Legal hold not found");
+    sendSuccess(res, hold);
+  }),
+);
+
+/**
+ * Accepted terms.
+ *
+ * Any authenticated seat, not admin-only: acceptance is the person's own act, and
+ * a tenant admin cannot accept on someone else's behalf.
+ */
+router.get(
+  "/me/terms",
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await getTermsStatus(req.user!.tenantId, req.userId!));
+  }),
+);
+
+router.post(
+  "/me/terms",
+  asyncHandler(async (req: Request, res: Response) => {
+    const row = await recordTermsAcceptance({
+      tenantId: req.user!.tenantId,
+      userId: req.userId!,
+      ipAddress: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null,
+    });
+    sendCreated(res, {
+      termsVersion: row.termsVersion,
+      acceptedAt: row.acceptedAt.toISOString(),
+    });
+  }),
 );
 
 /**

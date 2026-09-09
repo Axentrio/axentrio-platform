@@ -124,11 +124,15 @@ export const PURGE_BY_SESSION = [
 /** Same, but the session column predates snake_case. */
 export const PURGE_BY_CAMEL_SESSION = ['conversation_bindings'];
 
-/** Reached through a parent row (a connection, a notification). */
+/** Reached through a parent row (a connection, a notification, a user). */
 export const PURGE_VIA_PARENT = [
   'message_deliveries',
   'webhook_event_log',
   'notification_deliveries',
+  // Cascades from the `users` delete above (FK user_id ON DELETE CASCADE). A
+  // consent record for a workspace that no longer exists has nothing left to
+  // evidence; the invoices are the part that has to survive.
+  'terms_acceptances',
 ];
 
 /** Tables that deliberately survive, with the reason. */
@@ -140,6 +144,7 @@ export const RETAINED_TABLES: Record<string, string> = {
   billing_events: 'statutory accounting retention — Art 17(3)(b)',
   tenant_billing_accounts: 'statutory accounting retention — Art 17(3)(b)',
   chatbot_stripe_webhook_events: 'backs the invoices above',
+  legal_holds: 'proof that a hold existed — part of the compliance trail',
   faq_sections: 'platform-wide FAQ, not tenant content',
   faq_items: 'platform-wide FAQ, not tenant content',
   bot_templates: 'global template catalogue',
@@ -484,12 +489,31 @@ async function purgeTenantObjects(tenantId: string): Promise<number> {
 
 /** Execute every tenant whose window has closed. */
 export async function sweepDueTenantDeletions(): Promise<{ tenants: number; purged: number }> {
+  // A live legal hold wins: an open dispute means the rows are evidence, and
+  // deleting them would destroy the very thing the hold was opened to preserve.
+  // The window stays expired, so releasing the hold lets the next run proceed —
+  // no data is lost by waiting, and none is lost by deleting either.
   const due: Array<{ id: string }> = await AppDataSource.query(
-    `SELECT id FROM tenants
+    `SELECT id FROM tenants t
       WHERE deletion_scheduled_for IS NOT NULL
         AND deletion_scheduled_for <= now()
+        AND NOT EXISTS (
+          SELECT 1 FROM legal_holds h
+           WHERE h.tenant_id = t.id AND h.released_at IS NULL
+        )
       ORDER BY deletion_scheduled_for ASC`,
   );
+
+  const [held]: Array<{ count: number }> = await AppDataSource.query(
+    `SELECT count(*)::int AS count FROM tenants t
+      WHERE deletion_scheduled_for <= now()
+        AND EXISTS (SELECT 1 FROM legal_holds h WHERE h.tenant_id = t.id AND h.released_at IS NULL)`,
+  );
+  if ((held?.count ?? 0) > 0) {
+    logger.warn('[tenant-deletion] skipping tenants under an active legal hold', {
+      tenants: held.count,
+    });
+  }
 
   let purged = 0;
   for (const row of due) {

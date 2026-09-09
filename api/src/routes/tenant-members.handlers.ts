@@ -184,8 +184,12 @@ export const createTenantUser = asyncHandler(
     const tenantId = req.user!.tenantId;
     const { email, name, role, password } = req.body;
 
-    if (!email || !name || !role) {
+    if (!email || !name) {
       throw new ValidationError("Email, name, and role are required");
+    }
+
+    if (!role || !["admin", "supervisor", "agent"].includes(role)) {
+      throw new ValidationError("Invalid role");
     }
 
     const userRepository = AppDataSource.getRepository(User);

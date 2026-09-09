@@ -37,15 +37,29 @@ const mgrUpdate = vi.fn();
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: () => ({ findOne: repoFindOne, save: repoSave, create: (x: any) => x }),
-    transaction: async (cb: any) =>
-      cb({
+    // Writes are BUFFERED and only replayed onto the spies once the callback resolves, because
+    // Postgres rolls a transaction back when the callback throws. A save-then-throw from inside
+    // the callback therefore leaves `mgrSave`/`mgrUpdate` un-called, exactly as the real database
+    // leaves the row unchanged.
+    transaction: async (cb: any) => {
+      const writes: Array<() => void> = [];
+      const result = await cb({
         query: mgrQuery,
         findOne: mgrFindOne,
-        save: mgrSave,
-        update: mgrUpdate,
+        save: async (...args: any[]) => {
+          writes.push(() => mgrSave(...args));
+          return args[0];
+        },
+        update: async (...args: any[]) => {
+          writes.push(() => mgrUpdate(...args));
+          return undefined;
+        },
         // TypeORM EntityManager.create(EntityClass, data) → return the data object.
         create: (_cls: any, data: any) => data,
-      }),
+      });
+      for (const commit of writes) commit();
+      return result;
+    },
   },
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));

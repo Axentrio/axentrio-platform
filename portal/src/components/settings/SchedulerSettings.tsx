@@ -748,7 +748,7 @@ const GoogleCalendarSection: React.FC<GoogleCalendarSectionProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm text-text-secondary flex items-center gap-2">
             <Check className="w-4 h-4 text-status-online" />
-            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to your calendar and the bot won't double-book over your events.
+            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to the calendar below, and the bot won't double-book over the events on it.
           </span>
           <Button
             variant="outline"
@@ -824,8 +824,9 @@ function GoogleCalendarPicker({
         ))}
       </select>
       <p className="text-xs text-text-secondary">
-        New bookings, their invites and any Meet link are written here. Existing bookings stay on
-        the calendar they were created on.
+        New bookings, their invites and any Meet link are written here. Only the events on this
+        calendar block a new slot, so events on your other calendars stop blocking once you
+        switch. Bookings made before the switch stay on the calendar they were created on.
       </p>
     </div>
   );

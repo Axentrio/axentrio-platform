@@ -76,7 +76,6 @@ export function useSetGoogleCalendar(botId?: string) {
       api.put<{ calendarId: string }>(withBot('/integrations/google/calendar', botId), { calendarId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: statusKey(botId) });
-      queryClient.invalidateQueries({ queryKey: calendarsKey(botId) });
       toast.success('Bookings will go to that calendar');
     },
     onError: (err: Any) => {

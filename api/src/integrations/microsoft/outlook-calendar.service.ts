@@ -230,13 +230,6 @@ export async function exchangeAndStore(
 }
 
 /**
- * Return a valid access token, refreshing (and persisting the ROTATED refresh
- * token) if expired. The read-recheck-refresh-persist runs under the per-bot
- * `calcred:<botId>` advisory lock so it serializes with reconnect/disconnect and
- * a concurrent refresh can't double-rotate the refresh token. Throws
- * `CALENDAR_REAUTH_REQUIRED` (and sets `reauth_required`) when consent is gone.
- */
-/**
  * Result of the refresh transaction.
  *
  * `reauth` is RETURNED rather than thrown, because the flag it carries has to survive: throwing
@@ -249,6 +242,13 @@ type MicrosoftTokenOutcome =
   | { kind: 'token'; token: string }
   | { kind: 'reauth'; transitioned: boolean };
 
+/**
+ * Return a valid access token, refreshing (and persisting the ROTATED refresh
+ * token) if expired. The read-recheck-refresh-persist runs under the per-bot
+ * `calcred:<botId>` advisory lock so it serializes with reconnect/disconnect and
+ * a concurrent refresh can't double-rotate the refresh token. Throws
+ * `CALENDAR_REAUTH_REQUIRED` (and sets `reauth_required`) when consent is gone.
+ */
 export async function getValidAccessTokenMicrosoft(cred: CalendarCredential): Promise<string> {
   if (
     !cred.reauthRequired &&

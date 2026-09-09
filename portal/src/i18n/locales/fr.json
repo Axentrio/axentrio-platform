@@ -1977,7 +1977,7 @@
         },
         "delete": {
           "title": "Supprimer définitivement l'utilisateur",
-          "description": "Cette action anonymisera les données de <strong>{{name}}</strong> et la supprimera définitivement. Cette opération est irréversible.",
+          "description": "Cette action supprime le compte de <strong>{{name}}</strong> et déconnecte son identifiant. Cette opération est irréversible.",
           "button": "Supprimer définitivement"
         }
       }

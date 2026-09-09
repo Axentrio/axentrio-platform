@@ -14,6 +14,7 @@ import { isWithinBusinessHours } from '../booking/booking-providers/slot-engine'
 import { applyBotBusinessTimezones } from '../booking/business-timezone';
 import { fisherExactTwoSided, relativeRisk } from './stats/fisher';
 import { logger } from '../utils/logger';
+import { containsContactData } from './contact-in-text';
 
 const WINDOW_DAYS = 30;
 const N_FLOOR = 30; // per side
@@ -234,6 +235,11 @@ async function upsertExperiment(tenantId: string, k: Candidate, rr: number): Pro
   const title = `Chats ${k.splitLabel} tend to ${k.outcomeLabel} ${direction} often — ${rateA}% vs ${rateNotA}%`;
   const detail = `Worth a look — chats ${k.splitLabel} ${k.outcomeLabel} at ${rateA}% versus ${rateNotA}% otherwise. This is an observed pattern, not a proven cause.`;
   const severity = Math.abs(Math.log(rr)) >= Math.log(2) ? 'red' : 'orange';
+  // title and detail come from fixed templates, so this is a guard, not a fix.
+  // Four writers create insight rows, and the contact-data rule covers all
+  // four: this experiment, the gap recommendation, the digest narrative, and
+  // the sentiment experiment title (sentiment-aggregation.service.ts).
+  if (containsContactData(title) || containsContactData(detail)) return;
 
   const existing = await repo.findOne({ where: { tenantId, kind: 'correlation', fingerprint: k.fingerprint } });
   const payload = { rateA, rateNotA, relativeRisk: Number(rr.toFixed(2)), a: k.a, b: k.b, c: k.c, d: k.d };

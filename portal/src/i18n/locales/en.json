@@ -2052,7 +2052,7 @@
         },
         "delete": {
           "title": "Permanently Delete User",
-          "description": "This will anonymize <strong>{{name}}</strong>'s data and remove them permanently. This cannot be undone.",
+          "description": "This removes <strong>{{name}}</strong>'s user account and disconnects their login. This cannot be undone.",
           "button": "Delete Permanently"
         }
       }

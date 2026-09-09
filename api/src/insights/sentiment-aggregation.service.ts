@@ -12,6 +12,7 @@ import { Judgment } from '../database/entities/Judgment';
 import { SentimentTheme } from '../database/entities/SentimentTheme';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
 import { logger } from '../utils/logger';
+import { containsContactData } from './contact-in-text';
 
 const WINDOW_DAYS = 30;
 const RECURRENCE_FLOOR = 3;
@@ -63,10 +64,15 @@ export async function aggregateSentiment(tenantId: string, now: Date): Promise<v
 
   for (const s of stats) {
     if (s.sessions < RECURRENCE_FLOOR) continue;
-    qualifying.add(s.themeId);
 
     const verb = s.polarity === 'negative' ? 'mention' : s.polarity === 'positive' ? 'praise' : 'mention';
     const title = `Customers frequently ${verb} "${s.theme}" — ${s.sessions} sessions in 30 days`;
+    // The theme phrase is model written, so it can carry a customer's contact
+    // value. An insight store is presented as aggregate, so the row is not
+    // saved, and an existing row for the theme falls to the prune below.
+    if (containsContactData(title)) continue;
+
+    qualifying.add(s.themeId);
     const severity = s.polarity === 'negative' && s.sessions >= RED_SESSIONS ? 'red' : 'orange';
 
     const gap = byFingerprint.get(s.themeId);

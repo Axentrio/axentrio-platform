@@ -1284,23 +1284,6 @@ export class UploadService {
     return { deleted, errors };
   }
 
-  /**
-   * Extend file retention (for legal holds)
-   */
-  async extendRetention(fileKey: string, additionalDays: number): Promise<void> {
-    const metadata = await this.getFileMetadata(fileKey);
-    if (!metadata) {
-      throw new Error('File not found');
-    }
-
-    const currentDeleteDate = new Date(metadata['gdpr-delete-after']);
-    currentDeleteDate.setDate(currentDeleteDate.getDate() + additionalDays);
-
-    // Note: S3 doesn't allow metadata updates without re-upload
-    // In production, you'd use S3 Object Lambda or copy the object
-    logger.info(`Retention extended for ${fileKey} until ${currentDeleteDate.toISOString()}`);
-  }
-
   // ==========================================================================
   // Validation & Utilities
   // ==========================================================================

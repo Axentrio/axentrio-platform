@@ -62,6 +62,7 @@ import { generateDigest, weekStartFor, digestEmailEnabled } from '../../insights
 beforeEach(() => {
   state.counts = [10, 5, 3, 1, 2, 0, 4, 2]; // conv c/p, book c/p, lead c/p, gapsOpened, gapsWon
   state.countIdx = 0;
+  state.narrative = 'A warm grounded summary.';
   state.topExp = null;
   state.tenant = { id: 't1', settings: {} };
   state.existing = null;
@@ -144,6 +145,44 @@ describe('insights · generateDigest (P3 D6)', () => {
     await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
 
     expect(state.prompts[0]).not.toContain('Enterprise-only correlation');
+  });
+
+  it('keeps a tainted experiment title out of the prompt and the stored summary', async () => {
+    state.topExp = {
+      kind: 'sentiment',
+      severity: 'red',
+      title: 'Customers frequently mention "call 0470 12 34 56" \u2014 12 sessions in 30 days',
+    };
+    state.narrative = 'Owners should call 0470 12 34 56 back this week.';
+
+    await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+
+    expect(state.prompts[0]).not.toContain('0470 12 34 56');
+    expect(state.prompts[0]).not.toContain('notable pattern');
+    expect(state.saved[0].summaryMd).toMatch(/^This week:/);
+    expect(state.saved[0].summaryMd).not.toContain('0470 12 34 56');
+    expect(state.saved[0].summaryMd).not.toContain('notable pattern');
+  });
+
+  it('keeps a clean experiment title in the digest', async () => {
+    state.topExp = {
+      kind: 'correlation',
+      severity: 'red',
+      title: 'Chats after hours tend to stall more often',
+    };
+
+    await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+
+    expect(state.prompts[0]).toContain('notable pattern: Chats after hours tend to stall more often');
+  });
+
+  it('stores the deterministic summary when the narrative carries a contact value', async () => {
+    state.narrative = 'Email jane@x.com for a recap.';
+
+    await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+
+    expect(state.saved[0].summaryMd).toMatch(/^This week:/);
+    expect(state.saved[0].summaryMd).not.toContain('jane@x.com');
   });
 });
 

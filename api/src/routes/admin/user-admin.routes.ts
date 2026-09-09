@@ -320,7 +320,7 @@ router.post('/users/:id/demote', asyncHandler(async (req: Request, res: Response
   sendSuccess(res, user);
 }));
 
-// DELETE /admin/users/:id — permanently anonymize and soft-delete a deactivated user
+// DELETE /admin/users/:id — remove a deactivated user's account details and soft-delete the row
 router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const userId = req.params.id;
   const userRepo = AppDataSource.getRepository(User);
@@ -336,7 +336,7 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
     if (superAdminCount <= 1) throw new BadRequestError('Cannot delete the last super admin');
   }
 
-  // Store Clerk info before anonymization (needed for post-transaction cleanup)
+  // Store Clerk info before the scrub (needed for post-transaction cleanup)
   const clerkUserId = user.clerkUserId;
   const tenantId = user.tenantId;
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
@@ -345,10 +345,12 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
   const agentRepo = AppDataSource.getRepository(Agent);
   const agent = await agentRepo.findOne({ where: { userId, deletedAt: IsNull() } });
 
-  // Single transaction: anonymize + soft-delete + cleanup references
+  // Single transaction: scrub + soft-delete + cleanup references
   let deleteReleaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
   await AppDataSource.transaction(async (manager) => {
-    // 1. Anonymize user PII
+    // 1. Remove the user's own details. This is not anonymisation: the row keeps
+    //    its id, so audit logs, agents, and messages still join to this person.
+    //    The portal copy says "remove and disconnect" for the same reason.
     user.name = 'Deleted User';
     user.email = `deleted_${user.id}@removed.local`;
     user.avatarUrl = null as unknown as string | undefined;

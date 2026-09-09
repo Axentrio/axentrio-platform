@@ -820,7 +820,9 @@ function GoogleCalendarPicker({
         disabled={!canEdit || setCalendar.isPending}
       >
         {!valueIsListed ? (
-          <option value={value}>Current calendar (no longer shared with this account)</option>
+          // Deliberately names no cause: the reachable ones differ (the sharer downgraded this
+          // account below writer, or revoked access outright) and the list cannot tell them apart.
+          <option value={value}>Current calendar (not writable with this account)</option>
         ) : null}
         {options.map((c) => (
           <option key={c.id} value={c.primary ? 'primary' : c.id}>

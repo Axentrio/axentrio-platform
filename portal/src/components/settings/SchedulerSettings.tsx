@@ -670,10 +670,13 @@ interface CalendarSectionProps {
   disconnect: { mutate: () => void; isPending: boolean };
   /** Other provider already active. Connect is off until they disconnect that one. */
   blockedBy: string | null;
-  /** Google only: the write-target picker. Outlook writes to the account's default calendar
-   *  and ignores a calendar id, so its section is handed neither. */
-  calendars?: { data?: GoogleCalendarOption[]; isLoading: boolean };
-  setCalendar?: { mutate: (calendarId: string) => void; isPending: boolean };
+}
+
+/** Google carries the write-target picker on top of the shared row. Outlook writes to the
+ *  account's default calendar and ignores a calendar id, so its section has no such props. */
+interface GoogleCalendarSectionProps extends CalendarSectionProps {
+  calendars: { data?: GoogleCalendarOption[] };
+  setCalendar: { mutate: (calendarId: string) => void; isPending: boolean };
 }
 
 function CalendarIdleConnect({
@@ -712,7 +715,7 @@ function CalendarIdleConnect({
 
 /** Google Calendar connect / reconnect / disconnect row. Verbatim JSX, lifted out
  *  of SchedulerSettings so each section stays readable. */
-const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({
+const GoogleCalendarSection: React.FC<GoogleCalendarSectionProps> = ({
   status,
   connect,
   disconnect,
@@ -787,12 +790,15 @@ function GoogleCalendarPicker({
   setCalendar,
   calendarId,
 }: {
-  calendars?: { data?: GoogleCalendarOption[]; isLoading: boolean };
-  setCalendar?: { mutate: (calendarId: string) => void; isPending: boolean };
+  calendars: { data?: GoogleCalendarOption[] };
+  setCalendar: { mutate: (calendarId: string) => void; isPending: boolean };
   calendarId: string | null;
 }) {
-  if (!calendars || !setCalendar) return null;
   const options = calendars.data ?? [];
+  // No list means no picker: the query is still loading, or the reader may not call
+  // `GET /integrations/google/calendars` (agent role). A control with nothing to choose
+  // from would only be able to label the stored value by its internal id.
+  if (options.length === 0) return null;
   const value = calendarId ?? 'primary';
   // The stored calendar can be missing from the list when its sharing changed after the choice
   // was made. Keep it selectable rather than letting the control fall silent on a real value.
@@ -805,9 +811,11 @@ function GoogleCalendarPicker({
         className="w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
         value={value}
         onChange={(e) => setCalendar.mutate(e.target.value)}
-        disabled={calendars.isLoading || setCalendar.isPending || options.length === 0}
+        disabled={setCalendar.isPending}
       >
-        {!valueIsListed ? <option value={value}>{value}</option> : null}
+        {!valueIsListed ? (
+          <option value={value}>Current calendar (no longer shared with this account)</option>
+        ) : null}
         {options.map((c) => (
           <option key={c.id} value={c.primary ? 'primary' : c.id}>
             {c.summary}
@@ -816,8 +824,8 @@ function GoogleCalendarPicker({
         ))}
       </select>
       <p className="text-xs text-text-secondary">
-        New bookings, their invites and any Meet link are written here. Changing it moves your
-        upcoming bookings.
+        New bookings, their invites and any Meet link are written here. Existing bookings stay on
+        the calendar they were created on.
       </p>
     </div>
   );

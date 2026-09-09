@@ -44,6 +44,7 @@ import {
 } from '../leads/lead-retention.service';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
+import { exportSubject } from '../leads/subject-export.service';
 import { buildIntakeAnswers } from '../booking/intake-answers';
 import type { IntakeQuestion } from '../database/entities/ServiceType';
 
@@ -945,6 +946,43 @@ router.get(
         at: new Date(r.created_at).toISOString(),
       })),
     });
+  }),
+);
+
+/**
+ * Everything we hold about one person (GDPR Art 15).
+ *
+ * Read, not write — but reading someone's whole record is itself processing, so
+ * it is audited and recorded as a compliance event. Admin/supervisor only: this
+ * is the data a support agent would otherwise be tempted to paste into a ticket.
+ */
+router.get(
+  '/:id/export',
+  requireRole('admin', 'supervisor'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const bundle = await exportSubject(AppDataSource, tenantId, req.params.id);
+    if (!bundle) throw new NotFoundError('Lead not found');
+
+    const counts = {
+      leads: bundle.leads.length,
+      sessions: bundle.sessions.length,
+      messages: bundle.messages.length,
+      bookings: bundle.bookings.length,
+    };
+    await logAudit(req.userId!, 'subject.exported', 'lead', req.params.id, tenantId, counts);
+    await logComplianceEvent({
+      actorId: req.userId!,
+      eventType: 'subject.exported',
+      tenantId,
+      subjectType: 'lead',
+      subjectId: req.params.id,
+      details: counts,
+    });
+
+    sendSuccess(res, bundle);
   }),
 );
 

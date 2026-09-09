@@ -40,9 +40,14 @@
  *    customer's turns would leave the assistant quoting their name, address and
  *    phone number back at anyone who opens the conversation.
  *
- * Still outside this service: rows reachable only through a different holder
- * (`conversation_bindings`, `chatbot_judgments`, `Booking`), which are separate
- * erasure scopes rather than part of the transcript.
+ * 6. **The person is in more places than the lead row and the transcript.** The
+ *    channel binding holds their WhatsApp number, the judgment holds the model's
+ *    verbatim reasoning, the booking holds the address they typed, the handoff
+ *    holds a copy of the transcript, the sent emails hold their address, and the
+ *    guardrail logs hold the message that tripped them. Erasing the lead and the
+ *    messages while leaving those would make "we deleted your data" only mostly
+ *    true — so all of them are scrubbed here, each keeping its row where the
+ *    tenant still needs the shape (a booking's time, a judgment's aggregate).
  */
 import type { DataSource } from 'typeorm';
 import { emitLeadDeleted } from './lead-capture.service';
@@ -68,6 +73,18 @@ export interface ErasureResult {
     transcriptMessages: number;
     /** Visitor participant rows scrubbed (name, email, avatar, metadata). */
     transcriptParticipants: number;
+    /** Channel bindings whose platform identifiers were tombstoned. */
+    conversationBindings: number;
+    /** Per-session verdicts whose visitor id and reasoning were removed. */
+    judgments: number;
+    /** Bookings whose contact details were removed (the row survives). */
+    bookings: number;
+    /** Handoffs whose embedded transcript copy was removed. */
+    handoffContexts: number;
+    /** Sent emails whose recipient and payload were removed. */
+    emailDeliveries: number;
+    /** Guardrail logs whose raw message text was removed. */
+    guardrailLogs: number;
   };
   /** False: the transcript is deleted with the lead. Kept for wire compatibility. */
   transcriptRetained: boolean;
@@ -89,14 +106,20 @@ export async function eraseLead(
   const result = await dataSource.transaction(async (manager) => {
     // Lock the row so a concurrent capture-path upsert cannot interleave between
     // our read and the scrub and re-populate the fields we just cleared.
-    const rows: Array<{ id: string; dedupe_key: string | null; session_id: string | null; channel: string | null }> =
-      await manager.query(
-        `SELECT id, dedupe_key, session_id, channel
+    const rows: Array<{
+      id: string;
+      dedupe_key: string | null;
+      session_id: string | null;
+      channel: string | null;
+      email: string | null;
+      phone: string | null;
+    }> = await manager.query(
+      `SELECT id, dedupe_key, session_id, channel, email, phone
            FROM chatbot_leads
           WHERE id = $1 AND tenant_id = $2
           FOR UPDATE`,
-        [leadId, tenantId],
-      );
+      [leadId, tenantId],
+    );
     const lead = rows[0];
     if (!lead) return null; // wrong tenant or nonexistent — caller maps to 404
     if (isErasedDedupeKey(lead.dedupe_key)) return null; // already erased, idempotent
@@ -278,6 +301,109 @@ export async function eraseLead(
       [leadId, tenantId],
     );
 
+    // 9. The channel binding. The WhatsApp number IS `externalUserId`, and the
+    //    thread id is usually the same number again. Tombstoned rather than nulled
+    //    because the column is NOT NULL and part of a unique key — and because a
+    //    later inbound message must not match this binding and resurrect the
+    //    conversation the customer asked to forget.
+    const bindings = await manager.query(
+      `UPDATE conversation_bindings
+          SET "externalUserId" = 'erased:' || id::text,
+              "externalThreadId" = 'erased:' || id::text,
+              "externalUserName" = NULL,
+              "externalAvatarUrl" = NULL,
+              "platformUserData" = '{}'::jsonb
+        WHERE "sessionId" IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 10. The per-session verdict. `visitor_id` is NOT NULL, so it gets a
+    //     tombstone; the model's verbatim reasoning and the evidence quotes are
+    //     the personal data. The row stays so the aggregate counts survive.
+    const judgments = await manager.query(
+      `UPDATE chatbot_judgments
+          SET visitor_id = 'erased:' || session_id::text,
+              reasoning = NULL,
+              topic_phrase = NULL,
+              evidence_message_ids = '[]'::jsonb
+        WHERE session_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 11. Bookings carry the name, email, phone and address the customer typed.
+    //     The row is kept — the diary still has to show the appointment — but the
+    //     contact details go. `customer_place_id` has a CHECK that forbids '', so
+    //     it is nulled rather than blanked.
+    const bookings = await manager.query(
+      `UPDATE chatbot_bookings
+          SET attendee_name = NULL,
+              attendee_email = NULL,
+              customer_phone = NULL,
+              customer_address = NULL,
+              customer_place_id = NULL,
+              customer_lat = NULL,
+              customer_lng = NULL,
+              customer_coords_at = NULL,
+              customer_address_verified = NULL,
+              intake_answers = NULL,
+              uploaded_files = NULL,
+              notes = NULL,
+              ai_summary = NULL
+        WHERE tenant_id = $2
+          AND (lead_id = $1 OR session_id IN (${leadSessionIdsSql}))
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 12. A handoff embeds a COPY of the transcript plus the agent's notes. Leaving
+    //     it would defeat the message delete above for anyone reading the handoff.
+    const handoffs = await manager.query(
+      `UPDATE handoff_requests
+          SET context = COALESCE(context, '{}'::jsonb) - 'messageHistory',
+              notes = NULL
+        WHERE session_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 13. Emails we sent them. Scoped by the address they had at erasure time (it
+    //     is about to be nulled) and by any email tied to one of their sessions.
+    const emails = await manager.query(
+      `UPDATE email_deliveries
+          SET recipient_email = 'erased:' || id::text,
+              subject = 'Erased',
+              payload = NULL
+        WHERE tenant_id = $2
+          AND (
+            ($3::varchar IS NOT NULL AND recipient_email = $3)
+            OR related_id IN (${leadSessionIdsSql})
+          )
+        RETURNING id`,
+      [leadId, tenantId, lead.email],
+    );
+
+    // 14. Guardrail logs keep the raw message text that tripped them (`reasons`),
+    //     plus a pointer to the message itself.
+    const spamLogs = await manager.query(
+      `UPDATE guardrail_spam_logs
+          SET reasons = NULL,
+              suspicious_message_id = NULL
+        WHERE tenant_id = $2 AND conversation_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+    const outputLogs = await manager.query(
+      `UPDATE guardrail_output_logs
+          SET reasons = NULL,
+              families = '[]'::jsonb,
+              outbound_message_id = NULL
+        WHERE tenant_id = $2 AND conversation_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
     return {
       priorDedupeKey,
       sessionId: lead.session_id,
@@ -290,6 +416,12 @@ export async function eraseLead(
         customerMemoryRows,
         transcriptMessages: rowCount(transcript),
         transcriptParticipants: rowCount(participants),
+        conversationBindings: rowCount(bindings),
+        judgments: rowCount(judgments),
+        bookings: rowCount(bookings),
+        handoffContexts: rowCount(handoffs),
+        emailDeliveries: rowCount(emails),
+        guardrailLogs: rowCount(spamLogs) + rowCount(outputLogs),
       },
     };
   });

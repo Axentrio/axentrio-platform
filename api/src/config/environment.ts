@@ -161,6 +161,12 @@ const envSchema = z.object({
   // Audit
   AUDIT_RETENTION_DAYS: z.string().default('90').transform(Number),
 
+  // Compliance proof (retention sweeps ran, erasures executed, retention periods
+  // changed). Deliberately far longer than the audit window: these are the rows a
+  // dispute asks for months later. 7 years is a provisional engineering default —
+  // the period itself is a legal decision, which is why it is env-configurable.
+  COMPLIANCE_EVENT_RETENTION_DAYS: z.string().default('2555').transform(Number),
+
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.string().default('3310').transform(Number),
   CLAMAV_TIMEOUT: z.string().default('60000').transform(Number),
@@ -496,6 +502,10 @@ export const config = {
 
   audit: {
     retentionDays: env.AUDIT_RETENTION_DAYS,
+  },
+
+  compliance: {
+    retentionDays: env.COMPLIANCE_EVENT_RETENTION_DAYS,
   },
 
   clamav: {

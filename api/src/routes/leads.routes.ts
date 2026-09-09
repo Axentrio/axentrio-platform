@@ -43,6 +43,7 @@ import {
   MAX_RETENTION_DAYS,
 } from '../leads/lead-retention.service';
 import { logAudit } from '../utils/audit';
+import { logComplianceEvent } from '../compliance/compliance-events.service';
 import { buildIntakeAnswers } from '../booking/intake-answers';
 import type { IntakeQuestion } from '../database/entities/ServiceType';
 
@@ -787,6 +788,14 @@ router.put(
     await logAudit(req.userId!, 'leads.retention_updated', 'tenant', tenantId, tenantId, {
       retentionDays: value,
     });
+    await logComplianceEvent({
+      actorId: req.userId!,
+      eventType: 'leads.retention_updated',
+      tenantId,
+      subjectType: 'tenant',
+      subjectId: tenantId,
+      details: { retentionDays: value },
+    });
 
     sendSuccess(res, { retentionDays: value });
   }),
@@ -970,12 +979,27 @@ router.delete(
       impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
     });
 
+    // The single most-requested proof in a data-protection dispute: this person
+    // asked to be erased, and here is when and what went.
+    await logComplianceEvent({
+      actorId: req.userId!,
+      eventType: 'leads.erased',
+      tenantId,
+      subjectType: 'lead',
+      subjectId: result.leadId,
+      details: {
+        scrubbed: result.scrubbed,
+        transcriptRetained: result.transcriptRetained,
+        impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
+      },
+    });
+
     sendSuccess(res, {
       id: result.leadId,
       erased: true,
       scrubbed: result.scrubbed,
-      // Surfaced, not hidden: the caller should know the chat transcript is a
-      // separate deletion scope rather than assume this removed everything.
+      // Kept on the wire for compatibility. It is now always false: the transcript
+      // is deleted with the lead, so the caller no longer has to warn about it.
       transcriptRetained: result.transcriptRetained,
     });
   }),

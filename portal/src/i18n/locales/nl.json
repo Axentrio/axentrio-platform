@@ -279,6 +279,21 @@
       "failed": "Niet doorgegaan"
     }
   },
+  "conversations": {
+    "retention": {
+      "title": "Hoe lang gesprekken worden bewaard",
+      "body": "Gesprekken zonder activiteit langer dan deze termijn worden permanent verwijderd, inclusief hun berichten en bijlagen. Dit kan niet ongedaan worden gemaakt. De termijn loopt vanaf het laatste bericht, dus een gesprek waar uw klant naar terugkeert verloopt nooit.",
+      "keep": "Alles bewaren",
+      "6m": "6 maanden",
+      "1y": "1 jaar",
+      "2y": "2 jaar",
+      "confirm": "Gesprekken verwijderen die langer dan {{days}} dagen inactief zijn, vanaf vanavond? Dit draait elke dag en kan niet ongedaan worden gemaakt.",
+      "confirmYes": "Ja, oude gesprekken verwijderen",
+      "saved": "Bewaartermijn bijgewerkt",
+      "error": "Kon de bewaartermijn niet bijwerken",
+      "adminOnly": "Alleen beheerders van de werkruimte kunnen dit wijzigen."
+    }
+  },
   "socialMedia": {
     "locked": {
       "title": "Social media",
@@ -324,12 +339,17 @@
       "account": "Accountgegevens",
       "notifications": "Meldingen",
       "appearance": "Weergave",
+      "retention": "Gegevens en bewaring",
       "widget": "Widget & merk",
       "capabilities": "Functionaliteiten",
       "integrations": "Integraties",
       "channels": "Kanalen",
       "billing": "Facturatie",
       "features": "Functies"
+    },
+    "retention": {
+      "title": "Gegevens en bewaring",
+      "intro": "Hoe lang we de gegevens van uw klanten bewaren. Er wordt niets verwijderd tenzij u hier een termijn kiest."
     },
     "account": {
       "title": "Accountgegevens",

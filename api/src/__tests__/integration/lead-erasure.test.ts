@@ -29,7 +29,7 @@ import { Lead } from '../../database/entities/Lead';
 import { LeadConversation } from '../../database/entities/LeadConversation';
 import { eraseLead, isErasedDedupeKey, ERASED_PREFIX } from '../../leads/lead-erasure.service';
 import { upsertLead } from '../../leads/lead-capture.service';
-import { createTestTenant, createTestSession } from '../helpers/factories';
+import { createTestTenant, createTestSession, createTestParticipant, createTestMessage } from '../helpers/factories';
 
 async function seedLead(tenantId: string, over: Partial<Lead> = {}) {
   const repo = AppDataSource.getRepository(Lead);
@@ -316,5 +316,103 @@ describe('eraseLead', () => {
 
     const [row] = await AppDataSource.query(`SELECT name FROM chatbot_leads WHERE id = $1`, [lead.id]);
     expect(row.name).toBe('Achraf Peeters'); // untouched
+  });
+});
+
+/**
+ * The transcript. The published Data Deletion page promises that "the conversation
+ * messages and contact details exchanged with the AI assistant" are deleted, and
+ * erasure used to stop at the transcript boundary while still returning
+ * `transcriptRetained: true`.
+ */
+describe('eraseLead — transcript', () => {
+  async function seedTranscript(tenantId: string) {
+    const session = await createTestSession(tenantId);
+    const visitor = await createTestParticipant(session.id, {
+      type: 'user',
+      name: 'Achraf Peeters',
+      email: 'achraf@example.com',
+      avatarUrl: 'https://example.com/a.png',
+      metadata: { customData: { phone: '32475464421' } },
+    });
+    const m1 = await createTestMessage(session.id, tenantId, visitor.id, {
+      content: 'My name is Achraf, I live at Kerkstraat 12',
+    });
+    const m2 = await createTestMessage(session.id, tenantId, visitor.id, {
+      content: 'Call me on 0470 12 34 56',
+    });
+    return { session, visitor, m1, m2 };
+  }
+
+  it('deletes the transcript and scrubs the visitor participant', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const { session, visitor, m1, m2 } = await seedTranscript(tenant.id);
+    const lead = await seedLead(tenant.id, { sessionId: session.id });
+
+    const res = await eraseLead(AppDataSource, tenant.id, lead.id);
+
+    expect(res!.transcriptRetained).toBe(false);
+    expect(res!.scrubbed.transcriptMessages).toBe(2);
+    expect(res!.scrubbed.transcriptParticipants).toBe(1);
+
+    const messages = await AppDataSource.query(
+      `SELECT id FROM messages WHERE id = ANY($1::uuid[])`,
+      [[m1.id, m2.id]],
+    );
+    expect(messages).toHaveLength(0);
+
+    const [row] = await AppDataSource.query(
+      `SELECT name, email, avatar_url, metadata, is_anonymous FROM participants WHERE id = $1`,
+      [visitor.id],
+    );
+    expect(row.name).toBe('Deleted');
+    expect(row.email).toBeNull();
+    expect(row.avatar_url).toBeNull();
+    expect(row.metadata).toBeNull();
+    expect(row.is_anonymous).toBe(true);
+  });
+
+  it('resets the session counters so the inbox cannot advertise a gone conversation', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const { session } = await seedTranscript(tenant.id);
+    const lead = await seedLead(tenant.id, { sessionId: session.id });
+    await AppDataSource.query(
+      `UPDATE chat_sessions SET message_count = 2, unread_count = 1 WHERE id = $1`,
+      [session.id],
+    );
+    const [before] = await AppDataSource.query(
+      `SELECT transcript_revision FROM chat_sessions WHERE id = $1`,
+      [session.id],
+    );
+
+    await eraseLead(AppDataSource, tenant.id, lead.id);
+
+    const [row] = await AppDataSource.query(
+      `SELECT message_count, unread_count, transcript_revision FROM chat_sessions WHERE id = $1`,
+      [session.id],
+    );
+    expect(row.message_count).toBe(0);
+    expect(row.unread_count).toBe(0);
+    // The message-delete trigger bumps it, so a client holding the old transcript
+    // refetches instead of replaying it. Erasure must not bump it a second time.
+    expect(row.transcript_revision).toBeGreaterThan(before.transcript_revision);
+  });
+
+  it("leaves another person's transcript alone", async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const mine = await seedTranscript(tenant.id);
+    const theirs = await seedTranscript(tenant.id);
+    const lead = await seedLead(tenant.id, { sessionId: mine.session.id });
+
+    await eraseLead(AppDataSource, tenant.id, lead.id);
+
+    const kept = await AppDataSource.query(`SELECT id FROM messages WHERE id = $1`, [
+      theirs.m1.id,
+    ]);
+    expect(kept).toHaveLength(1);
+    const [row] = await AppDataSource.query(`SELECT name FROM participants WHERE id = $1`, [
+      theirs.visitor.id,
+    ]);
+    expect(row.name).toBe('Achraf Peeters');
   });
 });

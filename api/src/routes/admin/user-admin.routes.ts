@@ -10,6 +10,7 @@ import { invalidateProvisionCache } from '../../middleware/clerk.middleware';
 import { parsePaginationParams, applyPagination } from '../../utils/pagination';
 import { logger } from '../../utils/logger';
 import { logAudit } from '../../utils/audit';
+import { logComplianceEvent } from '../../compliance/compliance-events.service';
 import {
   addMemberToClerkOrganization,
   inviteToClerkOrganization,
@@ -394,6 +395,17 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
 
   await logAudit(req.userId!, 'user.deleted', 'user', userId, tenantId, {
     deletedUserEmail: `deleted_${userId}@removed.local`,
+  });
+
+  // The row is kept as a husk, so this is the record of when a staff account and
+  // its login were removed, and by whom.
+  await logComplianceEvent({
+    actorId: req.userId!,
+    eventType: 'user.deleted',
+    tenantId,
+    subjectType: 'user',
+    subjectId: userId,
+    details: { scrubbed: true },
   });
 
   logger.info('Permanently deleted user', { deletedBy: req.userId, userId });

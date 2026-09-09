@@ -3,9 +3,17 @@ import { AppDataSource } from '../database/data-source';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { requireRole } from '../middleware/auth.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
-import { asyncHandler, ValidationError } from '../middleware';
+import { asyncHandler, ValidationError, BadRequestError } from '../middleware';
 import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
+import { logComplianceEvent } from '../compliance/compliance-events.service';
+import {
+  CONVERSATION_RETENTION_SETTING,
+  MAX_CONVERSATION_RETENTION_DAYS,
+  MIN_CONVERSATION_RETENTION_DAYS,
+  readConversationRetentionDays,
+} from '../conversations/conversation-retention.service';
 
 const router = Router();
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
@@ -102,6 +110,72 @@ router.get('/stats', requireRole('admin', 'supervisor'), asyncHandler(async (req
   }
 
   sendSuccess(res, { byStatus, total: Object.values(byStatus).reduce((a, b) => a + b, 0) });
+}));
+
+/**
+ * Conversation retention policy.
+ *
+ * GET is readable by any seat that can see the inbox; PUT is admin-only, because
+ * setting it schedules irreversible deletion of customer conversations.
+ *
+ * `null` means KEEP FOREVER and is the default for every existing tenant —
+ * nothing expires unless someone chooses a period. Defaulting to a number would
+ * have deleted historical conversations on deploy.
+ */
+router.get('/retention', asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId;
+
+  const [row] = await AppDataSource.query(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+  sendSuccess(res, {
+    retentionDays: readConversationRetentionDays(row?.settings),
+    minDays: MIN_CONVERSATION_RETENTION_DAYS,
+    maxDays: MAX_CONVERSATION_RETENTION_DAYS,
+  });
+}));
+
+router.put('/retention', requireRole('admin'), asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const raw = (req.body ?? {}).retentionDays;
+
+  let value: number | null;
+  if (raw === null) {
+    value = null; // explicit "keep forever"
+  } else if (
+    typeof raw === 'number' &&
+    Number.isInteger(raw) &&
+    raw >= MIN_CONVERSATION_RETENTION_DAYS &&
+    raw <= MAX_CONVERSATION_RETENTION_DAYS
+  ) {
+    value = raw;
+  } else {
+    throw new BadRequestError(
+      `retentionDays must be null, or an integer between ${MIN_CONVERSATION_RETENTION_DAYS} and ${MAX_CONVERSATION_RETENTION_DAYS}`,
+    );
+  }
+
+  // Targeted jsonb write so a concurrent settings writer is not clobbered. `null`
+  // REMOVES the key entirely, which is what the sweep treats as "keep forever".
+  await AppDataSource.query(
+    value === null
+      ? `UPDATE tenants SET settings = COALESCE(settings, '{}'::jsonb) - '${CONVERSATION_RETENTION_SETTING}', updated_at = now() WHERE id = $1`
+      : `UPDATE tenants SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('${CONVERSATION_RETENTION_SETTING}', $2::int), updated_at = now() WHERE id = $1`,
+    value === null ? [tenantId] : [tenantId, value],
+  );
+
+  // Audited: this schedules irreversible deletion of customer conversations.
+  await logAudit(req.userId!, 'conversations.retention_updated', 'tenant', tenantId, tenantId, {
+    retentionDays: value,
+  });
+  await logComplianceEvent({
+    actorId: req.userId!,
+    eventType: 'conversations.retention_updated',
+    tenantId,
+    subjectType: 'tenant',
+    subjectId: tenantId,
+    details: { retentionDays: value },
+  });
+
+  sendSuccess(res, { retentionDays: value });
 }));
 
 export default router;

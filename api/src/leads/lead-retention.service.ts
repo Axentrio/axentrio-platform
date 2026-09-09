@@ -29,6 +29,7 @@ import { AppDataSource } from '../database/data-source';
 import { eraseLead } from './lead-erasure.service';
 import { notificationService } from '../services/notification.service';
 import { logAudit } from '../utils/audit';
+import { logComplianceEvent } from '../compliance/compliance-events.service';
 import { logger } from '../utils/logger';
 
 /** Guard rails on what a tenant may configure. */
@@ -185,6 +186,22 @@ export async function sweepLeadRetention(
           retentionDays: days,
           cappedAtBatchLimit: candidates.length >= batchLimit,
         }).catch(() => {});
+
+        // The proof that the sweep ran, kept long past the 90-day audit window:
+        // a regulator asking "show me you delete what you say you delete" asks
+        // months later, not tomorrow.
+        await logComplianceEvent({
+          actorId: 'system',
+          eventType: 'leads.retention_applied',
+          tenantId: tenant.id,
+          subjectType: 'tenant',
+          subjectId: tenant.id,
+          details: {
+            erased: erasedForTenant,
+            retentionDays: days,
+            cappedAtBatchLimit: candidates.length >= batchLimit,
+          },
+        });
       }
     }
 

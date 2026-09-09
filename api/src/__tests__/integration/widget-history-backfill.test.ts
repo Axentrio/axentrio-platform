@@ -62,9 +62,13 @@ describe('Widget reconnect backfill — /widget/history contract', () => {
       sender?: { type?: string };
       createdAt: string;
     }>;
-    const reply = messages.find((m) => m.sender?.type === 'bot');
+    // Init now persists the greeting too (missing settings.ai.enabled defaults
+    // on), so the seeded reply is no longer the only bot message — pick it out
+    // by content rather than by being first.
+    const reply = messages.find(
+      (m) => m.sender?.type === 'bot' && m.content === 'Our hours are 9am to 6pm.',
+    );
     expect(reply).toBeTruthy();
-    expect(reply!.content).toBe('Our hours are 9am to 6pm.');
     expect(reply!.id).toBeTruthy();
     expect(reply!.createdAt).toBeTruthy();
   });

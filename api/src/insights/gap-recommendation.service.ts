@@ -6,6 +6,7 @@ import { DEFAULT_MODEL } from "../llm/defaults";
 import { getProvider } from "../llm/provider-factory";
 import { logger } from "../utils/logger";
 import type { UsageTally } from "./judge.service";
+import { containsContactData } from "./contact-in-text";
 
 const MAX_RECOMMENDATIONS_PER_RUN = 10;
 const RECOMMENDATION_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
@@ -93,7 +94,8 @@ export async function generateGapRecommendations(
             role: "system",
             content:
               "Write one plain-English action sentence (maximum 160 characters) that helps a small-business owner close an unanswered customer topic. " +
-              "Use only the supplied topic and evidence. Start with a verb. No greeting, markdown, or invented details.",
+              "Use only the supplied topic and evidence. Start with a verb. No greeting, markdown, or invented details. " +
+              "Never include a person's name, email, or phone number.",
           },
           {
             role: "user",
@@ -120,6 +122,9 @@ export async function generateGapRecommendations(
 
       const recommendation = oneSentence(response.content);
       if (!recommendation) continue;
+      // The model can copy a contact value out of the evidence. An insight
+      // store is presented as aggregate, so drop the sentence instead.
+      if (containsContactData(recommendation)) continue;
       gap.recommendation = recommendation;
       gap.recommendationUpdatedAt = now;
       await gapRepo.save(gap);

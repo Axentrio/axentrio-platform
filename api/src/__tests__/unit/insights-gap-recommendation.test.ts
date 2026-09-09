@@ -99,6 +99,30 @@ describe('generateGapRecommendations', () => {
     expect(tally).toEqual({ promptTokens: 12, completionTokens: 7, calls: 1 });
   });
 
+  it('does not store a recommendation that carries a contact value', async () => {
+    state.gaps = [
+      {
+        id: 'open',
+        tenantId: 'tenant-1',
+        canonicalTopicId: 'topic-pricing',
+        status: 'open',
+        occurrences: 5,
+        recommendation: 'Previous safe suggestion.',
+        recommendationUpdatedAt: new Date('2026-08-01T12:00:00Z'),
+      },
+    ];
+    state.judgments = [{ reasoning: 'The Agent could not answer what the service costs.' }];
+    chatMock.mockResolvedValue({
+      content: 'Email jane@x.com to explain pricing.',
+      usage: { promptTokens: 12, completionTokens: 7 },
+    });
+
+    await generateGapRecommendations('tenant-1', undefined, NOW);
+
+    expect(state.gaps[0].recommendation).toBe('Previous safe suggestion.');
+    expect(state.saved).toHaveLength(0);
+  });
+
   it('does not regenerate a fresh recommendation', async () => {
     state.gaps = [{
       id: 'fresh',

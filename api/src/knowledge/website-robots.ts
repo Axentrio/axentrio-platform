@@ -1,3 +1,5 @@
+import { originFromSourceUrl } from "./website-url";
+
 export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 
 export function parseRobotsTxt(body: string): {
@@ -32,4 +34,38 @@ export function parseRobotsTxt(body: string): {
       return !disallows.some((prefix) => path.startsWith(prefix));
     },
   };
+}
+
+/** Path + query of a page URL, as robots.txt matching expects it. */
+export function pathFromPageUrl(pageUrl: string): string {
+  try {
+    const parsed = new URL(pageUrl);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "/";
+  }
+}
+
+/**
+ * Builds the crawl's robots.txt predicate for one origin. A missing,
+ * redirected, or unreachable robots.txt allows every path.
+ */
+export async function fetchRobotsAllows(
+  originUrl: string,
+  get: (url: string) => Promise<{ status: number; body: string }>,
+): Promise<(pageUrl: string) => Promise<boolean>> {
+  const allowAll = async () => true;
+  const origin = originFromSourceUrl(originUrl);
+  if (!origin) return allowAll;
+
+  let response: { status: number; body: string };
+  try {
+    response = await get(`${origin}/robots.txt`);
+  } catch {
+    return allowAll;
+  }
+  if (response.status !== 200) return allowAll;
+
+  const robots = parseRobotsTxt(response.body);
+  return async (pageUrl: string) => robots.allows(pathFromPageUrl(pageUrl));
 }

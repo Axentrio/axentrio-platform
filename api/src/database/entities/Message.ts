@@ -170,13 +170,6 @@ export class Message {
     this.editCount++;
   }
 
-  softDelete(): void {
-    this.isDeleted = true;
-    this.deletedAt = new Date();
-    this.content = '[Deleted]';
-    this.contentEncrypted = false;
-  }
-
   isSystemMessage(): boolean {
     return this.type === 'system';
   }

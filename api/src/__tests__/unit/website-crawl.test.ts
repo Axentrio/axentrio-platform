@@ -6,7 +6,10 @@ import {
   isMediaUrl,
   originFromSourceUrl,
 } from "../../knowledge/website-url";
-import { parseRobotsTxt } from "../../knowledge/website-robots";
+import {
+  fetchRobotsAllows,
+  parseRobotsTxt,
+} from "../../knowledge/website-robots";
 import {
   crawlWebsite,
   DEFAULT_MAX_PAGES,
@@ -94,6 +97,40 @@ describe("parseRobotsTxt", () => {
     expect(robots.allows("/services")).toBe(true);
     expect(robots.allows("/private/x")).toBe(false);
     expect(robots.allows("/drafts/a")).toBe(false);
+  });
+});
+
+describe("fetchRobotsAllows", () => {
+  it("refuses a disallowed path and allows the rest", async () => {
+    const allows = await fetchRobotsAllows("https://plumber.example/", async () => ({
+      status: 200,
+      body: "User-agent: *\nDisallow: /private\n",
+    }));
+    expect(await allows("https://plumber.example/private/x")).toBe(false);
+    expect(await allows("https://plumber.example/services")).toBe(true);
+  });
+
+  it("allows everything when robots.txt is absent", async () => {
+    const allows = await fetchRobotsAllows("https://plumber.example/", async () => ({
+      status: 404,
+      body: "Not found",
+    }));
+    expect(await allows("https://plumber.example/private/x")).toBe(true);
+  });
+
+  it("allows everything when the fetch fails", async () => {
+    const allows = await fetchRobotsAllows("https://plumber.example/", async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    expect(await allows("https://plumber.example/private/x")).toBe(true);
+  });
+
+  it("allows everything for a non-https origin, which has no resolvable origin", async () => {
+    const allows = await fetchRobotsAllows("http://example.com/", async () => ({
+      status: 200,
+      body: "User-agent: *\nDisallow: /\n",
+    }));
+    expect(await allows("http://example.com/private/x")).toBe(true);
   });
 });
 

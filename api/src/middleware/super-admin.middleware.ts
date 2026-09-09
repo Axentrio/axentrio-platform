@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
 import { BadRequestError, ForbiddenError, NotFoundError } from './error-handler';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,12 +51,19 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
       return next(new ForbiddenError('Tenant is cancelled'));
     }
 
+    const homeTenantId = req.user.tenantId;
     req.tenantId = tenant.id;
     req.user.tenantId = tenant.id;
     logger.info('Super admin context switch', {
       userId: req.userId,
       targetTenantId: tenant.id,
       targetTenantName: tenant.name,
+    });
+    // The audit row, not the log line, is the record that proves who read a
+    // controller's data. logAudit swallows database errors on purpose, so a
+    // failed write never blocks the request.
+    await logAudit(req.userId!, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
+      homeTenantId,
     });
 
     next();

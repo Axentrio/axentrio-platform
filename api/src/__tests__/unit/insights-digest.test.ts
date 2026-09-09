@@ -145,6 +145,15 @@ describe('insights · generateDigest (P3 D6)', () => {
 
     expect(state.prompts[0]).not.toContain('Enterprise-only correlation');
   });
+
+  it('stores the deterministic summary when the narrative carries a contact value', async () => {
+    state.narrative = 'Email jane@x.com for a recap.';
+
+    await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
+
+    expect(state.saved[0].summaryMd).toMatch(/^This week:/);
+    expect(state.saved[0].summaryMd).not.toContain('jane@x.com');
+  });
 });
 
 describe('insights · digest headline severity', () => {

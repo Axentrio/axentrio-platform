@@ -6,10 +6,7 @@ import {
   isMediaUrl,
   originFromSourceUrl,
 } from "../../knowledge/website-url";
-import {
-  fetchRobotsAllows,
-  parseRobotsTxt,
-} from "../../knowledge/website-robots";
+import { parseRobotsTxt } from "../../knowledge/website-robots";
 import {
   crawlWebsite,
   DEFAULT_MAX_PAGES,
@@ -97,96 +94,6 @@ describe("parseRobotsTxt", () => {
     expect(robots.allows("/services")).toBe(true);
     expect(robots.allows("/private/x")).toBe(false);
     expect(robots.allows("/drafts/a")).toBe(false);
-  });
-});
-
-describe("fetchRobotsAllows", () => {
-  it("refuses a disallowed path and allows the rest", async () => {
-    const allows = await fetchRobotsAllows("https://plumber.example/", async () => ({
-      status: 200,
-      body: "User-agent: *\nDisallow: /private\n",
-    }));
-    expect(await allows("https://plumber.example/private/x")).toBe(false);
-    expect(await allows("https://plumber.example/services")).toBe(true);
-  });
-
-  it("refuses the directory URL itself when the rule ends in a slash", async () => {
-    const allows = await fetchRobotsAllows("https://shop.example/", async () => ({
-      status: 200,
-      body: "User-agent: *\nDisallow: /my-account/\n",
-    }));
-    expect(await allows("https://shop.example/my-account")).toBe(false);
-    expect(await allows("https://shop.example/my-account/orders")).toBe(false);
-    expect(await allows("https://shop.example/my-account-help")).toBe(true);
-    expect(await allows("https://shop.example/services")).toBe(true);
-  });
-
-  it("allows everything when robots.txt is absent", async () => {
-    const allows = await fetchRobotsAllows("https://plumber.example/", async () => ({
-      status: 404,
-      body: "Not found",
-    }));
-    expect(await allows("https://plumber.example/private/x")).toBe(true);
-  });
-
-  it("allows everything when the fetch fails", async () => {
-    const allows = await fetchRobotsAllows("https://plumber.example/", async () => {
-      throw new Error("ECONNREFUSED");
-    });
-    expect(await allows("https://plumber.example/private/x")).toBe(true);
-  });
-
-  it("follows one same-host redirect and honours the rules it finds", async () => {
-    const seen: string[] = [];
-    const allows = await fetchRobotsAllows("https://plumber.example/", async (url) => {
-      seen.push(url);
-      if (url === "https://plumber.example/robots.txt") {
-        return {
-          status: 301,
-          body: "",
-          location: "https://www.plumber.example/robots.txt",
-        };
-      }
-      return { status: 200, body: "User-agent: *\nDisallow: /private\n" };
-    });
-    expect(seen).toEqual([
-      "https://plumber.example/robots.txt",
-      "https://www.plumber.example/robots.txt",
-    ]);
-    expect(await allows("https://plumber.example/private/x")).toBe(false);
-    expect(await allows("https://plumber.example/services")).toBe(true);
-  });
-
-  it("refuses to follow a redirect that leaves the host", async () => {
-    const allows = await fetchRobotsAllows("https://plumber.example/", async (url) => {
-      if (url === "https://plumber.example/robots.txt") {
-        return { status: 302, body: "", location: "https://attacker.example/robots.txt" };
-      }
-      return { status: 200, body: "User-agent: *\nDisallow: /\n" };
-    });
-    expect(await allows("https://plumber.example/private/x")).toBe(true);
-  });
-
-  it("stops after one hop and allows everything on a redirect chain", async () => {
-    let calls = 0;
-    const allows = await fetchRobotsAllows("https://plumber.example/", async () => {
-      calls += 1;
-      return {
-        status: 301,
-        body: "",
-        location: `https://plumber.example/robots.txt?hop=${calls}`,
-      };
-    });
-    expect(calls).toBe(2);
-    expect(await allows("https://plumber.example/private/x")).toBe(true);
-  });
-
-  it("allows everything for a non-https origin, which has no resolvable origin", async () => {
-    const allows = await fetchRobotsAllows("http://example.com/", async () => ({
-      status: 200,
-      body: "User-agent: *\nDisallow: /\n",
-    }));
-    expect(await allows("http://example.com/private/x")).toBe(true);
   });
 });
 

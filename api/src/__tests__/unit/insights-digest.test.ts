@@ -62,6 +62,7 @@ import { generateDigest, weekStartFor, digestEmailEnabled } from '../../insights
 beforeEach(() => {
   state.counts = [10, 5, 3, 1, 2, 0, 4, 2]; // conv c/p, book c/p, lead c/p, gapsOpened, gapsWon
   state.countIdx = 0;
+  state.narrative = 'A warm grounded summary.';
   state.topExp = null;
   state.tenant = { id: 't1', settings: {} };
   state.existing = null;

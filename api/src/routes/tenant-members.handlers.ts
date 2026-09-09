@@ -178,6 +178,13 @@ export const listTenantUsers = asyncHandler(
 /**
  * Create tenant user
  * POST /api/v1/tenants/me/users
+ *
+ * The role allowlist below is a tenant-isolation boundary, not input tidiness.
+ * `super_admin` is absent on purpose: that role reads every other tenant
+ * through `X-Tenant-Context`, so a tenant admin who could assign it would
+ * escalate out of their own tenant. Keep this list equal to the one in
+ * `updateTenantUserRole`. Regression test:
+ * `src/__tests__/integration/tenant-user-create-role-allowlist.test.ts`.
  */
 export const createTenantUser = asyncHandler(
   async (req: Request, res: Response) => {

@@ -47,6 +47,13 @@ export async function generateGapRecommendations(
       }
       continue;
     }
+    // Every later exit of this loop leaves the stored sentence in place, so a
+    // value that carries a contact value is removed here, before any of them.
+    if (gap.recommendation && containsContactData(gap.recommendation)) {
+      gap.recommendation = null;
+      gap.recommendationUpdatedAt = null;
+      await gapRepo.save(gap);
+    }
     if (
       gap.recommendation &&
       gap.recommendationUpdatedAt &&
@@ -123,16 +130,8 @@ export async function generateGapRecommendations(
       const recommendation = oneSentence(response.content);
       if (!recommendation) continue;
       // The model can copy a contact value out of the evidence. An insight
-      // store is presented as aggregate, so the sentence is dropped, and any
-      // sentence already stored for this gap goes with it.
-      if (containsContactData(recommendation)) {
-        if (gap.recommendation) {
-          gap.recommendation = null;
-          gap.recommendationUpdatedAt = null;
-          await gapRepo.save(gap);
-        }
-        continue;
-      }
+      // store is presented as aggregate, so the sentence is dropped.
+      if (containsContactData(recommendation)) continue;
       gap.recommendation = recommendation;
       gap.recommendationUpdatedAt = now;
       await gapRepo.save(gap);

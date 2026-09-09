@@ -99,7 +99,7 @@ describe('generateGapRecommendations', () => {
     expect(tally).toEqual({ promptTokens: 12, completionTokens: 7, calls: 1 });
   });
 
-  it('clears the stored suggestion when the new one carries a contact value', async () => {
+  it('keeps a clean stored suggestion when the new one carries a contact value', async () => {
     state.gaps = [
       {
         id: 'open',
@@ -119,9 +119,8 @@ describe('generateGapRecommendations', () => {
 
     await generateGapRecommendations('tenant-1', undefined, NOW);
 
-    expect(state.gaps[0].recommendation).toBeNull();
-    expect(state.gaps[0].recommendationUpdatedAt).toBeNull();
-    expect(state.saved).toHaveLength(1);
+    expect(state.gaps[0].recommendation).toBe('Previous safe suggestion.');
+    expect(state.saved).toHaveLength(0);
   });
 
   it('removes a tainted suggestion stored before the guard existed', async () => {
@@ -141,6 +140,48 @@ describe('generateGapRecommendations', () => {
       content: 'Email jane@x.com to explain pricing.',
       usage: { promptTokens: 12, completionTokens: 7 },
     });
+
+    await generateGapRecommendations('tenant-1', undefined, NOW);
+
+    expect(state.gaps[0].recommendation).toBeNull();
+    expect(state.saved[0].recommendation).toBeNull();
+  });
+
+  it('removes a tainted suggestion when the gap has no fresh evidence left', async () => {
+    state.gaps = [
+      {
+        id: 'stale-evidence',
+        tenantId: 'tenant-1',
+        canonicalTopicId: 'topic-pricing',
+        status: 'open',
+        occurrences: 5,
+        recommendation: 'Email jane@x.com to explain pricing.',
+        recommendationUpdatedAt: new Date('2026-08-01T12:00:00Z'),
+      },
+    ];
+    state.judgments = [];
+
+    await generateGapRecommendations('tenant-1', undefined, NOW);
+
+    expect(chatMock).not.toHaveBeenCalled();
+    expect(state.gaps[0].recommendation).toBeNull();
+    expect(state.gaps[0].recommendationUpdatedAt).toBeNull();
+    expect(state.saved[0].recommendation).toBeNull();
+  });
+
+  it('removes a tainted suggestion that is still inside the freshness window', async () => {
+    state.gaps = [
+      {
+        id: 'fresh-but-tainted',
+        tenantId: 'tenant-1',
+        canonicalTopicId: 'topic-pricing',
+        status: 'open',
+        occurrences: 5,
+        recommendation: 'Email jane@x.com to explain pricing.',
+        recommendationUpdatedAt: new Date('2026-08-17T12:00:00Z'),
+      },
+    ];
+    state.judgments = [];
 
     await generateGapRecommendations('tenant-1', undefined, NOW);
 

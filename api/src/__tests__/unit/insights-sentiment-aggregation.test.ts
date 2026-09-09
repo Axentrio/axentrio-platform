@@ -59,6 +59,24 @@ describe('insights · sentiment aggregation (P3 D5)', () => {
     expect(saved[0].title).toMatch(/slow response.*3 sessions/);
   });
 
+  it('saves no row when the theme phrase carries a contact value', async () => {
+    themeStats.push(stat('t1', 5, 'negative', 'call 0470 12 34 56 back'), stat('t2', 4));
+    await aggregateSentiment('tenant-1', NOW);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ fingerprint: 't2' });
+  });
+
+  it('removes an existing row once its theme phrase carries a contact value', async () => {
+    themeStats.push(stat('t1', 5, 'negative', 'email jane@x.com for a refund'));
+    existingExperiments.push({ fingerprint: 't1', state: 'active', title: 'old title' });
+
+    await aggregateSentiment('tenant-1', NOW);
+
+    expect(saved).toHaveLength(0);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatchObject({ fingerprint: 't1' });
+  });
+
   it('escalates to red for a negative theme at >= 8 sessions', async () => {
     themeStats.push(stat('t1', 8, 'negative'));
     await aggregateSentiment('tenant-1', NOW);

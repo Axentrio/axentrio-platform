@@ -36,29 +36,20 @@ export function parseRobotsTxt(body: string): {
   };
 }
 
-/** Path + query of a page URL, as robots.txt matching expects it. */
-export function pathFromPageUrl(pageUrl: string): string {
-  try {
-    const parsed = new URL(pageUrl);
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return "/";
-  }
-}
-
 /**
- * The forms a robots rule can name this page by. `canonicalSourceUrl` removes
- * a trailing slash, so the page queued as "/my-account" is the directory URL
- * that a "Disallow: /my-account/" rule names. Both forms are matched.
+ * The path + query forms a robots rule can name this page by.
+ * `canonicalSourceUrl` removes a trailing slash, so the page queued as
+ * "/my-account" is the directory URL that a "Disallow: /my-account/" rule
+ * names. Both forms are matched.
  */
 function robotsPathsFor(pageUrl: string): string[] {
-  const path = pathFromPageUrl(pageUrl);
   let parsed: URL;
   try {
     parsed = new URL(pageUrl);
   } catch {
-    return [path];
+    return ["/"];
   }
+  const path = `${parsed.pathname}${parsed.search}`;
   if (parsed.pathname.endsWith("/")) return [path];
   return [path, `${parsed.pathname}/${parsed.search}`];
 }

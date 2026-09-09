@@ -1,5 +1,9 @@
 # Dependencies
+# Trailing-slash patterns match directories only, so a symlink named
+# node_modules slips past them — which is how one got committed to main and
+# broke `railway up`. Match the name at any depth, file or directory.
 node_modules/
+node_modules
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

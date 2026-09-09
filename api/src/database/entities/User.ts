@@ -20,6 +20,25 @@ import type { NotificationPreferences } from '../../contracts/notification-prefe
 
 export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'agent';
 
+/**
+ * The roles a tenant admin may assign through the tenant-members API.
+ *
+ * `super_admin` is absent ON PURPOSE: that role reads every other tenant through
+ * `X-Tenant-Context`, so a tenant admin who could assign it would escalate out of
+ * their own tenant. Both `createTenantUser` and `updateTenantUserRole` must use
+ * THIS list — two copies of an allowlist is exactly how the two drift apart and
+ * the hole reopens.
+ */
+export const TENANT_ASSIGNABLE_ROLES = ['admin', 'supervisor', 'agent'] as const;
+
+export type TenantAssignableRole = (typeof TENANT_ASSIGNABLE_ROLES)[number];
+
+export function isTenantAssignableRole(value: unknown): value is TenantAssignableRole {
+  return (
+    typeof value === 'string' && (TENANT_ASSIGNABLE_ROLES as readonly string[]).includes(value)
+  );
+}
+
 @Entity('users')
 @Index(['tenantId', 'email'], { unique: true })
 export class User {

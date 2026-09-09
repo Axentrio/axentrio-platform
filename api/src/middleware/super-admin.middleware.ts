@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
 import { BadRequestError, ForbiddenError, NotFoundError } from './error-handler';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,6 +22,11 @@ export function requireSuperAdmin(req: Request, _res: Response, next: NextFuncti
  * Non-super-admin users: header is ignored entirely.
  * Super admins without header: tenantId stays as their own.
  * Super admins with header: tenantId is set to the target tenant.
+ *
+ * Routers mount on overlapping paths, so one request can run this middleware
+ * several times, and `autoProvision` re-attaches the home tenant before each
+ * run. Every run must therefore resolve the switch again; only the audit row
+ * is written once.
  */
 export async function resolveTenantContext(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const targetTenantId = req.headers['x-tenant-context'] as string | undefined;
@@ -50,6 +56,7 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
       return next(new ForbiddenError('Tenant is cancelled'));
     }
 
+    const homeTenantId = req.user.tenantId;
     req.tenantId = tenant.id;
     req.user.tenantId = tenant.id;
     logger.info('Super admin context switch', {
@@ -57,6 +64,15 @@ export async function resolveTenantContext(req: Request, _res: Response, next: N
       targetTenantId: tenant.id,
       targetTenantName: tenant.name,
     });
+    // The audit row, not the log line, is the record that proves who read a
+    // controller's data. logAudit swallows database errors on purpose, so a
+    // failed write never blocks the request.
+    if (!req.tenantContextAudited) {
+      req.tenantContextAudited = true;
+      await logAudit(req.userId!, 'tenant.context_switched', 'tenant', tenant.id, tenant.id, {
+        homeTenantId,
+      });
+    }
 
     next();
   } catch (error) {

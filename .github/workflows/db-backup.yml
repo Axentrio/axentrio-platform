@@ -101,7 +101,6 @@ jobs:
           echo "Uploaded $FILENAME to R2"
 
       - name: Cleanup old backups (keep last 30 days)
-        continue-on-error: true
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

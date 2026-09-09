@@ -19,6 +19,7 @@
  * POST body or Authorization headers — both of which we need.
  */
 import { API_CONFIG } from '@config/api.config';
+import { useTenantContextStore } from '../stores/tenantContextStore';
 
 export type CopilotSseEvent =
   | { event: 'token'; data: { text: string } }
@@ -91,6 +92,10 @@ export async function* streamCopilotMessages(
     Accept: 'text/event-stream',
   };
   if (token) headers.Authorization = `Bearer ${token}`;
+  // This bypasses apiClient, which sets the super-admin impersonation header for
+  // every other request — without it a copilot turn runs against the wrong tenant.
+  const { activeTenant } = useTenantContextStore.getState();
+  if (activeTenant) headers['X-Tenant-Context'] = activeTenant.tenantId;
 
   const url = `${API_CONFIG.baseURL}/copilot/messages`;
   const response = await fetch(url, {

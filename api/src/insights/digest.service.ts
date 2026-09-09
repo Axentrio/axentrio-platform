@@ -19,6 +19,7 @@ import { getProvider } from "../llm/provider-factory";
 import { DEFAULT_MODEL } from "../llm/defaults";
 import { logger } from "../utils/logger";
 import type { DigestMetrics } from "../contracts/insights";
+import { containsContactData } from "./contact-in-text";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -133,7 +134,9 @@ async function narrate(
     ),
     deltaPhrase("leads", metrics.leads.current, metrics.leads.previous),
     `${metrics.gapsOpened} new unanswered topics, ${metrics.gapsWon} resolved`,
-    topExperiment ? `notable pattern: ${topExperiment}` : null,
+    topExperiment && !containsContactData(topExperiment)
+      ? `notable pattern: ${topExperiment}`
+      : null,
   ]
     .filter(Boolean)
     .join("; ");
@@ -149,7 +152,8 @@ async function narrate(
           content:
             "You write a 2–3 sentence weekly business summary for a small-business owner from the figures provided. " +
             "Warm, plain English. Use ONLY the figures given — never invent numbers, never claim one thing caused another. " +
-            "No greeting, no sign-off, no markdown headers.",
+            "No greeting, no sign-off, no markdown headers. " +
+            "Never include an email address or phone number.",
         },
         { role: "user", content: facts },
       ],
@@ -161,7 +165,10 @@ async function narrate(
       },
     );
     const text = response.content?.trim();
-    return text && text.length > 0 ? text : deterministic;
+    if (!text || text.length === 0) return deterministic;
+    // A narrative that carries a contact value is replaced, not stored: the
+    // digest is presented as aggregate.
+    return containsContactData(text) ? deterministic : text;
   } catch (err) {
     logger.warn(
       "[insights-digest] narrative LLM failed, using deterministic summary",

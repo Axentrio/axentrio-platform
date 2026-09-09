@@ -620,27 +620,19 @@ describe('forwardMessageToN8n', () => {
 
   // ── 8. n8n forwarding (AI disabled, custom webhook) ─────────────────────
 
-  // ── 9. No AI + no webhook ───────────────────────────────────────────────
+  // ── 9. AI flag ──────────────────────────────────────────────────────────
 
-  describe('no AI + no webhook configured', () => {
-    it('should return false when neither AI nor webhook is configured', async () => {
+  describe('AI enabled flag', () => {
+    it('runs the platform agent when settings.ai is missing (defaults on)', async () => {
       const tenant = await createTestTenant({ settings: {} });
       const { session, message } = await setup(tenant.id);
 
-      expect(await forwardMessageToN8n(session, message)).toBe(false);
-      expect(mockGenerateResponse).not.toHaveBeenCalled();
+      expect(await forwardMessageToN8n(session, message)).toBe(true);
       expect(mockSendToWebhook).not.toHaveBeenCalled();
     });
 
-    it('should return false when AI is explicitly disabled', async () => {
+    it('returns false when AI is explicitly disabled', async () => {
       const tenant = await createTestTenant({ settings: { ai: aiSettings({ enabled: false }) } });
-      const { session, message } = await setup(tenant.id);
-
-      expect(await forwardMessageToN8n(session, message)).toBe(false);
-    });
-
-    it('should return false when webhook URL is empty', async () => {
-      const tenant = await createTestTenant({ webhookUrl: '', settings: {} });
       const { session, message } = await setup(tenant.id);
 
       expect(await forwardMessageToN8n(session, message)).toBe(false);
@@ -666,11 +658,7 @@ describe('forwardMessageToN8n', () => {
       expect(await forwardMessageToN8n(session, message)).toBe(true);
     });
 
-    it('should handle bot with settings cleared mid-conversation', async () => {
-      // Multi-bot Phase 4 (#16d): the behavioural slice lives on Bot.settings.
-      // Clearing the bot's settings (admin disables AI) means no webhook + no
-      // AI → forwarding returns false. (Previously this test cleared
-      // tenant.settings, which is no longer the source of truth.)
+    it('cleared bot settings still run the agent (missing enabled defaults on)', async () => {
       const tenant = await createTestTenant({
         settings: { ai: aiSettings() },
       });
@@ -682,7 +670,7 @@ describe('forwardMessageToN8n', () => {
         .where('tenantId = :tenantId AND isDefault = true', { tenantId: tenant.id })
         .execute();
 
-      expect(await forwardMessageToN8n(session, message)).toBe(false);
+      expect(await forwardMessageToN8n(session, message)).toBe(true);
     });
   });
 

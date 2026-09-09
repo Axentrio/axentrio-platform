@@ -1998,7 +1998,7 @@
         },
         "delete": {
           "title": "Gebruiker permanent verwijderen",
-          "description": "Dit anonimiseert de gegevens van <strong>{{name}}</strong> en verwijdert deze persoon permanent. Dit kan niet ongedaan worden gemaakt.",
+          "description": "Dit verwijdert het gebruikersaccount van <strong>{{name}}</strong> en koppelt de login los. Dit kan niet ongedaan worden gemaakt.",
           "button": "Permanent verwijderen"
         }
       }

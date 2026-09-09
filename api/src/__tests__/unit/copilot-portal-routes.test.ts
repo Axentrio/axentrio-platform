@@ -67,4 +67,19 @@ describe('PORTAL_ROUTES', () => {
     expect(lines).toHaveLength(PORTAL_ROUTES.length);
     expect(lines[0]).toContain('/inbox');
   });
+
+  it('keeps spoken opening hours on /ai, not on /bookings', () => {
+    const ai = PORTAL_ROUTES.find((r) => r.path === '/ai');
+    const bookings = PORTAL_ROUTES.find((r) => r.path === '/bookings');
+    expect(ai?.purpose).toMatch(/spoken opening hours/i);
+    expect(bookings?.purpose).toMatch(/Spoken opening hours for the bot are NOT here/);
+    expect(bookings?.purpose).toMatch(/\/ai/);
+  });
+
+  it('sends WhatsApp connect to /channels, not /settings/channels', () => {
+    const channels = PORTAL_ROUTES.find((r) => r.path === '/channels');
+    const settings = PORTAL_ROUTES.find((r) => r.path === '/settings/channels');
+    expect(channels?.purpose).toMatch(/CONNECT WhatsApp/);
+    expect(settings?.purpose).toMatch(/Not the place to connect WhatsApp/);
+  });
 });

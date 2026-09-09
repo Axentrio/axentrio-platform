@@ -20,7 +20,7 @@ import { Bot } from '../database/entities/Bot';
 import { enforceCountLimit } from '../billing/enforce';
 import { effectiveBotConfig, withEffectiveConfig } from '../templates/template-resolver';
 import { substituteVariables } from '../llm/prompt-builder';
-import { defaultBotAi } from '../config/default-bot-settings';
+import { defaultBotAi, isBotAiEnabled } from '../config/default-bot-settings';
 import {
   greetingQuickReplies,
   resolveBotLanguage,
@@ -137,10 +137,9 @@ export async function createWidgetSessionInTx(
       }),
   });
 
-  // #16d: initial status reads bot.settings - an AI-enabled bot starts in
-  // 'bot' (platform agent / custom webhook), anything else waits for a human.
-  const aiEnabled = bot.settings?.ai?.enabled;
-  const initialStatus = aiEnabled ? 'bot' : 'waiting';
+  // Same fill as the editor/test-chat: missing enabled defaults true.
+  // Explicit false waits for a human (onboarding skip / pause-all).
+  const initialStatus = isBotAiEnabled(bot) ? 'bot' : 'waiting';
 
   const draft = manager.create(ChatSession, {
     tenantId: tenant.id,

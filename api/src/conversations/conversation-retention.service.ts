@@ -31,6 +31,7 @@ import { AppDataSource } from '../database/data-source';
 import { notificationService } from '../services/notification.service';
 import { logAudit } from '../utils/audit';
 import { logComplianceEvent } from '../compliance/compliance-events.service';
+import { holdPredicate } from '../compliance/legal-hold.service';
 import { logger } from '../utils/logger';
 
 /** Guard rails on what a tenant may configure. Same shape as lead retention. */
@@ -119,6 +120,7 @@ export async function sweepConversationRetention(
         `SELECT id FROM chat_sessions
           WHERE tenant_id = $1
             AND last_activity_at < now() - ($2 || ' days')::interval
+            AND ${holdPredicate('chat_sessions', 'id', 'sessionIds')}
           ORDER BY last_activity_at ASC
           LIMIT $3`,
         [tenant.id, String(days), batchLimit],

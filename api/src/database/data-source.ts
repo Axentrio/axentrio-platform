@@ -24,6 +24,7 @@ import { WebhookDeliveryLog } from './entities/WebhookDeliveryLog';
 import { PendingInvite } from './entities/PendingInvite';
 import { AuditLog } from './entities/AuditLog';
 import { ComplianceEvent } from './entities/ComplianceEvent';
+import { LegalHold } from './entities/LegalHold';
 import { KnowledgeBase } from './entities/KnowledgeBase';
 import { KnowledgeDocument } from './entities/KnowledgeDocument';
 import { KnowledgeChunk } from './entities/KnowledgeChunk';
@@ -126,6 +127,7 @@ export const AppDataSource = new DataSource({
     PendingInvite,
     AuditLog,
     ComplianceEvent,
+    LegalHold,
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeChunk,

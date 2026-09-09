@@ -213,11 +213,11 @@
     "erase": {
       "confirm": "Erase",
       "thisLead": "this lead",
-      "done": "Personal data erased. The chat transcript was kept.",
+      "done": "Personal data erased, including {{count}} chat messages.",
       "forbidden": "Only admins and supervisors can erase a lead.",
       "error": "Could not erase this lead",
       "title": "Erase this lead’s personal data?",
-      "body": "This permanently removes the name, contact details and request from this lead, from any alerts about it, and from anything already sent to a connected system. It cannot be undone. The chat transcript itself is kept."
+      "body": "This permanently removes the name, contact details and request from this lead, from any alerts about it, from the chat transcript, and from anything already sent to a connected system. It cannot be undone."
     },
     "actions": {
       "erase": "Erase personal data",
@@ -281,6 +281,21 @@
       "failed": "Did not go through"
     }
   },
+  "conversations": {
+    "retention": {
+      "title": "How long to keep conversations",
+      "body": "Conversations with no activity for longer than this are permanently deleted, along with their messages and attachments. This cannot be undone. Deletion is measured from the last message, so a conversation your customer keeps returning to never expires.",
+      "keep": "Keep everything",
+      "6m": "6 months",
+      "1y": "1 year",
+      "2y": "2 years",
+      "confirm": "Delete conversations idle for more than {{days}} days, starting tonight? This runs every day from now on and cannot be undone.",
+      "confirmYes": "Yes, delete old conversations",
+      "saved": "Retention updated",
+      "error": "Could not update retention",
+      "adminOnly": "Only workspace admins can change this."
+    }
+  },
   "socialMedia": {
     "locked": {
       "title": "Social Media",
@@ -326,12 +341,17 @@
       "account": "Account Information",
       "notifications": "Notifications",
       "appearance": "Appearance",
+      "retention": "Data & retention",
       "widget": "Widget & Brand",
       "capabilities": "Capabilities",
       "features": "Features",
       "integrations": "Integrations",
       "channels": "Channels",
       "billing": "Billing"
+    },
+    "retention": {
+      "title": "Data & retention",
+      "intro": "How long we keep your customers’ data. Nothing is deleted unless you choose a period here."
     },
     "account": {
       "title": "Account Information",

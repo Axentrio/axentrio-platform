@@ -53,6 +53,7 @@ import ProfileSettings from '@pages/settings/ProfileSettings';
 import AccountInformationSettings from '@pages/settings/AccountInformationSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
+import DataRetentionSettings from '@pages/settings/DataRetentionSettings';
 import { IntegrationTab } from '@components/settings/IntegrationTab';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import { SocialChannelsContent } from '@components/channels/SocialChannelsContent';
@@ -396,6 +397,7 @@ function AppRoutes() {
                         <Route path="account" element={<AccountInformationSettings />} />
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />
+                        <Route path="retention" element={<DataRetentionSettings />} />
                         <Route path="widget" element={<WidgetBrandSettings />} />
                         <Route path="integrations" element={<IntegrationTab />} />
                         <Route path="channels" element={<SocialChannelsContent />} />

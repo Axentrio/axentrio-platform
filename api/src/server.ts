@@ -782,6 +782,25 @@ async function startBackgroundJobs(): Promise<void> {
       startCustomerMemoryRetentionSweep().forEach(trackTimer);
       startStuckMemoryRunWatcher().forEach(trackTimer);
 
+      // Conversation retention. Unflagged and ungated for the same reason as lead
+      // retention below: it is a NO-OP for every tenant that has not chosen a
+      // period (`settings.conversationRetentionDays`; unset = keep forever), and a
+      // data-protection control should not depend on remembering to enable it.
+      // The schedule (boot run + daily) lives in the service.
+      const { startConversationRetentionSweep } = await import(
+        "./conversations/conversation-retention.service"
+      );
+      startConversationRetentionSweep().forEach(trackTimer);
+
+      // Compliance-event retention. Its own, far longer period than the audit
+      // log's 90 days: the proof that a retention sweep ran, or that a data
+      // subject's erasure executed, has to outlive the login noise it used to
+      // be deleted with.
+      const { startComplianceEventRetentionSweep } = await import(
+        "./compliance/compliance-events.service"
+      );
+      startComplianceEventRetentionSweep().forEach(trackTimer);
+
       // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
       // env flag, because it is a NO-OP for every tenant that has not chosen a period,
       // and a data-protection control should not depend on remembering to enable it.

@@ -626,10 +626,10 @@ export default function Leads() {
       const res = await eraseLead.mutateAsync(lead.id);
       toast.success(
         t('leads.erase.done', {
-          defaultValue: 'Personal data erased. The chat transcript was kept.',
+          defaultValue: 'Personal data erased, including {{count}} chat messages.',
+          count: res.scrubbed.transcriptMessages,
         }),
       );
-      if (!res.transcriptRetained) return;
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       toast.error(

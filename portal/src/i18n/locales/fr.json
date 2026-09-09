@@ -279,6 +279,21 @@
       "failed": "N'a pas abouti"
     }
   },
+  "conversations": {
+    "retention": {
+      "title": "Durée de conservation des conversations",
+      "body": "Les conversations sans activité au-delà de cette durée sont définitivement supprimées, avec leurs messages et pièces jointes. Cette action est irréversible. Le délai court à partir du dernier message : une conversation à laquelle votre client revient n’expire jamais.",
+      "keep": "Tout conserver",
+      "6m": "6 mois",
+      "1y": "1 an",
+      "2y": "2 ans",
+      "confirm": "Supprimer les conversations inactives depuis plus de {{days}} jours, dès ce soir ? Cette opération s’exécute chaque jour et est irréversible.",
+      "confirmYes": "Oui, supprimer les anciennes conversations",
+      "saved": "Conservation mise à jour",
+      "error": "Impossible de mettre à jour la conservation",
+      "adminOnly": "Seuls les administrateurs de l’espace de travail peuvent modifier ceci."
+    }
+  },
   "socialMedia": {
     "locked": {
       "title": "Réseaux sociaux",
@@ -324,12 +339,17 @@
       "account": "Informations du compte",
       "notifications": "Notifications",
       "appearance": "Apparence",
+      "retention": "Données et conservation",
       "widget": "Widget & marque",
       "capabilities": "Fonctionnalités",
       "integrations": "Intégrations",
       "channels": "Canaux",
       "billing": "Facturation",
       "features": "Fonctionnalités"
+    },
+    "retention": {
+      "title": "Données et conservation",
+      "intro": "Combien de temps nous conservons les données de vos clients. Rien n’est supprimé tant que vous ne choisissez pas de durée ici."
     },
     "account": {
       "title": "Informations du compte",

@@ -30,13 +30,19 @@
  *    shipped this person's details out. Erasure that does not emit `lead.deleted`
  *    is unenforceable past our own database.
  *
- * SCOPE BOUNDARY — deliberately NOT scrubbed here: the conversation transcript
- * (`messages`). That text is the customer's own words in a chat session that is also
- * the evidence base for bookings, insights and dispute handling, and deleting it is a
- * different operation with a much wider blast radius. Erasing a LEAD erases the lead
- * record and everything derived from it. Transcript deletion belongs to the
- * session/tenant deletion flow, and the two must not be conflated — see the caveat
- * returned in `ErasureResult.transcriptRetained`.
+ * 5. **The transcript is the customer's own words.** The published Data Deletion
+ *    page promises that "the conversation messages ... exchanged with the AI
+ *    assistant" are deleted, and erasure used to stop at the transcript boundary.
+ *    It no longer does: the `messages` of this lead's sessions are deleted, the
+ *    visitor's participant row is scrubbed, and the session counters are reset.
+ *    That is the wider blast radius this service used to defer — the whole thread
+ *    goes, including the assistant's own replies, because deleting only the
+ *    customer's turns would leave the assistant quoting their name, address and
+ *    phone number back at anyone who opens the conversation.
+ *
+ * Still outside this service: rows reachable only through a different holder
+ * (`conversation_bindings`, `chatbot_judgments`, `Booking`), which are separate
+ * erasure scopes rather than part of the transcript.
  */
 import type { DataSource } from 'typeorm';
 import { emitLeadDeleted } from './lead-capture.service';
@@ -58,8 +64,12 @@ export interface ErasureResult {
     /** Traces carry `capture_lead`'s arguments — the contact and the request. */
     agentTraces: number;
     customerMemoryRows: number;
+    /** Message rows deleted from this person's sessions. */
+    transcriptMessages: number;
+    /** Visitor participant rows scrubbed (name, email, avatar, metadata). */
+    transcriptParticipants: number;
   };
-  /** Always true today — see the SCOPE BOUNDARY note above. */
+  /** False: the transcript is deleted with the lead. Kept for wire compatibility. */
   transcriptRetained: boolean;
 }
 
@@ -212,17 +222,59 @@ export async function eraseLead(
     //    NOTE: agent_traces uses QUOTED camelCase columns ("tenantId", "sessionId"),
     //    unlike every other table in this schema — it predates the snake_case
     //    convention. Unquoted snake_case here fails with `column does not exist`.
+    //
+    //    The session set is defined ONCE, just below, and shared with the transcript
+    //    deletion: two copies of this subquery is how the two would drift apart.
+    const leadSessionIdsSql = `
+      SELECT session_id FROM chatbot_lead_conversations
+       WHERE lead_id = $1 AND tenant_id = $2 AND session_id IS NOT NULL
+      UNION
+      SELECT session_id FROM chatbot_leads
+       WHERE id = $1 AND tenant_id = $2 AND session_id IS NOT NULL`;
+
     const traces = await manager.query(
       `UPDATE agent_traces
           SET trace = jsonb_build_object('erased', true, 'leadId', $1::text)
         WHERE "tenantId" = $2
-          AND "sessionId" IN (
-            SELECT session_id FROM chatbot_lead_conversations
-             WHERE lead_id = $1 AND tenant_id = $2 AND session_id IS NOT NULL
-            UNION
-            SELECT session_id FROM chatbot_leads
-             WHERE id = $1 AND tenant_id = $2 AND session_id IS NOT NULL
-          )`,
+          AND "sessionId" IN (${leadSessionIdsSql})`,
+      [leadId, tenantId],
+    );
+
+    // 6. The transcript itself. The published Data Deletion page promises these
+    //    rows are deleted, and the customer typically typed their own name, phone
+    //    and address into them. The whole thread goes — including the assistant's
+    //    replies, which quote that data back.
+    const transcript = await manager.query(
+      `DELETE FROM messages
+        WHERE tenant_id = $2
+          AND session_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 7. The visitor's own participant row (display name, email, avatar, metadata)
+    //    is the other half of the transcript. The agent's and the bot's rows are
+    //    left alone: they identify our customer's staff, not the data subject.
+    const participants = await manager.query(
+      `UPDATE participants
+          SET name = 'Deleted', email = NULL, avatar_url = NULL,
+              metadata = NULL, is_anonymous = true
+        WHERE type = 'user'
+          AND session_id IN (${leadSessionIdsSql})
+        RETURNING id`,
+      [leadId, tenantId],
+    );
+
+    // 8. The session still exists, so its cached counters must not keep advertising
+    //    a conversation that is gone. `transcript_revision` is NOT touched here: the
+    //    message-delete trigger above already bumps it, and bumping it twice would
+    //    inflate the counter every other CAS in the system compares against.
+    await manager.query(
+      `UPDATE chat_sessions
+          SET message_count = 0,
+              unread_count = 0,
+              updated_at = now()
+        WHERE tenant_id = $2 AND id IN (${leadSessionIdsSql})`,
       [leadId, tenantId],
     );
 
@@ -236,6 +288,8 @@ export async function eraseLead(
         webhookLogs: rowCount(hooks),
         agentTraces: rowCount(traces),
         customerMemoryRows,
+        transcriptMessages: rowCount(transcript),
+        transcriptParticipants: rowCount(participants),
       },
     };
   });
@@ -256,7 +310,7 @@ export async function eraseLead(
 
   logger.info('[leads] erased', { tenantId, leadId, scrubbed: result.scrubbed });
 
-  return { leadId, scrubbed: result.scrubbed, transcriptRetained: true };
+  return { leadId, scrubbed: result.scrubbed, transcriptRetained: false };
 }
 
 /**

@@ -175,7 +175,14 @@ export function useUpdateLeadStatus() {
 export interface LeadErasureResult {
   id: string;
   erased: true;
-  scrubbed: { conversations: number; notifications: number; webhookLogs: number };
+  scrubbed: {
+    conversations: number;
+    notifications: number;
+    webhookLogs: number;
+    /** Message rows deleted from this person's sessions. */
+    transcriptMessages: number;
+  };
+  /** False: the transcript is deleted with the lead. */
   transcriptRetained: boolean;
 }
 

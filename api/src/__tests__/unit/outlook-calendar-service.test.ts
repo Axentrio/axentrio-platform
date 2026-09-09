@@ -56,6 +56,9 @@ vi.mock('../../scheduler/calendar-rekey', async (orig) => ({
   rekeyBotBookings,
 }));
 
+const { alertCalendarReconnect } = vi.hoisted(() => ({ alertCalendarReconnect: vi.fn() }));
+vi.mock('../../notifications/calendar-reauth-alert', () => ({ alertCalendarReconnect }));
+
 import {
   buildConnectUrl,
   validateState,
@@ -195,7 +198,13 @@ describe('getValidAccessTokenMicrosoft', () => {
   });
 
   it('sets reauth_required and throws on invalid_grant', async () => {
-    const cred: any = { id: 'c1', botId: 'b1', tokenExpiry: new Date(Date.now() - 1000) };
+    const cred: any = {
+      id: 'c1',
+      botId: 'b1',
+      tenantId: 't1',
+      accountEmail: 'owner@outlook.com',
+      tokenExpiry: new Date(Date.now() - 1000),
+    };
     const row = {
       id: 'c1',
       botId: 'b1',
@@ -210,5 +219,31 @@ describe('getValidAccessTokenMicrosoft', () => {
     await expect(getValidAccessTokenMicrosoft(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
     expect(row.reauthRequired).toBe(true);
     expect(mgrSave).toHaveBeenCalledWith(expect.objectContaining({ reauthRequired: true }));
+    // The flag is COMMITTED before the error is raised. It used to be saved and then thrown out
+    // of the transaction, which rolled it back — so the dead link read as healthy forever.
+    expect(mgrSave.mock.invocationCallOrder[0]).toBeLessThan(
+      alertCalendarReconnect.mock.invocationCallOrder[0],
+    );
+    expect(alertCalendarReconnect).toHaveBeenCalledWith({
+      tenantId: 't1',
+      botId: 'b1',
+      provider: 'outlook',
+      accountEmail: 'owner@outlook.com',
+    });
+  });
+
+  it('does not re-alert when the link is already flagged', async () => {
+    const cred: any = { id: 'c1', botId: 'b1', tokenExpiry: new Date(Date.now() - 1000) };
+    mgrFindOne.mockResolvedValue({
+      id: 'c1',
+      botId: 'b1',
+      status: 'active',
+      reauthRequired: true,
+      refreshTokenEnc: 'enc(old-refresh)',
+      tokenExpiry: new Date(Date.now() - 1000),
+    });
+
+    await expect(getValidAccessTokenMicrosoft(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
+    expect(alertCalendarReconnect).not.toHaveBeenCalled();
   });
 });

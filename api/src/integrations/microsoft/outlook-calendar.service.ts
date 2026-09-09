@@ -19,6 +19,7 @@ import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
 import { conflictKeyFor, rekeyBotBookings } from '../../scheduler/calendar-rekey';
+import { alertCalendarReconnect } from '../../notifications/calendar-reauth-alert';
 
 const AUTHORIZE_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -235,6 +236,19 @@ export async function exchangeAndStore(
  * a concurrent refresh can't double-rotate the refresh token. Throws
  * `CALENDAR_REAUTH_REQUIRED` (and sets `reauth_required`) when consent is gone.
  */
+/**
+ * Result of the refresh transaction.
+ *
+ * `reauth` is RETURNED rather than thrown, because the flag it carries has to survive: throwing
+ * out of `AppDataSource.transaction` rolls the save back, so a dead Outlook link was flagged only
+ * in the manager's memory - `getStatus` kept reporting it healthy while every availability call
+ * failed closed. Committing the flag first, then raising the error, is what makes the dead link
+ * visible and lets the reconnect alert fire once rather than on every request.
+ */
+type MicrosoftTokenOutcome =
+  | { kind: 'token'; token: string }
+  | { kind: 'reauth'; transitioned: boolean };
+
 export async function getValidAccessTokenMicrosoft(cred: CalendarCredential): Promise<string> {
   if (
     !cred.reauthRequired &&
@@ -244,20 +258,20 @@ export async function getValidAccessTokenMicrosoft(cred: CalendarCredential): Pr
     return decrypt(cred.accessTokenEnc);
   }
 
-  return AppDataSource.transaction(async (manager) => {
+  const outcome = await AppDataSource.transaction<MicrosoftTokenOutcome>(async (manager) => {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`calcred:${cred.botId}`]);
     // Re-read under the lock — a concurrent refresh/reconnect may have updated it.
     const fresh = await manager.findOne(CalendarCredential, { where: { id: cred.id } });
     if (!fresh || fresh.status !== 'active' || fresh.reauthRequired) {
-      throw new Error('CALENDAR_REAUTH_REQUIRED');
+      return { kind: 'reauth', transitioned: false };
     }
     if (fresh.tokenExpiry && fresh.tokenExpiry.getTime() - Date.now() > 60_000) {
-      return decrypt(fresh.accessTokenEnc);
+      return { kind: 'token', token: decrypt(fresh.accessTokenEnc) };
     }
     if (!fresh.refreshTokenEnc) {
       fresh.reauthRequired = true;
       await manager.save(fresh);
-      throw new Error('CALENDAR_REAUTH_REQUIRED');
+      return { kind: 'reauth', transitioned: true };
     }
     try {
       const tok = await msTokenRequest({
@@ -270,16 +284,31 @@ export async function getValidAccessTokenMicrosoft(cred: CalendarCredential): Pr
       fresh.tokenExpiry = new Date(Date.now() + (tok.expires_in ?? 3600) * 1000);
       fresh.reauthRequired = false;
       await manager.save(fresh);
-      return tok.access_token;
+      return { kind: 'token', token: tok.access_token };
     } catch (err) {
       if (isInvalidGrant(err)) {
         fresh.reauthRequired = true;
         await manager.save(fresh);
-        throw new Error('CALENDAR_REAUTH_REQUIRED');
+        return { kind: 'reauth', transitioned: true };
       }
-      throw err; // transient — caller backs off / retries
+      throw err; // transient — nothing to persist, so rolling back is correct
     }
   });
+
+  if (outcome.kind === 'reauth') {
+    // Outside the transaction: the flag is committed, and a notification failure must not
+    // resurrect a refresh that already proved the link dead.
+    if (outcome.transitioned) {
+      await alertCalendarReconnect({
+        tenantId: cred.tenantId,
+        botId: cred.botId,
+        provider: 'outlook',
+        accountEmail: cred.accountEmail ?? null,
+      });
+    }
+    throw new Error('CALENDAR_REAUTH_REQUIRED');
+  }
+  return outcome.token;
 }
 
 /** Account-unique identity for the conflict key: the Graph object id. */

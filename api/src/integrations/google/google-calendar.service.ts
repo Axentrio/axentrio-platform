@@ -16,6 +16,7 @@ import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
 import { conflictKeyFor, rekeyBotBookings } from '../../scheduler/calendar-rekey';
+import { alertCalendarReconnect } from '../../notifications/calendar-reauth-alert';
 import type { ExternalEventState, ExternalChangeBatch } from '../../scheduler/calendar-provider';
 
 // Scopes:
@@ -298,6 +299,28 @@ function isInvalidGrant(err: unknown): boolean {
   return data?.error === 'invalid_grant';
 }
 
+/**
+ * Flag the connection dead AND tell the owner.
+ *
+ * The flag is what the portal reads; the notification is what reaches an owner who is not
+ * looking at Settings. Only the healthy -> dead transition alerts: once flagged, every
+ * availability check re-enters this path, so alerting on each one would bury the owner in
+ * duplicates of a single outage.
+ */
+async function flagReauthRequired(cred: CalendarCredential): Promise<void> {
+  const wasFlagged = cred.reauthRequired;
+  cred.reauthRequired = true;
+  await AppDataSource.getRepository(CalendarCredential).save(cred);
+  if (!wasFlagged) {
+    await alertCalendarReconnect({
+      tenantId: cred.tenantId,
+      botId: cred.botId,
+      provider: 'google',
+      accountEmail: cred.accountEmail ?? null,
+    });
+  }
+}
+
 /** Return a valid access token, refreshing (and persisting) if expired. On a
  *  PERMANENT refresh failure, set reauthRequired so the portal can surface a dead
  *  link (Google never set this flag before, so a dead link showed as healthy). */
@@ -305,10 +328,8 @@ export async function getValidAccessToken(cred: CalendarCredential): Promise<str
   const notExpired = cred.tokenExpiry && cred.tokenExpiry.getTime() - Date.now() > 60_000;
   if (notExpired && !cred.reauthRequired) return decrypt(cred.accessTokenEnc);
 
-  const repo = AppDataSource.getRepository(CalendarCredential);
   if (!cred.refreshTokenEnc) {
-    cred.reauthRequired = true;
-    await repo.save(cred);
+    await flagReauthRequired(cred);
     throw new Error('CALENDAR_REAUTH_REQUIRED');
   }
   const client = oauthClient();
@@ -322,22 +343,20 @@ export async function getValidAccessToken(cred: CalendarCredential): Promise<str
     // Permanent (invalid_grant) → flag for reconnect. Transient (network/5xx) →
     // rethrow without flagging so a blip doesn't falsely demand re-auth.
     if (isInvalidGrant(err)) {
-      cred.reauthRequired = true;
-      await repo.save(cred);
+      await flagReauthRequired(cred);
       throw new Error('CALENDAR_REAUTH_REQUIRED');
     }
     throw err;
   }
   if (!token) {
-    cred.reauthRequired = true;
-    await repo.save(cred);
+    await flagReauthRequired(cred);
     throw new Error('CALENDAR_REAUTH_REQUIRED');
   }
 
   cred.accessTokenEnc = encrypt(token);
   cred.tokenExpiry = client.credentials.expiry_date ? new Date(client.credentials.expiry_date) : null;
   cred.reauthRequired = false; // a successful refresh clears any prior dead-link flag
-  await repo.save(cred);
+  await AppDataSource.getRepository(CalendarCredential).save(cred);
   return token;
 }
 

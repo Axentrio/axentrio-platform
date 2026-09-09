@@ -59,12 +59,14 @@ export const getOpeningHours: CopilotTool<Record<string, never>, OpeningHoursRes
 
     const timezone = bot.businessTimezone || 'Europe/Brussels';
     const spoken = bot.settings?.businessHours;
+    // An explicit disable is a decision — check it BEFORE the type guard, which
+    // would otherwise narrow `spoken` to never in its negative branch.
+    if (spoken && spoken.enabled === false) {
+      return { source: 'always_on', hours: null, timezone };
+    }
     if (isBusinessHoursConfigured(spoken)) {
       const hours = formatBusinessHoursForPlaceholder(spoken, new Date(), timezone);
       return { source: 'configured', hours: hours || null, timezone };
-    }
-    if (spoken && spoken.enabled === false) {
-      return { source: 'always_on', hours: null, timezone };
     }
 
     const rule = await ctx.manager.findOne(AvailabilityRule, {

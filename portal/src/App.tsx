@@ -54,6 +54,7 @@ import AccountInformationSettings from '@pages/settings/AccountInformationSettin
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import DataRetentionSettings from '@pages/settings/DataRetentionSettings';
+import { TermsAcceptanceModal } from '@/components/tenant/TermsAcceptanceModal';
 import { IntegrationTab } from '@components/settings/IntegrationTab';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import { SocialChannelsContent } from '@components/channels/SocialChannelsContent';
@@ -495,6 +496,9 @@ const App: React.FC = () => {
               <ErrorBoundary>
               <CopilotDrawerProvider>
               <AuthenticatedLayout>
+                {/* Global: acceptance is per person and per version, so it has to
+                    be able to appear wherever the customer lands. */}
+                <TermsAcceptanceModal />
                 <OrganizationRequired>
                   <SetupGate>
                     <AppRoutes />

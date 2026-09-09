@@ -3298,5 +3298,13 @@
     },
     "progressLabel": "Setup progress",
     "saveFailed": "That did not save. Try again in a moment."
+  },
+  "terms": {
+    "title": "Our Terms of Service have been updated",
+    "body": "Please read and accept version {{version}} before continuing. Your acceptance is recorded with the date and is what we rely on if there is ever a question about what you agreed to.",
+    "read": "Read the Terms of Service",
+    "accept": "I accept",
+    "accepted": "Thanks — that is recorded.",
+    "error": "Could not record your acceptance"
   }
 }

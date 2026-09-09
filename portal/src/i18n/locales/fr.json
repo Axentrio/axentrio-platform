@@ -3258,5 +3258,13 @@
     },
     "progressLabel": "Progression de la configuration",
     "saveFailed": "L'enregistrement a échoué. Réessayez dans un instant."
+  },
+  "terms": {
+    "title": "Nos conditions générales ont été mises à jour",
+    "body": "Veuillez lire et accepter la version {{version}} avant de continuer. Votre acceptation est enregistrée avec la date et c’est ce sur quoi nous nous appuyons en cas de question sur ce que vous avez accepté.",
+    "read": "Lire les conditions générales",
+    "accept": "J’accepte",
+    "accepted": "Merci — c’est enregistré.",
+    "error": "Impossible d’enregistrer votre acceptation"
   }
 }

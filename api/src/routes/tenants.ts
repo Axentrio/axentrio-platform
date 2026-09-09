@@ -32,6 +32,7 @@ import {
   openLegalHold,
   releaseLegalHold,
 } from "../compliance/legal-hold.service";
+import { getTermsStatus, recordTermsAcceptance } from "../compliance/terms.service";
 import { updateClerkOrganization } from "../services/clerk-sync.service";
 import { logger } from "../utils/logger";
 import { invalidate } from "../utils/cache";
@@ -648,6 +649,35 @@ router.delete(
     });
     if (!hold) throw new NotFoundError("Legal hold not found");
     sendSuccess(res, hold);
+  }),
+);
+
+/**
+ * Accepted terms.
+ *
+ * Any authenticated seat, not admin-only: acceptance is the person's own act, and
+ * a tenant admin cannot accept on someone else's behalf.
+ */
+router.get(
+  "/me/terms",
+  asyncHandler(async (req: Request, res: Response) => {
+    sendSuccess(res, await getTermsStatus(req.user!.tenantId, req.userId!));
+  }),
+);
+
+router.post(
+  "/me/terms",
+  asyncHandler(async (req: Request, res: Response) => {
+    const row = await recordTermsAcceptance({
+      tenantId: req.user!.tenantId,
+      userId: req.userId!,
+      ipAddress: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null,
+    });
+    sendCreated(res, {
+      termsVersion: row.termsVersion,
+      acceptedAt: row.acceptedAt.toISOString(),
+    });
   }),
 );
 

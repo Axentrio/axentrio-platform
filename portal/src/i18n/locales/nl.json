@@ -3259,5 +3259,13 @@
     },
     "progressLabel": "Voortgang installatie",
     "saveFailed": "Dat is niet opgeslagen. Probeer het zo meteen opnieuw."
+  },
+  "terms": {
+    "title": "Onze algemene voorwaarden zijn bijgewerkt",
+    "body": "Lees en accepteer versie {{version}} voordat u doorgaat. Uw acceptatie wordt met de datum vastgelegd en daarop beroepen wij ons als er ooit een vraag is over wat u hebt aanvaard.",
+    "read": "Lees de algemene voorwaarden",
+    "accept": "Ik accepteer",
+    "accepted": "Bedankt — dat is vastgelegd.",
+    "error": "Kon uw acceptatie niet vastleggen"
   }
 }

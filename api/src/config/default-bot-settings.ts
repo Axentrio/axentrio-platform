@@ -58,6 +58,28 @@ export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
   };
 }
 
+export type BotAi = NonNullable<BotSettings['ai']>;
+
+/**
+ * Merge stored `ai` over defaultBotAi. Missing `enabled` stays true (the
+ * default); explicit false stays off. Same fill the editor and test-chat use.
+ */
+export function withAiDefaults(bot: { name: string; settings?: BotSettings | null }): BotAi {
+  const d = defaultBotAi(bot.name);
+  const e = (bot.settings?.ai ?? {}) as Partial<BotAi>;
+  return {
+    ...d,
+    ...e,
+    brandVoice: { ...d.brandVoice, ...(e.brandVoice ?? {}) },
+    guardrails: { ...d.guardrails, ...(e.guardrails ?? {}) },
+  };
+}
+
+/** Missing enabled follows defaultBotAi (true). Explicit false stays off. */
+export function isBotAiEnabled(bot: { name: string; settings?: BotSettings | null }): boolean {
+  return withAiDefaults(bot).enabled === true;
+}
+
 /** Default full settings for a newly-created (non-anchor) bot — clean slate. */
 export function defaultBotSettings(name: string): BotSettings {
   return {

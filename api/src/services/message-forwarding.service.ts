@@ -53,7 +53,7 @@ import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
 import { renderChannelAddressControls } from '../channels/address-controls';
 import { deliverHandoffNotification } from '../notifications/notification-outbox.worker';
-import { effectiveEscalationKeywords } from '../config/default-bot-settings';
+import { effectiveEscalationKeywords, withAiDefaults } from '../config/default-bot-settings';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -236,10 +236,9 @@ async function resolveLegacyConfig(
   // (ai, businessHours, integrations) lives on Bot.settings; only the LLM
   // provider apiKey stays on Tenant.settings.ai.apiKey (fetched lazily in the
   // RAG fallback path below via getLlmRuntimeConfigForSession).
-  let botSettings: BotSettings;
   let bot: Bot;
   try {
-    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
+    ({ bot } = await getBotConfigForSession(session));
   } catch (err) {
     if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
       // Traffic to a paused/deleted bot should have been rejected upstream
@@ -258,13 +257,12 @@ async function resolveLegacyConfig(
   // payload + the RAG fallback use the effective values. escalationKeywords +
   // businessHours stay tenant-owned (preserved / read from botSettings directly).
   const resolvedTemplates = await resolveBoundTemplates(bot);
-  const aiSettings = botSettings.ai ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates)) : botSettings.ai;
-
-  // External n8n forwarding has been retired — every AI-enabled bot is answered by
-  // the in-house platform agent. Bots with AI off (or before the agent service is
-  // wired) stay waiting for a human to pick up.
-  const willUsePlatformAgent = !!aiSettings?.enabled && !!agentService;
-  if (!willUsePlatformAgent) return null;
+  const aiSettings = withEffectiveConfig(
+    withAiDefaults(bot),
+    effectiveConfigFromList(resolvedTemplates),
+  );
+  // Missing enabled follows defaultBotAi (true). Explicit false waits for a human.
+  if (aiSettings.enabled !== true || !agentService) return null;
 
   return { tenant, aiSettings };
 }
@@ -1212,10 +1210,9 @@ async function resolveTurnConfig(
     return null;
   }
 
-  let botSettings: BotSettings;
   let bot: Bot;
   try {
-    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
+    ({ bot } = await getBotConfigForSession(session));
   } catch (err) {
     if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
       logger.warn(`[coalescer] session ${session.id} points at a paused/deleted bot — skipping`, {
@@ -1228,10 +1225,11 @@ async function resolveTurnConfig(
   }
 
   const resolvedTemplates = await resolveBoundTemplates(bot);
-  const aiSettings = botSettings.ai
-    ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates))
-    : botSettings.ai;
-  if (!aiSettings?.enabled || !agentService) return null;
+  const aiSettings = withEffectiveConfig(
+    withAiDefaults(bot),
+    effectiveConfigFromList(resolvedTemplates),
+  );
+  if (aiSettings.enabled !== true || !agentService) return null;
   return { tenant, aiSettings };
 }
 

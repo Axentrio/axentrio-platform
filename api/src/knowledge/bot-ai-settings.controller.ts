@@ -26,7 +26,7 @@ import {
   BotNotFoundConfigError,
 } from '../services/bot-config.service';
 import { getBotKnowledgeBaseIds } from './bot-knowledge-bases';
-import { defaultBotAi } from '../config/default-bot-settings';
+import { withAiDefaults } from '../config/default-bot-settings';
 import { resolveBotLanguage, resolveGreetingMessage } from '../config/bot-language';
 import { putBotAiSettingsSchema, PutBotAiSettingsInput } from '../schemas/bot-ai-settings.schema';
 import { testChatSchema } from '../schemas/ai-settings.schema';
@@ -48,21 +48,6 @@ async function loadOwnedBotOr404(botId: string, tenantId: string) {
   }
 }
 
-/**
- * Merge a bot's stored `ai` over the defaults so the editor always receives a
- * complete, valid shape (a partial/absent row would otherwise break the form's
- * initial snapshot + autosave).
- */
-function withAiDefaults(bot: { name: string; settings?: BotSettings }): BotAi {
-  const d = defaultBotAi(bot.name);
-  const e = (bot.settings?.ai ?? {}) as Partial<BotAi>;
-  return {
-    ...d,
-    ...e,
-    brandVoice: { ...d.brandVoice, ...(e.brandVoice ?? {}) },
-    guardrails: { ...d.guardrails, ...(e.guardrails ?? {}) },
-  };
-}
 
 /** Strip `apiKey` (never on the bot) and surface `hasApiKey` from the tenant. */
 function toAiSettingsResponse(botAi: BotAi, tenantApiKey: string | null | undefined) {

@@ -50,6 +50,7 @@ import { widgetVersionHash } from '../widget/widget-version';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { recordOriginDenial } from '../services/widget-abuse.service';
+import { isBotAiEnabled } from '../config/default-bot-settings';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -160,7 +161,7 @@ function buildWidgetFeatureFlags(botSettings: WidgetBotSettings, fileUploadEnabl
   return {
     fileUploadEnabled,
     handoffEnabled: botSettings.features?.handoffEnabled ?? true,
-    aiEnabled: botSettings.ai?.enabled ?? false,
+    aiEnabled: isBotAiEnabled({ name: 'widget', settings: botSettings }),
   };
 }
 

@@ -96,13 +96,64 @@ describe("originFromSourceUrl", () => {
 });
 
 describe("parseRobotsTxt", () => {
-  it("honours Disallow for our bot and for *", () => {
+  it("honours Disallow for * when no group names our bot", () => {
+    const robots = parseRobotsTxt("User-agent: *\nDisallow: /private\n");
+    expect(robots.allows("/services")).toBe(true);
+    expect(robots.allows("/private/x")).toBe(false);
+  });
+
+  it("lets a group naming our bot override the * group instead of stacking", () => {
     const robots = parseRobotsTxt(
       "User-agent: *\nDisallow: /private\n\nUser-agent: Axentrio-KnowledgeBot\nDisallow: /drafts\n",
     );
     expect(robots.allows("/services")).toBe(true);
-    expect(robots.allows("/private/x")).toBe(false);
     expect(robots.allows("/drafts/a")).toBe(false);
+    expect(robots.allows("/private/x")).toBe(true);
+  });
+
+  it("matches * as any sequence of characters", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /private*\nDisallow: /*/secret\nDisallow: /*?session=\n",
+    );
+    expect(robots.allows("/private/team")).toBe(false);
+    expect(robots.allows("/en/secret/team")).toBe(false);
+    expect(robots.allows("/cart?session=1")).toBe(false);
+    expect(robots.allows("/en/public")).toBe(true);
+    expect(robots.allows("/cart")).toBe(true);
+  });
+
+  it("anchors a trailing $ at the end of the path", () => {
+    const robots = parseRobotsTxt("User-agent: *\nDisallow: /p$\n");
+    expect(robots.allows("/p")).toBe(false);
+    expect(robots.allows("/page")).toBe(true);
+  });
+
+  it("applies a group with several User-agent lines to each agent", () => {
+    const withStar = parseRobotsTxt(
+      "User-agent: *\nUser-agent: GPTBot\nDisallow: /private\n",
+    );
+    expect(withStar.allows("/private")).toBe(false);
+    const withOwn = parseRobotsTxt(
+      "User-agent: GPTBot\nUser-agent: Axentrio-KnowledgeBot\nDisallow: /drafts\n",
+    );
+    expect(withOwn.allows("/drafts/a")).toBe(false);
+  });
+
+  it("starts a new group at a User-agent line after a rule line", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /a\nUser-agent: GPTBot\nDisallow: /b\n",
+    );
+    expect(robots.allows("/a")).toBe(false);
+    expect(robots.allows("/b")).toBe(true);
+  });
+
+  it("lets the longest match win, and Allow win a tie", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /\nAllow: /public\nDisallow: /folder\nAllow: /folder\n",
+    );
+    expect(robots.allows("/public/page")).toBe(true);
+    expect(robots.allows("/private/page")).toBe(false);
+    expect(robots.allows("/folder/x")).toBe(true);
   });
 });
 

@@ -2,12 +2,32 @@ import { logger } from "../utils/logger";
 
 export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 
+interface RobotsRule {
+  allow: boolean;
+  pattern: string;
+  matcher: RegExp;
+}
+
+// Google robots semantics: a rule is a path prefix, so "/private" also
+// blocks "/privateX".
+function ruleMatcher(pattern: string): RegExp {
+  const anchored = pattern.endsWith("$");
+  const source = (anchored ? pattern.slice(0, -1) : pattern)
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${source}${anchored ? "$" : ""}`);
+}
+
 export function parseRobotsTxt(body: string): {
   allows: (path: string) => boolean;
 } {
-  const disallows: string[] = [];
-  let ua = "";
-  let applies = false;
+  const ownAgent = KNOWLEDGE_BOT_UA.toLowerCase();
+  const ownRules: RobotsRule[] = [];
+  const starRules: RobotsRule[] = [];
+  let namesOwnAgent = false;
+  let agents: string[] = [];
+  let groupHasRules = false;
 
   for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*$/, "").trim();
@@ -18,20 +38,42 @@ export function parseRobotsTxt(body: string): {
     const value = line.slice(colon + 1).trim();
 
     if (field === "user-agent") {
-      ua = value.toLowerCase();
-      applies = ua === "*" || ua === KNOWLEDGE_BOT_UA.toLowerCase();
+      if (groupHasRules) {
+        agents = [];
+        groupHasRules = false;
+      }
+      const agent = value.toLowerCase();
+      agents.push(agent);
+      if (agent === ownAgent) namesOwnAgent = true;
       continue;
     }
-    if (field === "disallow" && applies && value) {
-      disallows.push(value);
-    }
+    if (field !== "allow" && field !== "disallow") continue;
+    groupHasRules = true;
+    if (!value) continue;
+    const rule = {
+      allow: field === "allow",
+      pattern: value,
+      matcher: ruleMatcher(value),
+    };
+    if (agents.includes(ownAgent)) ownRules.push(rule);
+    if (agents.includes("*")) starRules.push(rule);
   }
 
+  const rules = namesOwnAgent ? ownRules : starRules;
   return {
     allows(path: string): boolean {
-      // Google robots semantics: a Disallow prefix matches any path that
-      // starts with it, so "/private" also blocks "/privateX".
-      return !disallows.some((prefix) => path.startsWith(prefix));
+      let winner: RobotsRule | undefined;
+      for (const rule of rules) {
+        if (!rule.matcher.test(path)) continue;
+        if (
+          !winner ||
+          rule.pattern.length > winner.pattern.length ||
+          (rule.pattern.length === winner.pattern.length && rule.allow)
+        ) {
+          winner = rule;
+        }
+      }
+      return winner?.allow ?? true;
     },
   };
 }

@@ -314,6 +314,17 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "I'll let you know when the team replies. Your request has been forwarded to the team.",
       "Als u nog vragen heeft, laat het weten. Uw aanvraag is naar de eigenaar doorgestuurd.",
       "Si vous avez des questions, écrivez-nous. Votre demande a bien été transmise.",
+      // A lead-in whose own clause ends before the claim does not govern it.
+      "I'm not sure when they'll reply but your request has been forwarded to the team.",
+      "Good question about if we open Sundays - your request has been forwarded to the team.",
+      "Good question about if we open Sundays — your request has been forwarded to the team.",
+      "Good question about if we open Sundays – your request has been forwarded to the team.",
+      "Thanks! When it comes to your question - your request has been sent to the team.",
+      "Before you go I've passed your request on to the team.",
+      "Once again your request has been forwarded to the team.",
+      "Ik weet niet wanneer ze antwoorden maar uw aanvraag is doorgestuurd naar het team.",
+      "Voordat u gaat: ik heb uw aanvraag naar het team doorgestuurd.",
+      "Je ne sais pas quand ils répondront mais votre demande a bien été transmise.",
     ]) {
       const result = validateOutput(text, nothingRecorded);
       expect(result.violations.map((v) => v.family), text).toContain(
@@ -379,6 +390,8 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "Voordat uw aanvraag is doorgestuurd, controleren we de gegevens.",
       "Totdat uw aanvraag is ingediend, kunnen we niets plannen.",
       "Une fois que le formulaire est rempli et que votre demande a été transmise, nous répondons sous 48 heures.",
+      "We reply within 48 hours once all of your details have been submitted.",
+      "Zodra het formulier klaar is en uw aanvraag is ingediend, neemt het team contact op.",
       // A generic article is someone else's record, not the customer's ask.
       "De gegevens zijn geregistreerd bij de KvK.",
       // The adverb and recipient slots are closed lists, so a negation never fills them.

@@ -117,8 +117,9 @@ export function claimsBookingConfirmed(text: string): boolean {
  *  - A BARE ACKNOWLEDGEMENT. "Thanks, I have your details" is conversation, not a claim about
  *    what reached the owner, so only a completed transmission verb counts.
  *  - A CONDITION OR A SEQUENCE. "Once all your details have been submitted, we reply within
- *    48 hours" describes the process, so a claim whose own clause holds `SUBORDINATE_LEAD_IN`
- *    does not count.
+ *    48 hours" describes the process, so a claim that `SUBORDINATE_LEAD_IN` introduces does
+ *    not count. A lead-in whose own clause ends first ("Before you go I've passed your request
+ *    on") introduces nothing, so the claim after it still counts.
  */
 export function claimsRequestForwarded(text: string): boolean {
   const t = text.toLowerCase();
@@ -129,12 +130,19 @@ export function claimsRequestForwarded(text: string): boolean {
 
 /** The text from the start of the clause that holds `end` up to `end`, and never further back. */
 function clauseBefore(t: string, end: number): string {
-  return t.slice(0, end).split(/[.!?;:,\n]/).pop() ?? '';
+  return t.slice(0, end).split(/[.!?;:,\n—–]| - /).pop() ?? '';
 }
 
-/** A conjunction that turns the rest of its clause into a condition or a sequence. */
-const SUBORDINATE_LEAD_IN =
-  /\b(?:once|after|when|whenever|as soon as|if|before|until|unless|zodra|nadat|als|wanneer|indien|voordat|totdat|une fois que|dès que|après que|quand|lorsque|si)\s/;
+/**
+ * A conjunction that introduces the claim itself, which makes the claim a condition or a
+ * sequence. Only a quantifier of the claim's noun ("once all your details") may stand between
+ * them, or an earlier clause that "and" joins to the claim ("once the form is complete and your
+ * request"). Any other words form a clause of their own, and the claim is a new main clause.
+ */
+const SUBORDINATE_LEAD_IN = new RegExp(
+  '\\b(?:once|after|when|whenever|as soon as|if|before|until|unless|zodra|nadat|als|wanneer|indien|voordat|totdat|une fois que|dès que|après que|quand|lorsque|si)' +
+    '\\s+(?:(?:all(?: of)?|both|al)\\s+|.*\\s(?:and|en|et(?: que)?)\\s+)?$',
+);
 
 // One optional completion adverb, from a CLOSED list. Never a wildcard: an open gap between
 // the auxiliary and the participle would admit "has not been" and "is nog niet".

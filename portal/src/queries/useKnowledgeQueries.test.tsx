@@ -95,6 +95,37 @@ describe("website import watch", () => {
     expect(documentFetches()).toBe(fetches);
   });
 
+  it("keeps polling after a re-import of a refused site until the new crawl result arrives", async () => {
+    let crawled = false;
+    apiGet.mockImplementation(async () =>
+      crawled
+        ? {
+            documents: [
+              { id: "doc-1", status: "pending", sourceUrl: "https://down.example/" },
+            ],
+            websiteCrawls: [],
+          }
+        : { documents: [], websiteCrawls: [refused] },
+    );
+    const { result } = renderDocumentsPage();
+    await advance(1000);
+    expect(result.current.notices.data).toEqual([refused]);
+
+    act(() => {
+      result.current.importWebsite.mutate({ url: "https://down.example" });
+    });
+    await advance(0);
+    const fetchesAfterImport = documentFetches();
+    await advance(12_000);
+    expect(documentFetches()).toBeGreaterThanOrEqual(fetchesAfterImport + 2);
+    expect(result.current.notices.data).toEqual([refused]);
+
+    crawled = true;
+    await advance(6000);
+    expect(result.current.notices.data).toEqual([]);
+    expect(result.current.documents.data).toHaveLength(1);
+  });
+
   it("stops polling when the watch window ends without a notice", async () => {
     apiGet.mockResolvedValue({ documents: [], websiteCrawls: [] });
     const { result } = renderDocumentsPage();

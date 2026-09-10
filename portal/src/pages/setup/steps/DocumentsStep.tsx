@@ -10,7 +10,8 @@ import { useTranslation } from 'react-i18next';
 import { FileText, Loader2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import AddDocumentModal from '@/pages/knowledge/AddDocumentModal';
-import { useKnowledgeDocuments } from '@/queries/useKnowledgeQueries';
+import WebsiteCrawlNotices from '@/pages/knowledge/WebsiteCrawlNotices';
+import { useKnowledgeDocuments, useWebsiteCrawlNotices } from '@/queries/useKnowledgeQueries';
 import type { StepProps } from './types';
 
 interface KnowledgeDoc {
@@ -23,6 +24,7 @@ export function DocumentsStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const [adding, setAdding] = React.useState(false);
   const { data, isLoading } = useKnowledgeDocuments();
+  const { data: websiteCrawls = [] } = useWebsiteCrawlNotices();
   const docs = (Array.isArray(data) ? data : []) as KnowledgeDoc[];
 
   return (
@@ -33,6 +35,8 @@ export function DocumentsStep({ submit }: StepProps) {
         </h2>
         <p className="text-sm text-text-secondary">{t('setup.steps.documents.body')}</p>
       </div>
+
+      <WebsiteCrawlNotices notices={websiteCrawls} />
 
       {isLoading ? (
         <div className="flex justify-center py-6">

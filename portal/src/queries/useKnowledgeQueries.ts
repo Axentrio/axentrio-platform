@@ -47,24 +47,50 @@ function importOrigin(url: string): string | null {
   }
 }
 
+type ImportWatch = { origin: string | null; before: string | null };
+
+function noticeFor(
+  notices: WebsiteCrawlNotice[] | undefined,
+  origin: string | null,
+): string | null {
+  const notice = notices?.find((candidate) => candidate.origin === origin);
+  return notice ? JSON.stringify(notice) : null;
+}
+
+function cachedNotices(
+  queryClient: QueryClient,
+  kbId: string | undefined,
+): WebsiteCrawlNotice[] | undefined {
+  if (!kbId) {
+    return queryClient.getQueryData<DocumentsQueryData>(
+      queryKeys.knowledge.documents(),
+    )?.websiteCrawls;
+  }
+  return queryClient
+    .getQueriesData<{
+      kbId?: string | null;
+      websiteCrawls?: WebsiteCrawlNotice[];
+    }>({ queryKey: [...queryKeys.bots.all(), "knowledge"] })
+    .find(([, data]) => data?.kbId === kbId)?.[1]?.websiteCrawls;
+}
+
 export function websiteImportPollInterval(
   queryClient: QueryClient,
   kbId: string | undefined,
   notices: WebsiteCrawlNotice[] | undefined,
 ): number | false {
-  const arrived = new Set((notices ?? []).map((notice) => notice.origin));
   const watching = queryClient
     .getMutationCache()
     .findAll({ mutationKey: importWebsiteKey })
     .some((mutation) => {
       const input = mutation.state.variables as ImportWebsiteInput | undefined;
-      if (!input || input.kbId !== kbId) return false;
+      const watch = mutation.state.context as ImportWatch | undefined;
+      if (!input || !watch?.origin || input.kbId !== kbId) return false;
       if (mutation.state.status === "error") return false;
       if (Date.now() - mutation.state.submittedAt >= WEBSITE_IMPORT_WATCH_MS) {
         return false;
       }
-      const origin = importOrigin(input.url);
-      return origin !== null && !arrived.has(origin);
+      return noticeFor(notices, watch.origin) === watch.before;
     });
   return watching ? POLL_MS : false;
 }
@@ -224,6 +250,13 @@ export function useImportWebsite() {
         url: normalizeWebsiteUrl(data.url),
         extraUrls: data.extraUrls?.map(normalizeWebsiteUrl),
       }),
+    onMutate: (data): ImportWatch => {
+      const origin = importOrigin(data.url);
+      return {
+        origin,
+        before: noticeFor(cachedNotices(queryClient, data.kbId), origin),
+      };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),

@@ -412,7 +412,7 @@ time left that the business can take, the refusal names the range the whole-day 
 or the week after that date when that check gives no reason (a Service too long for the day's
 windows), not the same date. The reschedule change-Request path runs the same check
 (`requestWindowRefusal`: past, `too_soon`, closed date, out-of-hours) before it writes a change
-Request.
+Request that moves the start. An address-only change keeps the existing start and is not judged.
 Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals on each
 door, the date with no time left, the unusable window, the cap's precedence, and three capture
 controls.

@@ -4340,7 +4340,7 @@ export class InternalProvider implements BookingProvider {
     // Service that can auto-confirm. The policy still decides WHETHER the move needs approval;
     // this decides only which hour or date may be put to the owner.
     const refusal =
-      service.bookingMode === 'request'
+      service.bookingMode === 'request' || start.getTime() === booking.startUtc.getTime()
         ? null
         : requestWindowRefusal(rule, service, start, (end.getTime() - start.getTime()) / 60_000, new Date());
     if (

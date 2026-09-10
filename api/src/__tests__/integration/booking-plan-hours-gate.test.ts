@@ -107,6 +107,7 @@ import {
   bookingCount,
   requestCount,
   bookingsForService,
+  CUSTOMER_ADDRESS_A,
 } from '../helpers/booking-plan-harness';
 
 const CUSTOMER = { name: 'QA Hours', email: PLAN_CUSTOMER_EMAIL };
@@ -554,6 +555,46 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
       await expect(move).rejects.toThrow(new RegExp(`startDate ${today} and endDate ${dayAfter(today, 6)}`));
       await expect(move).rejects.not.toThrow(new RegExp(gone));
+      await expectOriginalKept(service.id, originalLocal);
+    });
+
+    it('[address only] keeps a start inside the notice and still writes the change Request with the new address', async () => {
+      // An address change is a reschedule that passes the EXISTING start. Nothing moves, so no
+      // window rule judges it, even though that start now sits inside the notice.
+      const originalLocal = `${planDate(3)}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({
+        originalLocal,
+        service: { minNoticeMin: 20 * 24 * 60 },
+      });
+
+      const result = await new InternalProvider().rescheduleBooking(
+        customerCtx,
+        original.id,
+        original.startUtc.toISOString(),
+        { customerAddress: CUSTOMER_ADDRESS_A },
+      );
+
+      expect(result.requested).toBe(true);
+      const request = (await bookingsForService(service.id)).find((r) => r.status === 'request_created');
+      expect(request?.requestKind).toBe('reschedule');
+      expect(request?.customerAddress).toBe(CUSTOMER_ADDRESS_A);
+      expect(request!.startUtc.getTime()).toBe(original.startUtc.getTime());
+    });
+
+    it('[address and time] still refuses an out-of-hours new time when the address changes too, and writes no row', async () => {
+      const date = planDate(38);
+      const originalLocal = `${date}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({ originalLocal });
+
+      const move = new InternalProvider().rescheduleBooking(
+        customerCtx,
+        original.id,
+        localInstant(`${date}T03:00`).toISOString(),
+        { customerAddress: CUSTOMER_ADDRESS_A },
+      );
+
+      await expect(move).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(move).rejects.toThrow(/opening hours/i);
       await expectOriginalKept(service.id, originalLocal);
     });
   });

@@ -337,6 +337,86 @@ if (env.NODE_ENV !== 'test') {
   }
 }
 
+// Google configuration boot check.
+//
+// EVERY Google key is optional, and that is deliberate: a deployment that sells
+// no calendar sync and no Drive import must boot with none of them. So this
+// check never demands a key on its own.
+//
+// What it refuses is a HALF-configured feature. A group with some keys set and
+// some empty is not a smaller feature, it is a broken one: the portal offers the
+// connect button, the customer clicks it, and Google answers with an OAuth error
+// - or, for the Picker, the button opens nothing at all. That failure lands in
+// front of a customer instead of in a deploy log, and calendar sync is a
+// paid-tier feature, so it also reaches billing.
+//
+// GOOGLE_MAPS_API_KEY is NOT in a group. Its absence is a supported state and the
+// documented emergency stop for travel time (ADR-0014), and `travel-health`
+// already alerts PLATFORM_ALERT_EMAIL about it after every deploy.
+export const GOOGLE_CONFIG_GROUPS: ReadonlyArray<{
+  /** Feature name a human recognises, used in the failure message. */
+  feature: string;
+  keys: readonly string[];
+}> = [
+  {
+    feature: 'Google Calendar sync (paid tier)',
+    keys: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI'],
+  },
+  {
+    // The Picker API key and the state secret are load-bearing, not extras: the
+    // portal cannot open the file picker without the key, and every connect is
+    // refused with `oauth_state_unavailable` without the secret. STORAGE_OAUTH_
+    // STATE_SECRET is shared with OneDrive, so it is listed here only as a
+    // companion of an already-configured Google Drive import.
+    feature: 'Google Drive knowledge import',
+    keys: [
+      'GOOGLE_STORAGE_CLIENT_ID',
+      'GOOGLE_STORAGE_CLIENT_SECRET',
+      'GOOGLE_STORAGE_REDIRECT_URI',
+      'GOOGLE_PICKER_API_KEY',
+      'STORAGE_OAUTH_STATE_SECRET',
+    ],
+  },
+];
+
+/**
+ * Finds Google features that are configured in part. A group with no keys set is
+ * silent (the feature is simply off); a group with every key set is silent too.
+ *
+ * @returns one message per half-configured group, each naming the missing keys
+ *   and the feature that breaks.
+ */
+export function findPartialGoogleConfig(
+  source: Record<string, string | undefined>,
+): string[] {
+  const problems: string[] = [];
+  for (const group of GOOGLE_CONFIG_GROUPS) {
+    const present = group.keys.filter((k) => (source[k] ?? '').trim() !== '');
+    if (present.length === 0 || present.length === group.keys.length) continue;
+    const missing = group.keys.filter((k) => !present.includes(k));
+    problems.push(
+      `${group.feature} is configured in part: ${missing.join(', ')} ` +
+        `${missing.length === 1 ? 'is' : 'are'} missing while ${present.join(', ')} ` +
+        `${present.length === 1 ? 'is' : 'are'} set. Set the missing key(s), or unset ` +
+        `the whole group to turn the feature off.`,
+    );
+  }
+  return problems;
+}
+
+if (env.NODE_ENV !== 'test') {
+  const googleProblems = findPartialGoogleConfig(process.env);
+  if (googleProblems.length > 0) {
+    const message = `Google configuration error: ${googleProblems.join(' ')}`;
+    if (env.NODE_ENV === 'production') {
+      console.error(message);
+      process.exit(1);
+    } else {
+      console.warn(`[non-production boot] ${message}`);
+    }
+  }
+}
+
 export function resolveDatabaseSsl(opts: {
   nodeEnv: string;
   host: string | null | undefined;

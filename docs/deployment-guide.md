@@ -117,6 +117,25 @@ railway redeploy -y
 | `META_OAUTH_REDIRECT_URI` | `https://api.axentrio.com/api/v1/channels/meta/oauth/callback` |
 | `META_OAUTH_JWT_SECRET` | JWT for Meta OAuth flow |
 
+**Google (all optional to boot; each absence turns a feature off):**
+
+A Google feature that is set IN PART is refused at startup in production, and the
+error names the key and the feature. The groups are `GOOGLE_CONFIG_GROUPS` in
+`api/src/config/environment.ts`. Full comments per key are in
+`api/.env.production.example`.
+
+| Variable | Group | What breaks without it |
+|----------|-------|------------------------|
+| `GOOGLE_CLIENT_ID` | Calendar sync (paid) | No tenant can connect a calendar |
+| `GOOGLE_CLIENT_SECRET` | Calendar sync (paid) | Same: the connect is refused |
+| `GOOGLE_REDIRECT_URI` | Calendar sync (paid) | `https://api.axentrio.com/api/v1/integrations/google/callback` |
+| `GOOGLE_MAPS_API_KEY` | (standalone) | Travel time is inert and address autocomplete stops |
+| `GOOGLE_STORAGE_CLIENT_ID` | Drive import | Drive connect is refused as not configured |
+| `GOOGLE_STORAGE_CLIENT_SECRET` | Drive import | Same: the connect is refused |
+| `GOOGLE_STORAGE_REDIRECT_URI` | Drive import | `https://api.axentrio.com/api/v1/knowledge/storage/google/callback` |
+| `GOOGLE_PICKER_API_KEY` | Drive import | The portal file picker opens nothing |
+| `STORAGE_OAUTH_STATE_SECRET` | Drive import | Every cloud connect fails with `oauth_state_unavailable` |
+
 **n8n integration:**
 | Variable | Description |
 |----------|-------------|
@@ -180,6 +199,74 @@ railway redeploy -y
 | `QUEUE_BULL_REDIS_HOST` | `redis.railway.internal` |
 | `QUEUE_BULL_REDIS_PORT` | `6379` |
 | `QUEUE_BULL_REDIS_PASSWORD` | (from Railway Redis) |
+
+---
+
+## Google Cloud setup a human must do
+
+No code and no environment variable can do the work in this section. Do it before
+the first paying tenant connects a calendar, and before the booking path sends
+traffic to Maps.
+
+### 1. OAuth consent screen
+
+1. Open the Google Cloud Console, project of the production deploy.
+2. Fill the OAuth consent screen: app name, support email, logo, the privacy
+   policy URL, and the terms URL. The privacy policy must be reachable on the
+   public site.
+3. Set the publishing status to **In production**. While the app stays in
+   **Testing**, only listed test users can connect, and their refresh tokens
+   expire after a short period.
+4. Register the exact redirect URIs on each OAuth client. Google matches them
+   byte for byte:
+   - Calendar client: the value of `GOOGLE_REDIRECT_URI`.
+   - Drive client (a SEPARATE client): the value of `GOOGLE_STORAGE_REDIRECT_URI`.
+
+### 2. Sensitive-scope verification for the calendar
+
+The calendar client asks for two scopes (`SCOPES` in
+`api/src/integrations/google/google-calendar.service.ts`):
+`https://www.googleapis.com/auth/calendar.events` and
+`https://www.googleapis.com/auth/calendar.calendarlist.readonly`. Google
+classifies both as sensitive, so they need a verification review before an
+unlimited number of external users can grant them. Do not change what the product
+asks for to dodge the review; the scopes are already the narrowest that work.
+
+What the review asks for:
+
+1. A justification of the scope: why the product must write calendar events.
+2. A demo video that shows the OAuth screen and the feature that uses the scope.
+3. A verified domain and a privacy policy on that domain.
+
+Two facts to plan around:
+
+- The review takes weeks, not hours. Google publishes the current timeline, and
+  it changes: read the console's own estimate, do not trust a number in this doc.
+- Calendar sync is a paid-tier feature. Do not sell it to an external tenant
+  before the verification is granted, because an unverified sensitive scope blocks
+  the connect for users outside the test list.
+
+The Drive import asks for `drive.file` only. That scope is not sensitive, because
+it grants access to the files the user picks and nothing else. It needs no
+sensitive-scope review.
+
+### 3. API key restriction and a billing budget for Maps
+
+`GOOGLE_MAPS_API_KEY` is one platform key on the booking hot path: Geocoding,
+Places autocomplete, and Routes. An unrestricted key on that path is both a
+security problem and a cost problem.
+
+1. Restrict the key by API. Enable only Geocoding API, Places API, and Routes API.
+2. Restrict the key by caller. The API calls Google from the server, so use an IP
+   restriction for the server key. Use an HTTP-referrer restriction for the
+   browser Picker key (`GOOGLE_PICKER_API_KEY`), limited to the portal origin.
+3. Put the key on an upgraded, NON-TRIAL billing account. A lapsed trial degrades
+   travel time permanently and silently; it is not a clean failure.
+4. Create a Cloud Billing budget with alert thresholds on the project. The
+   per-tenant cap `TRAVEL_MONTHLY_ELEMENT_CAP` limits one tenant's blast radius,
+   not the platform total, so the billing budget is the only platform-wide guard.
+5. Confirm the key works after the deploy: `travel-health` probes Routes about 90
+   seconds after startup and emails `PLATFORM_ALERT_EMAIL` when it cannot answer.
 
 ---
 

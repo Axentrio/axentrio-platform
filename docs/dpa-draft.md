@@ -66,6 +66,36 @@ Customer gets a right to object.
 not confirmed in writing. That confirmation belongs in this agreement, and it is a
 factual question for whoever holds the vendor contracts.
 
+### Retention at the model providers
+
+Both providers delete API inputs and outputs by default, but on a **30-day** clock
+and for their own safety purposes. That window is invisible to a Customer who
+deletes a conversation, so it has to be stated here.
+
+| Provider | Default | What to apply for |
+|---|---|---|
+| OpenAI | Prompts and responses sit in abuse-monitoring logs for up to 30 days. Not used for training since 1 March 2023 unless explicitly opted in. | **Modified Abuse Monitoring** or **Zero Data Retention** — both require prior approval by OpenAI. Eligible endpoints include `/v1/chat/completions` and `/v1/embeddings`, which are the ones Axentrio calls. |
+| Anthropic | Inputs and outputs deleted within 30 days. | A **zero data retention agreement** (negotiated). |
+
+Three carve-outs to carry into this agreement, because they outlive a deletion:
+
+1. Anthropic retains content flagged as a Usage Policy violation for up to **2
+   years**, and trust-and-safety classification scores for up to **7 years**.
+2. OpenAI may make a model ineligible for ZDR for a specific customer ("Eyes Off" /
+   "Safety Retention"), with notice; content is then retained but not human-reviewed.
+3. Images flagged by OpenAI's CSAM classifier are retained for manual review even
+   under ZDR.
+
+Axentrio must not call an OpenAI **ZDR-ineligible** endpoint (`/v1/files`,
+`/v1/vector_stores`, `/v1/batches`, `/v1/assistants`, `/v1/threads`,
+`/v1/conversations`, `/v1/evals`, `/v1/videos`) — those store application state
+regardless of the setting. A test enforces that in the codebase
+(`openai-zdr-eligibility.test.ts`), so the claim stays true as the code grows.
+
+The public list of sub-processors is at `/sub-processors`, rendered from
+`api/src/contracts/sub-processors.ts`; the privacy notice renders the same list.
+
+
 ## 5. Security measures
 
 - Encryption at rest for message content where it is stored encrypted; transport

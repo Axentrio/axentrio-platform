@@ -79,6 +79,7 @@ import Help from '@pages/help/Help';
 import PrivacyPolicy from '@pages/legal/PrivacyPolicy';
 import Terms from '@pages/legal/Terms';
 import DataDeletion from '@pages/legal/DataDeletion';
+import SubProcessors from '@pages/legal/SubProcessors';
 
 // Copilot (AI Platform Assistant) — Pro+ feature, locked-but-visible
 import { CopilotDrawerProvider } from '@components/copilot/CopilotDrawerProvider';
@@ -373,7 +374,7 @@ const DefaultRedirect: React.FC = () => {
   return <Navigate to="/analytics" replace />;
 };
 
-const LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion'];
+const LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion', '/sub-processors'];
 
 /** Lifted out of App so the provider/layout JSX stays under the depth limit.
  *  Identical routes — pure extraction, no behavior change. */
@@ -469,6 +470,7 @@ const App: React.FC = () => {
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/data-deletion" element={<DataDeletion />} />
+            <Route path="/sub-processors" element={<SubProcessors />} />
           </Routes>
         </BrowserRouter>
       </ThemeProvider>

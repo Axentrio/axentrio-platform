@@ -8,6 +8,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import LegalLayout, { LegalSection } from './LegalLayout';
+import { SUB_PROCESSORS } from '@contracts/sub-processors';
 
 const PrivacyPolicy: React.FC = () => {
   return (
@@ -142,43 +143,22 @@ const PrivacyPolicy: React.FC = () => {
 
         <p className="mt-3">
           <strong>Our sub-processors.</strong> A named list, because &ldquo;service
-          providers&rdquo; is not something a Customer can assess:
+          providers&rdquo; is not something a Customer can assess. The{' '}
+          <Link to="/sub-processors" className="text-primary-600 underline">
+            sub-processor list
+          </Link>{' '}
+          says what each one is used for and what reaches it:
         </p>
         <ul className="list-disc space-y-2 pl-6">
-          <li>
-            <strong>Railway</strong> — application hosting, managed PostgreSQL and Redis.
-          </li>
-          <li>
-            <strong>Cloudflare</strong> — DNS, file storage (R2) and database backups.
-          </li>
-          <li>
-            <strong>OpenAI</strong> and <strong>Anthropic</strong> — language-model
-            inference for AI replies and insights.
-          </li>
-          <li>
-            <strong>Clerk</strong> — authentication and organisation management.
-          </li>
-          <li>
-            <strong>Stripe</strong> — payments, invoices and subscription billing.
-          </li>
-          <li>
-            <strong>Resend</strong> — transactional email.
-          </li>
-          <li>
-            <strong>Sentry</strong> — error monitoring.
-          </li>
-          <li>
-            <strong>Google</strong> and <strong>Microsoft</strong> — calendar, maps and
-            file integrations, used only when a Customer connects them.
-          </li>
-          <li>
-            <strong>Meta</strong> — WhatsApp, Instagram and Messenger delivery, used
-            only for the channels a Customer connects.
-          </li>
+          {SUB_PROCESSORS.map((sp) => (
+            <li key={sp.name}>
+              <strong>{sp.name}</strong> &mdash; {sp.purpose}
+            </li>
+          ))}
         </ul>
         <p className="mt-3">
           We will tell Customers before adding a sub-processor that processes their end
-          users&rsquo; personal data.
+          users&rsquo; personal data, so they have a chance to object.
         </p>
       </LegalSection>
 

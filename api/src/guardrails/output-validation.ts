@@ -116,26 +116,38 @@ export function claimsBookingConfirmed(text: string): boolean {
  *    as legitimate replies in the unit corpus.
  *  - A BARE ACKNOWLEDGEMENT. "Thanks, I have your details" is conversation, not a claim about
  *    what reached the owner, so only a completed transmission verb counts.
+ *  - A CONDITION OR A SEQUENCE. "Once your request has been submitted, we reply within 48
+ *    hours" describes the process, so a claim that directly follows `SUBORDINATE_LEAD_IN`
+ *    does not count.
  */
 export function claimsRequestForwarded(text: string): boolean {
   const t = text.toLowerCase();
-  return [
-    // English, passive: the noun must be the customer's ask, so "your booking has been
-    // confirmed" stays with `claimsBookingDone` and is judged against the Booking flag.
-    /\byour (?:request|enquiry|inquiry|details|message) (?:has|have) been (?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\b/,
-    // English, active. `(?:your|the|this)` is required after the verb: without it,
-    // "I've sent you the opening hours" would match on `sent` alone.
-    /\bi(?:'ve| have) (?:now |already )?(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\b/,
-    // Dutch. Present-perfect and passive, matching how the tenants this platform serves
-    // actually phrase it ("uw aanvraag is doorgestuurd naar het team").
-    /\b(?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/,
-    /\bik heb (?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/,
-    // French. `demande` only — `coordonnées` alone is contact detail, not an ask.
-    // Both apostrophes, because a model writes either and a miss here is a lie shipped.
-    /\bvotre demande a (?:bien )?été (?:transmise|envoyée|enregistrée|soumise|transférée)\b/,
-    /\bj['’]ai (?:bien )?(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\b/,
-  ].some((re) => re.test(t));
+  return REQUEST_FORWARDED.some((re) =>
+    [...t.matchAll(re)].some((m) => !SUBORDINATE_LEAD_IN.test(t.slice(0, m.index ?? 0))),
+  );
 }
+
+/** A clause opener that turns the claim after it into a condition or a sequence. */
+const SUBORDINATE_LEAD_IN =
+  /\b(?:once|after|when|whenever|as soon as|if|zodra|nadat|als|wanneer|indien|une fois que|dès que|après que|quand|lorsque|si)\s+$/;
+
+const REQUEST_FORWARDED: RegExp[] = [
+  // English, passive: the noun must be the customer's ask, so "your booking has been
+  // confirmed" stays with `claimsBookingDone` and is judged against the Booking flag.
+  /\byour (?:request|enquiry|inquiry|details|message) (?:has|have) been (?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\b/g,
+  // English, active. `(?:your|the|this)` is required after the verb: without it,
+  // "I've sent you the opening hours" would match on `sent` alone.
+  /\bi(?:'ve| have) (?:now |already )?(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\b/g,
+  // Dutch. Present-perfect and passive, matching how the tenants this platform serves
+  // actually phrase it ("uw aanvraag is doorgestuurd naar het team"). The passive needs the
+  // customer's own pronoun: "de gegevens zijn geregistreerd bij de KvK" is not their ask.
+  /\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/g,
+  /\bik heb (?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/g,
+  // French. `demande` only — `coordonnées` alone is contact detail, not an ask.
+  // Both apostrophes, because a model writes either and a miss here is a lie shipped.
+  /\bvotre demande a (?:bien )?été (?:transmise|envoyée|enregistrée|soumise|transférée)\b/g,
+  /\bj['’]ai (?:bien )?(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\b/g,
+];
 
 /**
  * A reply that declares a NAMED DATE shut, full, or impossible.

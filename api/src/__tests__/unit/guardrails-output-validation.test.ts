@@ -341,6 +341,14 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "I've sent you the opening hours.",
       "Ik stuur je aanvraag door zodra ik je nummer heb.",
       "Je peux transmettre votre demande au propriétaire.",
+      // A condition or a sequence describes the process; it reports nothing.
+      "Once your request has been submitted, we reply within 48 hours.",
+      "When I have sent your details to the team, you will get an email.",
+      "Zodra uw aanvraag is doorgestuurd, neemt het team contact op.",
+      "Nadat de aanvraag is ingediend, duurt het 2 weken.",
+      "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
+      // A generic article is someone else's record, not the customer's ask.
+      "De gegevens zijn geregistreerd bij de KvK.",
     ]) {
       const result = validateOutput(text, nothingRecorded);
       expect(result.ok, `${text} → ${JSON.stringify(result.violations)}`).toBe(true);

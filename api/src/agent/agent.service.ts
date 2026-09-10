@@ -691,8 +691,10 @@ const ALREADY_HELD_FALLBACK =
 const BOOKING_SAFE_FALLBACK =
   "Sorry, let me just confirm a couple of details before I put that through — could you confirm the date and time you'd like?";
 
+/** The request twin of BOOKING_SAFE_FALLBACK, and the same shape: it asks, and states nothing
+ *  about whether anything reached the team, because the guard cannot know that either way. */
 const REQUEST_SAFE_FALLBACK =
-  'Sorry, I have not passed your request on to the team yet. Let me know how I can help from here.';
+  'Sorry, let me just confirm a couple of details first. Could you tell me again what you need, and how the team can best reach you?';
 
 /**
  * Which kind of failure ended this run.
@@ -2361,8 +2363,9 @@ export class AgentService {
    * turn may repeat "your request has been forwarded" without a new tool call.
    *
    * Same atomic jsonb MERGE as the proactive-ask state, for the same reason: the turn
-   * coalescer writes its watermark to this column. Fail open - a missed write costs a
-   * later restatement one nudge, never a reply this turn.
+   * coalescer writes its watermark to this column. Fail open. A missed write makes a later
+   * honest restatement look unrecorded: it gets the nudge, and if the model repeats it, the
+   * customer reads REQUEST_SAFE_FALLBACK instead of the true sentence.
    */
   private async rememberRequestOnRecord(session: ChatSession, state: RunLoopState): Promise<void> {
     if (!(state.bookingRecorded || state.requestRecorded) || requestOnRecord(session)) return;

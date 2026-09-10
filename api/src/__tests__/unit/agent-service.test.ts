@@ -2339,7 +2339,7 @@ describe('AgentService', () => {
     expect(noted.type).toBe('response');
     if (noted.type === 'response') {
       expect(noted.content).not.toBe(claim);
-      expect(noted.content).toMatch(/not passed your request on/);
+      expect(noted.content).toMatch(/^Sorry, let me just confirm a couple of details first\./);
     }
 
     // A written row makes the same sentence true, so it ships unchanged.
@@ -2389,7 +2389,7 @@ describe('AgentService', () => {
       const booking = await run();
       expect(booking.type).toBe('response');
       if (booking.type === 'response') {
-        expect(booking.content).toMatch(/^NL: Sorry, let me just confirm a couple of details/);
+        expect(booking.content).toMatch(/^NL: Sorry, let me just confirm a couple of details before I put that through/);
       }
 
       // A lead that wrote no row, and a Dutch "your request was forwarded" twice.
@@ -2402,7 +2402,7 @@ describe('AgentService', () => {
       const request = await run();
       expect(request.type).toBe('response');
       if (request.type === 'response') {
-        expect(request.content).toMatch(/^NL: Sorry, I have not passed your request on/);
+        expect(request.content).toMatch(/^NL: Sorry, let me just confirm a couple of details first\./);
       }
     } finally {
       mockLocalize.mockImplementation(async (message: string) => message);

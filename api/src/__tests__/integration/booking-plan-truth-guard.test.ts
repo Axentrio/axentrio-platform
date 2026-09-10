@@ -110,6 +110,7 @@ import { Tenant } from '../../database/entities/Tenant';
 import { Lead } from '../../database/entities/Lead';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { GuardrailOutputLog } from '../../database/entities/GuardrailOutputLog';
+import { claimsRequestForwarded } from '../../guardrails/output-validation';
 import { decrypt } from '../../utils/encryption';
 import { createTestParticipant, createTestMessage } from '../helpers/factories';
 import {
@@ -179,7 +180,7 @@ const BOOKING_SAFE_FALLBACK =
   "Sorry, let me just confirm a couple of details before I put that through — could you confirm the date and time you'd like?";
 /** The agent's replacement when a request claim has nothing on record behind it. */
 const REQUEST_SAFE_FALLBACK =
-  'Sorry, I have not passed your request on to the team yet. Let me know how I can help from here.';
+  'Sorry, let me just confirm a couple of details first. Could you tell me again what you need, and how the team can best reach you?';
 /** The tenant fallback `createPlanBusiness` seeds, sent when the output gate blocks a reply. */
 const TENANT_FALLBACK = 'Let me connect you with our team.';
 
@@ -575,5 +576,39 @@ describe('SYS-07 — a request-forwarded claim needs a recorded request', () => 
     expect(await guardrailLogCount(session.id)).toBe(0);
     // No `bot_error` handoff: the conversation is still the bot's.
     expect((await sessionRepo.findOneByOrFail({ id: session.id })).status).toBe('bot');
+  });
+
+  it('[SYS-07] when the row predates the latch, the fallback asserts nothing in either direction', async () => {
+    initializeAgentService(realAgent());
+    const chat = await leadCaptureBusiness({ enforce: true });
+    const { session, tenantId } = chat;
+    const restated = 'Yes, your details have been passed on to the team.';
+
+    chatMock
+      .mockResolvedValueOnce(
+        callTool('tc-sys07-4', 'capture_lead', {
+          name: 'Visitor',
+          email: PLAN_CUSTOMER_EMAIL,
+          summary: 'Broken tap, wants a call back',
+        }),
+      )
+      .mockResolvedValueOnce(say(FORWARDED_CLAIM))
+      .mockResolvedValueOnce(say(restated))
+      .mockResolvedValueOnce(say(restated));
+
+    expect(await customerSays(chat, `Can someone call me about a broken tap? My email is ${PLAN_CUSTOMER_EMAIL}`)).toBe(true);
+
+    // A conversation opened before `requestOnRecord` existed: the lead row is real, the latch is not.
+    await AppDataSource.query(`UPDATE chat_sessions SET metadata = metadata - 'requestOnRecord' WHERE id = $1`, [session.id]);
+    const sessionRepo = AppDataSource.getRepository(ChatSession);
+    const nextTurn: Chat = { ...chat, session: await sessionRepo.findOneByOrFail({ id: session.id }) };
+    expect(await customerSays(nextTurn, 'So the team has it?')).toBe(true);
+
+    expect(await leadCount(tenantId)).toBe(1);
+    const replies = await botMessages(session.id);
+    expect(replies).toEqual([FORWARDED_CLAIM, REQUEST_SAFE_FALLBACK]);
+    // The guard cannot see the row, so its reply may neither claim it nor deny it.
+    expect(claimsRequestForwarded(replies[1])).toBe(false);
+    expect(replies[1].toLowerCase()).not.toMatch(/\b(?:not|never|haven't|hasn't|nothing|no one)\b/);
   });
 });

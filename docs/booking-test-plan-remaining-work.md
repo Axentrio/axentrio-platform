@@ -409,7 +409,8 @@ keeps the ordinary-empty Request `booking-rules.md:20` documents. A window that 
 it opens counts as no hours, so that date gets the closed-day refusal. The gate sits after the
 daily cap, so a capped date still sends the customer to another date. When the named date has no
 time left that the business can take, the refusal names the range the whole-day check would retry,
-not the same date. The reschedule change-Request path runs the same check before it writes a change
+or the week after that date when that check gives no reason (a Service too long for the day's
+windows), not the same date. The reschedule change-Request path runs the same check before it writes a change
 Request. Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals,
 the date with no time left, the unusable window, the reschedule path, the cap's precedence, and
 three capture controls.

@@ -117,6 +117,7 @@ export const BOOKING_COPY_EN = {
   'manage.err_SERVICE_REQUIRED':
     "We couldn't load the available times for this appointment. Please contact the business directly.",
   'manage.err_SLOT_UNAVAILABLE': 'That time has just been taken. Please pick another.',
+  'manage.err_REQUEST_OUTSIDE_WINDOW': 'That time is outside the opening hours. Please pick another.',
   'manage.err_BOOKING_NOT_FOUND': 'This appointment could no longer be found.',
   'manage.err_CHANGE_NOT_ALLOWED':
     'This appointment cannot be changed online. Please contact the business directly.',

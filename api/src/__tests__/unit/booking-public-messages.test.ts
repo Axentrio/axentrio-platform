@@ -12,6 +12,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { CUSTOMER_MESSAGE, customerMessage, rescheduleOptionsState } from '../../scheduler/booking-public.controller';
+import { BOOKING_COPY_NL } from '../../booking/booking-copy.nl';
+import { BOOKING_COPY_FR } from '../../booking/booking-copy.fr';
 import { BookingError } from '../../booking/booking-providers/types';
 import { BOOKING_COPY_EN } from '../../booking/booking-copy';
 
@@ -41,6 +43,7 @@ describe('customer-facing copy for a BookingError', () => {
       'BOOKING_TEMPORARILY_UNAVAILABLE',
       'SERVICE_REQUIRED',
       'SLOT_UNAVAILABLE',
+      'REQUEST_OUTSIDE_WINDOW',
     ]) {
       const shown = customerMessage(new BookingError('Do not offer specific times — capture it with request_appointment.', code, 409));
       expect(shown, code).not.toMatch(BOT_DIRECTIVE);
@@ -70,6 +73,16 @@ describe('customer-facing copy for a BookingError', () => {
     const err = new BookingError('Do not offer times', 'SLOT_UNAVAILABLE', 409);
     expect(customerMessage(err, frCopy)).toBe('Ce créneau vient d\'être pris.');
     expect(customerMessage(new BookingError('x', 'UNKNOWN_CODE', 500), frCopy)).toBe('Ce lien est invalide ou expiré.');
+  });
+
+  it('tells a manage-page customer a refused hour is outside opening hours, in every locale, never "invalid link"', () => {
+    const err = new BookingError('Do NOT capture it and do NOT tell the customer the team will come back on it.', 'REQUEST_OUTSIDE_WINDOW', 409);
+    for (const [lang, copy] of [['en', BOOKING_COPY_EN], ['nl', BOOKING_COPY_NL], ['fr', BOOKING_COPY_FR]] as const) {
+      const shown = customerMessage(err, copy);
+      expect(shown, lang).toBe(copy['manage.err_REQUEST_OUTSIDE_WINDOW']);
+      expect(shown, lang).not.toBe(copy['manage.err_invalid_link']);
+      expect(shown, lang).not.toMatch(BOT_DIRECTIVE);
+    }
   });
 
   it('prefers throw-site customerMessage over catalog copy', () => {

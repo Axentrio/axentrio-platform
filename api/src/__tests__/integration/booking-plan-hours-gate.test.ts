@@ -246,6 +246,32 @@ describe('booking plan · the opening-hours gate on the request path', () => {
         expect(DateTime.fromISO(slot.start, { zone: PLAN_TZ }).toFormat('yyyy-MM-dd')).not.toBe(date);
       }
     });
+
+    it('sends the customer to another date when no window on the named date can fit the Service', async () => {
+      // Open 09:00-12:00 with a 240-minute Service: the date has hours but no start the business
+      // can take, and no notice, horizon or cap explains why.
+      const date = planDate(39);
+      const { service, ctx } = await planHoursFixture({
+        date,
+        rule: { dateOverrides: [{ date, windows: [{ start: '09:00', end: '12:00' }] }] },
+        service: { durationMin: 240 },
+      });
+
+      const capture = new InternalProvider().requestAppointment(
+        ctx,
+        `idem-avl01-nofit-${randomUUID()}`,
+        localInstant(`${date}T14:00`).toISOString(),
+        CUSTOMER,
+      );
+
+      await expect(capture).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(capture).rejects.toThrow(/opening hours/i);
+      await expect(capture).rejects.toThrow(
+        new RegExp(`startDate ${dayAfter(date, 1)} and endDate ${dayAfter(date, 7)}`),
+      );
+      await expect(capture).rejects.not.toThrow(new RegExp(date));
+      expect(await bookingCount(service.id)).toBe(0);
+    });
   });
 
   describe('[AVL-01] case 2 — a date closed all day', () => {

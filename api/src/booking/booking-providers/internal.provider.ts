@@ -317,8 +317,12 @@ function outOfHoursRetry(
   const date = day.toFormat('yyyy-MM-dd');
   const { rangeStart, rangeEnd } = normalizeDateRange(date, date, rule.timezone);
   const dayInput: SlotEngineInput = { rule, eventType: { ...service, durationMin }, rangeStart, rangeEnd, now };
-  const gone = computeSlots(dayInput).length === 0 ? diagnoseEmptyRange(dayInput) : null;
-  return { date, retry: gone ? retryRange(gone.reason, gone.boundary, rule.timezone) : null };
+  if (computeSlots(dayInput).length > 0) return { date, retry: null };
+  const gone = diagnoseEmptyRange(dayInput) ?? {
+    reason: 'closed' as const,
+    boundary: day.plus({ days: 1 }).toJSDate().toISOString(),
+  };
+  return { date, retry: retryRange(gone.reason, gone.boundary, rule.timezone) };
 }
 
 export class InternalProvider implements BookingProvider {

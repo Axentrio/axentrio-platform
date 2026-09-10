@@ -78,10 +78,10 @@ export function claimsBookingConfirmed(text: string): boolean {
   return [
     // Completed booking mutation only — bare `scheduled` (reminder/follow-up) is
     // an everyday reply, not a booking claim (review FP round 2).
-    /\bi(?:'ve| have) (?:successfully )?booked\b/,
+    /\bi(?:['’]ve| have) (?:successfully )?booked\b/,
     // `confirmed your booking/appointment` — but NOT when it merely states
     // availability ("your appointment is available tomorrow").
-    /\bi(?:'ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
+    /\bi(?:['’]ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
     /\byour booking has been (?:booked|confirmed)\b/,
     // Dutch: `geboekt/gereserveerd` may stand alone ("ik heb geboekt" is a
     // completed claim), but `gepland/ingepland/bevestigd` need the booking noun
@@ -96,7 +96,7 @@ export function claimsBookingConfirmed(text: string): boolean {
     // tells the customer the original appointment still stands.
     /\b(?:je|uw) wijziging is bevestigd\b/,
     /\byour (?:change|reschedule) (?:is|has been) confirmed\b/,
-    /\bi(?:'ve| have) (?:successfully )?(?:rescheduled|moved) (?:your )?(?:appointment|booking)\b/,
+    /\bi(?:['’]ve| have) (?:successfully )?(?:rescheduled|moved) (?:your )?(?:appointment|booking)\b/,
     /\byour appointment has been (?:moved|rescheduled)\b/,
   ].some((re) => re.test(t));
 }

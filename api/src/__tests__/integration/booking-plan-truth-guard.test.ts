@@ -369,6 +369,8 @@ describe('CAL-06 — a Request is not a Booking, and the reply may not say it is
     ['a Dutch confirmation', 'Top, je afspraak is bevestigd voor dinsdag om 10:00!'],
     ['"I\'ve scheduled"', "I've scheduled your appointment for 10:00. See you then!"],
     ['"successfully booked"', 'Your appointment was successfully booked for 10:00.'],
+    ['a curly-apostrophe "I’ve scheduled"', 'I’ve scheduled your appointment for 10:00. See you then!'],
+    ['a curly-apostrophe "I’ll go ahead and book"', 'Great, I’ll go ahead and book Tuesday at 10:00 for you now.'],
   ])('[CAL-06] on the downgraded Request, %s is not what the customer reads', async (_label, claim) => {
     initializeAgentService(realAgent());
     const chat = await autoBookBusiness({ calendarConnected: false });
@@ -422,6 +424,38 @@ describe('CAL-06 — a Request is not a Booking, and the reply may not say it is
     expect(await botMessages(session.id)).toEqual([submitted]);
     expect(await guardrailLogCount(session.id)).toBe(0);
   });
+
+  // KNOWN RESIDUALS. The booked-claim family knows a closed set of phrasings, so on a
+  // downgraded Request these reach the customer. Each test states the RIGHT answer and is
+  // expected to fail; the CAL-06 row names them. If a change fixes one, its test goes red.
+  for (const claim of [
+    'Your appointment is confirmed for Friday at 10:00.',
+    'Your booking is confirmed for Friday at 10:00.',
+    'You are booked in for Friday at 10:00.',
+  ]) {
+    it.fails(`[CAL-06] known residual, should not reach the customer on the downgraded Request: ${claim}`, async () => {
+      initializeAgentService(realAgent());
+      const chat = await autoBookBusiness({ calendarConnected: false });
+      const { service, session } = chat;
+      const day = planDate(7, { weekdayOnly: true });
+
+      chatMock
+        .mockResolvedValueOnce(
+          callTool('tc-cal06-residual', 'create_booking', {
+            serviceId: service.id,
+            startTime: `${day}T10:00:00`,
+            attendeeName: 'Visitor',
+            attendeeEmail: PLAN_CUSTOMER_EMAIL,
+          }),
+        )
+        .mockResolvedValueOnce(say(claim))
+        .mockResolvedValueOnce(say(claim));
+
+      expect(await customerSays(chat, `Book me in at 10:00 on ${day}, my name is Visitor`)).toBe(true);
+      expect(await requestCount(service.id)).toBe(1);
+      expect(await botMessages(session.id)).toEqual([BOOKING_SAFE_FALLBACK]);
+    });
+  }
 });
 
 describe('a lead or handoff licenses a request claim, never a booking claim', () => {

@@ -238,8 +238,8 @@ function absorbNamedTimeRefusal(
 /** Booked-shaped: only a confirmed Booking makes these true. */
 function claimsBookedForAgentNudge(t: string): boolean {
   return claimsBookingConfirmed(t) || [
-    /\bi'?ve (successfully )?(booked|scheduled)\b/,
-    /\bi'?ll go ahead and (book|schedule)\b/,
+    /\bi['’]?ve (successfully )?(booked|scheduled)\b/,
+    /\bi['’]?ll go ahead and (book|schedule)\b/,
     /\bsuccessfully (booked|scheduled)\b/,
     /\byour (booking|request) (has been|is) booked\b/,
     /\bik heb (je|uw|het|de|een)?\s?(afspraak|reservering|boeking)?\s?(ge(boekt|reserveerd|pland)|ingepland|vastgelegd)\b/,
@@ -251,8 +251,8 @@ function claimsBookedForAgentNudge(t: string): boolean {
 function claimsBookingRequestForAgentNudge(t: string): boolean {
   return [
     /\byour booking has been submitted\b/,
-    /\bi'?ve (successfully )?(requested|submitted|placed|created)\b/,
-    /\bi'?ll (go ahead and (request|submit)|proceed( with (the|your|this))?)\b/,
+    /\bi['’]?ve (successfully )?(requested|submitted|placed|created)\b/,
+    /\bi['’]?ll (go ahead and (request|submit)|proceed( with (the|your|this))?)\b/,
     /\bsuccessfully (requested|submitted|created)\b/,
     /\byour booking (has been|is) (submitted|created|placed|received|sent)\b/,
     /\bik heb (je|uw|het|de|een)?\s?(afspraak|reservering|boeking)?\s?aangevraagd\b/,

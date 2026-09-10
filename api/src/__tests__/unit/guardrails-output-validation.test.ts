@@ -175,6 +175,10 @@ describe("guardrails · validateOutput — checks run state", () => {
       "Uw wijziging is bevestigd. Uw afspraak staat nu op maandag 7 september 2026 om 14:00.",
       "I've rescheduled your appointment.",
       "Your appointment has been moved.",
+      // A model writes either apostrophe.
+      "I’ve booked your appointment.",
+      "I’ve confirmed your booking.",
+      "I’ve rescheduled your appointment.",
     ]) {
       const result = validateOutput(text, context);
       expect(result.violations.map((v) => v.family)).toContain(

@@ -292,6 +292,21 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "Ik heb je aanvraag doorgegeven aan de zaak.",
       "Votre demande a bien été transmise à l'équipe.",
       "J'ai transmis votre demande au propriétaire.",
+      // A completion adverb before the participle.
+      "Your request has been successfully forwarded to the team.",
+      "Your request has been successfully submitted.",
+      "Your request has been already submitted.",
+      "Your details have now been passed on to the team.",
+      "I've successfully submitted your request to the team.",
+      "I have just sent your request to the owner.",
+      "Uw aanvraag is succesvol doorgestuurd.",
+      "Je aanvraag is zojuist doorgestuurd naar het team.",
+      "Ik heb uw aanvraag al doorgestuurd.",
+      "Votre demande a déjà été transmise.",
+      "J'ai déjà transmis votre demande.",
+      // Dutch clause order: the recipient comes before the participle.
+      "Ik heb uw aanvraag naar het team doorgestuurd.",
+      "Uw aanvraag is naar de eigenaar doorgestuurd.",
     ]) {
       const result = validateOutput(text, nothingRecorded);
       expect(result.violations.map((v) => v.family), text).toContain(
@@ -349,6 +364,14 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
       // A generic article is someone else's record, not the customer's ask.
       "De gegevens zijn geregistreerd bij de KvK.",
+      // The adverb and recipient slots are closed lists, so a negation never fills them.
+      "Your request has not been forwarded yet.",
+      "Once your request has been successfully submitted, we reply within 48 hours.",
+      "I'll just send your request to the owner.",
+      "Ik heb uw aanvraag nog niet doorgestuurd.",
+      "Uw aanvraag is niet naar het team doorgestuurd.",
+      "Zodra uw aanvraag succesvol is ingediend, neemt het team contact op.",
+      "Votre demande n'a pas encore été transmise.",
     ]) {
       const result = validateOutput(text, nothingRecorded);
       expect(result.ok, `${text} → ${JSON.stringify(result.violations)}`).toBe(true);

@@ -131,22 +131,46 @@ export function claimsRequestForwarded(text: string): boolean {
 const SUBORDINATE_LEAD_IN =
   /\b(?:once|after|when|whenever|as soon as|if|zodra|nadat|als|wanneer|indien|une fois que|dès que|après que|quand|lorsque|si)\s+$/;
 
+// One optional completion adverb, from a CLOSED list. Never a wildcard: an open gap between
+// the auxiliary and the participle would admit "has not been" and "is nog niet".
+const EN_ADVERB = '(?:(?:successfully|now|just|already|also) )?';
+const NL_ADVERB = '(?:(?:succesvol|nu|zojuist|net|al|ook) )?';
+const FR_ADVERB = '(?:(?:bien|déjà) )?';
+// Dutch puts the recipient before a clause-final participle: "is naar de eigenaar doorgestuurd".
+// The article is required, so the slot holds a recipient and never a negation.
+const NL_RECIPIENT = "(?:(?:naar|aan) (?:het|de|ons|onze) [a-zà-ÿ'’-]+ )?";
+
 const REQUEST_FORWARDED: RegExp[] = [
   // English, passive: the noun must be the customer's ask, so "your booking has been
   // confirmed" stays with `claimsBookingDone` and is judged against the Booking flag.
-  /\byour (?:request|enquiry|inquiry|details|message) (?:has|have) been (?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\b/g,
+  new RegExp(
+    `\\byour (?:request|enquiry|inquiry|details|message) (?:has|have) ${EN_ADVERB}been ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\\b`,
+    'g',
+  ),
   // English, active. `(?:your|the|this)` is required after the verb: without it,
   // "I've sent you the opening hours" would match on `sent` alone.
-  /\bi(?:'ve| have) (?:now |already )?(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\b/g,
+  new RegExp(
+    `\\bi(?:'ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
+    'g',
+  ),
   // Dutch. Present-perfect and passive, matching how the tenants this platform serves
   // actually phrase it ("uw aanvraag is doorgestuurd naar het team"). The passive needs the
   // customer's own pronoun: "de gegevens zijn geregistreerd bij de KvK" is not their ask.
-  /\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/g,
-  /\bik heb (?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) (?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\b/g,
+  new RegExp(
+    `\\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+    'g',
+  ),
+  new RegExp(
+    `\\bik heb ${NL_ADVERB}(?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+    'g',
+  ),
   // French. `demande` only — `coordonnées` alone is contact detail, not an ask.
   // Both apostrophes, because a model writes either and a miss here is a lie shipped.
-  /\bvotre demande a (?:bien )?été (?:transmise|envoyée|enregistrée|soumise|transférée)\b/g,
-  /\bj['’]ai (?:bien )?(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\b/g,
+  new RegExp(
+    `\\bvotre demande a ${FR_ADVERB}été ${FR_ADVERB}(?:transmise|envoyée|enregistrée|soumise|transférée)\\b`,
+    'g',
+  ),
+  new RegExp(`\\bj['’]ai ${FR_ADVERB}(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\\b`, 'g'),
 ];
 
 /**

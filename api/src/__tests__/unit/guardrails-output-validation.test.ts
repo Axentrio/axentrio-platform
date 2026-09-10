@@ -163,6 +163,7 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("flags a booking confirmation when no booking was recorded", () => {
     const context = {
       bookingRecorded: false,
+      requestRecorded: false,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -184,6 +185,7 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("allows the same confirmation when a booking was recorded", () => {
     const result = validateOutput("I've confirmed your appointment.", {
       bookingRecorded: true,
+      requestRecorded: false,
       priceContextLoaded: false,
     });
     expect(result.ok).toBe(true);
@@ -196,6 +198,7 @@ describe("guardrails · validateOutput — checks run state", () => {
     ]) {
       const result = validateOutput(text, {
         bookingRecorded: false,
+        requestRecorded: false,
         priceContextLoaded: false,
       });
       expect(result.violations.map((v) => v.family)).toContain(
@@ -207,6 +210,7 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("allows a price assertion backed by loaded context", () => {
     const result = validateOutput("That service costs €30.", {
       bookingRecorded: false,
+      requestRecorded: false,
       priceContextLoaded: true,
     });
     expect(result.ok).toBe(true);
@@ -215,6 +219,10 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("does not treat future intent or a prior Dutch confirmation as a new mutation", () => {
     const context = {
       bookingRecorded: false,
+      // A REQUEST WAS RECORDED on this run, which is why "Your request has been submitted."
+      // below is legitimate. Before `requestRecorded` existed the sentence passed because
+      // nothing looked at it at all; now it passes for the reason that makes it true.
+      requestRecorded: true,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -235,6 +243,78 @@ describe("guardrails · validateOutput — checks run state", () => {
     ]) {
       const result = validateOutput(text, context);
       expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+    }
+  });
+});
+
+describe("guardrails · validateOutput — a request claim needs a recorded request", () => {
+  const nothingRecorded = {
+    bookingRecorded: false,
+    requestRecorded: false,
+    priceContextLoaded: false,
+  };
+
+  it("flags a request-forwarded claim when nothing was recorded", () => {
+    for (const text of [
+      "Your request has been submitted.",
+      "Your request has been forwarded to the team.",
+      "Your details have been passed on to the owner.",
+      "I've sent your request to the business.",
+      "I have passed your enquiry along to our team.",
+      "Uw aanvraag is doorgestuurd naar het team.",
+      "Ik heb je aanvraag doorgegeven aan de zaak.",
+      "Votre demande a bien été transmise à l'équipe.",
+      "J'ai transmis votre demande au propriétaire.",
+    ]) {
+      const result = validateOutput(text, nothingRecorded);
+      expect(result.violations.map((v) => v.family), text).toContain(
+        "fake_request_confirmation",
+      );
+    }
+  });
+
+  it("allows the same claim once a request was recorded", () => {
+    for (const text of [
+      "Your request has been submitted.",
+      "Uw aanvraag is doorgestuurd naar het team.",
+      "Votre demande a bien été transmise à l'équipe.",
+    ]) {
+      const result = validateOutput(text, {
+        bookingRecorded: false,
+        requestRecorded: true,
+        priceContextLoaded: false,
+      });
+      expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+    }
+  });
+
+  it("allows the same claim on the turn that BOOKED them", () => {
+    // A Booking outranks a Request: their ask was fulfilled, not merely forwarded, so
+    // blocking this would swap a good reply for a fallback on the happiest path there is.
+    const result = validateOutput("Your request has been submitted and you're all set.", {
+      bookingRecorded: true,
+      requestRecorded: false,
+      priceContextLoaded: false,
+    });
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+  });
+
+  it("does not treat an intention, an offer, or a plain acknowledgement as a claim", () => {
+    // The false-positive half, and the half that decides whether this guard is worth
+    // shipping: every one of these is a good answer that must not become a fallback.
+    for (const text of [
+      "I'll forward your request to our business owner who handles special orders.",
+      "I'll go ahead and request your phone number.",
+      "Would you like me to pass your request on to the team?",
+      "I can send your details to the business if you like.",
+      "Thanks, I have your details.",
+      "I've scheduled a follow-up with our team.",
+      "I've sent you the opening hours.",
+      "Ik stuur je aanvraag door zodra ik je nummer heb.",
+      "Je peux transmettre votre demande au propriétaire.",
+    ]) {
+      const result = validateOutput(text, nothingRecorded);
+      expect(result.ok, `${text} → ${JSON.stringify(result.violations)}`).toBe(true);
     }
   });
 });

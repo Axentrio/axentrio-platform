@@ -30,10 +30,10 @@ Paths below are relative to `api/` unless stated otherwise.
 |---|---|
 | `COVERED` — already pinned, no work needed | 46 |
 | Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 38 |
-| Still open (audited, test not yet written) | 2 — SYS-07 and AVL-01, both blocked on a product decision (§11) |
+| Still open (audited, test not yet written) | 1 — AVL-01, blocked on a product decision (§11) |
 | `EVAL` — measured by the live suite, which never runs in CI | 5 — SYS-03, SYS-04, and the model half of BK-02, BK-08 and SRV-02 |
 | `RESTATE` — drop or reword the case | 4 |
-| `BUG` — product defect found, left unfixed | 4 |
+| `BUG` — product defect found, left unfixed | 3 |
 
 Several closed rows carry a named residual clause. A residual is written into the row rather than
 rounded up, so `COVERED` here always means "a test would fail if this broke", never "near enough".
@@ -44,9 +44,9 @@ single-day guard, and BK-03's new reuse assertion — and each reproduced the fa
 describes. The rest are the recorded claim of the test's own author, written in the file beside
 the assertion it defends.
 
-**Delivered in two waves** — one shared harness, 11 vitest files holding 83 passing tests, and one
-live eval script that no CI job can reach. No production code was touched; the only non-test
-change is one `package.json` script.
+**Delivered in three waves** — one shared harness, 12 vitest files holding 87 passing tests, and one
+live eval script that no CI job can reach. Waves 1 and 2 touched no production code; wave 3 is the
+first that does, because the two cases it closes are defects rather than gaps.
 
 Wave 1, the audit and the first five files:
 
@@ -71,9 +71,15 @@ Wave 2, written by eight parallel authors and merged into one branch:
 | `src/__tests__/integration/booking-plan-outlook.test.ts` | 2 | **OUT-01**, a booking through a Microsoft-typed adapter |
 | `src/__tests__/live/booking-eval.ts` | 5 cases, not vitest | SYS-03, SYS-04, and the model half of BK-02, BK-08, SRV-02. Run with `npm run eval:booking-plan`; no CI job can reach it |
 
+Wave 3, the two cases waves 1 and 2 left as defects:
+
+| File | Tests | Closes |
+|---|---|---|
+| `src/__tests__/integration/booking-plan-truth-guard.test.ts` | 4 | **SYS-07** and **CAL-06** (reply half), one root cause: run state that said something happened when it had not. Changes `agent/agent.service.ts` and `guardrails/output-validation.ts` |
+
 The headline: **roughly 40% of the plan was already pinned.** The valuable remainder was
 concentrated in cross-surface agreement, the request/change-policy persistence path, and a set
-of engine boundaries that had never been exercised. Both waves are now merged.
+of engine boundaries that had never been exercised. All three waves are now merged.
 
 Two of the delivered tests correct rather than merely extend:
 **SRV-07** was verified to FAIL when the buffers are zeroed, which the test it replaces could not do;
@@ -173,7 +179,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | CAL-03 abutting before event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113` (comment at `:107` names boundary-touching). |
 | CAL-04 abutting after event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113`; `unit/business-capacity.test.ts:94-103`; real DB `integration/booking-plan-harness.test.ts`. |
 | CAL-05 contained inside event | P0 | `COVERED` | `unit/slot-engine.test.ts:329-338`; `unit/internal-provider-create.test.ts:443-465`. |
-| CAL-06 disconnected calendar | P0 | `COVERED` (state half) + `BUG` (reply half) | `integration/booking-plan-requests.test.ts:340-408`: an Auto-book Service on a business with NO credential persists `status='request_created'`, confirms nothing and writes no mirror; the control at `:383` seeds the credential and the same call confirms, so the credential is the cause. That file also restores the real credential check, because the shared harness stub answers "healthy" whether or not a credential row exists (`helpers/booking-plan-harness.ts:509`). Residual, deliberately NOT pinned and explained at `requests.test.ts:373-380`: "never tell the customer it is booked" (`modules/booking.module.ts:623`) is prompt prose with no runtime guard, and pinning it would freeze the contradicted behaviour. Same product decision as SYS-07. |
+| CAL-06 disconnected calendar | P0 | `COVERED` (state + reply) | State half: `integration/booking-plan-requests.test.ts:340-408` — an Auto-book Service on a business with NO credential persists `status='request_created'`, confirms nothing and writes no mirror; the control at `:383` seeds the credential and the same call confirms, so the credential is the cause. Reply half, closed here: `integration/booking-plan-truth-guard.test.ts:248` drives the real agent loop over that same fixture, lets the scripted model announce a confirmation twice, and asserts the `messages` row the customer received is the safe fallback; the control at `:292` seeds the credential and the same script ships the confirmation unchanged. The defect behind it was `agent.service.ts:2225-2233`, which set `state.bookingRecorded` from `result.success` alone — true for the `CALENDAR_NOT_CONNECTED` downgrade — so the false-confirmation guard stood down. The flag is now set from `requested` in the result. Verified to fail when that split is reverted to the old single assignment. Both files restore the real credential check, because the shared harness stub answers "healthy" whether or not a credential row exists (`helpers/booking-plan-harness.ts:509`, whose comment now says so). |
 | CAL-07 row + calendar + email agree | P0 | `GAP` | **Nothing on the same value across surfaces**: the calendar start was never asserted, the email's local hour was asserted nowhere, and the real-DB `start_utc` was never checked. Closed by BK-06 in `integration/booking-plan-lifecycle.test.ts`. |
 
 ## 7. Reschedule and cancellation (§10)
@@ -218,7 +224,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | SYS-04 customer can switch language | P1 | `EVAL` + `PARTIAL` | Same: snapshot pins the clause (`unit/prompt-composition-characterization.test.ts:83`); no turn-level assertion possible deterministically. Live suite. |
 | SYS-05 past-time guardrail | P0 | `COVERED` + contradicted clause | Past excluded and refused (`unit/slot-engine.test.ts:56-65`, `unit/internal-provider-create.test.ts:3051-3057`); driven end to end in `integration/booking-plan-system.test.ts`. The clause "no request for a past time" is **contradicted** for a request-only Service (`unit/internal-provider-create.test.ts:3059-3064` still captures one), so the plan wording needs a correction (§10). |
 | SYS-06 broad time preference respected | P1 | `COVERED` | `unit/clock-window.test.ts:11-16`; `unit/day-part.test.ts:5-8`; chips `unit/agent-service.test.ts:1930-1967`. |
-| SYS-07 no false request-forwarding claim | P1 | `BUG` | **Actively contradicted.** `claimsBookingDone` (`guardrails/output-validation.ts:49-73`, submission regex `:60`) matches BOOKING-shaped claims only, and `unit/guardrails-output-validation.test.ts:232` **positively asserts** that `"Your request has been submitted."` PASSES with `bookingRecorded: false`. So a "forwarded to the owner" lie ships green, guarded by prompt prose alone. This needs a **product decision**, not a test — see §11. |
+| SYS-07 no false request-forwarding claim | P1 | `COVERED` | Closed, not deferred: `docs/booking-rules.md:223` and `:225` already decide it. `claimsBookingDone` still excludes request language on purpose, and the missing half was STATE — `guardrails/output-validation.ts` now carries `requestRecorded` beside `bookingRecorded` plus a `claimsRequestForwarded` matcher (English, Dutch, French), and `agent.service.ts` sets the new flag when a Request, lead or handoff row is really written. `unit/guardrails-output-validation.test.ts:240` still asserts `"Your request has been submitted."` PASSES, now with `requestRecorded: true`, so it passes for the reason that makes it true; the false-positive case at `:302` keeps "I'll forward your request to our business owner" and "I'll go ahead and request your phone number" legal. End to end at `integration/booking-plan-truth-guard.test.ts:324`: a lead-capture bot with bookings toggled off (so no in-loop booking guard is armed) claims the request was forwarded with no tool call, and the customer reads the tenant fallback while `guardrail_output_logs` records `fake_request_confirmation`; the control at `:354` calls `capture_lead` first and the same sentence ships unchanged. Verified to fail when the new check is removed. |
 | SYS-08 general booking email info + attachments | P1 | `COVERED`; enumerated end to end | Template level `unit/booking-email-template.test.ts:93-136`, negations `:171-199`. The enumeration is now `integration/booking-plan-notifications.test.ts:389-537`: the extras reach the customer on a confirmed create, on an owner-accepted request, on a reschedule and on an invite re-issued to a corrected address, and are absent from a cancellation. "Every booking email" is no longer inferred from one flag. Residual, stated at `:385-387`: the ATTACHMENT files are not exercised, because they come from object storage through the same `method` gate as the text. |
 | SYS-09 preparation instructions preserved | P1 | `COVERED` | `integration/booking-plan-notifications.test.ts:316-362`: the Service's `preparationInstructions` reach the committed customer confirmation email, and are absent from the cancellation email. Before this, no test ever passed `preparationInstructions` to `sendBookingEmail`, so the card at `booking-email.ts:333-338` was rendered by nothing. Both guards had to be broken together to make the negative fail, which the test records. |
 | OUT-01 Outlook smoke test | P1 | `COVERED` (provider-agnostic path) | `integration/booking-plan-outlook.test.ts:260-392`: a booking on a Microsoft `CalendarCredential` auto-confirms rather than downgrading, the mirror is written through a Microsoft-typed adapter, the `BookingReference` row records `providerType='microsoft'` and the id the provider minted, and an Outlook busy interval refuses a slot while a free one on the same day books. Residual, stated by the file at `:14-26`: nothing here speaks Graph. The wire format stays covered only by `unit/outlook-events-service.test.ts` and `unit/outlook-calendar-service.test.ts`, and the real `microsoftProvider` wiring by `unit/calendar-provider.test.ts`. |
@@ -249,14 +255,17 @@ Two smaller wording corrections, which the new tests pin as-is with a comment:
 6. **SYS-05** says never create or offer a Request for a past time. A **request-only** Service
    still captures one.
 
-## 11. Product defects found (4, all left UNFIXED)
+## 11. Product defects found (4, one now FIXED)
 
 Reported rather than patched, because each is a behaviour change that needs an owner's decision.
+The exception is SYS-07, whose decision `docs/booking-rules.md:223-225` had already taken.
 
-1. **SYS-07 — the output guard deliberately excludes request-shaped claims.** A false "your
-   request has been forwarded" claim reaches the customer, and an existing test asserts that the
-   sentence is permitted. `docs/booking-rules.md:186-231` (customer change policy, confirmation
-   and honesty) carries **no `Pinned:` line** — which maps 1:1 onto this and the next finding.
+1. **SYS-07 — the output guard excluded request-shaped claims. FIXED** (wave 3). A false "your
+   request has been forwarded" claim reached the customer, and a test asserted the sentence was
+   permitted. The rule was never open: `docs/booking-rules.md:225` calls announcing an act you
+   did not perform a false confirmation, and `:223` says `CONFIRMATION_REQUIRED` is not a
+   Booking. The guard now judges a request claim against `requestRecorded`, and the same root
+   cause closed CAL-06's reply half. See both rows for the tests and the falsification.
 2. **AVL-01 — no opening-hours gate on the request path.** `internal.provider.ts:2414-2443`
    refuses past / too_soon / too_far / closed-day / service-cap / no-check but **not** an
    out-of-hours hour on a day that has hours, so an Auto-book Service can capture a Request for
@@ -317,15 +326,17 @@ Two deliberate design choices:
 
 ## 14. Not yet closed
 
-Honest open list, so this matrix is not mistaken for completion. Everything the two waves closed
+Honest open list, so this matrix is not mistaken for completion. Everything the three waves closed
 has moved into the tables above with a `file:line`; what follows is what is genuinely left.
 
 **Blocked on a product decision, not on test effort** (§11). Until the decision lands, a test could
 only pin the current, contradicted behaviour:
 
-1. **SYS-07** — a false "your request has been forwarded" claim ships green. `unit/guardrails-output-validation.test.ts:232` positively asserts that the sentence is permitted with `bookingRecorded: false`.
-2. **AVL-01** — no opening-hours gate on the request path, so an Auto-book Service can capture an out-of-hours Request. Forbidden by `docs/booking-rules.md:26-28`, enforced by prompt copy alone.
-3. **CAL-06's reply half** — "never tell the customer it is booked" on a disconnected calendar is prompt prose with no runtime seam, and the create still returns `success: true`, which sets `state.bookingRecorded`. Same decision as SYS-07.
+1. **AVL-01** — no opening-hours gate on the request path, so an Auto-book Service can capture an out-of-hours Request. Forbidden by `docs/booking-rules.md:26-28`, enforced by prompt copy alone.
+
+SYS-07 and CAL-06's reply half were on this list and are now closed by wave 3. They were never
+blocked: `docs/booking-rules.md:223` and `:225` had already decided both, and the code simply did
+not honour the rule.
 
 **Named residuals inside closed rows** (each is written into its row, not rounded away):
 

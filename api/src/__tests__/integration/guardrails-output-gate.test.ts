@@ -93,7 +93,7 @@ describe('guardrails · applyOutputGuardrails (integration)', () => {
       tenantId: tenant.id, session, channel: 'widget',
       content: "I've confirmed your booking.", fallbackMessage: FALLBACK,
       generationPath: 'coalescer',
-      validationContext: { bookingRecorded: false, priceContextLoaded: false },
+      validationContext: { bookingRecorded: false, requestRecorded: false, priceContextLoaded: false },
     });
 
     expect(r).toEqual({ blocked: true, content: FALLBACK });
@@ -107,7 +107,7 @@ describe('guardrails · applyOutputGuardrails (integration)', () => {
     const r = await applyOutputGuardrails({
       tenantId: tenant.id, session, channel: 'widget',
       content, fallbackMessage: FALLBACK, generationPath: 'coalescer',
-      validationContext: { bookingRecorded: true, priceContextLoaded: false },
+      validationContext: { bookingRecorded: true, requestRecorded: false, priceContextLoaded: false },
     });
 
     expect(r).toEqual({ blocked: false, content });
@@ -119,7 +119,7 @@ describe('guardrails · applyOutputGuardrails (integration)', () => {
       tenantId: tenant.id, session, channel: 'widget',
       content: 'That service costs €30.', fallbackMessage: FALLBACK,
       generationPath: 'coalescer',
-      validationContext: { bookingRecorded: false, priceContextLoaded: false },
+      validationContext: { bookingRecorded: false, requestRecorded: false, priceContextLoaded: false },
     });
 
     expect(r).toEqual({ blocked: true, content: FALLBACK });

@@ -140,6 +140,49 @@ function buildUserContent(message: string, images?: AgentImageInput[]): string |
 const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking', 'update_booking'];
 
 /**
+ * Did this booking mutation produce a REQUEST rather than a Booking?
+ *
+ * `requested: true` is the providers' own word for it (`CreateBookingResult.requested`,
+ * and the same field on the reschedule/cancel results), set for a request-only Service and
+ * for the `CALENDAR_NOT_CONNECTED` downgrade. `request_appointment` is judged by NAME as
+ * well, because capturing a Request is the entire tool: it can never return a Booking, and
+ * a future result shape that forgot the flag would otherwise read as one.
+ */
+function isRequestOutcome(toolName: string, result: ToolResult): boolean {
+  if (toolName === 'request_appointment') return true;
+  return (result.data as { requested?: boolean } | undefined)?.requested === true;
+}
+
+/**
+ * What this tool result lets the REPLY claim.
+ *
+ * Three facts, deliberately separate, because a run can honestly say one and dishonestly
+ * say another. `bookingRecorded` is a confirmed Booking. `requestRecorded` is a Request,
+ * lead or handoff row. `bookingToolSucceeded` is neither claim — it is only "the run acted
+ * on the diary", which the availability and pending-yes guards ask about.
+ *
+ * `capture_lead` counts on any success, including the entitlement-gated `Noted.` path.
+ * These flags only ever stand a guard DOWN, so an over-generous read costs a missed lie
+ * while a stingy one replaces an honest reply with a fallback - and the fallback is the
+ * error direction the guardrail layer is explicitly biased against.
+ */
+function absorbRecordedOutcome(tool: { name: string }, result: ToolResult, state: RunLoopState): void {
+  if (!result.success) return;
+  if (tool.name === 'escalate_to_human' || tool.name === 'capture_lead') {
+    state.requestRecorded = true;
+    return;
+  }
+  if (!BOOKING_MUTATION_TOOLS.includes(tool.name)) return;
+  state.bookingToolSucceeded = true;
+  // WHAT THE RESULT SAYS, not merely that the call returned. A request-only Service and a
+  // disconnected calendar both come back `success: true` with `requested: true` from
+  // `internal.provider.ts`. Reading success alone set `bookingRecorded` on those turns,
+  // which stood the false-confirmation guard down on precisely the runs it exists for.
+  if (isRequestOutcome(tool.name, result)) state.requestRecorded = true;
+  else state.bookingRecorded = true;
+}
+
+/**
  * Notice/horizon refused the named time this run. Later availability is a list of
  * alternatives, so the clock-only "already chose this hour" match must stand down.
  */
@@ -751,8 +794,25 @@ interface RunLoopState {
    * customer, and the later call is the better-informed one.
    */
   pendingAffordance: Affordance | null;
-  /** Egress guard state: was a booking/request actually recorded this run? */
+  /**
+   * Egress guard state: was a CONFIRMED Booking recorded this run?
+   *
+   * A Request is NOT one. `create_booking` returns `success: true` for a request-mode
+   * service and for the disconnected-calendar downgrade alike, so success alone proved
+   * nothing about what the customer may be told (`docs/booking-rules.md:223`).
+   */
   bookingRecorded: boolean;
+  /** Egress guard state: was a Request, lead or handoff row recorded this run? */
+  requestRecorded: boolean;
+  /**
+   * A booking mutation tool SUCCEEDED this run, Booking or Request alike.
+   *
+   * The honesty guards may not read this - "the tool worked" is not "you are booked" - but
+   * the availability and pending-yes guards ask a different question: did this run already
+   * act on the diary, so is there anything left to nudge for? A captured Request settles
+   * that as firmly as a confirmed Booking does.
+   */
+  bookingToolSucceeded: boolean;
   /**
    * #7: per-run guard — a side-effecting tool must not execute twice with
    * identical args within one agent run (a model re-emitting the same call).
@@ -816,6 +876,8 @@ function newRunLoopState(): RunLoopState {
     pendingAvailabilityCallId: null,
     pendingAffordance: null,
     bookingRecorded: false,
+    requestRecorded: false,
+    bookingToolSucceeded: false,
     sideEffectsInvoked: new Set<string>(),
     pendingYesNudgeAttempted: false,
     correctionAttempted: false,
@@ -1663,9 +1725,14 @@ export class AgentService {
     state: RunLoopState,
     content: string,
   ): GuardVerdict {
-    if (!ctx.bookingClaimGuardArmed || state.bookingRecorded || !claimsBookingForAgentNudge(content)) {
-      return { kind: 'content', content };
-    }
+    if (!ctx.bookingClaimGuardArmed || state.bookingRecorded) return { kind: 'content', content };
+    // A RECORDED REQUEST BUYS THE REQUEST SENTENCES ONLY. `claimsBookingForAgentNudge` covers
+    // both families ("your request has been submitted" as well as "I've booked you in"), and
+    // on a disconnected calendar the run captures a real Request - so nudging the honest
+    // "your request is in" would replace a true reply, while the "booked" half of the same
+    // family is still the lie this guard exists for (`docs/booking-rules.md:225`).
+    if (state.requestRecorded && !claimsBookingDone(content)) return { kind: 'content', content };
+    if (!claimsBookingForAgentNudge(content)) return { kind: 'content', content };
     if (!state.correctionAttempted && i < MAX_ITERATIONS - 1) {
       state.correctionAttempted = true;
       (ctx.trace.corrections ??= []).push('unrecorded_booking_claim');
@@ -1708,7 +1775,10 @@ export class AgentService {
     state: RunLoopState,
     content: string,
   ): Promise<boolean> {
-    if (state.bookingRecorded || !ctx.bookingClaimGuardArmed) return false;
+    // `bookingToolSucceeded`, not `bookingRecorded`: this guard asks whether the run acted on
+    // the yes at all, and a captured Request is an act. Nudging for `create_booking` after
+    // `request_appointment` already wrote the row would ask for a second write.
+    if (state.bookingToolSucceeded || !ctx.bookingClaimGuardArmed) return false;
     if (state.pendingYesNudgeAttempted || i >= MAX_ITERATIONS - 1) return false;
     const history = [...state.messages, { role: 'user' as const, content: ctx.message }];
     let correction: string;
@@ -1758,7 +1828,10 @@ export class AgentService {
     state: RunLoopState,
     content: string,
   ): Promise<boolean> {
-    if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.heldBooking || state.bookingRecorded) return false;
+    // `bookingToolSucceeded` keeps this exactly where it was: a run that captured a Request
+    // has settled the diary question as firmly as one that booked, and this guard judges
+    // availability talk, never the honesty of a confirmation.
+    if (!ctx.availabilityClaimGuardArmed || state.pendingAvailability || state.heldBooking || state.bookingToolSucceeded) return false;
     if (i >= MAX_ITERATIONS - 1) return false;
     const dated = claimsDatedUnavailability(content);
     const offered = !dated && ctx.requestOfferGuardArmed && !state.availabilityChecked && offersManualRequest(content)
@@ -1867,7 +1940,9 @@ export class AgentService {
     content: string,
   ): Promise<GuardVerdict> {
     const pass: GuardVerdict = { kind: 'content', content };
-    if (!ctx.availabilityClaimGuardArmed || state.bookingRecorded) return pass;
+    // `bookingToolSucceeded` again: same question, same answer - a captured Request means
+    // the run acted, so a clumsy "let me check" beside it is not the dead end this replaces.
+    if (!ctx.availabilityClaimGuardArmed || state.bookingToolSucceeded) return pass;
     if (!promisesAvailabilityCheck(content, ctx.message)) return pass;
     if (!state.availabilityChecked) return this.promisedCheckNothingRan(i, ctx, state, content);
     // THE CALL RAN. `pendingAvailability` being set means only that it SUCCEEDED - the
@@ -1999,7 +2074,11 @@ export class AgentService {
       type: 'response',
       content: safeContent,
       quickReplies: slotChips,
-      validationContext: { bookingRecorded: state.bookingRecorded, priceContextLoaded: state.priceContextLoaded },
+      validationContext: {
+        bookingRecorded: state.bookingRecorded,
+        requestRecorded: state.requestRecorded,
+        priceContextLoaded: state.priceContextLoaded,
+      },
       ...(state.escalationRequested ? { handoffRequested: true } : {}),
       ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
       // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
@@ -2185,6 +2264,7 @@ export class AgentService {
     // Latched (never reset) so whatever exit this run takes carries
     // `handoffRequested: true` — the forwarding mapping owes them a human.
     if (tool.name === 'escalate_to_human' && result.success && ctx.sessionBotOwned) state.escalationRequested = true;
+    absorbRecordedOutcome(tool, result, state);
     if (result.success && result.replyFact?.kind === 'booking_address') {
       const merged = mergeAddressFacts(state.pendingAddressFact, result.replyFact);
       state.pendingAddressFact = merged.fact;
@@ -2230,7 +2310,6 @@ export class AgentService {
       // decision the customer has already made.
       state.pendingAffordance = null;
       void clearRefusedNamedTime(ctx.session.id);
-      state.bookingRecorded = true;
     }
   }
 

@@ -41,7 +41,7 @@ describe('EmbedWidgetCard — deploy snippet', () => {
 
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.querySelector('#allowedOrigins')).toBeNull();
-    expect(container.textContent).not.toContain('allowedOrigins');
+    expect(container.textContent).not.toContain('Allowed websites');
   });
 
   it('renders nothing when publicKey is missing', () => {

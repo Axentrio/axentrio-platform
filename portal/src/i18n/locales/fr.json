@@ -493,7 +493,7 @@
       },
       "embed": {
         "title": "Intégrer le widget",
-        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio. Si votre compte a une liste de sites approuvés, seuls ces sites peuvent intégrer le widget. Demandez au support de modifier cette liste.",
+        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio.",
         "copied": "Copié dans le presse-papiers",
         "copyTitle": "Copier l'extrait",
         "rotate": {

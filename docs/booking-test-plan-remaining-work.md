@@ -87,7 +87,7 @@ that bug comes back.
 ### 1.1 `BK-07` — the false-success guard, wired end to end
 
 **Unasserted:** the wiring itself. `state.bookingRecorded` defaults false
-(`agent/agent.service.ts:818`) and flips true at `:2233`, and it is only ever asserted **TRUE**
+(`newRunLoopState` in `agent/agent.service.ts`) and flips true in `absorbRecordedOutcome`, and it is only ever asserted **TRUE**
 (`unit/agent-service.test.ts:2251`). Every output-guard test hand-supplies `validationContext`
 (`integration/guardrails-output-gate.test.ts:96`, `:110`), so no test has ever driven a run in which
 the write failed and the model then claimed success. `docs/booking-rules.md:225` — *"Announcing
@@ -252,16 +252,8 @@ change the price on the calendar mirror relative to the price emailed to the cus
 
 ### 2.2 `CAL-06` — "never say confirmed" on a disconnected calendar
 
-**Unasserted:** the reply layer. `CALENDAR_NOT_CONNECTED` is pinned as a *result*
-(`unit/internal-provider-create.test.ts:2075`, `:935`, `:3258`), and the rule lives in prose
-(`modules/booking.module.ts:623`: *"Do NOT offer specific time slots … Never tell the customer it is
-booked or confirmed"*), but no conversation-level test asserts the assistant refrains.
-
-**Fixture:** **omit** `seedPlanCalendarCredential`. Drive a real agent turn (or the booking tool) for
-a valid Auto-book appointment.
-
-**Assertions:** a `request_created` row exists; **no** confirmed row; the reply does not claim a
-confirmed booking.
+**Closed** (wave 3). The state half and the reply half are both pinned. See the CAL-06 row in
+`booking-test-plan-traceability.md` for the tests, the falsification and the residual.
 
 ### 2.3 `SRV-22` — real persistence, and the read-back
 
@@ -379,22 +371,15 @@ flag is caught.
 
 ## 3. Blocked on a product decision — do not write a test yet
 
-The items below cannot be honestly tested until someone decides what the behaviour should be. **This is
+Both items below are now fixed. They needed a decision on the behaviour first. **This is
 not a test-effort gap**, and writing a test now would only pin the current, contradicted behaviour.
 `AVL-01` (§3.2) was listed here in error and is now fixed.
 
 ### 3.1 `SYS-07` — a false "we forwarded your request" claim ships green
 
-`claimsBookingDone` (`guardrails/output-validation.ts:49-73`; the submission regex is `:60`) matches
-**BOOKING-shaped claims only**, and `unit/guardrails-output-validation.test.ts:232` **positively
-asserts** that `"Your request has been submitted."` is allowed with `bookingRecorded: false`. So the
-plan's rule — a forwarded/submitted claim requires a real request row — is enforced by prompt prose
-alone, with no runtime guard.
-
-`docs/booking-rules.md:186-231` (customer change policy, and confirmation and honesty) carries **no
-`Pinned:` line**, which maps 1:1 onto this and `BK-07`. Given the plan lists SYS-07 as P1 and treats
-"every test that expects a request must assert the request row exists" as an implementation note for
-*automation*, the likely intent is a real guard. **Decide, then test.**
+**Closed** (wave 3). It was never blocked: `docs/booking-rules.md:223` and `:225` already decide it.
+See the SYS-07 row in `booking-test-plan-traceability.md` for the tests, the condition and the
+residuals.
 
 ### 3.2 `AVL-01` — no opening-hours gate on the request path — FIXED, not blocked
 
@@ -470,11 +455,10 @@ Two smaller wording corrections, both now pinned as-is with a comment:
 
 ## 6. Product defects found
 
-Reported rather than patched — each is a behaviour change needing an owner's decision.
-`AVL-01` is the exception: the rule already decided it, and it is now fixed.
+Reported rather than patched — each is a behaviour change needing an owner's decision. SYS-07 and
+`AVL-01` are the exceptions: the rule already decided each, and both are now fixed.
 
-1. **`SYS-07`** — no runtime guard for request-shaped success claims; a test asserts the forbidden
-   sentence is permitted (§3.1).
+1. **`SYS-07`** - fixed in wave 3 (§3.1).
 2. **`AVL-01`** — FIXED (§3.2).
 3. **`SYS-02`** — a conversation reset cancels live Bookings and deletes their calendar mirrors,
    which is broader than "clear conversation state, keep bookings" (§1.4).

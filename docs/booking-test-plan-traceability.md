@@ -29,11 +29,14 @@ Paths below are relative to `api/` unless stated otherwise.
 | Verdict | Count |
 |---|---|
 | `COVERED` — already pinned, no work needed | 46 |
-| Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 39 |
-| Still open (audited, test not yet written) | 1 - SYS-07, blocked on a product decision (§11) |
+| Closed by this work (`GAP`/`PARTIAL`/`BUG` with a delivered test) | 40 — includes SYS-07 and AVL-01, both former `BUG`s |
+| Still open (audited, test not yet written) | 0 |
 | `EVAL` — measured by the live suite, which never runs in CI | 5 — SYS-03, SYS-04, and the model half of BK-02, BK-08 and SRV-02 |
 | `RESTATE` — drop or reword the case | 4 |
-| `BUG` — product defect found, left unfixed | 3 |
+| `BUG` — product defect found, left unfixed | 2 — SYS-02 and PRC-12 (§11) |
+
+The rows overlap, so they do not sum to the case count: the `EVAL` row counts the model half of
+cases that another row also counts.
 
 Several closed rows carry a named residual clause. A residual is written into the row rather than
 rounded up, so `COVERED` here always means "a test would fail if this broke", never "near enough".
@@ -44,9 +47,9 @@ single-day guard, and BK-03's new reuse assertion — and each reproduced the fa
 describes. The rest are the recorded claim of the test's own author, written in the file beside
 the assertion it defends.
 
-**Delivered in two waves** — one shared harness, 11 vitest files holding 83 passing tests, and one
-live eval script that no CI job can reach. No production code was touched; the only non-test
-change is one `package.json` script.
+**Delivered in three waves** — one shared harness, 12 vitest files holding 98 passing tests, and one
+live eval script that no CI job can reach. Waves 1 and 2 touched no production code; wave 3 is the
+first that does, because the two cases it closes are defects rather than gaps.
 
 Wave 1, the audit and the first five files:
 
@@ -71,9 +74,15 @@ Wave 2, written by eight parallel authors and merged into one branch:
 | `src/__tests__/integration/booking-plan-outlook.test.ts` | 2 | **OUT-01**, a booking through a Microsoft-typed adapter |
 | `src/__tests__/live/booking-eval.ts` | 5 cases, not vitest | SYS-03, SYS-04, and the model half of BK-02, BK-08, SRV-02. Run with `npm run eval:booking-plan`; no CI job can reach it |
 
+Wave 3, the two cases waves 1 and 2 left as defects:
+
+| File | Tests | Closes |
+|---|---|---|
+| `src/__tests__/integration/booking-plan-truth-guard.test.ts` | 15, plus 3 `it.fails` known residuals | **SYS-07** and **CAL-06** (reply half), one root cause: run state that said something happened when it had not. Changes `agent/agent.service.ts`, `agent/tools/capture-lead.tool.ts` and `guardrails/output-validation.ts` |
+
 The headline: **roughly 40% of the plan was already pinned.** The valuable remainder was
 concentrated in cross-surface agreement, the request/change-policy persistence path, and a set
-of engine boundaries that had never been exercised. Both waves are now merged.
+of engine boundaries that had never been exercised. All three waves are now merged.
 
 Two of the delivered tests correct rather than merely extend:
 **SRV-07** was verified to FAIL when the buffers are zeroed, which the test it replaces could not do;
@@ -93,7 +102,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | BK-04 preferred time survives a follow-up | P0 | `COVERED` | `unit/builtin-tools.test.ts:644-671`, twin `:675-698`; engine `unit/unoffered-times.test.ts:405-440`. |
 | BK-05 final availability rechecked before write | P0 | `COVERED` | `unit/internal-provider-create.test.ts:860-866` (external busy → `SLOT_UNAVAILABLE`), `:755-765` (23P01), alternatives `:727-753`. |
 | BK-06 result time equals confirmed time | P0 | `PARTIAL` | `displayTime` pinned (`unit/internal-provider-create.test.ts:352`, `:359-361`) but **no test bound row + calendar + email to one local hour**, and the real-DB `start_utc` was never asserted. Three-surface binding DELIVERED in `integration/booking-plan-lifecycle.test.ts`, which closes CAL-07 too. |
-| BK-07 no false success when the write fails | P0 | `COVERED` | `integration/booking-plan-false-success.test.ts:190` drives the real agent loop against a real Availability Rule, lets the scripted model claim success on a refused write, and asserts the `messages` row the customer actually received; control at `:259`. Verified to fail when `agent/agent.service.ts:1691` ships the model's own words instead of the safe fallback. Before this, `state.bookingRecorded` was only ever asserted TRUE (`unit/agent-service.test.ts:2251`) and every guard test hand-supplied `validationContext` (`integration/guardrails-output-gate.test.ts:96`, `:110`). |
+| BK-07 no false success when the write fails | P0 | `COVERED` | `integration/booking-plan-false-success.test.ts:190` drives the real agent loop against a real Availability Rule, lets the scripted model claim success on a refused write, and asserts the `messages` row the customer actually received; control at `:259`. Verified to fail when `agent/agent.service.ts:1825` ships the model's own words instead of the safe fallback. Before this, `state.bookingRecorded` was only ever asserted TRUE (`unit/agent-service.test.ts:2251`) and every guard test hand-supplied `validationContext` (`integration/guardrails-output-gate.test.ts:96`, `:110`). |
 | BK-08 no silent manual-request fallback | P0 | `COVERED` | `unit/booking-prompt-behaviour.test.ts:1123-1131`, `:1237-1241`, `:1329-1333`, `:1186-1193`; write path `unit/internal-provider-create.test.ts:3236-3240` (`REQUEST_BEFORE_CHECK`). |
 
 ## 3. Service configuration (§6)
@@ -173,7 +182,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | CAL-03 abutting before event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113` (comment at `:107` names boundary-touching). |
 | CAL-04 abutting after event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113`; `unit/business-capacity.test.ts:94-103`; real DB `integration/booking-plan-harness.test.ts`. |
 | CAL-05 contained inside event | P0 | `COVERED` | `unit/slot-engine.test.ts:329-338`; `unit/internal-provider-create.test.ts:443-465`. |
-| CAL-06 disconnected calendar | P0 | `COVERED` (state half) + `BUG` (reply half) | `integration/booking-plan-requests.test.ts:340-408`: an Auto-book Service on a business with NO credential persists `status='request_created'`, confirms nothing and writes no mirror; the control at `:383` seeds the credential and the same call confirms, so the credential is the cause. That file also restores the real credential check, because the shared harness stub answers "healthy" whether or not a credential row exists (`helpers/booking-plan-harness.ts:509`). Residual, deliberately NOT pinned and explained at `requests.test.ts:373-380`: "never tell the customer it is booked" (`modules/booking.module.ts:623`) is prompt prose with no runtime guard, and pinning it would freeze the contradicted behaviour. Same product decision as SYS-07. |
+| CAL-06 disconnected calendar | P0 | `COVERED` (state + reply, on the condition below) | **The condition.** The reply half holds only for the phrasings the matcher knows, and the residual at the end of this row names phrasings it does not know. State half: `integration/booking-plan-requests.test.ts:340-408` — an Auto-book Service on a business with NO credential persists `status='request_created'`, confirms nothing and writes no mirror; the control at `:383` seeds the credential and the same call confirms, so the credential is the cause. Reply half, closed here: `integration/booking-plan-truth-guard.test.ts:291` drives the real agent loop over that same fixture, lets the scripted model announce a confirmation twice, and asserts the `messages` row the customer received is the safe fallback; the control at `:335` seeds the credential and the same script ships the confirmation unchanged. On the same Request, `:368` shows that the loop also stops the booked claims the output gate leaves out (Dutch "je afspraak is bevestigd", "I've scheduled", "successfully booked", and "I’ve scheduled" and "I’ll go ahead and book" with a curly apostrophe), and `:399` shows that the honest "your booking has been submitted" ships unchanged. `:462` shows that a captured lead does not stop the nudge for "I'll go ahead and book". The defect behind it was the old tail of `absorbToolResult` in `agent.service.ts`, which set `state.bookingRecorded` from `result.success` alone — true for the `CALENDAR_NOT_CONNECTED` downgrade — so the false-confirmation guard stood down. `absorbRecordedOutcome` now sets the flag from `requested` in the result. Verified to fail when that split is reverted to the old single assignment. Both files restore the real credential check, because the shared harness stub answers "healthy" whether or not a credential row exists (`helpers/booking-plan-harness.ts:509`, whose comment now says so). Residual in the matcher, pinned with `it.fails` at `integration/booking-plan-truth-guard.test.ts:431`: the matcher knows a closed set of phrasings, so it cannot catch every wording of the same claim. Each of these passes on a downgraded Request: "Your appointment is confirmed for Friday at 10:00.", "Your booking is confirmed for Friday at 10:00.", and "You are booked in for Friday at 10:00." |
 | CAL-07 row + calendar + email agree | P0 | `GAP` | **Nothing on the same value across surfaces**: the calendar start was never asserted, the email's local hour was asserted nowhere, and the real-DB `start_utc` was never checked. Closed by BK-06 in `integration/booking-plan-lifecycle.test.ts`. |
 
 ## 7. Reschedule and cancellation (§10)
@@ -218,7 +227,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | SYS-04 customer can switch language | P1 | `EVAL` + `PARTIAL` | Same: snapshot pins the clause (`unit/prompt-composition-characterization.test.ts:83`); no turn-level assertion possible deterministically. Live suite. |
 | SYS-05 past-time guardrail | P0 | `COVERED` + contradicted clause | Past excluded and refused (`unit/slot-engine.test.ts:56-65`, `unit/internal-provider-create.test.ts:3051-3057`); driven end to end in `integration/booking-plan-system.test.ts`. The clause "no request for a past time" is **contradicted** for a request-only Service (`unit/internal-provider-create.test.ts:3059-3064` still captures one), so the plan wording needs a correction (§10). |
 | SYS-06 broad time preference respected | P1 | `COVERED` | `unit/clock-window.test.ts:11-16`; `unit/day-part.test.ts:5-8`; chips `unit/agent-service.test.ts:1930-1967`. |
-| SYS-07 no false request-forwarding claim | P1 | `BUG` | **Actively contradicted.** `claimsBookingDone` (`guardrails/output-validation.ts:49-73`, submission regex `:60`) matches BOOKING-shaped claims only, and `unit/guardrails-output-validation.test.ts:232` **positively asserts** that `"Your request has been submitted."` PASSES with `bookingRecorded: false`. So a "forwarded to the owner" lie ships green, guarded by prompt prose alone. This needs a **product decision**, not a test — see §11. |
+| SYS-07 no false request-forwarding claim | P1 | `COVERED` (on the condition below) | Closed, not deferred: `docs/booking-rules.md:223` and `:225` already decide it. **The condition.** SYS-07 holds only for the phrasings the matcher knows, and residual (3) below names phrasings it does not know. The guard runs on every tenant whose bot has a tool that can record a request (`capture_lead`, `escalate_to_human`, or a booking tool). There, the in-loop request guard nudges once and then sends a safe fallback, also in the default shadow mode. A bot with none of these tools has only the output gate. That gate stops the claim only when the tenant sets guardrails to enforce. In shadow mode it logs `fake_request_confirmation` and still sends the reply. **The mechanism.** `claimsBookingDone` still excludes request language on purpose, and the missing half was STATE — `guardrails/output-validation.ts` now carries `requestRecorded` beside `bookingRecorded` plus a `claimsRequestForwarded` matcher (English, Dutch, French). `agent.service.ts` sets the new flag only when a Request, lead or handoff row is really written: `capture_lead` counts only when it reports `captured`. The flag also carries to later turns of the same conversation through `chat_sessions.metadata.requestOnRecord`, so an honest restatement passes. `unit/guardrails-output-validation.test.ts:270` still asserts `"Your request has been submitted."` PASSES, now with `requestRecorded: true`, so it passes for the reason that makes it true; the must-pass table at `:380` keeps "I'll forward your request to our business owner" and "I'll go ahead and request your phone number" legal. End to end at `integration/booking-plan-truth-guard.test.ts:491`: a bot with no tool that can record a request claims the request was forwarded with no tool call, and the customer reads the tenant fallback while `guardrail_output_logs` records `fake_request_confirmation`; the control at `:520` calls `capture_lead` first and the same sentence ships unchanged. `:545` pins the shadow-mode half: the loop sends the safe fallback, and its control at `:561` records the lead after the nudge. `:583` pins the later turn: the restatement ships and the bot stays on. `:615` pins the fallback itself: when the lead row predates the latch, the customer reads a reply that neither claims nor denies that anything reached the team. Residuals in the matcher, pinned with `it.fails` at `unit/guardrails-output-validation.test.ts:442`: (1) a condition that "and" or "that" joins to the claim hides the claim, for example "Thanks for waiting while I checked if the team was in and your request has been forwarded to them." and "When I checked I saw that your request has been forwarded." The matcher cannot treat "and" or "that" as a clause end, because "Once the form is complete and your request has been submitted, we reply within 48 hours." and "Once we see that your request has been submitted, we reply within 48 hours." must pass. (2) A negated report is blocked, for example "I can't confirm that your request has been forwarded." Only a negation check could tell it from "I can confirm that ...", and recall wins that tie. (3) The matcher knows a closed set of phrasings, so it cannot catch every wording of the same claim. Each of these passes with nothing recorded: "Zojuist heb ik uw aanvraag doorgestuurd naar het team." and "Inmiddels is uw aanvraag doorgestuurd naar het team." (Dutch word order after a fronted adverb), "I've forwarded your question to the owner." (a noun outside the list), and "I've passed this on to the team." (no noun). Verified to fail when the new check is removed. |
 | SYS-08 general booking email info + attachments | P1 | `COVERED`; enumerated end to end | Template level `unit/booking-email-template.test.ts:93-136`, negations `:171-199`. The enumeration is now `integration/booking-plan-notifications.test.ts:389-537`: the extras reach the customer on a confirmed create, on an owner-accepted request, on a reschedule and on an invite re-issued to a corrected address, and are absent from a cancellation. "Every booking email" is no longer inferred from one flag. Residual, stated at `:385-387`: the ATTACHMENT files are not exercised, because they come from object storage through the same `method` gate as the text. |
 | SYS-09 preparation instructions preserved | P1 | `COVERED` | `integration/booking-plan-notifications.test.ts:316-362`: the Service's `preparationInstructions` reach the committed customer confirmation email, and are absent from the cancellation email. Before this, no test ever passed `preparationInstructions` to `sendBookingEmail`, so the card at `booking-email.ts:333-338` was rendered by nothing. Both guards had to be broken together to make the negative fail, which the test records. |
 | OUT-01 Outlook smoke test | P1 | `COVERED` (provider-agnostic path) | `integration/booking-plan-outlook.test.ts:260-392`: a booking on a Microsoft `CalendarCredential` auto-confirms rather than downgrading, the mirror is written through a Microsoft-typed adapter, the `BookingReference` row records `providerType='microsoft'` and the id the provider minted, and an Outlook busy interval refuses a slot while a free one on the same day books. Residual, stated by the file at `:14-26`: nothing here speaks Graph. The wire format stays covered only by `unit/outlook-events-service.test.ts` and `unit/outlook-calendar-service.test.ts`, and the real `microsoftProvider` wiring by `unit/calendar-provider.test.ts`. |
@@ -249,15 +258,18 @@ Two smaller wording corrections, which the new tests pin as-is with a comment:
 6. **SYS-05** says never create or offer a Request for a past time. A **request-only** Service
    still captures one.
 
-## 11. Product defects found (4; AVL-01 since fixed, the rest left UNFIXED)
+## 11. Product defects found (4, two now FIXED)
 
 Reported rather than patched, because each is a behaviour change that needs an owner's decision.
-AVL-01 is the exception: the rule already decided it, and it is now fixed.
+SYS-07 and AVL-01 are the exceptions: the rule had already decided each, and both are now fixed.
 
-1. **SYS-07 — the output guard deliberately excludes request-shaped claims.** A false "your
-   request has been forwarded" claim reaches the customer, and an existing test asserts that the
-   sentence is permitted. `docs/booking-rules.md:186-231` (customer change policy, confirmation
-   and honesty) carries **no `Pinned:` line** — which maps 1:1 onto this and the next finding.
+1. **SYS-07 — the output guard excluded request-shaped claims. FIXED** (wave 3). A false "your
+   request has been forwarded" claim reached the customer, and a test asserted the sentence was
+   permitted. The rule was never open: `docs/booking-rules.md:225` calls announcing an act you
+   did not perform a false confirmation, and `:223` says `CONFIRMATION_REQUIRED` is not a
+   Booking. The guard now judges a request claim against `requestRecorded`, and the same root
+   cause closed CAL-06's reply half. See both rows for the tests and the falsification. The
+   SYS-07 row states the condition under which the fix holds.
 2. **AVL-01 — no opening-hours gate on the request path.** FIXED. See the AVL-01 row in §5.
 3. **SYS-02 — a reset mutates and un-mirrors live Bookings.** Cancel + mirror delete
    (`services/conversation-reset-state.ts:255-291`, `:121-131`) is broader than the plan's
@@ -314,14 +326,15 @@ Two deliberate design choices:
 
 ## 14. Not yet closed
 
-Honest open list, so this matrix is not mistaken for completion. Everything the two waves closed
+Honest open list, so this matrix is not mistaken for completion. Everything the three waves closed
 has moved into the tables above with a `file:line`; what follows is what is genuinely left.
 
 **Blocked on a product decision, not on test effort** (§11). Until the decision lands, a test could
 only pin the current, contradicted behaviour:
 
-1. **SYS-07** — a false "your request has been forwarded" claim ships green. `unit/guardrails-output-validation.test.ts:232` positively asserts that the sentence is permitted with `bookingRecorded: false`.
-2. **CAL-06's reply half** — "never tell the customer it is booked" on a disconnected calendar is prompt prose with no runtime seam, and the create still returns `success: true`, which sets `state.bookingRecorded`. Same decision as SYS-07.
+Nothing is left on this list. SYS-07, CAL-06's reply half and AVL-01 all sat here, and each is now
+closed with the evidence in its own row. None of the three was blocked in the end:
+`docs/booking-rules.md` had already decided each one, and the code did not honour the rule.
 
 **Named residuals inside closed rows** (each is written into its row, not rounded away):
 
@@ -330,6 +343,8 @@ only pin the current, contradicted behaviour:
 - **OUT-01** — no Microsoft Graph wire format, and the real `microsoftProvider` wiring is mocked out.
 - **PRC-12** — `sync-reconciler.ts:311` re-derives the discount at reconcile time (§11, defect 4).
 - **BK-03** — the NAME clause is still prompt prose; the email and phone clauses are pinned.
+- **SYS-07** - the request matcher knows a closed set of phrasings, so it cannot catch every wording of the same claim. The residual shapes are pinned with `it.fails`.
+- **CAL-06** - the booked-claim matcher knows a closed set of phrasings, so it cannot catch every wording of the same claim. The residual phrasings are pinned with `it.fails`.
 - **SRV-06, SRV-12, SRV-18, AVL-11, SYS-01** — residuals recorded in their own rows, unchanged by this work.
 
 **Wording corrections owed to the plan's author:** SYS-02 and SYS-05 (§10), plus the four `RESTATE`

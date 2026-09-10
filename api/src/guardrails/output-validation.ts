@@ -19,6 +19,7 @@ export type OutputViolationFamily =
   | "credential_solicitation"
   | "unsafe_link"
   | "fake_booking_confirmation"
+  | "fake_request_confirmation"
   | "invented_price";
 
 export interface OutputViolation {
@@ -32,8 +33,24 @@ export interface OutputValidationResult {
 }
 
 export interface OutputValidationContext {
-  /** True only when a booking mutation succeeded during this Agent run. */
+  /** True only when a CONFIRMED Booking was recorded during this Agent run. */
   bookingRecorded: boolean;
+  /**
+   * True only when a Request, lead or handoff row was recorded during this Agent run, or
+   * during an earlier turn of the same conversation - so a reply that repeats an earlier,
+   * true "your request has been forwarded" is not judged a new claim.
+   *
+   * Separate from `bookingRecorded` because the two claims are separately falsifiable:
+   * `docs/booking-rules.md:223` — "`CONFIRMATION_REQUIRED` is not a Booking" — and a
+   * disconnected calendar downgrades an Auto-book create to a Request, so one run can
+   * honestly say "your request is in" and dishonestly say "you are booked".
+   */
+  requestRecorded: boolean;
+  /**
+   * True only when a booking tool recorded a Request, not a Booking, during this Agent run.
+   * That makes "your booking has been submitted" true, and a lead or handoff does not.
+   */
+  bookingRequestRecorded: boolean;
   /** True when price-bearing catalog or KnowledgeBase content reached this run. */
   priceContextLoaded: boolean;
 }
@@ -47,17 +64,25 @@ export function containsCurrencyAmount(text: string): boolean {
 
 /** High-precision detector for a reply claiming a booking mutation completed now. */
 export function claimsBookingDone(text: string): boolean {
+  // Only a *booking* submission counts — a lead/handoff `request` is not a
+  // booking mutation.
+  return claimsBookingConfirmed(text) || /\byour booking has been submitted\b/.test(text.toLowerCase());
+}
+
+/**
+ * `claimsBookingDone` without "your booking has been submitted": the sentences only a
+ * CONFIRMED Booking makes true. A Request makes that one sentence true as well.
+ */
+export function claimsBookingConfirmed(text: string): boolean {
   const t = text.toLowerCase();
   return [
     // Completed booking mutation only — bare `scheduled` (reminder/follow-up) is
     // an everyday reply, not a booking claim (review FP round 2).
-    /\bi(?:'ve| have) (?:successfully )?booked\b/,
+    /\bi(?:['’]ve| have) (?:successfully )?booked\b/,
     // `confirmed your booking/appointment` — but NOT when it merely states
     // availability ("your appointment is available tomorrow").
-    /\bi(?:'ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
-    // Only a *booking* submission counts — a lead/handoff `request` is not a
-    // booking mutation.
-    /\byour booking has been (?:submitted|booked|confirmed)\b/,
+    /\bi(?:['’]ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
+    /\byour booking has been (?:booked|confirmed)\b/,
     // Dutch: `geboekt/gereserveerd` may stand alone ("ik heb geboekt" is a
     // completed claim), but `gepland/ingepland/bevestigd` need the booking noun
     // — otherwise "ik heb gepland om je te bellen" / "ik heb bevestigd dat we
@@ -71,10 +96,138 @@ export function claimsBookingDone(text: string): boolean {
     // tells the customer the original appointment still stands.
     /\b(?:je|uw) wijziging is bevestigd\b/,
     /\byour (?:change|reschedule) (?:is|has been) confirmed\b/,
-    /\bi(?:'ve| have) (?:successfully )?(?:rescheduled|moved) (?:your )?(?:appointment|booking)\b/,
+    /\bi(?:['’]ve| have) (?:successfully )?(?:rescheduled|moved) (?:your )?(?:appointment|booking)\b/,
     /\byour appointment has been (?:moved|rescheduled)\b/,
   ].some((re) => re.test(t));
 }
+
+/**
+ * The request twin of `claimsBookingDone`: a reply telling the customer their request is
+ * already with the business.
+ *
+ * It exists because `claimsBookingDone` deliberately excludes request language — a lead or a
+ * handoff really is not a booking mutation — and NOTHING then constrained the sentence at all.
+ * "Your request has been submitted" is honest when a Request, lead or handoff row was written
+ * and a lie when the run recorded nothing, and only `requestRecorded` can tell those apart.
+ *
+ * SAME PRECISION BIAS as every matcher in this file, so two whole families stay out:
+ *  - FUTURE INTENT. "I'll forward your request to our business owner" and "I'll go ahead and
+ *    request your phone number" promise a next step; they assert no row, and both are pinned
+ *    as legitimate replies in the unit corpus.
+ *  - A BARE ACKNOWLEDGEMENT. "Thanks, I have your details" is conversation, not a claim about
+ *    what reached the owner, so only a completed transmission verb counts.
+ *  - A CONDITION, A SEQUENCE OR AN EMBEDDED QUESTION. "Once all your details have been
+ *    submitted, we reply within 48 hours" and "I can't confirm whether your request has been
+ *    forwarded" report nothing, so a claim that a lead-in of its own language introduces does
+ *    not count. A lead-in whose own clause ends first ("Before you go I've passed your request
+ *    on") introduces nothing, so the claim after it still counts.
+ *
+ * KNOWN RESIDUALS. A regex has no parse tree, so three shapes stay wrong on purpose. Each is
+ * pinned with `it.fails` in the unit corpus and written into the SYS-07 row:
+ *  - A join word after a lead-in's own clause hides a real claim: "When I checked I saw that
+ *    your request has been forwarded." A clause end at "and" or "that" would block "Once we see
+ *    that your request has been submitted, we reply within 48 hours."
+ *  - A negated report is blocked: "I can't confirm that your request has been forwarded." Only
+ *    a negation check could tell it from "I can confirm that ...", and recall wins that tie.
+ *  - The vocabulary is closed, so the same claim in other words passes: "I've forwarded your
+ *    question to the owner.", or the Dutch inversion "Inmiddels is uw aanvraag doorgestuurd."
+ */
+export function claimsRequestForwarded(text: string): boolean {
+  const t = text.toLowerCase();
+  return REQUEST_FORWARDED.some(({ claim, leadIn }) =>
+    [...t.matchAll(claim)].some((m) => !leadIn.test(clauseBefore(t, m.index ?? 0))),
+  );
+}
+
+/** The text from the start of the clause that holds `end` up to `end`, and never further back. */
+function clauseBefore(t: string, end: number): string {
+  return t.slice(0, end).split(/[.!?;:,\n—–]| - | but | maar | mais /).pop() ?? '';
+}
+
+/**
+ * A conjunction that introduces the claim itself. Between the two stands nothing, or one
+ * closed filler ("once all your details", "when exactly your request"), or an earlier clause
+ * that a join word ties to the claim ("once the form is complete and your request"). Any other
+ * words form a clause of their own, and the claim is a new main clause.
+ *
+ * One list per language, because the words collide: Dutch "of" is "whether", but English "of"
+ * is the quantifier in "All of your details have been submitted.", which is a claim.
+ */
+function subordinateLeadIn(leadIns: string, fillers: string, joins: string): RegExp {
+  return new RegExp(`\\b(?:${leadIns})\\s+(?:(?:${fillers})\\s+|.*\\s(?:${joins})\\s+)?$`);
+}
+
+const EN_LEAD_IN = subordinateLeadIn(
+  'once|after|when|whenever|as soon as|if|whether|before|until|unless',
+  '(?:all|most|some|any|each|both|the rest)(?: of)?|exactly',
+  'and|that',
+);
+const NL_LEAD_IN = subordinateLeadIn('zodra|nadat|als|wanneer|indien|of|voordat|totdat', 'al|precies', 'en|dat');
+const FR_LEAD_IN = subordinateLeadIn(
+  'une fois que|dès que|après que|quand|lorsque|si',
+  'exactement',
+  'et(?: que)?|que',
+);
+
+// One optional completion adverb, from a CLOSED list. Never a wildcard: an open gap between
+// the auxiliary and the participle would admit "has not been" and "is nog niet".
+const EN_ADVERB = '(?:(?:successfully|now|just|already|also) )?';
+const NL_ADVERB = '(?:(?:succesvol|nu|zojuist|net|al|ook) )?';
+const FR_ADVERB = '(?:(?:bien|déjà) )?';
+// Dutch puts the recipient before a clause-final participle: "is naar de eigenaar doorgestuurd".
+// The article is required, so the slot holds a recipient and never a negation.
+const NL_RECIPIENT = "(?:(?:naar|aan) (?:het|de|ons|onze) [a-zà-ÿ'’-]+ )?";
+
+const REQUEST_FORWARDED: Array<{ claim: RegExp; leadIn: RegExp }> = [
+  // English, passive: the noun must be the customer's ask, so "your booking has been
+  // confirmed" stays with `claimsBookingDone` and is judged against the Booking flag.
+  {
+    claim: new RegExp(
+      `\\byour (?:request|enquiry|inquiry|details|message) (?:has|have) ${EN_ADVERB}been ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\\b`,
+      'g',
+    ),
+    leadIn: EN_LEAD_IN,
+  },
+  // English, active. `(?:your|the|this)` is required after the verb: without it,
+  // "I've sent you the opening hours" would match on `sent` alone.
+  {
+    claim: new RegExp(
+      `\\bi(?:['’]ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
+      'g',
+    ),
+    leadIn: EN_LEAD_IN,
+  },
+  // Dutch. Present-perfect and passive, matching how the tenants this platform serves
+  // actually phrase it ("uw aanvraag is doorgestuurd naar het team"). The passive needs the
+  // customer's own pronoun: "de gegevens zijn geregistreerd bij de KvK" is not their ask.
+  {
+    claim: new RegExp(
+      `\\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+      'g',
+    ),
+    leadIn: NL_LEAD_IN,
+  },
+  {
+    claim: new RegExp(
+      `\\bik heb ${NL_ADVERB}(?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+      'g',
+    ),
+    leadIn: NL_LEAD_IN,
+  },
+  // French. `demande` only — `coordonnées` alone is contact detail, not an ask.
+  // Both apostrophes, because a model writes either and a miss here is a lie shipped.
+  {
+    claim: new RegExp(
+      `\\bvotre demande a ${FR_ADVERB}été ${FR_ADVERB}(?:transmise|envoyée|enregistrée|soumise|transférée)\\b`,
+      'g',
+    ),
+    leadIn: FR_LEAD_IN,
+  },
+  {
+    claim: new RegExp(`\\bj['’]ai ${FR_ADVERB}(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\\b`, 'g'),
+    leadIn: FR_LEAD_IN,
+  },
+];
 
 /**
  * A reply that declares a NAMED DATE shut, full, or impossible.
@@ -316,13 +469,7 @@ export function validateOutput(
   for (const r of detectUnsafeLinkHosts(t)) {
     violations.push({ family: "unsafe_link", evidence: r });
   }
-  if (context?.bookingRecorded === false && claimsBookingDone(t)) {
-    violations.push({
-      family: "fake_booking_confirmation",
-      evidence:
-        "reply claims a booking mutation but none was recorded this run",
-    });
-  }
+  violations.push(...claimViolations(t, context));
   if (context?.priceContextLoaded === false && containsCurrencyAmount(t)) {
     violations.push({
       family: "invented_price",
@@ -342,4 +489,33 @@ export function validateOutput(
   });
 
   return { ok: deduped.length === 0, violations: deduped };
+}
+
+/** The honesty checks: a reply that says a Booking or a Request exists when the run recorded none. */
+function claimViolations(t: string, context?: OutputValidationContext): OutputViolation[] {
+  const violations: OutputViolation[] = [];
+  const claimsBooking = context?.bookingRequestRecorded ? claimsBookingConfirmed(t) : claimsBookingDone(t);
+  if (context?.bookingRecorded === false && claimsBooking) {
+    violations.push({
+      family: "fake_booking_confirmation",
+      evidence:
+        "reply claims a booking mutation but none was recorded this run",
+    });
+  }
+  // A CONFIRMED BOOKING OUTRANKS A REQUEST, so it satisfies this claim too: the customer's
+  // ask was not merely forwarded, it was fulfilled, and blocking "your request is in" on the
+  // turn that booked them would replace a good reply with a fallback. Only a run that
+  // recorded NEITHER can be lying here.
+  if (
+    context?.requestRecorded === false &&
+    context.bookingRecorded === false &&
+    claimsRequestForwarded(t)
+  ) {
+    violations.push({
+      family: "fake_request_confirmation",
+      evidence:
+        "reply claims a request reached the business but none was recorded this run",
+    });
+  }
+  return violations;
 }

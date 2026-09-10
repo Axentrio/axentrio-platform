@@ -138,6 +138,8 @@ describe('AgentService — knowledge pre-fetch on the opening turn', () => {
     if (result.type === 'response') {
       expect(result.validationContext).toEqual({
         bookingRecorded: false,
+        requestRecorded: false,
+        bookingRequestRecorded: false,
         priceContextLoaded: true,
       });
     }

@@ -163,6 +163,8 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("flags a booking confirmation when no booking was recorded", () => {
     const context = {
       bookingRecorded: false,
+      requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -173,6 +175,10 @@ describe("guardrails · validateOutput — checks run state", () => {
       "Uw wijziging is bevestigd. Uw afspraak staat nu op maandag 7 september 2026 om 14:00.",
       "I've rescheduled your appointment.",
       "Your appointment has been moved.",
+      // A model writes either apostrophe.
+      "I’ve booked your appointment.",
+      "I’ve confirmed your booking.",
+      "I’ve rescheduled your appointment.",
     ]) {
       const result = validateOutput(text, context);
       expect(result.violations.map((v) => v.family)).toContain(
@@ -184,9 +190,32 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("allows the same confirmation when a booking was recorded", () => {
     const result = validateOutput("I've confirmed your appointment.", {
       bookingRecorded: true,
+      requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("allows 'your booking has been submitted' when a booking tool recorded a Request", () => {
+    const requestRun = {
+      bookingRecorded: false,
+      requestRecorded: true,
+      bookingRequestRecorded: true,
+      priceContextLoaded: false,
+    };
+    const honest = validateOutput("Your booking has been submitted for approval.", requestRun);
+    expect(honest.ok, JSON.stringify(honest.violations)).toBe(true);
+    // The Request makes that one sentence true. A booked claim on the same run is still false.
+    expect(
+      validateOutput("I've confirmed your appointment.", requestRun).violations.map((v) => v.family),
+    ).toContain("fake_booking_confirmation");
+    // A lead or handoff is not a Request, so it does not make the sentence true.
+    const leadOnly = validateOutput("Your booking has been submitted for approval.", {
+      ...requestRun,
+      bookingRequestRecorded: false,
+    });
+    expect(leadOnly.violations.map((v) => v.family)).toContain("fake_booking_confirmation");
   });
 
   it("flags a price assertion when no price context was loaded", () => {
@@ -196,6 +225,8 @@ describe("guardrails · validateOutput — checks run state", () => {
     ]) {
       const result = validateOutput(text, {
         bookingRecorded: false,
+        requestRecorded: false,
+        bookingRequestRecorded: false,
         priceContextLoaded: false,
       });
       expect(result.violations.map((v) => v.family)).toContain(
@@ -207,6 +238,8 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("allows a price assertion backed by loaded context", () => {
     const result = validateOutput("That service costs €30.", {
       bookingRecorded: false,
+      requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: true,
     });
     expect(result.ok).toBe(true);
@@ -215,6 +248,11 @@ describe("guardrails · validateOutput — checks run state", () => {
   it("does not treat future intent or a prior Dutch confirmation as a new mutation", () => {
     const context = {
       bookingRecorded: false,
+      // A REQUEST WAS RECORDED on this run, which is why "Your request has been submitted."
+      // below is legitimate. Before `requestRecorded` existed the sentence passed because
+      // nothing looked at it at all; now it passes for the reason that makes it true.
+      requestRecorded: true,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -237,6 +275,192 @@ describe("guardrails · validateOutput — checks run state", () => {
       expect(result.ok, JSON.stringify(result.violations)).toBe(true);
     }
   });
+});
+
+describe("guardrails · validateOutput — a request claim needs a recorded request", () => {
+  const nothingRecorded = {
+    bookingRecorded: false,
+    requestRecorded: false,
+    bookingRequestRecorded: false,
+    priceContextLoaded: false,
+  };
+
+  // THE CONTRACT for the request matcher, pinned in both directions, so that a change which
+  // trades recall for precision, or the reverse, fails here instead of shipping.
+  // MUST BLOCK: each sentence reports a record that the run does not have.
+  const MUST_BLOCK = [
+    "Your request has been submitted.",
+    "Your request has been forwarded to the team.",
+    "Your details have been passed on to the owner.",
+    "I've sent your request to the business.",
+    "I have passed your enquiry along to our team.",
+    "Uw aanvraag is doorgestuurd naar het team.",
+    "Ik heb je aanvraag doorgegeven aan de zaak.",
+    "Votre demande a bien été transmise à l'équipe.",
+    "J'ai transmis votre demande au propriétaire.",
+    // A completion adverb before the participle.
+    "Your request has been successfully forwarded to the team.",
+    "Your request has been successfully submitted.",
+    "Your request has been already submitted.",
+    "Your details have now been passed on to the team.",
+    "I've successfully submitted your request to the team.",
+    "I have just sent your request to the owner.",
+    "Uw aanvraag is succesvol doorgestuurd.",
+    "Je aanvraag is zojuist doorgestuurd naar het team.",
+    "Ik heb uw aanvraag al doorgestuurd.",
+    "Votre demande a déjà été transmise.",
+    "J'ai déjà transmis votre demande.",
+    // Dutch clause order: the recipient comes before the participle.
+    "Ik heb uw aanvraag naar het team doorgestuurd.",
+    "Uw aanvraag is naar de eigenaar doorgestuurd.",
+    "I've passed your request on to the team.",
+    // A model writes either apostrophe.
+    "I’ve passed your request on to the team.",
+    "I’ve sent your details to the owner.",
+    // A lead-in in an earlier clause or sentence does not govern the claim.
+    "Once again, your request has been forwarded to the team.",
+    "As requested I've passed your request on to the team.",
+    "I'll let you know when the team replies. Your request has been forwarded to the team.",
+    "Als u nog vragen heeft, laat het weten. Uw aanvraag is naar de eigenaar doorgestuurd.",
+    "Si vous avez des questions, écrivez-nous. Votre demande a bien été transmise.",
+    // A lead-in whose own clause ends before the claim does not govern it.
+    "I'm not sure when they'll reply but your request has been forwarded to the team.",
+    "Good question about if we open Sundays - your request has been forwarded to the team.",
+    "Good question about if we open Sundays — your request has been forwarded to the team.",
+    "Good question about if we open Sundays – your request has been forwarded to the team.",
+    "Thanks! When it comes to your question - your request has been sent to the team.",
+    "Before you go I've passed your request on to the team.",
+    "Once again your request has been forwarded to the team.",
+    "Ik weet niet wanneer ze antwoorden maar uw aanvraag is doorgestuurd naar het team.",
+    "Voordat u gaat: ik heb uw aanvraag naar het team doorgestuurd.",
+    "Je ne sais pas quand ils répondront mais votre demande a bien été transmise.",
+    // "but" starts a new main clause, so a lead-in before it cannot reach the claim.
+    "I'm not sure if they're in today but I've checked and your request has been forwarded.",
+    "Ik weet niet of ze er vandaag zijn maar ik heb gekeken en uw aanvraag is doorgestuurd.",
+    "Je ne sais pas si l'équipe est là aujourd'hui mais j'ai vérifié et votre demande a bien été transmise.",
+    // English "of" is a quantifier, not the Dutch "whether".
+    "All of your details have been submitted.",
+  ];
+
+  it.each(MUST_BLOCK)("blocks when nothing was recorded: %s", (text) => {
+    const result = validateOutput(text, nothingRecorded);
+    expect(result.violations.map((v) => v.family)).toContain("fake_request_confirmation");
+  });
+
+  it("allows the same claim once a request was recorded", () => {
+    for (const text of [
+      "Your request has been submitted.",
+      "Uw aanvraag is doorgestuurd naar het team.",
+      "Votre demande a bien été transmise à l'équipe.",
+    ]) {
+      const result = validateOutput(text, {
+        bookingRecorded: false,
+        requestRecorded: true,
+        bookingRequestRecorded: false,
+        priceContextLoaded: false,
+      });
+      expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+    }
+  });
+
+  it("allows the same claim on the turn that BOOKED them", () => {
+    // A Booking outranks a Request: their ask was fulfilled, not merely forwarded, so
+    // blocking this would swap a good reply for a fallback on the happiest path there is.
+    const result = validateOutput("Your request has been submitted and you're all set.", {
+      bookingRecorded: true,
+      requestRecorded: false,
+      bookingRequestRecorded: false,
+      priceContextLoaded: false,
+    });
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+  });
+
+  // MUST PASS: the false-positive half, and the half that decides whether this guard is worth
+  // shipping. Each is a good answer that must not become a fallback.
+  const MUST_PASS = [
+    // Future intent, an offer, or a plain acknowledgement.
+    "I'll forward your request to our business owner who handles special orders.",
+    "I'll go ahead and request your phone number.",
+    "Would you like me to pass your request on to the team?",
+    "I can send your details to the business if you like.",
+    "Thanks, I have your details.",
+    "I've scheduled a follow-up with our team.",
+    "I've sent you the opening hours.",
+    "Ik stuur je aanvraag door zodra ik je nummer heb.",
+    "Je peux transmettre votre demande au propriétaire.",
+    // A condition or a sequence describes the process; it reports nothing.
+    "Once your request has been submitted, we reply within 48 hours.",
+    "When I have sent your details to the team, you will get an email.",
+    "Zodra uw aanvraag is doorgestuurd, neemt het team contact op.",
+    "Nadat de aanvraag is ingediend, duurt het 2 weken.",
+    "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
+    // A filler or a joined clause may stand between the lead-in and the claim.
+    "Once all your details have been submitted, the team will contact you.",
+    "Once most of your details have been submitted, we reply.",
+    "Once the form is complete and your request has been submitted, we reply within 48 hours.",
+    "Once we see that your request has been submitted, we reply within 48 hours.",
+    "After we check that your details have been recorded, the team calls you.",
+    "Before your request has been forwarded, please check the form.",
+    "Until your request has been submitted, we cannot confirm a time.",
+    "Unless your details have been sent, the team cannot call you back.",
+    "Zodra al uw gegevens zijn ingediend, neemt het team contact op.",
+    "Zodra we zien dat uw aanvraag is ingediend, antwoorden we binnen 48 uur.",
+    "Voordat uw aanvraag is doorgestuurd, controleren we de gegevens.",
+    "Totdat uw aanvraag is ingediend, kunnen we niets plannen.",
+    "Une fois que le formulaire est rempli et que votre demande a été transmise, nous répondons sous 48 heures.",
+    "Une fois que nous voyons que votre demande a été transmise, nous répondons sous 48 heures.",
+    "We reply within 48 hours once all of your details have been submitted.",
+    "Zodra het formulier klaar is en uw aanvraag is ingediend, neemt het team contact op.",
+    // An embedded question asks; it reports nothing.
+    "When exactly your request has been forwarded depends on the queue.",
+    "I can't confirm whether your request has been forwarded.",
+    "Let me check whether your request has been submitted.",
+    "Ik kan niet zien of uw aanvraag is doorgestuurd.",
+    "Ik weet niet wanneer precies uw aanvraag is doorgestuurd.",
+    "Je ne peux pas confirmer si votre demande a été transmise.",
+    "Je ne sais pas quand exactement votre demande a été transmise.",
+    // A generic article is someone else's record, not the customer's ask.
+    "De gegevens zijn geregistreerd bij de KvK.",
+    // The adverb and recipient slots are closed lists, so a negation never fills them.
+    "Your request has not been forwarded yet.",
+    "Once your request has been successfully submitted, we reply within 48 hours.",
+    "I'll just send your request to the owner.",
+    "Ik heb uw aanvraag nog niet doorgestuurd.",
+    "Uw aanvraag is niet naar het team doorgestuurd.",
+    "Zodra uw aanvraag succesvol is ingediend, neemt het team contact op.",
+    "Votre demande n'a pas encore été transmise.",
+  ];
+
+  it.each(MUST_PASS)("passes when nothing was recorded: %s", (text) => {
+    const result = validateOutput(text, nothingRecorded);
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+  });
+
+  // KNOWN RESIDUALS. A regex has no parse tree, so these stay wrong on purpose; the SYS-07
+  // row names them. Each test states the RIGHT answer and is expected to fail. If a change
+  // fixes one, its test goes red: move the sentence into MUST_BLOCK or MUST_PASS.
+  const KNOWN_RESIDUALS: Array<[text: string, rightAnswer: "blocked" | "passed"]> = [
+    // A join word after a lead-in's own clause hides a real claim. A clause end at "and" or
+    // "that" would block "Once we see that your request has been submitted, ..." above.
+    ["Thanks for waiting while I checked if the team was in and your request has been forwarded to them.", "blocked"],
+    ["When I checked I saw that your request has been forwarded.", "blocked"],
+    // A negated report is blocked. Only a negation check could tell it from "I can confirm
+    // that ...", and recall wins that tie.
+    ["I can't confirm that your request has been forwarded.", "passed"],
+    ["Je ne peux pas confirmer que votre demande a été transmise.", "passed"],
+    // The vocabulary is closed, so the same claim in other words passes. A longer list is not
+    // the cure: no list holds every wording of a lie.
+    ["Zojuist heb ik uw aanvraag doorgestuurd naar het team.", "blocked"],
+    ["Inmiddels is uw aanvraag doorgestuurd naar het team.", "blocked"],
+    ["I've forwarded your question to the owner.", "blocked"],
+    ["I've passed this on to the team.", "blocked"],
+  ];
+
+  for (const [text, rightAnswer] of KNOWN_RESIDUALS) {
+    it.fails(`known residual, should be ${rightAnswer}: ${text}`, () => {
+      expect(validateOutput(text, nothingRecorded).ok).toBe(rightAnswer === "passed");
+    });
+  }
 });
 
 // These legitimate SMB replies must PASS — a false positive replaces a good

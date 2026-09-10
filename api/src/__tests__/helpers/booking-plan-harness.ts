@@ -516,9 +516,16 @@ export function planCalendarMockModule() {
 }
 
 /**
- * A connected Google calendar. Without a credential the write path downgrades an Auto-book
- * Service to a Request (`CALENDAR_NOT_CONNECTED`), so every case that expects a CONFIRMED booking
- * needs this — and a case that expects a Request instead should simply omit it.
+ * A connected Google calendar, for a case that expects a CONFIRMED booking.
+ *
+ * OMITTING IT DOES NOT REACH THE DISCONNECTED PATH. `planCalendarMockModule` above stubs
+ * `hasHealthyCalendarConnection` as `busyError === null`, so the mock answers "healthy"
+ * whether or not a `CalendarCredential` row exists, and an Auto-book Service is confirmed
+ * with no calendar at all. A case about a disconnected calendar must therefore override that
+ * predicate with the real `loadActiveCredential`, as
+ * `integration/booking-plan-requests.test.ts:38-47` does — otherwise it passes against the
+ * mock and proves nothing. Production downgrades such a create to a Request
+ * (`CALENDAR_NOT_CONNECTED`); only the real predicate makes the harness say so.
  */
 export async function seedPlanCalendarCredential(bot: Bot): Promise<CalendarCredential> {
   const repo = AppDataSource.getRepository(CalendarCredential);

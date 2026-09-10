@@ -105,8 +105,10 @@ export class CaptureLeadTool implements ToolAdapter {
       });
 
       // R31: don't surface the internal leadId to the model (it could echo it).
+      // `captured` is set only when a row was written, so only then may a reply say the
+      // details reached the team.
       return res
-        ? { success: true, data: { message: 'Lead captured' } }
+        ? { success: true, data: { message: 'Lead captured', captured: true } }
         : { success: true, data: { message: 'Noted.' } }; // gated off / no identifier — never an error to the model
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to capture lead' };

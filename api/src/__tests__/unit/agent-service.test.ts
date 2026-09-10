@@ -2303,6 +2303,112 @@ describe('AgentService', () => {
     if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
   });
 
+  it('counts capture_lead as a recorded request only when it wrote a row', async () => {
+    const claim = 'Your details have been passed on to the team.';
+    const usage = { promptTokens: 10, completionTokens: 5 };
+    const captureLead = (data: Record<string, unknown>): ToolAdapter => ({
+      name: 'capture_lead',
+      description: 'Lead',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data }),
+    });
+    const callCapture = {
+      content: '',
+      usage,
+      finishReason: 'tool_calls',
+      toolCalls: [{ id: 'tc_1', name: 'capture_lead', arguments: { email: 'a@b.com' } }],
+    };
+    const say = { content: claim, usage, finishReason: 'stop' };
+    const run = () =>
+      agent.run(
+        'can someone call me back?',
+        { id: 's1', tenantId: 't1', status: 'bot' } as any,
+        { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+        [],
+      );
+
+    // The `Noted.` path returns success and writes no row, so the claim is false: one nudge,
+    // then the safe fallback.
+    mockGetToolsForTenant.mockResolvedValueOnce([captureLead({ message: 'Noted.' })]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce(callCapture)
+      .mockResolvedValueOnce(say)
+      .mockResolvedValueOnce(say);
+    const noted = await run();
+    expect(noted.type).toBe('response');
+    if (noted.type === 'response') {
+      expect(noted.content).not.toBe(claim);
+      expect(noted.content).toMatch(/^Sorry, let me just confirm a couple of details first\./);
+    }
+
+    // A written row makes the same sentence true, so it ships unchanged.
+    mockGetToolsForTenant.mockResolvedValueOnce([captureLead({ message: 'Lead captured', captured: true })]);
+    (mockProvider.chat as any).mockResolvedValueOnce(callCapture).mockResolvedValueOnce(say);
+    const captured = await run();
+    expect(captured.type).toBe('response');
+    if (captured.type === 'response') {
+      expect(captured.content).toBe(claim);
+      expect(captured.validationContext?.requestRecorded).toBe(true);
+    }
+  });
+
+  it('says the booking and request safe fallbacks in the customer\'s language', async () => {
+    const usage = { promptTokens: 10, completionTokens: 5 };
+    const tool = (name: string, data: Record<string, unknown>): ToolAdapter => ({
+      name,
+      description: name,
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data }),
+    });
+    const call = (name: string) => ({
+      content: '',
+      usage,
+      finishReason: 'tool_calls',
+      toolCalls: [{ id: `tc_${name}`, name, arguments: { email: 'a@b.com' } }],
+    });
+    const say = (content: string) => ({ content, usage, finishReason: 'stop' });
+    const run = () =>
+      agent.run(
+        'Kan iemand mij terugbellen?',
+        { id: 's1', tenantId: 't1', status: 'bot' } as any,
+        { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+        [],
+      );
+    const dutch = (message: string) => `NL: ${message}`;
+    mockLocalize.mockImplementation(async (message: string) => dutch(message));
+    try {
+      // A downgraded Request, and a Dutch "your appointment is confirmed" twice.
+      mockGetToolsForTenant.mockResolvedValueOnce([tool('create_booking', { requested: true })]);
+      const confirmed = 'Top, je afspraak is bevestigd voor dinsdag om 10:00!';
+      (mockProvider.chat as any)
+        .mockResolvedValueOnce(call('create_booking'))
+        .mockResolvedValueOnce(say(confirmed))
+        .mockResolvedValueOnce(say(confirmed));
+      const booking = await run();
+      expect(booking.type).toBe('response');
+      if (booking.type === 'response') {
+        expect(booking.content).toMatch(/^NL: Sorry, let me just confirm a couple of details before I put that through/);
+      }
+
+      // A lead that wrote no row, and a Dutch "your request was forwarded" twice.
+      mockGetToolsForTenant.mockResolvedValueOnce([tool('capture_lead', { message: 'Noted.' })]);
+      const forwarded = 'Uw aanvraag is doorgestuurd naar het team.';
+      (mockProvider.chat as any)
+        .mockResolvedValueOnce(call('capture_lead'))
+        .mockResolvedValueOnce(say(forwarded))
+        .mockResolvedValueOnce(say(forwarded));
+      const request = await run();
+      expect(request.type).toBe('response');
+      if (request.type === 'response') {
+        expect(request.content).toMatch(/^NL: Sorry, let me just confirm a couple of details first\./);
+      }
+    } finally {
+      mockLocalize.mockImplementation(async (message: string) => message);
+    }
+  });
+
   it('retries a wrong-address reply once with tools disabled', async () => {
     const requestAppointment: ToolAdapter = {
       name: 'request_appointment',

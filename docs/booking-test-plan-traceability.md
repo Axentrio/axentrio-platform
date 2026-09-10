@@ -29,13 +29,26 @@ Paths below are relative to `api/` unless stated otherwise.
 | Verdict | Count |
 |---|---|
 | `COVERED` — already pinned, no work needed | 46 |
-| Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 15 |
-| Still open (audited, test not yet written) | 24 |
-| `EVAL` — needs the non-CI live suite (not built yet) | 2 |
+| Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 38 |
+| Still open (audited, test not yet written) | 2 — SYS-07 and AVL-01, both blocked on a product decision (§11) |
+| `EVAL` — measured by the live suite, which never runs in CI | 5 — SYS-03, SYS-04, and the model half of BK-02, BK-08 and SRV-02 |
 | `RESTATE` — drop or reword the case | 4 |
 | `BUG` — product defect found, left unfixed | 4 |
 
-**Delivered in this change** — 4 new test files, 39 passing tests, no production code touched:
+Several closed rows carry a named residual clause. A residual is written into the row rather than
+rounded up, so `COVERED` here always means "a test would fail if this broke", never "near enough".
+
+"Verified to fail when …" in a row means somebody broke that behaviour and watched the test go
+red. Five of those breaks were re-run during the merge review — BK-07, AVL-09, MOD-06, GEO-01's
+single-day guard, and BK-03's new reuse assertion — and each reproduced the failure the row
+describes. The rest are the recorded claim of the test's own author, written in the file beside
+the assertion it defends.
+
+**Delivered in two waves** — one shared harness, 11 vitest files holding 83 passing tests, and one
+live eval script that no CI job can reach. No production code was touched; the only non-test
+change is one `package.json` script.
+
+Wave 1, the audit and the first five files:
 
 | File | Tests | Closes |
 |---|---|---|
@@ -45,9 +58,22 @@ Paths below are relative to `api/` unless stated otherwise.
 | `src/__tests__/integration/booking-plan-system.test.ts` | 6 | **CON-01** (the only race-proof guarantee, never exercised), AVL-17, SYS-05 |
 | `src/__tests__/integration/booking-plan-lifecycle.test.ts` | 4 | **BK-06 + CAL-07** (three-surface time agreement, never bound together), BK-01 row delta, BK-02 deterministic half |
 
-The headline: **roughly 40% of the plan was already pinned.** The valuable remainder is
+Wave 2, written by eight parallel authors and merged into one branch:
+
+| File | Tests | Closes |
+|---|---|---|
+| `src/__tests__/integration/booking-plan-false-success.test.ts` | 2 | **BK-07**, the false-success guard driven end to end through the real agent loop |
+| `src/__tests__/integration/booking-plan-changes.test.ts` | 9 | **MOD-01, MOD-02, MOD-03, MOD-04, MOD-06, MOD-07, MOD-08** on persisted rows and the calendar port |
+| `src/__tests__/integration/booking-plan-requests.test.ts` | 6 | **SRV-04, SYS-02, CAL-06** (state half) on real rows |
+| `src/__tests__/integration/booking-plan-persistence.test.ts` | 4 | **SRV-22, SRV-11, SRV-02** (no-write half) |
+| `src/__tests__/integration/booking-plan-notifications.test.ts` | 10 | **PRC-12, SRV-14, SYS-09, SYS-08, BK-03** on the calendar entry and the committed email |
+| `src/__tests__/integration/booking-plan-availability.test.ts` | 11 | **AVL-09, TRV-05, GEO-01** on the offer path |
+| `src/__tests__/integration/booking-plan-outlook.test.ts` | 2 | **OUT-01**, a booking through a Microsoft-typed adapter |
+| `src/__tests__/live/booking-eval.ts` | 5 cases, not vitest | SYS-03, SYS-04, and the model half of BK-02, BK-08, SRV-02. Run with `npm run eval:booking-plan`; no CI job can reach it |
+
+The headline: **roughly 40% of the plan was already pinned.** The valuable remainder was
 concentrated in cross-surface agreement, the request/change-policy persistence path, and a set
-of engine boundaries that had never been exercised.
+of engine boundaries that had never been exercised. Both waves are now merged.
 
 Two of the delivered tests correct rather than merely extend:
 **SRV-07** was verified to FAIL when the buffers are zeroed, which the test it replaces could not do;
@@ -63,11 +89,11 @@ the test was corrected to the real contract rather than the contract bent to the
 |---|---|---|---|
 | BK-01 require explicit confirmation | P0 | `PARTIAL` | Was a mocked-service CALL count only (`unit/builtin-tools.test.ts:1016-1018`, `:1078`), never a row delta. Row-delta half DELIVERED in `integration/booking-plan-lifecycle.test.ts`. |
 | BK-02 no booking from a price-only question | P1 | `GAP` | Zero coverage anywhere. Deterministic half DELIVERED in `integration/booking-plan-lifecycle.test.ts`; model half still needs the live `EVAL`. |
-| BK-03 supplied information reused | P1 | `PARTIAL` | Phone reuse pinned (`unit/internal-provider-create.test.ts:555`, `:1367-1374`); name is prompt prose only; **email reuse was asserted nowhere**. Email half **still open**. |
+| BK-03 supplied information reused | P1 | `COVERED` | Phone reuse pinned (`unit/internal-provider-create.test.ts:555`, `:1367-1374`); the email half is now `integration/booking-plan-notifications.test.ts:540-609`, which books once with an address, then reschedules WITHOUT supplying one and asserts the stored address still receives the invite. Verified to fail when `internal.provider.ts:4658` stops reading the stored address. Residual: the NAME clause is still prompt prose only. |
 | BK-04 preferred time survives a follow-up | P0 | `COVERED` | `unit/builtin-tools.test.ts:644-671`, twin `:675-698`; engine `unit/unoffered-times.test.ts:405-440`. |
 | BK-05 final availability rechecked before write | P0 | `COVERED` | `unit/internal-provider-create.test.ts:860-866` (external busy → `SLOT_UNAVAILABLE`), `:755-765` (23P01), alternatives `:727-753`. |
 | BK-06 result time equals confirmed time | P0 | `PARTIAL` | `displayTime` pinned (`unit/internal-provider-create.test.ts:352`, `:359-361`) but **no test bound row + calendar + email to one local hour**, and the real-DB `start_utc` was never asserted. Three-surface binding DELIVERED in `integration/booking-plan-lifecycle.test.ts`, which closes CAL-07 too. |
-| BK-07 no false success when the write fails | P0 | `PARTIAL` | The guard exists but was never wired end-to-end: `state.bookingRecorded` is only ever asserted TRUE (`unit/agent-service.test.ts:2251`), and every guard test hand-supplies `validationContext` (`integration/guardrails-output-gate.test.ts:96`, `:110`). Wiring test added in `integration/booking-plan-lifecycle.test.ts`. |
+| BK-07 no false success when the write fails | P0 | `COVERED` | `integration/booking-plan-false-success.test.ts:190` drives the real agent loop against a real Availability Rule, lets the scripted model claim success on a refused write, and asserts the `messages` row the customer actually received; control at `:259`. Verified to fail when `agent/agent.service.ts:1691` ships the model's own words instead of the safe fallback. Before this, `state.bookingRecorded` was only ever asserted TRUE (`unit/agent-service.test.ts:2251`) and every guard test hand-supplied `validationContext` (`integration/guardrails-output-gate.test.ts:96`, `:110`). |
 | BK-08 no silent manual-request fallback | P0 | `COVERED` | `unit/booking-prompt-behaviour.test.ts:1123-1131`, `:1237-1241`, `:1329-1333`, `:1186-1193`; write path `unit/internal-provider-create.test.ts:3236-3240` (`REQUEST_BEFORE_CHECK`). |
 
 ## 3. Service configuration (§6)
@@ -75,19 +101,19 @@ the test was corrected to the real contract rather than the contract bent to the
 | Case | Pri | Verdict | Evidence / new test |
 |---|---|---|---|
 | SRV-01 single clear service match | P1 | `COVERED` | `unit/find-bookable-service.test.ts:49`, `:27-31`. |
-| SRV-02 ambiguous match asks once | P1 | `PARTIAL` | `SERVICE_REQUIRED` is pinned (`unit/find-bookable-service.test.ts:54`); the **ask count** and pre-clarification no-write were not. **Still open** — needs a live `EVAL` for the ask count, plus a no-write assertion. |
+| SRV-02 ambiguous match asks once | P1 | `COVERED` (no-write half) + `EVAL` (ask count) | `SERVICE_REQUIRED` is pinned (`unit/find-bookable-service.test.ts:54`). The pre-clarification no-write half is now `integration/booking-plan-persistence.test.ts:242-299`: both the confirm path and the request path refuse, and the tenant holds zero Booking rows; control at `:301`. The ASK COUNT stays `EVAL` — it is a conversational property, measured at `live/booking-eval.ts:563`. |
 | SRV-03 no active matching service | P0 | `COVERED` | `unit/internal-provider-create.test.ts:877-883`, copy `:1023-1040`. |
-| SRV-04 request-only creates a Request | P0 | `PARTIAL` | Only the TS `requested: true` flag was asserted (`unit/internal-provider-create.test.ts:1052-1060`); the **persisted `status='request_created'` was never asserted**, and no real-DB request row existed in the suite. **Still open** — the provider-level change-policy file is not written yet. |
+| SRV-04 request-only creates a Request | P0 | `COVERED` | `integration/booking-plan-requests.test.ts:127-207` asserts the persisted `status='request_created'` row with `requestKind='new'` and no confirmed booking; control at `:181` books the identical fixture on auto, so the MODE is the cause. Before this, only the TS `requested: true` flag was asserted (`unit/internal-provider-create.test.ts:1052-1060`). |
 | SRV-05 fixed duration | P0 | `COVERED` | `unit/internal-provider-create.test.ts:1105`, `:1153`; `unit/service-duration.test.ts:59`. |
 | SRV-06 customer chooses duration | P1 | `COVERED` | `unit/service-duration.test.ts:84-97`; `unit/internal-provider-create.test.ts:1111-1165`. Residual: availability is never pinned to the chosen length. |
 | SRV-07 service buffer before/after | P0 | `GAP` — **and the existing test cannot fail** | The only buffer test (`unit/slot-engine.test.ts:115-127`) passes with **both buffers zeroed**, so prep/cleanup time could be lost with the suite green. Discriminating test DELIVERED in `unit/booking-plan-rules.test.ts` — verified to FAIL when the buffers are zeroed. |
 | SRV-08 service minimum notice | P0 | `COVERED` | `unit/slot-engine.test.ts:56`; `unit/internal-provider-create.test.ts:2872`, `:3043`. |
 | SRV-09 service max horizon | P0 | `PARTIAL` | Bound pinned only at DAY level ~11h inside it (`unit/slot-engine.test.ts:312`), so flipping the comparator (`slot-engine.ts:285`) kept every test green. Exact-instant test DELIVERED in `unit/booking-plan-rules.test.ts`. |
 | SRV-10 price display "No price" | P1 | `COVERED` | `unit/service-discount.test.ts:112-117`; `unit/booking-prompt-behaviour.test.ts:640-661`. |
-| SRV-11 required intake question | P0 | `PARTIAL` | Persistence was pinned on the **Request** path only (`unit/internal-provider-create.test.ts:1606-1614`); `intake_answers` on the **confirmed** INSERT was unasserted. *Not yet closed — see §14.* |
+| SRV-11 required intake question | P0 | `COVERED` | `integration/booking-plan-persistence.test.ts:193-239` asserts `intake_answers` on the CONFIRMED row, keyed by the question's server-minted uuid, with an invented key dropped. Persistence used to be pinned on the Request path only (`unit/internal-provider-create.test.ts:1606-1614`). |
 | SRV-12 optional intake still asked | P1 | `PARTIAL` | "Still asked" is prompt text only (`unit/booking-prompt-behaviour.test.ts:736`); no behavioural test. |
 | SRV-13 "Ask this" OFF | P1 | `COVERED` | `unit/booking-prompt-behaviour.test.ts:706-805`; behavioural `unit/internal-provider-create.test.ts:614`. |
-| SRV-14 "Show on my calendar" OFF | P1 | `PARTIAL` | Calendar clause pinned (`unit/booking-prompt-behaviour.test.ts:771`); the **email clause was entirely unasserted**. *Not yet closed — see §14.* |
+| SRV-14 "Show on my calendar" OFF | P1 | `COVERED` | `integration/booking-plan-notifications.test.ts:252-312`: the hidden answer is stored on the row, absent from the calendar description and from the owner email, while a SHOWN answer is present in both — and the customer email carries no intake at all. The calendar clause was already pinned (`unit/booking-prompt-behaviour.test.ts:771`); the email clause was unasserted. |
 | SRV-15 at my business location | P1 | `COVERED` | `unit/booking-venue-and-split.test.ts:262-268`; `unit/service-location-mode.test.ts:232`. |
 | SRV-16 video call meeting link | P0 | `COVERED` | `unit/internal-provider-create.test.ts:780-784`, `:844-858`, `:787-800`. |
 | SRV-17 phone call service | P0 | `COVERED` | `unit/internal-provider-create.test.ts:1324-1334`, `:1367-1374`; `unit/booking-venue-and-split.test.ts:312-320`. |
@@ -95,7 +121,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | SRV-19 at customer location needs full address | P0 | `COVERED` | `unit/contact-fields.test.ts:105-121`; `unit/internal-provider-create.test.ts:2593-2600`; `unit/booking-venue-and-split.test.ts:233-256`. |
 | SRV-20 required customer phone | P0 | `COVERED` | `unit/internal-provider-create.test.ts:1277-1284` (`PHONE_REQUIRED`, no INSERT), `:1324-1334`. |
 | SRV-21 file upload optional | P1 | `COVERED` | `unit/booking-prompt-behaviour.test.ts:270-287`; `unit/internal-provider-create.test.ts:1248-1264`. |
-| SRV-22 uploaded file survives | P0 | `PARTIAL` | Only the mocked-repo INSERT parameter was proven (`unit/internal-provider-create.test.ts:1180-1246`); real persistence and the `uploadedFileSnapshots` read-back (`booking/booking.service.ts:517`) were untested. **Still open.** |
+| SRV-22 uploaded file survives | P0 | `COVERED` | `integration/booking-plan-persistence.test.ts:110-190` asserts the persisted `uploaded_files` jsonb re-read from Postgres AND the `uploadedFileSnapshots` projection through `adminListBookings`, with a `scanning` upload as the negative control. Residual, recorded by the test itself at `:129-134`: the READY filter has two layers (`upload.service.ts:748`, `internal.provider.ts:2688`) and breaking either alone leaves this test green, so it guards the pair, not each layer. |
 | SRV-23 max bookings per day | P0 | `COVERED`; integration added | `unit/booking-capacity-gates.test.ts:138-165`; `unit/internal-provider-create.test.ts:1066-1094`. Every check was a canned row with no integration test and **no fixture set BOTH a service cap and a business cap**, so "the stricter binds" was unproven. DELIVERED in `integration/booking-plan-system.test.ts`. |
 | SRV-24 active / online-bookable flags | P0 | `COVERED` | `unit/find-bookable-service.test.ts:34-55`; `unit/internal-provider-create.test.ts:999`, `:1015`; `unit/booking-catalog-filter.test.ts:41-49`. |
 
@@ -114,13 +140,13 @@ the test was corrected to the real contract rather than the contract bent to the
 | PRC-09 future discount inactive | P1 | `COVERED` | `unit/service-discount.test.ts:40`, `:59`. |
 | PRC-10 expired discount inactive | P1 | `COVERED` | `unit/service-discount.test.ts:60`. |
 | PRC-11 discount active on the boundary | P1 | `COVERED` | `unit/service-discount.test.ts:58` with false neighbours `:59`/`:60`, so either bound made exclusive fails. |
-| PRC-12 discount consistent through booking | P0 | `GAP` | The quote side is pinned (`unit/booking-prompt-behaviour.test.ts:1775-1817`) and the persistence side is pinned **undiscounted** (`unit/internal-provider-create.test.ts:803-818`). `discountEnabled` never appears alongside `createBooking`/`createCalendarEvent`/`sendBookingEmail`. **There is no Booking price column**, so the carriers are the calendar description and the email. *Not yet closed — see §14.* |
+| PRC-12 discount consistent through booking | P0 | `COVERED` | `integration/booking-plan-notifications.test.ts:150-249`: a real `createBooking` on a 20%-off EUR 100 Service puts `Price: €80` on both carriers — the calendar description and the committed confirmation email — and `€100` on neither. **There is no Booking price column**, so those two surfaces are the whole record. Verified to fail when `booking/pricing/service-discount.ts:121` stops applying the discount. Residual, unchanged and NOT closed by a test: `sync-reconciler.ts:311` re-derives the discount at reconcile time with its own `now` (§11, defect 4). |
 
 ## 5. Availability and global rules (§8)
 
 | Case | Pri | Verdict | Evidence / new test |
 |---|---|---|---|
-| AVL-01 time before opening rejected | P0 | `BUG` + `PARTIAL` | The offer side is pinned (`unit/slot-engine.test.ts:45`; `unit/agent-service.test.ts:1726`). But the plan's "no request fallback" clause is **not enforced server-side**: `internal.provider.ts:2414-2443` gates past / too_soon / too_far / closed-day / service-cap / no-check and **not** an out-of-hours hour on an open day, which `docs/booking-rules.md:26-28` explicitly forbids. Enforced by prompt copy alone. See §13. |
+| AVL-01 time before opening rejected | P0 | `BUG` + `PARTIAL` | The offer side is pinned (`unit/slot-engine.test.ts:45`; `unit/agent-service.test.ts:1726`). But the plan's "no request fallback" clause is **not enforced server-side**: `internal.provider.ts:2414-2443` gates past / too_soon / too_far / closed-day / service-cap / no-check and **not** an out-of-hours hour on an open day, which `docs/booking-rules.md:26-28` explicitly forbids. Enforced by prompt copy alone. See §11. |
 | AVL-02 always open 24/7 | P0 | `PARTIAL` | `unit/slot-engine.test.ts:149`; every fixture pairs `always_open` with an **empty** grid, so a mode that failed to bypass a configured grid would pass. DELIVERED in `unit/booking-plan-rules.test.ts`. |
 | AVL-03 day-specific hours | P0 | `PARTIAL` | Tuesday-opens-at-12:00 was pinned with **injected** slots (`unit/internal-provider-create.test.ts:2973`, `unit/agent-service.test.ts:1971`). Engine-level test with two differing weekdays added in `unit/booking-plan-rules.test.ts`. |
 | AVL-04 exact end allowed | P0 | `COVERED` | `unit/slot-engine.test.ts:45`; `unit/business-capacity.test.ts:44`. |
@@ -128,7 +154,7 @@ the test was corrected to the real contract rather than the contract bent to the
 | AVL-06 closed weekday | P0 | `COVERED` | `unit/slot-engine.test.ts:427-438`; write path `unit/internal-provider-create.test.ts:3161`. |
 | AVL-07 multiple availability blocks | P0 | `GAP` | **Nothing called the engine with a two-window day at any layer.** A regression could offer appointments inside the owner's lunch break with the suite green. DELIVERED in `unit/booking-plan-rules.test.ts`. |
 | AVL-08 duration cannot cross a gap | P0 | `GAP` | Same — no fixture with a gap after a window end. DELIVERED in `unit/booking-plan-rules.test.ts`. |
-| AVL-09 duration cannot cross closing | P0 | `PARTIAL` | Every fixture had `duration == granularity`, so closing was only ever crossed by a start exactly ON closing; `duration > granularity` (60-min service on a 30-min grid) was never exercised. |
+| AVL-09 duration cannot cross closing | P0 | `COVERED` | `integration/booking-plan-availability.test.ts:210-282` drives `checkAvailability` with a 60-minute Service on a 30-minute grid: 16:00 is the last start offered, 16:30 never appears, every offered span really is 60 minutes, and the duration-30 control at `:262` gets 16:30 back. Verified to fail (both cases, control green) when `booking-providers/slot-engine.ts:273` validates the START against closing instead of the END. |
 | AVL-10 slot interval 30 off-grid | P1 | `COVERED` | `unit/internal-provider-create.test.ts:698`; `unit/internal-provider-reschedule-cancel.test.ts:731`. |
 | AVL-11 slot interval 15 | P1 | `COVERED` | `unit/internal-provider-reschedule-cancel.test.ts:738-748`. Residual: only the reschedule seam. |
 | AVL-12 global min notice inherited | P0 | `PARTIAL` | The arithmetic is pinned (`unit/business-capacity.test.ts:157-161`) but **never ENFORCED**: every refusal fixture sets the value on the Service, so a wiring break at `internal.provider.ts:330`/`:2418` left the suite green. Enforcement test added in `unit/booking-plan-rules.test.ts`. |
@@ -147,21 +173,21 @@ the test was corrected to the real contract rather than the contract bent to the
 | CAL-03 abutting before event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113` (comment at `:107` names boundary-touching). |
 | CAL-04 abutting after event | P0 | `COVERED` | `unit/slot-engine.test.ts:100-113`; `unit/business-capacity.test.ts:94-103`; real DB `integration/booking-plan-harness.test.ts`. |
 | CAL-05 contained inside event | P0 | `COVERED` | `unit/slot-engine.test.ts:329-338`; `unit/internal-provider-create.test.ts:443-465`. |
-| CAL-06 disconnected calendar | P0 | `PARTIAL` | `unit/internal-provider-create.test.ts:2075`, `:935`, `:3258`. The rule "never tell the customer it is booked" (`modules/booking.module.ts:623`) has no reply-layer test. |
+| CAL-06 disconnected calendar | P0 | `COVERED` (state half) + `BUG` (reply half) | `integration/booking-plan-requests.test.ts:340-408`: an Auto-book Service on a business with NO credential persists `status='request_created'`, confirms nothing and writes no mirror; the control at `:383` seeds the credential and the same call confirms, so the credential is the cause. That file also restores the real credential check, because the shared harness stub answers "healthy" whether or not a credential row exists (`helpers/booking-plan-harness.ts:509`). Residual, deliberately NOT pinned and explained at `requests.test.ts:373-380`: "never tell the customer it is booked" (`modules/booking.module.ts:623`) is prompt prose with no runtime guard, and pinning it would freeze the contradicted behaviour. Same product decision as SYS-07. |
 | CAL-07 row + calendar + email agree | P0 | `GAP` | **Nothing on the same value across surfaces**: the calendar start was never asserted, the email's local hour was asserted nowhere, and the real-DB `start_utc` was never checked. Closed by BK-06 in `integration/booking-plan-lifecycle.test.ts`. |
 
 ## 7. Reschedule and cancellation (§10)
 
 | Case | Pri | Verdict | Evidence / new test |
 |---|---|---|---|
-| MOD-01 reschedule auto | P0 | `PARTIAL` | Gate pinned (`unit/builtin-tools.test.ts:1745-1764`); the mirror's **new** start/end was never asserted (`unit/internal-provider-reschedule-cancel.test.ts:606-637` use `objectContaining({location…})`), nor was absence of a duplicate row. **Still open** — the provider-level change-policy file is not written yet. |
-| MOD-02 reschedule request | P0 | `PARTIAL` | `unit/internal-provider-reschedule-cancel.test.ts:1472-1522`. "Original untouched" was unasserted — no no-UPDATE check exists on the request path (it does for `not_allowed` `:1424`), and the `it()` title at `:1472` over-claims its body. **Still open** — the provider-level change-policy file is not written yet. |
-| MOD-03 reschedule not allowed | P1 | `PARTIAL` | Refusal pinned (`unit/internal-provider-reschedule-cancel.test.ts:1418-1425`), but **no-handoff was copy-only** (`unit/builtin-tools.test.ts:1739`). **Still open** — asserting an absent `HandoffRequest` row is not written yet. |
-| MOD-04 approved reschedule verified later | P1 | `PARTIAL` | Listing pinned (`unit/internal-provider-reschedule-cancel.test.ts:851-878`); no later "approved?" **turn** was ever driven, and no handoff-row assertion existed. |
-| MOD-05 false planning conflict | P0 | `COVERED` | `unit/internal-provider-reschedule-cancel.test.ts:738-749`, `:408-420`. |
-| MOD-06 cancellation auto | P0 | `PARTIAL` | Cancel pinned (`:801-806`); **`syncCalendarCancel` was never asserted** — `deleteEvent` is a bare `vi.fn()` (`:103`). **Still open** — the mirror deletion is still unasserted. |
-| MOD-07 cancellation request | P0 | `PARTIAL` | Tool level only (`unit/builtin-tools.test.ts:1833-1846`); no provider-level proof that a `request_created` row is written while the original stays active. **Still open** — the provider-level change-policy file is not written yet. |
-| MOD-08 cancellation not allowed | P1 | `PARTIAL` | `unit/builtin-tools.test.ts:1848-1864`; "no request / booking active" was pinned only as "the writer was never called", not by SQL, and no-handoff was copy-only. **Still open** — the provider-level change-policy file is not written yet. |
+| MOD-01 reschedule auto | P0 | `COVERED` | `integration/booking-plan-changes.test.ts:181-226`: the row moves to the new local hour with `sequence + 1`, the mirror is PATCHED to the same new hour on the recorded event id, and no second row or second invite appears. Verified to fail when the mirror is written from the old `startUtc`. The old pin used `objectContaining({location…})` (`unit/internal-provider-reschedule-cancel.test.ts:606-637`), which passes against an unchanged start. |
+| MOD-02 reschedule request | P0 | `COVERED` | `integration/booking-plan-changes.test.ts:228-276`: a real `request_created` row with `requestKind='reschedule'` and `relatedBookingId`, the requested time on the request row, and the original re-read by SQL to prove `startUtc`, `status` and `sequence` are untouched. Verified to fail when the request branch also UPDATEs the original, which the pre-existing flag assertion at `:1472-1479` cannot see. |
+| MOD-03 reschedule not allowed | P1 | `COVERED` | `integration/booking-plan-changes.test.ts:278-351`: `CHANGE_NOT_ALLOWED` with machine-readable `details`, the original untouched by SQL, no Request row, and **no human summoned** — zero `handoff_requests` rows plus a spy on the real `EscalationTool`. The cutoff twin at `:311` derives the expected duration through the product's own `spokenChangeCutoff`. Every earlier no-handoff pin was guidance copy. |
+| MOD-04 approved reschedule verified later | P1 | `COVERED` | `integration/booking-plan-changes.test.ts:353-394`: the later turn reads `listBookings`, whose `pendingRequest` projection reports the change as pending while `displayTime` still shows the appointment that stands; both are derived through the product's own formatter, and no handoff row is written for a status question. |
+| MOD-05 false planning conflict | P0 | `COVERED` | `unit/internal-provider-reschedule-cancel.test.ts:738-749`, `:408-420`. Deliberately not repeated in the new file (`changes.test.ts:33-34`). |
+| MOD-06 cancellation auto | P0 | `COVERED` | `integration/booking-plan-changes.test.ts:396-424`: the row is cancelled with `sequence + 1` AND the mirror is deleted, matched on the event id the create recorded. Verified to fail (`expected [] to have a length of 1`) when the `syncCalendarCancel` call at `internal.provider.ts:4755` is removed. `deleteEvent` used to be a bare `vi.fn()` (`unit/internal-provider-reschedule-cancel.test.ts:103`). |
+| MOD-07 cancellation request | P0 | `COVERED` | `integration/booking-plan-changes.test.ts:426-456`: a `request_created` row with `requestKind='cancel'` carrying the appointment's own span, while the original stays confirmed, keeps its sequence and keeps its live mirror. The old pin was tool level with a mocked provider (`unit/builtin-tools.test.ts:1833-1846`). |
+| MOD-08 cancellation not allowed | P1 | `COVERED` | `integration/booking-plan-changes.test.ts:458-509`: refusal by code, the booking still confirmed BY SQL, no Request, the mirror still live, and no handoff row or escalation call; cutoff twin at `:483`. The old pin asserted only that a mocked `cancelBooking` was never called (`unit/builtin-tools.test.ts:1848-1864`). |
 
 ## 8. Travel time and geography (§11)
 
@@ -171,9 +197,9 @@ the test was corrected to the real contract rather than the contract bent to the
 | TRV-02 travel from previous appointment | P0 | `COVERED` | `unit/internal-provider-create.test.ts:2644-2656`; `unit/travel-gate.test.ts:100-110`. |
 | TRV-03 travel to next appointment | P0 | `COVERED` | `unit/travel-gate.test.ts:113-121`, `:406-420`. |
 | TRV-04 extra minutes per journey | P1 | **`RESTATE`** | **Removed feature.** `travel_slack_min` was dropped (`database/migrations/1794700000000-RouteOptimizationMvp.ts:25`) and `docs/adr/0019-maximum-travel-time-is-a-limit.md:15` records the removal ("one cushion cannot be charged twice"). Zero `extraMinutes`/`slack` hits remain in `api/src`. Replacement is `minGapMin` + per-Service Buffer, already pinned (`unit/travel-gate.test.ts:864-880`). |
-| TRV-05 start day from own address | P1 | `PARTIAL` | Base-as-predecessor pinned (`unit/travel-gate.test.ts:626-630`); the **offer path** measuring from the Base's own located coordinates is unpinned because every `checkAvailability` fixture passes `venue: null` (`unit/internal-provider-create.test.ts:2559`), leaving `travelBaseFor`'s located branch (`internal.provider.ts:1019-1027`) unexercised. |
+| TRV-05 start day from own address | P1 | `COVERED` | `integration/booking-plan-availability.test.ts:299-422` drives `checkAvailability` with a located premises address: a far Base makes 09:00 UNREACHABLE (not merely undecided, which only a located base can prove), a near Base offers it, switching `travelStartFromBase` off restores it, and the recorded leg departs at 08:30 — opening minus the owner's offset — toward the customer. Verified to fail when `travelBaseFor` is forced to `location: { kind: 'unresolved' }`, the state `venue: null` produces. |
 | TRV-06 minutes leave before opening | P1 | `COVERED` | `unit/travel-base-departure.test.ts:51-62`, `:45`, `:143-160`. |
-| GEO-01 grouping reorders, never invalidates | P1 | `COVERED` | `unit/apply-grouping.test.ts:45-52`, `:171-182`; `unit/slot-ordering.test.ts:55-63`. Residual: the provider wiring is never driven with `groupingPeriod !== 'none'`. |
+| GEO-01 grouping reorders, never invalidates | P1 | `COVERED` | Engine level `unit/apply-grouping.test.ts:45-52`, `:171-182`; `unit/slot-ordering.test.ts:55-63`. The provider WIRING is now `integration/booking-plan-availability.test.ts:438-581`, driven with `travelGroupingPeriod: 'full_day'`: same times in a different order, the cheapest insertion first on geometry rather than a hand-picked table, no promotion of a time the gate could not confirm, and grouping off for a two-day range. Verified to fail when `pilotOn` is forced false, and the single-day case verified to fail when `singleDay` is forced true (`internal.provider.ts:926-928`). |
 | GEO-02 route priority Auto | P1 | **`RESTATE`** | No selectable priority exists. Auto Optimize (cheapest insertion first) is the only order (`docs/adr/0019:13`); the behaviour is pinned at `unit/slot-ordering.test.ts:30-36`. Reword to "grouping/insertion order". |
 | GEO-03 nearest first | P1 | **`RESTATE`** | **Removed feature.** `travel_route_priority` was dropped with its CHECK constraint (`1794700000000-RouteOptimizationMvp.ts:13-18`); `CONTEXT.md:169` lists nearest-first/farthest-first as removed. Its tests were deleted. |
 | GEO-04 farthest first | P1 | **`RESTATE`** | Same as GEO-03. |
@@ -187,15 +213,15 @@ the test was corrected to the real contract rather than the contract bent to the
 | OVR-02 one-off hours override | P0 | `COVERED` | `unit/slot-engine.test.ts:89-98` — weekly hours replaced, not merged. |
 | CON-01 two customers race one slot | P0 | `GAP` | The exclusion constraint ships (`1784400000000-CreateInternalSchedulerBookings.ts:57-58`, in the test schema) but **was never exercised**: every 23P01 assertion injects the error into a mocked repository. DELIVERED in `integration/booking-plan-system.test.ts`. |
 | SYS-01 reset clears conversational state | P0 | `COVERED` | `integration/conversation-reset.test.ts:405-407`, `:487-528`; real-Redis twin `integration/conversation-reset-redis.test.ts:120-121`. Residual: the "next `Ik wil boeken` turn" in the title is never executed as a turn. |
-| SYS-02 reset does not delete persisted bookings | P0 | `BUG` + `PARTIAL` | **The plan's premise is wrong.** A reset does not delete rows, but it does **cancel** live Bookings (`services/conversation-reset-state.ts:255-291`) and **delete their calendar mirrors** (`:121-131` → `booking/booking-providers/calendar-sync.ts:236`), leaving `intake_answers`/`uploaded_files` intact. The calendar half was mocked with no expectation (`integration/conversation-reset.test.ts:49-51`). **Still open** — pinning the reset's real contract is not written yet. |
+| SYS-02 reset does not delete persisted bookings | P0 | `COVERED` (the real contract) + `BUG` (the plan's premise) | **The plan's premise is wrong, and the test pins the code.** A reset does not delete rows, but it does **cancel** live Bookings (`services/conversation-reset-state.ts:255-291`) and **delete their calendar mirrors** (`:121-131` → `calendar-sync.ts:236`). `integration/booking-plan-requests.test.ts:209-337` asserts exactly that: the row survives, its status becomes `cancelled` with `sequence + 1`, the reminder jobs are emptied, `intake_answers` survive, and the mirror delete matches the event id the create recorded; the control at `:314` proves an empty session deletes nothing. Verified to fail when `syncCalendarCancel` is stubbed the way `integration/conversation-reset.test.ts:49-51` stubs it. The wording question stays open for the plan's author (§10). |
 | SYS-03 Dutch wins on ambiguous greeting | P1 | `EVAL` + `PARTIAL` | The rule is **prompt text only** (`config/bot-language.ts:39-51`) — there is no server gate, so a deterministic assertion cannot prove the answer's language. Prompt pinned (`unit/booking-placeholders.test.ts:174-188`); behaviour measured in the live suite. |
 | SYS-04 customer can switch language | P1 | `EVAL` + `PARTIAL` | Same: snapshot pins the clause (`unit/prompt-composition-characterization.test.ts:83`); no turn-level assertion possible deterministically. Live suite. |
-| SYS-05 past-time guardrail | P0 | `PARTIAL` + contradicted clause | Past excluded and refused (`unit/slot-engine.test.ts:56-65`, `unit/internal-provider-create.test.ts:3051-3057`), but "no request for a past time" is **contradicted** for a request-only Service (`:3059-3064` still captures). **Still open** — pinning the reset's real contract is not written yet. |
+| SYS-05 past-time guardrail | P0 | `COVERED` + contradicted clause | Past excluded and refused (`unit/slot-engine.test.ts:56-65`, `unit/internal-provider-create.test.ts:3051-3057`); driven end to end in `integration/booking-plan-system.test.ts`. The clause "no request for a past time" is **contradicted** for a request-only Service (`unit/internal-provider-create.test.ts:3059-3064` still captures one), so the plan wording needs a correction (§10). |
 | SYS-06 broad time preference respected | P1 | `COVERED` | `unit/clock-window.test.ts:11-16`; `unit/day-part.test.ts:5-8`; chips `unit/agent-service.test.ts:1930-1967`. |
-| SYS-07 no false request-forwarding claim | P1 | `BUG` | **Actively contradicted.** `claimsBookingDone` (`guardrails/output-validation.ts:49-73`, submission regex `:60`) matches BOOKING-shaped claims only, and `unit/guardrails-output-validation.test.ts:232` **positively asserts** that `"Your request has been submitted."` PASSES with `bookingRecorded: false`. So a "forwarded to the owner" lie ships green, guarded by prompt prose alone. This needs a **product decision**, not a test — see §13. |
-| SYS-08 general booking email info + attachments | P1 | `COVERED`; enumerated | `unit/booking-email-template.test.ts:93-136`, negations `:171-199`. "Every booking email" was inferred from one flag (`booking-email.ts:423`) rather than enumerated; the end-to-end enumeration is **still open**. |
-| SYS-09 preparation instructions preserved | P1 | `PARTIAL` | Calendar body and chat notice pinned (`unit/booking-content.test.ts:55-73`; `unit/booking-preparation-chat.test.ts:76-90`), but **no test ever passed `preparationInstructions` to `sendBookingEmail`**, and the Service→email plumbing (`internal.provider.ts:1648`) was unasserted. **Still open.** |
-| OUT-01 Outlook smoke test | P1 | `GAP` | All Outlook coverage is axios-mocked; nothing drove a booking through the microsoft adapter and nothing showed a busy Outlook event preventing a double booking. **Still open.** |
+| SYS-07 no false request-forwarding claim | P1 | `BUG` | **Actively contradicted.** `claimsBookingDone` (`guardrails/output-validation.ts:49-73`, submission regex `:60`) matches BOOKING-shaped claims only, and `unit/guardrails-output-validation.test.ts:232` **positively asserts** that `"Your request has been submitted."` PASSES with `bookingRecorded: false`. So a "forwarded to the owner" lie ships green, guarded by prompt prose alone. This needs a **product decision**, not a test — see §11. |
+| SYS-08 general booking email info + attachments | P1 | `COVERED`; enumerated end to end | Template level `unit/booking-email-template.test.ts:93-136`, negations `:171-199`. The enumeration is now `integration/booking-plan-notifications.test.ts:389-537`: the extras reach the customer on a confirmed create, on an owner-accepted request, on a reschedule and on an invite re-issued to a corrected address, and are absent from a cancellation. "Every booking email" is no longer inferred from one flag. Residual, stated at `:385-387`: the ATTACHMENT files are not exercised, because they come from object storage through the same `method` gate as the text. |
+| SYS-09 preparation instructions preserved | P1 | `COVERED` | `integration/booking-plan-notifications.test.ts:316-362`: the Service's `preparationInstructions` reach the committed customer confirmation email, and are absent from the cancellation email. Before this, no test ever passed `preparationInstructions` to `sendBookingEmail`, so the card at `booking-email.ts:333-338` was rendered by nothing. Both guards had to be broken together to make the negative fail, which the test records. |
+| OUT-01 Outlook smoke test | P1 | `COVERED` (provider-agnostic path) | `integration/booking-plan-outlook.test.ts:260-392`: a booking on a Microsoft `CalendarCredential` auto-confirms rather than downgrading, the mirror is written through a Microsoft-typed adapter, the `BookingReference` row records `providerType='microsoft'` and the id the provider minted, and an Outlook busy interval refuses a slot while a free one on the same day books. Residual, stated by the file at `:14-26`: nothing here speaks Graph. The wire format stays covered only by `unit/outlook-events-service.test.ts` and `unit/outlook-calendar-service.test.ts`, and the real `microsoftProvider` wiring by `unit/calendar-provider.test.ts`. |
 
 ---
 
@@ -251,9 +277,12 @@ the factory, so that copy is unasserted.
 
 ## 12. How the new tests are shaped
 
-- **Case IDs live in the test titles**, in square brackets: `it('[AVL-07] a lunch break is not
-  bookable', …)`. That is the traceability key — a case ID in a title can be grepped, so this
-  matrix can be re-derived mechanically instead of trusted.
+- **Case IDs live in the test NAME**, in square brackets: either on the `it` (`it('[AVL-07] a lunch
+  break is not bookable', …)`) or on the `describe` that wraps it (`describe('[MOD-01] an auto
+  reschedule moves the appointment and its mirror', …)`). Wave 1 puts it on the `it`; most of
+  wave 2 puts it on the `describe`. The full test name therefore always carries the ID, and a
+  reporter run re-derives this matrix mechanically — but a plain source grep for `it('[` misses
+  the wave-2 cases, so grep the reporter output, not the files.
 - **State, not wording.** Assertions are about persisted rows, recorded calendar writes, committed
   email payloads, and machine-readable codes (`CONFIRMATION_REQUIRED`, `CHANGE_NOT_ALLOWED`,
   `REQUEST_BEFORE_CHECK`). Exact AI phrasing is asserted nowhere, per the plan's own §1.
@@ -288,39 +317,34 @@ Two deliberate design choices:
 
 ## 14. Not yet closed
 
-Honest open list, so this matrix is not mistaken for completion.
+Honest open list, so this matrix is not mistaken for completion. Everything the two waves closed
+has moved into the tables above with a `file:line`; what follows is what is genuinely left.
 
-**Audited but not yet written** (the highest-value remaining work, in risk order):
+**Blocked on a product decision, not on test effort** (§11). Until the decision lands, a test could
+only pin the current, contradicted behaviour:
 
-1. **BK-07** — the false-success guard wired end-to-end. `state.bookingRecorded` is still only ever
-   asserted TRUE, and no test drives a failed write that the model then claims as done. This is
-   `docs/booking-rules.md:225` with no pinning test.
-2. **SYS-07 and AVL-01** — blocked on a **product decision**, not on test effort (§11). Until that
-   decision lands, a test could only pin the current (contradicted) behaviour.
-3. **MOD-01…MOD-08** — the change-policy persistence path: real `request_created` rows with
-   `requestKind`, "original untouched" by SQL rather than by "the writer was not called", mirror
-   update/delete asserted against the port, and **absent `HandoffRequest` rows** on a `not_allowed`
-   refusal (every existing no-handoff pin is guidance copy).
-4. **SRV-04** — the literal persisted `status = 'request_created'`; no real-DB request row exists.
-5. **CON-01's counterpart in the change path** is covered, but **SYS-02** is not: the reset's real
-   contract (rows cancelled, mirrors deleted) is still unasserted.
-6. **PRC-12** — the discount reaching the calendar description and the email on a real booking.
-   Remember there is **no Booking price column**, so those two surfaces are the only carriers.
-7. **CAL-06** — the reply-layer "never say confirmed" rule on a disconnected calendar.
-8. **SRV-22** — real DB persistence and the `uploadedFileSnapshots` read-back.
-9. **SRV-11** — `intake_answers` on the *confirmed* INSERT (only the Request path is pinned).
-10. **SRV-14** — the email half of "show on my calendar OFF".
-11. **SYS-09** — the customer-email preparation card and the Service→email plumbing.
-12. **OUT-01** — no end-to-end Outlook path at all.
-13. **SRV-02** — the single-clarification ask count.
-14. **BK-03** — email reuse.
-15. **AVL-09** — `duration > granularity` crossing closing (every existing fixture had
-    `duration == granularity`).
-16. **TRV-05** — the offer path measuring from the Base's located coordinates.
-17. **GEO-01** — provider wiring with `groupingPeriod !== 'none'`.
-18. **SYS-08** — enumerating every confirmation-email kind rather than inferring from one flag.
+1. **SYS-07** — a false "your request has been forwarded" claim ships green. `unit/guardrails-output-validation.test.ts:232` positively asserts that the sentence is permitted with `bookingRecorded: false`.
+2. **AVL-01** — no opening-hours gate on the request path, so an Auto-book Service can capture an out-of-hours Request. Forbidden by `docs/booking-rules.md:26-28`, enforced by prompt copy alone.
+3. **CAL-06's reply half** — "never tell the customer it is booked" on a disconnected calendar is prompt prose with no runtime seam, and the create still returns `success: true`, which sets `state.bookingRecorded`. Same decision as SYS-07.
 
-**Not built: the live eval suite.** `SYS-03` and `SYS-04` are marked `EVAL` because the rule is
-prompt text only and a deterministic test cannot prove which language the model answers in — same
-for the model half of BK-02 and BK-08. `api/src/__tests__/live/booking-flow-live.ts` remains a
-manual script with zero `expect()` that no CI job runs; it is not a substitute.
+**Named residuals inside closed rows** (each is written into its row, not rounded away):
+
+- **SRV-22** — the READY filter has two layers and the test guards the pair, not each layer.
+- **SYS-08** — the attachment FILES are not read; only the extras text is enumerated.
+- **OUT-01** — no Microsoft Graph wire format, and the real `microsoftProvider` wiring is mocked out.
+- **PRC-12** — `sync-reconciler.ts:311` re-derives the discount at reconcile time (§11, defect 4).
+- **BK-03** — the NAME clause is still prompt prose; the email and phone clauses are pinned.
+- **SRV-06, SRV-12, SRV-18, AVL-11, SYS-01** — residuals recorded in their own rows, unchanged by this work.
+
+**Wording corrections owed to the plan's author:** SYS-02 and SYS-05 (§10), plus the four `RESTATE`
+cases.
+
+**Built, and outside CI on purpose: the live eval suite.** `api/src/__tests__/live/booking-eval.ts`
+covers SYS-03, SYS-04 and the model half of BK-02, BK-08 and SRV-02. It is deliberately not named
+`*.test.ts`, so no vitest include and no CI job can reach it; run it with `npm run eval:booking-plan`.
+It needs `TEST_DATABASE_URL` always and `OPENAI_API_KEY` only in live mode, creates and drops its
+own database, and grades tool calls and rows rather than wording. Two dry modes make it reviewable
+without spend: `--dry-run` (all five PASS) and `--dry-run-broken`, which feeds every case the
+forbidden behaviour and fails the run unless every grader rejects it. The older
+`api/src/__tests__/live/booking-flow-live.ts` remains a manual script with zero assertions and is
+not a substitute.

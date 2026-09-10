@@ -94,6 +94,14 @@ export async function renderWithFetch(url: string) {
   };
 }
 
+async function getRobotsTxt(robotsUrl: string) {
+  const { res } = await getFollowingSameHostRedirects(robotsUrl, 5000, 6);
+  return {
+    status: res.status,
+    body: typeof res.data === "string" ? res.data : "",
+  };
+}
+
 async function defaultRenderer(url: string) {
   try {
     const { renderWithPlaywright } = await import("./playwright-renderer");
@@ -130,17 +138,7 @@ export function createWebsiteCrawlProcessor(
         maxPages,
         remainingSlots: slots,
         renderer: pageRenderer,
-        robotsAllows: await fetchRobotsAllows(url, async (robotsUrl) => {
-          const { res } = await getFollowingSameHostRedirects(
-            robotsUrl,
-            5000,
-            6,
-          );
-          return {
-            status: res.status,
-            body: typeof res.data === "string" ? res.data : "",
-          };
-        }),
+        robotsAllows: await fetchRobotsAllows(url, getRobotsTxt),
         assertSafe: (safeUrl) => {
           assertSafeOutboundUrl(safeUrl);
         },

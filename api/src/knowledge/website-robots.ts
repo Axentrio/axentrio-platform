@@ -41,6 +41,23 @@ function normalisePercentEncoding(value: string): string {
   );
 }
 
+function robotsDirectives(
+  body: string,
+): Array<{ field: string; value: string }> {
+  const directives: Array<{ field: string; value: string }> = [];
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const colon = line.indexOf(":");
+    if (colon < 0) continue;
+    directives.push({
+      field: line.slice(0, colon).trim().toLowerCase(),
+      value: line.slice(colon + 1).trim(),
+    });
+  }
+  return directives;
+}
+
 export function parseRobotsTxt(body: string): {
   allows: (path: string) => boolean;
 } {
@@ -51,14 +68,7 @@ export function parseRobotsTxt(body: string): {
   let agents: string[] = [];
   let groupHasRules = false;
 
-  for (const rawLine of body.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, "").trim();
-    if (!line) continue;
-    const colon = line.indexOf(":");
-    if (colon < 0) continue;
-    const field = line.slice(0, colon).trim().toLowerCase();
-    const value = line.slice(colon + 1).trim();
-
+  for (const { field, value } of robotsDirectives(body)) {
     if (field === "user-agent") {
       if (groupHasRules) {
         agents = [];
@@ -82,22 +92,24 @@ export function parseRobotsTxt(body: string): {
 
   const rules = namesOwnAgent ? ownRules : starRules;
   return {
-    allows(path: string): boolean {
-      const target = normalisePercentEncoding(path);
-      let winner: RobotsRule | undefined;
-      for (const rule of rules) {
-        if (!ruleMatches(rule.pattern, target)) continue;
-        if (
-          !winner ||
-          rule.pattern.length > winner.pattern.length ||
-          (rule.pattern.length === winner.pattern.length && rule.allow)
-        ) {
-          winner = rule;
-        }
-      }
-      return winner?.allow ?? true;
-    },
+    allows: (path: string) => rulesAllow(rules, path),
   };
+}
+
+function rulesAllow(rules: RobotsRule[], path: string): boolean {
+  const target = normalisePercentEncoding(path);
+  let winner: RobotsRule | undefined;
+  for (const rule of rules) {
+    if (!ruleMatches(rule.pattern, target)) continue;
+    if (
+      !winner ||
+      rule.pattern.length > winner.pattern.length ||
+      (rule.pattern.length === winner.pattern.length && rule.allow)
+    ) {
+      winner = rule;
+    }
+  }
+  return winner?.allow ?? true;
 }
 
 export async function fetchRobotsAllows(

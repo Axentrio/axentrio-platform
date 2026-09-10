@@ -42,7 +42,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     
     // Widget Appearance
     position: 'right',
-    primaryColor: '#4F46E5',
+    primaryColor: '#6366f1',
     secondaryColor: '#10B981',
     backgroundColor: '',      // legacy, unused by editorial theme
     textColor: '',            // legacy, unused by editorial theme
@@ -326,7 +326,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
     :host {
       /* ---- Brand (tenant-configurable via applyThemeTokens) ---- */
-      --cb-primary:       #4F46E5;
+      --cb-primary:       #6366f1;
       --cb-primary-hover: color-mix(in oklch, var(--cb-primary) 88%, #000);
       --cb-primary-ink:   #FFFFFF;
       --cb-secondary:     #22C55E;

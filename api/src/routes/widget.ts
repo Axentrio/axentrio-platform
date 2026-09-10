@@ -4,6 +4,7 @@
  */
 
 import express, { Router, Request, Response, NextFunction } from 'express';
+import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
@@ -144,7 +145,15 @@ async function validateApiKey(apiKey: string, origin: string | undefined): Promi
 
 type WidgetBotSettings = NonNullable<Bot['settings']>;
 
-function buildWidgetAppearance(botSettings: WidgetBotSettings) {
+async function readAnchorPrimaryColor(bot: Bot): Promise<string | null> {
+  if (bot.isDefault || bot.settings?.theme?.primaryColor) return null;
+  const anchor = await AppDataSource.getRepository(Bot).findOne({
+    where: { tenantId: bot.tenantId, isDefault: true, deletedAt: IsNull() },
+  });
+  return anchor?.settings?.theme?.primaryColor || null;
+}
+
+function buildWidgetAppearance(botSettings: WidgetBotSettings, anchorPrimaryColor: string | null) {
   const widgetSettings = (botSettings.widget ?? {}) as {
     avatarUrl?: string | null;
     launcherPosition?: 'bottom-right' | 'bottom-left';
@@ -154,7 +163,7 @@ function buildWidgetAppearance(botSettings: WidgetBotSettings) {
     primaryColor?: string | null;
   };
   return {
-    primaryColor: theme.primaryColor || null,
+    primaryColor: theme.primaryColor || anchorPrimaryColor,
     avatarUrl: widgetSettings.avatarUrl || null,
     launcherPosition: widgetSettings.launcherPosition || 'bottom-right',
     launcherLabel: widgetSettings.launcherLabel || null,
@@ -226,7 +235,7 @@ router.get(
     // bot.settings. Tenant is only consulted for tier (entitlement gates)
     // and the LLM-provider apiKey (read elsewhere, not exposed here).
     const botSettings = bot.settings ?? {};
-    const appearance = buildWidgetAppearance(botSettings);
+    const appearance = buildWidgetAppearance(botSettings, await readAnchorPrimaryColor(bot));
 
     // D33/D34: the "Powered by Axentrio" footer is hidden on Pro+ and
     // shown on Essential. The widget client reads `attribution.hide` and

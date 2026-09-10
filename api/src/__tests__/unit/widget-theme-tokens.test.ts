@@ -3,7 +3,8 @@
  *
  * The portal saves primaryColor on bot.settings.theme. The public config
  * payload carries it on appearance.primaryColor. The widget must apply that
- * value instead of DEFAULT_CONFIG (#4F46E5).
+ * value. With no saved colour, the widget must paint the same default that
+ * the portal form and preview show.
  */
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -12,6 +13,9 @@ import { join } from 'node:path';
 import Module from 'node:module';
 
 const WIDGET = join(__dirname, '../../../public/widget.js');
+// portal/src/pages/knowledge/ChatbotAppearancesForm.tsx and
+// ChatbotAppearancesPreview.tsx show this colour when primaryColor is null.
+const PORTAL_DEFAULT_PRIMARY = '#6366f1';
 
 type WidgetHost = {
   host: HTMLElement;
@@ -78,7 +82,7 @@ describe('widget.js brand colour', () => {
     });
   });
 
-  it('keeps the editorial default when no colour is saved', async () => {
+  it('paints the portal default when no colour is saved', async () => {
     const widget = await mountWidget({
       primaryColor: null,
       avatarUrl: null,
@@ -86,7 +90,7 @@ describe('widget.js brand colour', () => {
       launcherLabel: null,
     });
     await vi.waitFor(() => {
-      expect(widget.host.style.getPropertyValue('--cb-primary')).toBe('#4F46E5');
+      expect(widget.host.style.getPropertyValue('--cb-primary')).toBe(PORTAL_DEFAULT_PRIMARY);
     });
   });
 });

@@ -51,11 +51,17 @@ export async function crawlWebsite(input: {
     id: string;
     processingVersion: number;
   }) => Promise<void>;
-}): Promise<{ visited: number; indexed: number; failed: number }> {
+}): Promise<{
+  visited: number;
+  indexed: number;
+  failed: number;
+  skippedByRules: number;
+}> {
   const budget = clampMaxPages(input.maxPages, input.remainingSlots);
   const origin = canonicalSourceUrl(input.originUrl);
   const queue: string[] = [origin];
   const seen = new Set<string>();
+  const skippedByRules = new Set<string>();
   let indexed = 0;
   let failed = 0;
   let visited = 0;
@@ -74,13 +80,19 @@ export async function crawlWebsite(input: {
     if (seen.has(pageUrl)) continue;
     if (!isSameHost(origin, pageUrl)) continue;
     if (isMediaUrl(pageUrl)) continue;
-    if (!(await input.robotsAllows(pageUrl))) continue;
+    if (!(await input.robotsAllows(pageUrl))) {
+      skippedByRules.add(pageUrl);
+      continue;
+    }
     seen.add(pageUrl);
     visited += 1;
 
     try {
       const rendered = await input.renderer.render(pageUrl);
-      if (!(await input.robotsAllows(rendered.url))) continue;
+      if (!(await input.robotsAllows(rendered.url))) {
+        skippedByRules.add(rendered.url);
+        continue;
+      }
       const extracted = rendered.text
         ? { title: rendered.title, text: rendered.text, links: rendered.links }
         : extractHtml(rendered.html, pageUrl);
@@ -112,5 +124,5 @@ export async function crawlWebsite(input: {
     }
   }
 
-  return { visited, indexed, failed };
+  return { visited, indexed, failed, skippedByRules: skippedByRules.size };
 }

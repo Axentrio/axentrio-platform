@@ -1146,8 +1146,12 @@
         "loadError": "Failed to load documents",
         "banner": {
           "aiDisabled": "AI Bot is not enabled yet. Turn it on so these documents can be used in visitor replies.",
-          "configureCta": "Configure AI Bot"
+          "configureCta": "Configure AI Bot",
+          "skippedByRules_one": "{{count}} page on {{host}} was skipped because the site's own rules disallow it.",
+          "skippedByRules_other": "{{count}} pages on {{host}} were skipped because the site's own rules disallow them.",
+          "rulesUnreachable": "The site's own rules for {{host}} were not available, so nothing was imported."
         },
+
         "filters": {
           "all": "All",
           "indexed": "Indexed",

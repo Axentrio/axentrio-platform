@@ -1139,8 +1139,12 @@
         "loadError": "Documenten laden is mislukt",
         "banner": {
           "aiDisabled": "AI-bot is nog niet ingeschakeld. Schakel hem in zodat deze documenten gebruikt kunnen worden in antwoorden aan bezoekers.",
-          "configureCta": "AI-bot configureren"
+          "configureCta": "AI-bot configureren",
+          "skippedByRules_one": "{{count}} pagina op {{host}} is overgeslagen omdat de eigen regels van de site die weigeren.",
+          "skippedByRules_other": "{{count}} pagina's op {{host}} zijn overgeslagen omdat de eigen regels van de site die weigeren.",
+          "rulesUnreachable": "De eigen regels van de site {{host}} konden niet worden gelezen, dus er is niets geïmporteerd."
         },
+
         "filters": {
           "all": "Alles",
           "indexed": "Geïndexeerd",

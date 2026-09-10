@@ -131,14 +131,15 @@ export function createWebsiteCrawlProcessor(
     });
     const remaining = await knowledge.remainingDocumentSlots(tenantId, kbId);
     const pageRenderer = renderer ?? { render: defaultRenderer };
-    const runCrawl = async (url: string, slots: number) =>
-      crawlWebsite({
+    const runCrawl = async (url: string, slots: number) => {
+      const robotsAllows = await fetchRobotsAllows(url, getRobotsTxt);
+      const result = await crawlWebsite({
         originUrl: url,
         followLinks,
         maxPages,
         remainingSlots: slots,
         renderer: pageRenderer,
-        robotsAllows: await fetchRobotsAllows(url, getRobotsTxt),
+        robotsAllows,
         assertSafe: (safeUrl) => {
           assertSafeOutboundUrl(safeUrl);
         },
@@ -156,6 +157,13 @@ export function createWebsiteCrawlProcessor(
           );
         },
       });
+      await knowledge.recordWebsiteCrawlRun(tenantId, kbId, url, {
+        skippedByRules: robotsAllows.originRefused ? 0 : result.skippedByRules,
+        rulesUnreachable: robotsAllows.originRefused,
+      });
+      return result;
+    };
+
 
     const result = await runCrawl(originUrl, remaining);
     await knowledge.recordUrlCrawlAttempt(tenantId, kbId, originUrl);

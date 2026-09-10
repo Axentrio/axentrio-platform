@@ -14,15 +14,32 @@ type Any = any;
 
 // --- Query Options ---
 
+export type WebsiteCrawlNotice = {
+  origin: string;
+  skippedByRules: number;
+  rulesUnreachable: boolean;
+};
+
+type DocumentsQueryData = {
+  documents: Any[];
+  websiteCrawls: WebsiteCrawlNotice[];
+};
+
 export const knowledgeOptions = {
   documents: () =>
     queryOptions({
       queryKey: queryKeys.knowledge.documents(),
-      queryFn: async () => {
+      queryFn: async (): Promise<DocumentsQueryData> => {
         const res = await api.get<Any>("/knowledge/documents", {
           params: { limit: 100 },
         });
-        return Array.isArray(res) ? res : (res?.documents ?? []);
+        if (Array.isArray(res)) {
+          return { documents: res, websiteCrawls: [] };
+        }
+        return {
+          documents: res?.documents ?? [],
+          websiteCrawls: res?.websiteCrawls ?? [],
+        };
       },
     }),
   stats: () =>
@@ -37,18 +54,28 @@ export const knowledgeOptions = {
 export function useKnowledgeDocuments() {
   return useQuery({
     ...knowledgeOptions.documents(),
+    select: (data) => data.documents,
     // Auto-poll every 5s while any document is pending/processing
     refetchInterval: (query) => {
       const data = query.state.data;
+      const docs = Array.isArray(data) ? data : data?.documents;
       const hasProcessing =
-        Array.isArray(data) &&
-        data.some(
+        Array.isArray(docs) &&
+        docs.some(
           (d: Any) => d.status === "pending" || d.status === "processing",
         );
       return hasProcessing ? 5000 : false;
     },
   });
 }
+
+export function useWebsiteCrawlNotices() {
+  return useQuery({
+    ...knowledgeOptions.documents(),
+    select: (data) => data.websiteCrawls ?? [],
+  });
+}
+
 
 export function useKnowledgeStats() {
   return useQuery(knowledgeOptions.stats());

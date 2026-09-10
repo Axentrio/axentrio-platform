@@ -7,6 +7,8 @@ import {
   KnowledgeDocument,
   DocumentType,
 } from "../database/entities/KnowledgeDocument";
+import { WebsiteCrawlRun } from "../database/entities/WebsiteCrawlRun";
+
 import { KnowledgeChunk } from "../database/entities/KnowledgeChunk";
 import { Tenant } from "../database/entities/Tenant";
 import { config } from "../config/environment";
@@ -48,13 +50,16 @@ export class KnowledgeService {
   private docRepo: Repository<KnowledgeDocument>;
   private chunkRepo: Repository<KnowledgeChunk>;
   private tenantRepo: Repository<Tenant>;
+  private crawlRunRepo: Repository<WebsiteCrawlRun>;
 
   constructor(dataSource: DataSource) {
     this.kbRepo = dataSource.getRepository(KnowledgeBase);
     this.docRepo = dataSource.getRepository(KnowledgeDocument);
     this.chunkRepo = dataSource.getRepository(KnowledgeChunk);
     this.tenantRepo = dataSource.getRepository(Tenant);
+    this.crawlRunRepo = dataSource.getRepository(WebsiteCrawlRun);
   }
+
 
   /**
    * Resolve the tenant-primary (bot-less) KnowledgeBase, creating it if absent.
@@ -128,7 +133,17 @@ export class KnowledgeService {
       .take(limit);
 
     const [documents, total] = await qb.getManyAndCount();
-    return { documents, total, page, limit };
+    const runs = await this.crawlRunRepo.find({
+      where: { tenantId, knowledgeBaseId: kb.id },
+    });
+    const websiteCrawls = runs
+      .filter((run) => run.rulesUnreachable || run.skippedByRules > 0)
+      .map((run) => ({
+        origin: run.origin,
+        skippedByRules: run.skippedByRules,
+        rulesUnreachable: run.rulesUnreachable,
+      }));
+    return { documents, total, page, limit, websiteCrawls };
   }
 
   async createDocument(
@@ -404,6 +419,26 @@ export class KnowledgeService {
       .setParameter("attemptedAt", new Date().toISOString())
       .execute();
   }
+
+  async recordWebsiteCrawlRun(
+    tenantId: string,
+    kbId: string,
+    originUrl: string,
+    facts: { skippedByRules: number; rulesUnreachable: boolean },
+  ): Promise<void> {
+    const origin = `${new URL(originUrl).origin}/`;
+    await this.crawlRunRepo.upsert(
+      {
+        tenantId,
+        knowledgeBaseId: kbId,
+        origin,
+        skippedByRules: facts.skippedByRules,
+        rulesUnreachable: facts.rulesUnreachable,
+      },
+      { conflictPaths: ["tenantId", "knowledgeBaseId", "origin"] },
+    );
+  }
+
 
   async listStaleUrlOrigins(
     olderThan: Date,

@@ -38,12 +38,12 @@ describe("WebsiteCrawlNotices", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("names the whole site without a page count only when its rules left no pages", () => {
+  it("says the requested address was disallowed, with no count or whole-site claim, only when its rules left no pages", () => {
     render(
       <WebsiteCrawlNotices
         notices={[
           {
-            origin: "https://closed.example/",
+            origin: "https://members.example/",
             skippedByRules: 1,
             rulesUnreachable: false,
             hasPages: false,
@@ -60,19 +60,20 @@ describe("WebsiteCrawlNotices", () => {
 
     expect(
       screen.getByText(
-        "The whole site closed.example could not be imported because the site's own rules disallow it.",
+        "Nothing was imported from members.example because the site's own rules disallow the address that was requested.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/page.*closed\.example/),
+      screen.queryByText(/page.*members\.example/),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText(/whole site/i)).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "1 page on shop.example was skipped because the site's own rules disallow it.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/whole site shop\.example/),
+      screen.queryByText(/Nothing was imported from shop\.example/),
     ).not.toBeInTheDocument();
   });
 });

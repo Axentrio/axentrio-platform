@@ -165,7 +165,31 @@ describe("website crawl notices", () => {
     ]);
   });
 
-  it("reports a site whose rules disallow its origin as the whole-site state: a rules skip and no pages", async () => {
+  it("reports an import of a path the rules disallow, while the rest of the site is allowed, as a rules skip with no pages", async () => {
+    const tenant = await createTestTenant();
+    const knowledge = new KnowledgeService(AppDataSource);
+    const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+    const render = vi.fn();
+    const processor = createWebsiteCrawlProcessor(AppDataSource, { render });
+
+    await processor(
+      crawlJob(tenant.id, kb.id, "https://shop.notices.example/secret"),
+    );
+
+    const payload = await knowledge.listDocuments(tenant.id);
+    expect(render).not.toHaveBeenCalled();
+    expect(payload.documents).toEqual([]);
+    expect(payload.websiteCrawls).toEqual([
+      {
+        origin: "https://shop.notices.example/",
+        skippedByRules: 1,
+        rulesUnreachable: false,
+        hasPages: false,
+      },
+    ]);
+  });
+
+  it("reports a site whose rules disallow its origin as the same requested-address state: a rules skip with no pages", async () => {
     const tenant = await createTestTenant();
     const knowledge = new KnowledgeService(AppDataSource);
     const kb = await knowledge.resolveKnowledgeBase(tenant.id);

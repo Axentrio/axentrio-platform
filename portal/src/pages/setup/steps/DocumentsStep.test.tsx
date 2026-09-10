@@ -35,12 +35,15 @@ function renderStep() {
 }
 
 describe("DocumentsStep", () => {
-  it("says the whole site was not imported, with no page count, above an empty list", async () => {
+  it.each([
+    ["a path the rules disallow while the rest of the site is allowed", "https://shop.notices.example/", "shop.notices.example"],
+    ["a site whose rules disallow its origin", "https://closed.notices.example/", "closed.notices.example"],
+  ])("says the requested address was disallowed above an empty list after an import of %s", async (_case, origin, host) => {
     apiGet.mockResolvedValue({
       documents: [],
       websiteCrawls: [
         {
-          origin: "https://closed.notices.example/",
+          origin,
           skippedByRules: 1,
           rulesUnreachable: false,
           hasPages: false,
@@ -52,10 +55,11 @@ describe("DocumentsStep", () => {
 
     expect(
       await screen.findByText(
-        "The whole site closed.notices.example could not be imported because the site's own rules disallow it.",
+        `Nothing was imported from ${host} because the site's own rules disallow the address that was requested.`,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/\d+ pages? on/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/whole site/i)).not.toBeInTheDocument();
     expect(screen.getByText(i18n.t("setup.steps.documents.add"))).toBeInTheDocument();
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
@@ -83,7 +87,7 @@ describe("DocumentsStep", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("About")).toBeInTheDocument();
-    expect(screen.queryByText(/whole site/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was imported/)).not.toBeInTheDocument();
   });
 
   it("tells the tenant that a website import during setup imported nothing", async () => {

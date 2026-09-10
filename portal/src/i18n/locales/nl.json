@@ -1142,7 +1142,7 @@
           "configureCta": "AI-bot configureren",
           "skippedByRules_one": "{{count}} pagina op {{host}} is overgeslagen omdat de eigen regels van de site die weigeren.",
           "skippedByRules_other": "{{count}} pagina's op {{host}} zijn overgeslagen omdat de eigen regels van de site die weigeren.",
-          "siteDisallowed": "De hele site {{host}} kon niet worden geïmporteerd omdat de eigen regels van de site die weigeren.",
+          "requestedAddressDisallowed": "Er is niets geïmporteerd van {{host}} omdat de eigen regels van de site het gevraagde adres weigeren.",
           "rulesUnreachable": "De eigen regels van de site {{host}} konden niet worden gelezen, dus er is niets geïmporteerd.",
           "rulesUnreachableNoNewPages": "De laatste controle kon de eigen regels van de site {{host}} niet lezen, dus er zijn geen nieuwe pagina's toegevoegd."
         },

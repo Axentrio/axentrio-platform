@@ -27,7 +27,9 @@ const WebsiteCrawlNotices: React.FC<{ notices: WebsiteCrawlNotice[] }> = ({
                 count: crawl.skippedByRules,
                 host,
               })
-            : t("ai.knowledge.list.banner.siteDisallowed", { host });
+            : t("ai.knowledge.list.banner.requestedAddressDisallowed", {
+                host,
+              });
         return (
           <div
             key={crawl.origin}

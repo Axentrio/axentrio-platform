@@ -116,20 +116,25 @@ export function claimsBookingConfirmed(text: string): boolean {
  *    as legitimate replies in the unit corpus.
  *  - A BARE ACKNOWLEDGEMENT. "Thanks, I have your details" is conversation, not a claim about
  *    what reached the owner, so only a completed transmission verb counts.
- *  - A CONDITION OR A SEQUENCE. "Once your request has been submitted, we reply within 48
- *    hours" describes the process, so a claim that directly follows `SUBORDINATE_LEAD_IN`
+ *  - A CONDITION OR A SEQUENCE. "Once all your details have been submitted, we reply within
+ *    48 hours" describes the process, so a claim whose own clause holds `SUBORDINATE_LEAD_IN`
  *    does not count.
  */
 export function claimsRequestForwarded(text: string): boolean {
   const t = text.toLowerCase();
   return REQUEST_FORWARDED.some((re) =>
-    [...t.matchAll(re)].some((m) => !SUBORDINATE_LEAD_IN.test(t.slice(0, m.index ?? 0))),
+    [...t.matchAll(re)].some((m) => !SUBORDINATE_LEAD_IN.test(clauseBefore(t, m.index ?? 0))),
   );
 }
 
-/** A clause opener that turns the claim after it into a condition or a sequence. */
+/** The text from the start of the clause that holds `end` up to `end`, and never further back. */
+function clauseBefore(t: string, end: number): string {
+  return t.slice(0, end).split(/[.!?;:,\n]/).pop() ?? '';
+}
+
+/** A conjunction that turns the rest of its clause into a condition or a sequence. */
 const SUBORDINATE_LEAD_IN =
-  /\b(?:once|after|when|whenever|as soon as|if|zodra|nadat|als|wanneer|indien|une fois que|dès que|après que|quand|lorsque|si)\s+$/;
+  /\b(?:once|after|when|whenever|as soon as|if|before|until|unless|zodra|nadat|als|wanneer|indien|voordat|totdat|une fois que|dès que|après que|quand|lorsque|si)\s/;
 
 // One optional completion adverb, from a CLOSED list. Never a wildcard: an open gap between
 // the auxiliary and the participle would admit "has not been" and "is nog niet".

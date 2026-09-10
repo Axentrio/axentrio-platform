@@ -307,6 +307,13 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       // Dutch clause order: the recipient comes before the participle.
       "Ik heb uw aanvraag naar het team doorgestuurd.",
       "Uw aanvraag is naar de eigenaar doorgestuurd.",
+      "I've passed your request on to the team.",
+      // A lead-in in an earlier clause or sentence does not govern the claim.
+      "Once again, your request has been forwarded to the team.",
+      "As requested I've passed your request on to the team.",
+      "I'll let you know when the team replies. Your request has been forwarded to the team.",
+      "Als u nog vragen heeft, laat het weten. Uw aanvraag is naar de eigenaar doorgestuurd.",
+      "Si vous avez des questions, écrivez-nous. Votre demande a bien été transmise.",
     ]) {
       const result = validateOutput(text, nothingRecorded);
       expect(result.violations.map((v) => v.family), text).toContain(
@@ -362,6 +369,16 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       "Zodra uw aanvraag is doorgestuurd, neemt het team contact op.",
       "Nadat de aanvraag is ingediend, duurt het 2 weken.",
       "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
+      // The lead-in governs its whole clause, not only the word next to the claim.
+      "Once all your details have been submitted, the team will contact you.",
+      "Once the form is complete and your request has been submitted, we reply within 48 hours.",
+      "Before your request has been forwarded, please check the form.",
+      "Until your request has been submitted, we cannot confirm a time.",
+      "Unless your details have been sent, the team cannot call you back.",
+      "Zodra al uw gegevens zijn ingediend, neemt het team contact op.",
+      "Voordat uw aanvraag is doorgestuurd, controleren we de gegevens.",
+      "Totdat uw aanvraag is ingediend, kunnen we niets plannen.",
+      "Une fois que le formulaire est rempli et que votre demande a été transmise, nous répondons sous 48 heures.",
       // A generic article is someone else's record, not the customer's ask.
       "De gegevens zijn geregistreerd bij de KvK.",
       // The adverb and recipient slots are closed lists, so a negation never fills them.

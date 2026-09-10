@@ -149,7 +149,6 @@ export class KnowledgeService {
         kb.id,
         run.origin,
       );
-      if (!run.rulesUnreachable && !hasPages) continue;
       websiteCrawls.push({
         origin: run.origin,
         skippedByRules: run.skippedByRules,

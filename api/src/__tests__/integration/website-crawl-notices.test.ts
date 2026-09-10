@@ -25,6 +25,12 @@ vi.mock("../../security/ssrf-guard", async (importOriginal) => {
       if (host === "down.notices.example") {
         throw new Error("timeout of 5000ms exceeded");
       }
+      if (host === "closed.notices.example") {
+        return { status: 200, data: "User-agent: *\nDisallow: /\n", headers: {} };
+      }
+      if (host === "clean.notices.example") {
+        return { status: 404, data: "", headers: {} };
+      }
       throw new Error(`unexpected outbound request ${config.url}`);
     }),
   };
@@ -152,19 +158,52 @@ describe("website crawl notices", () => {
     ]);
   });
 
-  it("drops the skip notice once the tenant deletes every page of that site", async () => {
+  it("reports a site whose rules disallow every page while it has no documents", async () => {
     const tenant = await createTestTenant();
     const knowledge = new KnowledgeService(AppDataSource);
     const kb = await knowledge.resolveKnowledgeBase(tenant.id);
-    const processor = createWebsiteCrawlProcessor(AppDataSource, {
-      render: renderShop(),
-    });
+    const render = vi.fn();
+    const processor = createWebsiteCrawlProcessor(AppDataSource, { render });
+
     await processor(
-      crawlJob(tenant.id, kb.id, "https://shop.notices.example/"),
+      crawlJob(tenant.id, kb.id, "https://closed.notices.example/"),
+    );
+
+    const payload = await knowledge.listDocuments(tenant.id);
+    expect(render).not.toHaveBeenCalled();
+    expect(payload.documents).toEqual([]);
+    expect(payload.websiteCrawls).toEqual([
+      {
+        origin: "https://closed.notices.example/",
+        skippedByRules: 1,
+        rulesUnreachable: false,
+        hasPages: false,
+      },
+    ]);
+  });
+
+  it("reports nothing once the tenant deletes every page of a clean import", async () => {
+    const tenant = await createTestTenant();
+    const knowledge = new KnowledgeService(AppDataSource);
+    const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+    const render = vi.fn(async (url: string) => ({
+      url,
+      html: "",
+      title: url,
+      text: `Page at ${url}`,
+      links:
+        url === "https://clean.notices.example/"
+          ? ["https://clean.notices.example/about"]
+          : [],
+    }));
+    const processor = createWebsiteCrawlProcessor(AppDataSource, { render });
+    await processor(
+      crawlJob(tenant.id, kb.id, "https://clean.notices.example/"),
     );
 
     const imported = await knowledge.listDocuments(tenant.id);
-    expect(imported.websiteCrawls).toHaveLength(1);
+    expect(imported.documents).toHaveLength(2);
+    expect(imported.websiteCrawls).toEqual([]);
     for (const doc of imported.documents) {
       await knowledge.deleteDocument(tenant.id, doc.id);
     }

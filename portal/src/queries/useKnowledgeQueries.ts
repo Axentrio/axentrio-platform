@@ -47,7 +47,17 @@ function importOrigin(url: string): string | null {
   }
 }
 
-type ImportWatch = { origin: string | null; before: string | null };
+type ImportWatch = {
+  kbId: string | undefined;
+  origin: string | null;
+  before: string | null;
+};
+
+type KnowledgeView = {
+  kbId: string | undefined;
+  documents: Array<{ id: string; sourceUrl?: string | null }>;
+  websiteCrawls: WebsiteCrawlNotice[];
+};
 
 function noticeFor(
   notices: WebsiteCrawlNotice[] | undefined,
@@ -57,21 +67,42 @@ function noticeFor(
   return notice ? JSON.stringify(notice) : null;
 }
 
-function cachedNotices(
-  queryClient: QueryClient,
-  kbId: string | undefined,
-): WebsiteCrawlNotice[] | undefined {
-  if (!kbId) {
-    return queryClient.getQueryData<DocumentsQueryData>(
-      queryKeys.knowledge.documents(),
-    )?.websiteCrawls;
+function cachedKnowledgeViews(queryClient: QueryClient): KnowledgeView[] {
+  const primary = queryClient.getQueryData<DocumentsQueryData>(
+    queryKeys.knowledge.documents(),
+  );
+  const views: KnowledgeView[] = primary
+    ? [
+        {
+          kbId: undefined,
+          documents: primary.documents,
+          websiteCrawls: primary.websiteCrawls,
+        },
+      ]
+    : [];
+  const bots = queryClient.getQueriesData<{
+    kbId?: string | null;
+    documents?: KnowledgeView["documents"];
+    websiteCrawls?: WebsiteCrawlNotice[];
+  }>({ queryKey: [...queryKeys.bots.all(), "knowledge"] });
+  for (const [, data] of bots) {
+    if (!data?.kbId) continue;
+    views.push({
+      kbId: data.kbId,
+      documents: data.documents ?? [],
+      websiteCrawls: data.websiteCrawls ?? [],
+    });
   }
-  return queryClient
-    .getQueriesData<{
-      kbId?: string | null;
-      websiteCrawls?: WebsiteCrawlNotice[];
-    }>({ queryKey: [...queryKeys.bots.all(), "knowledge"] })
-    .find(([, data]) => data?.kbId === kbId)?.[1]?.websiteCrawls;
+  return views;
+}
+
+function watchCrawl(
+  view: KnowledgeView | undefined,
+  kbId: string | undefined,
+  url: string | null | undefined,
+): ImportWatch {
+  const origin = url ? importOrigin(url) : null;
+  return { kbId, origin, before: noticeFor(view?.websiteCrawls, origin) };
 }
 
 export function websiteImportPollInterval(
@@ -83,9 +114,8 @@ export function websiteImportPollInterval(
     .getMutationCache()
     .findAll({ mutationKey: importWebsiteKey })
     .some((mutation) => {
-      const input = mutation.state.variables as ImportWebsiteInput | undefined;
       const watch = mutation.state.context as ImportWatch | undefined;
-      if (!input || !watch?.origin || input.kbId !== kbId) return false;
+      if (!watch?.origin || watch.kbId !== kbId) return false;
       if (mutation.state.status === "error") return false;
       if (Date.now() - mutation.state.submittedAt >= WEBSITE_IMPORT_WATCH_MS) {
         return false;
@@ -250,13 +280,14 @@ export function useImportWebsite() {
         url: normalizeWebsiteUrl(data.url),
         extraUrls: data.extraUrls?.map(normalizeWebsiteUrl),
       }),
-    onMutate: (data): ImportWatch => {
-      const origin = importOrigin(data.url);
-      return {
-        origin,
-        before: noticeFor(cachedNotices(queryClient, data.kbId), origin),
-      };
-    },
+    onMutate: (data): ImportWatch =>
+      watchCrawl(
+        cachedKnowledgeViews(queryClient).find(
+          (view) => view.kbId === data.kbId,
+        ),
+        data.kbId,
+        data.url,
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),
@@ -271,7 +302,15 @@ export function useImportWebsite() {
 export function useRefreshWebsiteDocument() {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: importWebsiteKey,
     mutationFn: (id: string) => api.post(`/knowledge/documents/${id}/refresh`),
+    onMutate: (id): ImportWatch | undefined => {
+      for (const view of cachedKnowledgeViews(queryClient)) {
+        const doc = view.documents.find((candidate) => candidate.id === id);
+        if (doc) return watchCrawl(view, view.kbId, doc.sourceUrl);
+      }
+      return undefined;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),

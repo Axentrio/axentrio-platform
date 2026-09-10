@@ -23,6 +23,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import {
   useImportWebsite,
   useKnowledgeDocuments,
+  useRefreshWebsiteDocument,
   useWebsiteCrawlNotices,
   WEBSITE_IMPORT_WATCH_MS,
 } from "./useKnowledgeQueries";
@@ -46,6 +47,7 @@ function renderDocumentsPage() {
       documents: useKnowledgeDocuments(),
       notices: useWebsiteCrawlNotices(),
       importWebsite: useImportWebsite(),
+      refreshWebsite: useRefreshWebsiteDocument(),
     }),
     { wrapper },
   );
@@ -124,6 +126,39 @@ describe("website import watch", () => {
     await advance(6000);
     expect(result.current.notices.data).toEqual([]);
     expect(result.current.documents.data).toHaveLength(1);
+  });
+
+  it("shows a refresh's unreadable-rules notice while the tenant stays on the page", async () => {
+    const kept = {
+      origin: "https://shop.example/",
+      skippedByRules: 0,
+      rulesUnreachable: true,
+      hasPages: true,
+    };
+    let crawled = false;
+    apiGet.mockImplementation(async () => ({
+      documents: [
+        {
+          id: "doc-1",
+          type: "url",
+          status: "indexed",
+          sourceUrl: "https://shop.example/about",
+        },
+      ],
+      websiteCrawls: crawled ? [kept] : [],
+    }));
+    const { result } = renderDocumentsPage();
+    await advance(1000);
+
+    act(() => {
+      result.current.refreshWebsite.mutate("doc-1");
+    });
+    await advance(0);
+    expect(result.current.notices.data).toEqual([]);
+
+    crawled = true;
+    await advance(6000);
+    expect(result.current.notices.data).toEqual([kept]);
   });
 
   it("stops polling when the watch window ends without a notice", async () => {

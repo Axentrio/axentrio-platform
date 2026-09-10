@@ -531,6 +531,31 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       await expect(move).rejects.not.toThrow(new RegExp(refused));
       await expectOriginalKept(service.id, originalLocal);
     });
+
+    it('[past] refuses a move to a time already gone by with the past reason, not the notice reason', async () => {
+      const now = DateTime.now().setZone(PLAN_TZ);
+      const today = now.toFormat('yyyy-MM-dd');
+      const gone = now.minus({ days: 2 }).toFormat('yyyy-MM-dd');
+      const originalLocal = `${planDate(35)}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({
+        originalLocal,
+        service: { minNoticeMin: 0 },
+      });
+
+      const move = new InternalProvider().rescheduleBooking(
+        customerCtx,
+        original.id,
+        localInstant(`${gone}T10:00`).toISOString(),
+      );
+
+      await expect(move).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(move).rejects.toThrow(/already gone by/i);
+      await expect(move).rejects.not.toThrow(/notice/i);
+      await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
+      await expect(move).rejects.toThrow(new RegExp(`startDate ${today} and endDate ${dayAfter(today, 6)}`));
+      await expect(move).rejects.not.toThrow(new RegExp(gone));
+      await expectOriginalKept(service.id, originalLocal);
+    });
   });
 
   describe('[AVL-01] the controls — what must keep capturing', () => {

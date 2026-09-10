@@ -411,7 +411,8 @@ daily cap, so a capped date still sends the customer to another date. When the n
 time left that the business can take, the refusal names the range the whole-day check would retry,
 or the week after that date when that check gives no reason (a Service too long for the day's
 windows), not the same date. The reschedule change-Request path runs the same check
-(`requestWindowRefusal`: out-of-hours, closed date, `too_soon`) before it writes a change Request.
+(`requestWindowRefusal`: past, `too_soon`, closed date, out-of-hours) before it writes a change
+Request.
 Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals on each
 door, the date with no time left, the unusable window, the cap's precedence, and three capture
 controls.

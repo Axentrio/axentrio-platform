@@ -230,6 +230,17 @@ export const rescheduleClosedDay = (startDate: string, endDate: string): string 
   `ONLY the times it returns, and call reschedule_booking again with the one they choose. Do NOT ` +
   `capture it with request_appointment: a move is not a new request. Do not retry the same date.`;
 
+/** `requestInPast` for a move: those hours have gone by, and the appointment still stands. */
+export const reschedulePast = (startDate: string, endDate: string): string =>
+  `That time has already passed, so the appointment cannot be moved there and no change request ` +
+  `can be sent for it - there is nothing for the business to approve. The existing appointment ` +
+  `has NOT been changed. Do NOT tell the customer the team will come back on it. SAY BOTH: tell ` +
+  `the customer plainly that those hours have already gone by, and that their appointment still ` +
+  `stands. Call check_availability with startDate ${startDate} and endDate ${endDate}, offer the ` +
+  `customer ONLY the times it returns, and call reschedule_booking again with the one they ` +
+  `choose. Do not work out the next date yourself and do not name one to the customer. Do NOT ` +
+  `capture it with request_appointment: a move is not a new request.`;
+
 /** `requestTooSoon` for a move: the range only, never the notice bound itself. */
 export const rescheduleTooSoon = (startDate: string, endDate: string): string =>
   `That time is sooner than the notice this business needs, so the appointment cannot be moved ` +

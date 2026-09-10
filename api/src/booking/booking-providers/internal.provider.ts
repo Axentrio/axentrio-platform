@@ -139,6 +139,7 @@ import {
   rescheduleOutsideHours,
   rescheduleClosedDay,
   rescheduleTooSoon,
+  reschedulePast,
   requestBeforeCheck,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
@@ -306,6 +307,7 @@ function clearedTravelSnapshot(checked: TravelSnapshot | null, verdict: TravelVe
  * range to offer instead, or null when none applies. Both doors that write a Request ask this, so
  * the create path and a reschedule change Request cannot disagree about a time.
  *
+ *  - `past`: already gone by, and the range is the first reachable week.
  *  - `too_soon`: inside the minimum notice, and the range is the first reachable week.
  *  - `closed`: a date with no usable hours while the next week has some, and the range is ANOTHER
  *    date, never that one. A business that never opens gets null: that is the documented
@@ -323,10 +325,18 @@ function requestWindowRefusal(
   start: Date,
   durationMin: number,
   now: Date,
-): { reason: 'too_soon' | 'closed' | 'outside_hours' | 'outside_hours_none_left'; startDate: string; endDate: string } | null {
+): {
+  reason: 'past' | 'too_soon' | 'closed' | 'outside_hours' | 'outside_hours_none_left';
+  startDate: string;
+  endDate: string;
+} | null {
   const { earliestMs } = bookableWindow(service, now);
+  const earliest = new Date(earliestMs).toISOString();
+  if (start.getTime() < now.getTime()) {
+    return { reason: 'past', ...retryRange('past', earliest, rule.timezone) };
+  }
   if (start.getTime() < earliestMs) {
-    return { reason: 'too_soon', ...retryRange('too_soon', new Date(earliestMs).toISOString(), rule.timezone) };
+    return { reason: 'too_soon', ...retryRange('too_soon', earliest, rule.timezone) };
   }
   const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
   const nextDay = day.plus({ days: 1 });
@@ -2467,17 +2477,17 @@ export class InternalProvider implements BookingProvider {
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
       const now = new Date();
-      const { earliestMs, latestMs } = bookableWindow(service, now);
+      const { latestMs } = bookableWindow(service, now);
       const startMs = start.getTime();
       // The RANGE goes into the message, never the bound: it is a policy instant, not an opening
       // time - see the note on `requestTooSoon`.
-      if (startMs < now.getTime()) {
-        const { startDate, endDate } = retryRange('past', new Date(earliestMs).toISOString(), rule.timezone);
-        throw new BookingError(requestInPast(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
-      }
+      //
       // `requestWindowRefusal` decides which of booking-rules.md:26-28 applies; each answer is
       // spoken here at its own place in this path's gate order.
       const refusal = requestWindowRefusal(rule, service, start, effectiveDuration, now);
+      if (refusal?.reason === 'past') {
+        throw new BookingError(requestInPast(refusal.startDate, refusal.endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
       if (refusal?.reason === 'too_soon') {
         throw new BookingError(requestTooSoon(refusal.startDate, refusal.endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
@@ -4339,7 +4349,9 @@ export class InternalProvider implements BookingProvider {
       !(await loadBusinessRules(ctx.bot.id)).bookingsPaused
     ) {
       const message =
-        refusal.reason === 'too_soon'
+        refusal.reason === 'past'
+          ? reschedulePast(refusal.startDate, refusal.endDate)
+          : refusal.reason === 'too_soon'
           ? rescheduleTooSoon(refusal.startDate, refusal.endDate)
           : refusal.reason === 'closed'
             ? rescheduleClosedDay(refusal.startDate, refusal.endDate)

@@ -52,7 +52,7 @@ import { AvailabilityRule } from "../database/entities/AvailabilityRule";
 import { businessHoursToAvailability } from "../booking/sync-hours-from-bot";
 import { parseDefaultTakeoverHours } from "../services/inbox-prefs.service";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../schemas/user.schema";
-import { findInvertedHoursWindow } from "../schemas/bot.schema";
+import { findInvertedHoursWindow } from "../schemas/scheduler.schema";
 import { presentTenantSettings } from "./tenant-settings-view";
 import {
   listTenantUsers,

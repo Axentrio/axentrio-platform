@@ -18,7 +18,61 @@ export const writableLocationType = z.enum([
 export const weekday = z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 export const timeWindow = z.object({ start: hhmm, end: hhmm });
 
-const weeklyHours = z.record(weekday, z.array(timeWindow));
+const CLOCK_RE = /^(\d{1,2}):(\d{2})$/;
+
+/** Minutes since midnight, so `9:00`, `09:00` and `24:00` compare correctly. */
+function clockMinutes(t: string): number {
+  const m = CLOCK_RE.exec(t);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
+/**
+ * A window must run forward inside one calendar day. A `close` at or before `open` is
+ * impossible, and the off-hours reader (`isOutsideBusinessHours`) treats such a row as a
+ * window that never opens, so a saved 18:00->09:00 silently closes the day.
+ *
+ * OVERNIGHT HOURS (18:00->02:00) ARE NOT LEGAL HERE. One row holds one pair of clock
+ * times with no day-crossing marker, and the reader compares both bounds inside the same
+ * local day. Making them legal needs an explicit representation (a spill-over flag or a
+ * second row) in the reader, the slot engine and the hours placeholder - a larger change.
+ * Until then a window that wraps midnight is refused, like any other inverted window.
+ *
+ * A day marked `closed` keeps its stored clock text (see `availabilityToBusinessHours`),
+ * so its times are irrelevant and must never block a save.
+ */
+export function findInvertedHoursWindow(
+  schedule: ReadonlyArray<{ day: string; open: string; close: string; closed: boolean }>,
+): { index: number; message: string } | null {
+  const index = schedule.findIndex((d) => !d.closed && clockMinutes(d.close) <= clockMinutes(d.open));
+  if (index < 0) return null;
+  const d = schedule[index]!;
+  return {
+    index,
+    message: `${d.day}: close (${d.close}) must be after open (${d.open})`,
+  };
+}
+
+/** The same rule for `{ start, end }` windows, reported on the offending `end`. */
+function refuseInvertedWindows(
+  label: string,
+  windows: ReadonlyArray<{ start: string; end: string }>,
+  closed: boolean,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): void {
+  const bad = findInvertedHoursWindow(
+    windows.map((w) => ({ day: label, open: w.start, close: w.end, closed })),
+  );
+  if (bad) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, bad.index, 'end'], message: bad.message });
+  }
+}
+
+const weeklyHours = z.record(weekday, z.array(timeWindow)).superRefine((week, ctx) => {
+  for (const [day, windows] of Object.entries(week)) {
+    refuseInvertedWindows(day, windows ?? [], false, ctx, [day]);
+  }
+});
 
 /** The plain object shape — presets `.extend()` this, which a refined schema forbids. */
 export const dateOverrideBase = z.object({
@@ -43,7 +97,8 @@ export const dateOverride = dateOverrideBase
       return Number.isFinite(days) && days <= 366;
     },
     { message: 'A single override cannot span more than a year', path: ['endDate'] }
-  );
+  )
+  .superRefine((o, ctx) => refuseInvertedWindows(o.date, o.windows ?? [], o.closed === true, ctx, ['windows']));
 
 /**
  * A place the business serves. `id` is validated for shape only — an unknown province or

@@ -53,6 +53,54 @@ describe('availabilityInputSchema — split shifts', () => {
   });
 });
 
+describe('availabilityInputSchema — window direction', () => {
+  it('refuses an inverted weekly window and names the day', () => {
+    const r = availabilityInputSchema.safeParse({
+      ...base,
+      weeklyHours: { tue: [{ start: '09:00', end: '12:00' }, { start: '18:00', end: '09:00' }] },
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('tue: close (09:00) must be after open (18:00)');
+      expect(r.error.issues[0]!.path).toEqual(['weeklyHours', 'tue', 1, 'end']);
+    }
+  });
+
+  it('refuses equal start and end', () => {
+    const r = availabilityInputSchema.safeParse({ ...base, weeklyHours: { mon: [{ start: '09:00', end: '09:00' }] } });
+    expect(r.success).toBe(false);
+  });
+
+  it('compares clock minutes, so an unpadded hour and a 24:00 end stay valid', () => {
+    const r = availabilityInputSchema.safeParse({
+      ...base,
+      weeklyHours: { mon: [{ start: '9:00', end: '17:00' }], sat: [{ start: '00:00', end: '24:00' }] },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('refuses an inverted window on a date override', () => {
+    const r = availabilityInputSchema.safeParse({
+      ...base,
+      weeklyHours: {},
+      dateOverrides: [{ date: '2026-12-24', windows: [{ start: '18:00', end: '09:00' }] }],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.path).toEqual(['dateOverrides', 0, 'windows', 0, 'end']);
+    }
+  });
+
+  it('ignores the windows of a closed date override', () => {
+    const r = availabilityInputSchema.safeParse({
+      ...base,
+      weeklyHours: {},
+      dateOverrides: [{ date: '2026-12-25', closed: true, windows: [{ start: '18:00', end: '09:00' }] }],
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
 describe('availabilityInputSchema — timezone', () => {
   it('accepts a missing timezone for new clients', () => {
     const r = availabilityInputSchema.safeParse({ weeklyHours: {} });

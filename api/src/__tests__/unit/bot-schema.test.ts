@@ -57,6 +57,19 @@ describe('businessHoursSchema — dateOverrides', () => {
     expect(r.success).toBe(false);
   });
 
+  it('refuses an inverted one-off window and names the date', () => {
+    const r = businessHoursSchema.safeParse({
+      enabled: true,
+      schedule,
+      dateOverrides: [{ date: '2026-12-24', windows: [{ start: '18:00', end: '09:00' }] }],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('2026-12-24: close (09:00) must be after open (18:00)');
+      expect(r.error.issues[0]!.path).toEqual(['dateOverrides', 0, 'windows', 0, 'end']);
+    }
+  });
+
   it('treats a missing dateOverrides as empty (weekly schedule only)', () => {
     const r = businessHoursSchema.safeParse({ enabled: true, schedule });
     expect(r.success).toBe(true);

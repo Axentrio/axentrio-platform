@@ -37,4 +37,42 @@ describe("WebsiteCrawlNotices", () => {
       screen.queryByText(/kept\.example.*nothing was imported/),
     ).not.toBeInTheDocument();
   });
+
+  it("names the whole site without a page count only when its rules left no pages", () => {
+    render(
+      <WebsiteCrawlNotices
+        notices={[
+          {
+            origin: "https://closed.example/",
+            skippedByRules: 1,
+            rulesUnreachable: false,
+            hasPages: false,
+          },
+          {
+            origin: "https://shop.example/",
+            skippedByRules: 1,
+            rulesUnreachable: false,
+            hasPages: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "The whole site closed.example could not be imported because the site's own rules disallow it.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/page.*closed\.example/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "1 page on shop.example was skipped because the site's own rules disallow it.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/whole site shop\.example/),
+    ).not.toBeInTheDocument();
+  });
 });

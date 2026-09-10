@@ -18,14 +18,16 @@ const WebsiteCrawlNotices: React.FC<{ notices: WebsiteCrawlNotice[] }> = ({
     <>
       {notices.map((crawl) => {
         const host = noticeHost(crawl.origin);
-        const message = !crawl.rulesUnreachable
-          ? t("ai.knowledge.list.banner.skippedByRules", {
-              count: crawl.skippedByRules,
-              host,
-            })
-          : crawl.hasPages
+        const message = crawl.rulesUnreachable
+          ? crawl.hasPages
             ? t("ai.knowledge.list.banner.rulesUnreachableNoNewPages", { host })
-            : t("ai.knowledge.list.banner.rulesUnreachable", { host });
+            : t("ai.knowledge.list.banner.rulesUnreachable", { host })
+          : crawl.hasPages
+            ? t("ai.knowledge.list.banner.skippedByRules", {
+                count: crawl.skippedByRules,
+                host,
+              })
+            : t("ai.knowledge.list.banner.siteDisallowed", { host });
         return (
           <div
             key={crawl.origin}

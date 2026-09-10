@@ -165,7 +165,7 @@ describe("website crawl notices", () => {
     ]);
   });
 
-  it("reports a site whose rules disallow every page while it has no documents", async () => {
+  it("reports a site whose rules disallow its origin as the whole-site state: a rules skip and no pages", async () => {
     const tenant = await createTestTenant();
     const knowledge = new KnowledgeService(AppDataSource);
     const kb = await knowledge.resolveKnowledgeBase(tenant.id);

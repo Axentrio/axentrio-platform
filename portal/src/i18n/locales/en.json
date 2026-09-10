@@ -1149,6 +1149,7 @@
           "configureCta": "Configure AI Bot",
           "skippedByRules_one": "{{count}} page on {{host}} was skipped because the site's own rules disallow it.",
           "skippedByRules_other": "{{count}} pages on {{host}} were skipped because the site's own rules disallow them.",
+          "siteDisallowed": "The whole site {{host}} could not be imported because the site's own rules disallow it.",
           "rulesUnreachable": "The site's own rules for {{host}} were not available, so nothing was imported.",
           "rulesUnreachableNoNewPages": "The latest check could not read the site's own rules for {{host}}, so no new pages were added."
         },

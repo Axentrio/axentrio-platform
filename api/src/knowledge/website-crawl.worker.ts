@@ -151,6 +151,7 @@ export function createWebsiteCrawlProcessor(
       });
 
     const result = await runCrawl(originUrl, remaining);
+    await knowledge.recordUrlCrawlAttempt(tenantId, kbId, originUrl);
     logger.info("Website crawl finished", {
       tenantId,
       kbId,
@@ -169,6 +170,7 @@ export function createWebsiteCrawlProcessor(
       if (slots <= 0) break;
       try {
         const extraResult = await runCrawl(extraUrl, slots);
+        await knowledge.recordUrlCrawlAttempt(tenantId, kbId, extraUrl);
         logger.info("Website extra-host crawl finished", {
           tenantId,
           kbId,

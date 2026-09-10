@@ -36,15 +36,6 @@ export function parseRobotsTxt(body: string): {
   };
 }
 
-export function pathFromPageUrl(pageUrl: string): string {
-  try {
-    const parsed = new URL(pageUrl);
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return "/";
-  }
-}
-
 export async function fetchRobotsAllows(
   originUrl: string,
   get: (url: string) => Promise<{ status: number; body: string }>,
@@ -65,7 +56,10 @@ export async function fetchRobotsAllows(
     return async () => true;
   }
   const { allows } = parseRobotsTxt(res.body);
-  return async (pageUrl: string) => allows(pathFromPageUrl(pageUrl));
+  return async (pageUrl: string) => {
+    const { pathname, search } = new URL(pageUrl);
+    return allows(`${pathname}${search}`);
+  };
 }
 
 function refuseCrawl(

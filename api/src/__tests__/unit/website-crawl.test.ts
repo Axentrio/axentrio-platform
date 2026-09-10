@@ -6,7 +6,10 @@ import {
   isMediaUrl,
   originFromSourceUrl,
 } from "../../knowledge/website-url";
-import { parseRobotsTxt } from "../../knowledge/website-robots";
+import {
+  parseRobotsTxt,
+  fetchRobotsAllows,
+} from "../../knowledge/website-robots";
 import {
   crawlWebsite,
   DEFAULT_MAX_PAGES,
@@ -94,6 +97,66 @@ describe("parseRobotsTxt", () => {
     expect(robots.allows("/services")).toBe(true);
     expect(robots.allows("/private/x")).toBe(false);
     expect(robots.allows("/drafts/a")).toBe(false);
+  });
+});
+
+describe("fetchRobotsAllows", () => {
+  it("refuses Disallow paths on 200 and allows the rest", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /private\n",
+      }),
+    );
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(await allows("https://example.com/services")).toBe(true);
+  });
+
+  it("allows every path when robots.txt is 404", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({ status: 404, body: "" }),
+    );
+    expect(await allows("https://example.com/private/x")).toBe(true);
+  });
+
+  it("allows every path when get throws", async () => {
+    const allows = await fetchRobotsAllows("https://example.com", async () => {
+      throw new Error("network");
+    });
+    expect(await allows("https://example.com/private/x")).toBe(true);
+  });
+
+  it("allows every path for a non-https origin", async () => {
+    let calls = 0;
+    const allows = await fetchRobotsAllows(
+      "http://example.com",
+      async () => {
+        calls += 1;
+        return { status: 200, body: "User-agent: *\nDisallow: /\n" };
+      },
+    );
+    expect(calls).toBe(0);
+    expect(await allows("http://example.com/private")).toBe(true);
+  });
+
+  it("fetches robots.txt once per origin", async () => {
+    let calls = 0;
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => {
+        calls += 1;
+        return {
+          status: 200,
+          body: "User-agent: *\nDisallow: /private\n",
+        };
+      },
+    );
+    await allows("https://example.com/a");
+    await allows("https://example.com/b");
+    await allows("https://example.com/private/x");
+    expect(calls).toBe(1);
   });
 });
 

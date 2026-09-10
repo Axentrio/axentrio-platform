@@ -2,7 +2,7 @@ import type { DataSource } from "typeorm";
 import { KnowledgeService } from "./knowledge.service";
 import { crawlWebsite, type PageRenderer } from "./website-crawl";
 import { isSameHost } from "./website-url";
-import { KNOWLEDGE_BOT_UA } from "./website-robots";
+import { KNOWLEDGE_BOT_UA, fetchRobotsAllows } from "./website-robots";
 import {
   assertSafeOutboundUrl,
   safeOutboundRequest,
@@ -117,7 +117,21 @@ export function createWebsiteCrawlProcessor(
         maxPages,
         remainingSlots: slots,
         renderer: pageRenderer,
-        robotsAllows: async () => true,
+        robotsAllows: await fetchRobotsAllows(url, async (robotsUrl) => {
+          const res = await safeOutboundRequest({
+            url: robotsUrl,
+            method: "GET",
+            timeout: 5000,
+            headers: { "User-Agent": KNOWLEDGE_BOT_UA },
+            responseType: "text",
+            validateStatus: () => true,
+            maxRedirects: 0,
+          });
+          return {
+            status: res.status,
+            body: typeof res.data === "string" ? res.data : "",
+          };
+        }),
         assertSafe: (safeUrl) => {
           assertSafeOutboundUrl(safeUrl);
         },

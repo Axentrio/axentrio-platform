@@ -1,3 +1,5 @@
+import { originFromSourceUrl } from "./website-url";
+
 export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 
 export function parseRobotsTxt(body: string): {
@@ -32,4 +34,33 @@ export function parseRobotsTxt(body: string): {
       return !disallows.some((prefix) => path.startsWith(prefix));
     },
   };
+}
+
+export function pathFromPageUrl(pageUrl: string): string {
+  try {
+    const parsed = new URL(pageUrl);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "/";
+  }
+}
+
+export async function fetchRobotsAllows(
+  originUrl: string,
+  get: (url: string) => Promise<{ status: number; body: string }>,
+): Promise<(pageUrl: string) => Promise<boolean>> {
+  const origin = originFromSourceUrl(originUrl);
+  if (!origin) {
+    return async () => true;
+  }
+  try {
+    const res = await get(`${origin}/robots.txt`);
+    if (res.status !== 200) {
+      return async () => true;
+    }
+    const { allows } = parseRobotsTxt(res.body);
+    return async (pageUrl: string) => allows(pathFromPageUrl(pageUrl));
+  } catch {
+    return async () => true;
+  }
 }

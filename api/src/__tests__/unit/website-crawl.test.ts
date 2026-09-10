@@ -123,6 +123,21 @@ describe("fetchRobotsAllows", () => {
     expect(await allows("https://example.com/services")).toBe(true);
   });
 
+  it("refuses the canonical directory URL when Disallow ends in a slash", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /private/\n",
+      }),
+    );
+    expect(await allows("https://example.com/private")).toBe(false);
+    expect(await allows("https://example.com/private?page=2")).toBe(false);
+    expect(await allows("https://example.com/private/team")).toBe(false);
+    expect(await allows("https://example.com/privateer")).toBe(true);
+    expect(await allows("https://example.com/private.html")).toBe(true);
+  });
+
   it("allows every path when robots.txt is 404", async () => {
     const allows = await fetchRobotsAllows(
       "https://example.com",

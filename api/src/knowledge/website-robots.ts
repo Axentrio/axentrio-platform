@@ -58,7 +58,8 @@ export async function fetchRobotsAllows(
   const { allows } = parseRobotsTxt(res.body);
   return async (pageUrl: string) => {
     const { pathname, search } = new URL(pageUrl);
-    return allows(`${pathname}${search}`);
+    const directory = pathname.endsWith("/") ? pathname : `${pathname}/`;
+    return allows(`${pathname}${search}`) && allows(`${directory}${search}`);
   };
 }
 

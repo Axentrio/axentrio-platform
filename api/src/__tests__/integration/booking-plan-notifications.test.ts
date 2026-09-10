@@ -213,7 +213,7 @@ describe('booking plan · customer-facing notifications', () => {
       expect(formatServicePrice(service, PLAN_TZ)).toBe('€80');
     });
 
-    it('shows the final figure without advertising the reduction when the discount is not to be mentioned', async () => {
+    it('the calendar entry and the email carry only the payable figure', async () => {
       const { service, booking } = await bookWithPrice(false);
 
       /**
@@ -538,7 +538,7 @@ describe('booking plan · customer-facing notifications', () => {
 
   // ── BK-03 ─────────────────────────────────────────────────────────────────
   describe('[BK-03] an email address given once', () => {
-    it('lands on the booking and addresses the confirmation, without EMAIL_REQUIRED firing', async () => {
+    it('lands on the booking, addresses the confirmation, and is reused on a later reschedule', async () => {
       const { tenant, bot } = await bookableBusiness();
       /**
        * `customerEmailRequired: true` is load-bearing. The entity default is FALSE
@@ -583,6 +583,36 @@ describe('booking plan · customer-facing notifications', () => {
           service.id,
         ),
       ).rejects.toMatchObject({ code: 'EMAIL_REQUIRED' });
+
+      // THE REUSE CLAUSE, and the half a create-only test cannot reach. `rescheduleBooking` takes
+      // NO attendee argument, so the invite it issues can only find the customer by reading the
+      // address the first turn stored: the row supplies it at `internal.provider.ts:4658`.
+      // Asserting the create alone would prove only that a field passed in comes back out, which
+      // is plumbing rather than the plan's "supplied information reused, so the customer is never
+      // asked twice".
+      //
+      // PROVEN by breaking it, not assumed: with `attendeeEmail: booking.attendeeEmail ?? ''`
+      // at `internal.provider.ts:4658` replaced by `''`, the reschedule invite reaches nobody and
+      // the last assertion below fails with `expected [] to have a length of 1`. Restored.
+      // Worth recording honestly: SYS-08's reschedule case (`:447`) fails on that same break. This
+      // case is the one that NAMES the reuse clause; it is not the only guard on that line.
+      const seen = await deliveryIds(booking.id);
+      const movedStart = localInstant(planLocalTime(49, '15:00'));
+      const moved = await provider.rescheduleBooking(ctx, booking.id, movedStart.toISOString());
+      expect(moved.success).toBe(true);
+
+      // The appointment really moved, so the delivery below is the reschedule's own invite and not
+      // the original confirmation read a second time.
+      const rebooked = await soleConfirmedBooking(service.id);
+      expect(rebooked.id).toBe(booking.id);
+      expect(rebooked.startUtc.getTime()).toBe(movedStart.getTime());
+      expect(rebooked.attendeeEmail).toBe(PLAN_CUSTOMER_EMAIL);
+
+      // Nobody was asked again: the new invite reached the stored address, exactly once.
+      const afterMove = (await deliveriesSince(booking.id, seen)).filter(
+        (r) => r.recipientEmail.toLowerCase() === PLAN_CUSTOMER_EMAIL,
+      );
+      expect(afterMove).toHaveLength(1);
     });
   });
 });

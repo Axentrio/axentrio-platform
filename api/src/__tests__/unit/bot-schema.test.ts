@@ -64,6 +64,39 @@ describe('businessHoursSchema — dateOverrides', () => {
   });
 });
 
+describe('businessHoursSchema — window direction', () => {
+  const day = (open: string, close: string, closed = false) => ({
+    enabled: true,
+    schedule: [{ day: 'wednesday' as const, open, close, closed }],
+  });
+
+  it('accepts a window that runs forward', () => {
+    expect(businessHoursSchema.safeParse(day('09:00', '17:00')).success).toBe(true);
+  });
+
+  it('refuses equal open and close, and names the day', () => {
+    const r = businessHoursSchema.safeParse(day('09:00', '09:00'));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('wednesday: close (09:00) must be after open (09:00)');
+      expect(r.error.issues[0]!.path).toEqual(['schedule', 0, 'close']);
+    }
+  });
+
+  it('refuses a close before the open (an overnight window is not representable)', () => {
+    const r = businessHoursSchema.safeParse(day('18:00', '02:00'));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('wednesday: close (02:00) must be after open (18:00)');
+    }
+  });
+
+  it('ignores the times of a day marked closed', () => {
+    expect(businessHoursSchema.safeParse(day('18:00', '09:00', true)).success).toBe(true);
+    expect(businessHoursSchema.safeParse(day('00:00', '00:00', true)).success).toBe(true);
+  });
+});
+
 describe('updateBotSchema — quotedAddress', () => {
   it('accepts optional streetNumber / boxNumber and uppercases the country', () => {
     const r = updateBotSchema.safeParse({

@@ -1,4 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../../utils/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+import { logger } from "../../utils/logger";
 import {
   canonicalSourceUrl,
   normalizeWebsiteUrl,
@@ -101,6 +107,10 @@ describe("parseRobotsTxt", () => {
 });
 
 describe("fetchRobotsAllows", () => {
+  beforeEach(() => {
+    vi.mocked(logger.warn).mockClear();
+  });
+
   it("refuses Disallow paths on 200 and allows the rest", async () => {
     const allows = await fetchRobotsAllows(
       "https://example.com",
@@ -119,26 +129,40 @@ describe("fetchRobotsAllows", () => {
       async () => ({ status: 404, body: "" }),
     );
     expect(await allows("https://example.com/private/x")).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it("allows every path when get throws", async () => {
+  it("refuses every path when get throws", async () => {
     const allows = await fetchRobotsAllows("https://example.com", async () => {
-      throw new Error("network");
+      throw new Error("timeout of 5000ms exceeded");
     });
-    expect(await allows("https://example.com/private/x")).toBe(true);
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "timeout of 5000ms exceeded",
+    });
   });
 
-  it("allows every path for a non-https origin", async () => {
-    let calls = 0;
+  it("refuses every path when robots.txt is 5xx", async () => {
     const allows = await fetchRobotsAllows(
-      "http://example.com",
-      async () => {
-        calls += 1;
-        return { status: 200, body: "User-agent: *\nDisallow: /\n" };
-      },
+      "https://example.com",
+      async () => ({ status: 503, body: "" }),
     );
-    expect(calls).toBe(0);
-    expect(await allows("http://example.com/private")).toBe(true);
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "robots.txt returned status 503",
+    });
+  });
+
+  it("requests robots.txt at the origin root", async () => {
+    const requested: string[] = [];
+    await fetchRobotsAllows("https://example.com/blog/post", async (url) => {
+      requested.push(url);
+      return { status: 404, body: "" };
+    });
+    expect(requested).toEqual(["https://example.com/robots.txt"]);
   });
 
   it("fetches robots.txt once per origin", async () => {

@@ -1,4 +1,4 @@
-import { originFromSourceUrl } from "./website-url";
+import { logger } from "../utils/logger";
 
 export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 
@@ -49,18 +49,32 @@ export async function fetchRobotsAllows(
   originUrl: string,
   get: (url: string) => Promise<{ status: number; body: string }>,
 ): Promise<(pageUrl: string) => Promise<boolean>> {
-  const origin = originFromSourceUrl(originUrl);
-  if (!origin) {
-    return async () => true;
-  }
+  let res: { status: number; body: string };
   try {
-    const res = await get(`${origin}/robots.txt`);
-    if (res.status !== 200) {
-      return async () => true;
-    }
-    const { allows } = parseRobotsTxt(res.body);
-    return async (pageUrl: string) => allows(pathFromPageUrl(pageUrl));
-  } catch {
+    res = await get(new URL("/robots.txt", originUrl).toString());
+  } catch (error) {
+    return refuseCrawl(
+      originUrl,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  if (res.status >= 500) {
+    return refuseCrawl(originUrl, `robots.txt returned status ${res.status}`);
+  }
+  if (res.status !== 200) {
     return async () => true;
   }
+  const { allows } = parseRobotsTxt(res.body);
+  return async (pageUrl: string) => allows(pathFromPageUrl(pageUrl));
+}
+
+function refuseCrawl(
+  originUrl: string,
+  cause: string,
+): (pageUrl: string) => Promise<boolean> {
+  logger.warn("Website crawl refused: robots.txt unreachable", {
+    origin: originUrl,
+    cause,
+  });
+  return async () => false;
 }

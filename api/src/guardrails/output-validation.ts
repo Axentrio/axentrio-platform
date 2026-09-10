@@ -116,32 +116,55 @@ export function claimsBookingConfirmed(text: string): boolean {
  *    as legitimate replies in the unit corpus.
  *  - A BARE ACKNOWLEDGEMENT. "Thanks, I have your details" is conversation, not a claim about
  *    what reached the owner, so only a completed transmission verb counts.
- *  - A CONDITION OR A SEQUENCE. "Once all your details have been submitted, we reply within
- *    48 hours" describes the process, so a claim that `SUBORDINATE_LEAD_IN` introduces does
+ *  - A CONDITION, A SEQUENCE OR AN EMBEDDED QUESTION. "Once all your details have been
+ *    submitted, we reply within 48 hours" and "I can't confirm whether your request has been
+ *    forwarded" report nothing, so a claim that a lead-in of its own language introduces does
  *    not count. A lead-in whose own clause ends first ("Before you go I've passed your request
  *    on") introduces nothing, so the claim after it still counts.
+ *
+ * KNOWN RESIDUALS. A regex has no parse tree, so two shapes stay wrong on purpose. Each is
+ * pinned with `it.fails` in the unit corpus and written into the SYS-07 row:
+ *  - A join word after a lead-in's own clause hides a real claim: "When I checked I saw that
+ *    your request has been forwarded." A clause end at "and" or "that" would block "Once we see
+ *    that your request has been submitted, we reply within 48 hours."
+ *  - A negated report is blocked: "I can't confirm that your request has been forwarded." Only
+ *    a negation check could tell it from "I can confirm that ...", and recall wins that tie.
  */
 export function claimsRequestForwarded(text: string): boolean {
   const t = text.toLowerCase();
-  return REQUEST_FORWARDED.some((re) =>
-    [...t.matchAll(re)].some((m) => !SUBORDINATE_LEAD_IN.test(clauseBefore(t, m.index ?? 0))),
+  return REQUEST_FORWARDED.some(({ claim, leadIn }) =>
+    [...t.matchAll(claim)].some((m) => !leadIn.test(clauseBefore(t, m.index ?? 0))),
   );
 }
 
 /** The text from the start of the clause that holds `end` up to `end`, and never further back. */
 function clauseBefore(t: string, end: number): string {
-  return t.slice(0, end).split(/[.!?;:,\n—–]| - /).pop() ?? '';
+  return t.slice(0, end).split(/[.!?;:,\n—–]| - | but | maar | mais /).pop() ?? '';
 }
 
 /**
- * A conjunction that introduces the claim itself, which makes the claim a condition or a
- * sequence. Only a quantifier of the claim's noun ("once all your details") may stand between
- * them, or an earlier clause that "and" joins to the claim ("once the form is complete and your
- * request"). Any other words form a clause of their own, and the claim is a new main clause.
+ * A conjunction that introduces the claim itself. Between the two stands nothing, or one
+ * closed filler ("once all your details", "when exactly your request"), or an earlier clause
+ * that a join word ties to the claim ("once the form is complete and your request"). Any other
+ * words form a clause of their own, and the claim is a new main clause.
+ *
+ * One list per language, because the words collide: Dutch "of" is "whether", but English "of"
+ * is the quantifier in "All of your details have been submitted.", which is a claim.
  */
-const SUBORDINATE_LEAD_IN = new RegExp(
-  '\\b(?:once|after|when|whenever|as soon as|if|before|until|unless|zodra|nadat|als|wanneer|indien|voordat|totdat|une fois que|dès que|après que|quand|lorsque|si)' +
-    '\\s+(?:(?:all(?: of)?|both|al)\\s+|.*\\s(?:and|en|et(?: que)?)\\s+)?$',
+function subordinateLeadIn(leadIns: string, fillers: string, joins: string): RegExp {
+  return new RegExp(`\\b(?:${leadIns})\\s+(?:(?:${fillers})\\s+|.*\\s(?:${joins})\\s+)?$`);
+}
+
+const EN_LEAD_IN = subordinateLeadIn(
+  'once|after|when|whenever|as soon as|if|whether|before|until|unless',
+  '(?:all|most|some|any|each|both|the rest)(?: of)?|exactly',
+  'and|that',
+);
+const NL_LEAD_IN = subordinateLeadIn('zodra|nadat|als|wanneer|indien|of|voordat|totdat', 'al|precies', 'en|dat');
+const FR_LEAD_IN = subordinateLeadIn(
+  'une fois que|dès que|après que|quand|lorsque|si',
+  'exactement',
+  'et(?: que)?|que',
 );
 
 // One optional completion adverb, from a CLOSED list. Never a wildcard: an open gap between
@@ -153,37 +176,55 @@ const FR_ADVERB = '(?:(?:bien|déjà) )?';
 // The article is required, so the slot holds a recipient and never a negation.
 const NL_RECIPIENT = "(?:(?:naar|aan) (?:het|de|ons|onze) [a-zà-ÿ'’-]+ )?";
 
-const REQUEST_FORWARDED: RegExp[] = [
+const REQUEST_FORWARDED: Array<{ claim: RegExp; leadIn: RegExp }> = [
   // English, passive: the noun must be the customer's ask, so "your booking has been
   // confirmed" stays with `claimsBookingDone` and is judged against the Booking flag.
-  new RegExp(
-    `\\byour (?:request|enquiry|inquiry|details|message) (?:has|have) ${EN_ADVERB}been ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\\b`,
-    'g',
-  ),
+  {
+    claim: new RegExp(
+      `\\byour (?:request|enquiry|inquiry|details|message) (?:has|have) ${EN_ADVERB}been ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?)\\b`,
+      'g',
+    ),
+    leadIn: EN_LEAD_IN,
+  },
   // English, active. `(?:your|the|this)` is required after the verb: without it,
   // "I've sent you the opening hours" would match on `sent` alone.
-  new RegExp(
-    `\\bi(?:'ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
-    'g',
-  ),
+  {
+    claim: new RegExp(
+      `\\bi(?:'ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
+      'g',
+    ),
+    leadIn: EN_LEAD_IN,
+  },
   // Dutch. Present-perfect and passive, matching how the tenants this platform serves
   // actually phrase it ("uw aanvraag is doorgestuurd naar het team"). The passive needs the
   // customer's own pronoun: "de gegevens zijn geregistreerd bij de KvK" is not their ask.
-  new RegExp(
-    `\\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
-    'g',
-  ),
-  new RegExp(
-    `\\bik heb ${NL_ADVERB}(?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
-    'g',
-  ),
+  {
+    claim: new RegExp(
+      `\\b(?:je|jouw|uw) (?:aanvraag|verzoek|gegevens|bericht) (?:is|zijn|werd|werden) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+      'g',
+    ),
+    leadIn: NL_LEAD_IN,
+  },
+  {
+    claim: new RegExp(
+      `\\bik heb ${NL_ADVERB}(?:je|jouw|uw|de) (?:aanvraag|verzoek|gegevens|bericht) ${NL_ADVERB}${NL_RECIPIENT}(?:doorgestuurd|doorgegeven|verstuurd|ingediend|geregistreerd)\\b`,
+      'g',
+    ),
+    leadIn: NL_LEAD_IN,
+  },
   // French. `demande` only — `coordonnées` alone is contact detail, not an ask.
   // Both apostrophes, because a model writes either and a miss here is a lie shipped.
-  new RegExp(
-    `\\bvotre demande a ${FR_ADVERB}été ${FR_ADVERB}(?:transmise|envoyée|enregistrée|soumise|transférée)\\b`,
-    'g',
-  ),
-  new RegExp(`\\bj['’]ai ${FR_ADVERB}(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\\b`, 'g'),
+  {
+    claim: new RegExp(
+      `\\bvotre demande a ${FR_ADVERB}été ${FR_ADVERB}(?:transmise|envoyée|enregistrée|soumise|transférée)\\b`,
+      'g',
+    ),
+    leadIn: FR_LEAD_IN,
+  },
+  {
+    claim: new RegExp(`\\bj['’]ai ${FR_ADVERB}(?:transmis|envoyé|enregistré|soumis) (?:votre|la) demande\\b`, 'g'),
+    leadIn: FR_LEAD_IN,
+  },
 ];
 
 /**

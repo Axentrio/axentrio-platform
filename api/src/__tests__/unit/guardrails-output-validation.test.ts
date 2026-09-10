@@ -281,56 +281,63 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     priceContextLoaded: false,
   };
 
-  it("flags a request-forwarded claim when nothing was recorded", () => {
-    for (const text of [
-      "Your request has been submitted.",
-      "Your request has been forwarded to the team.",
-      "Your details have been passed on to the owner.",
-      "I've sent your request to the business.",
-      "I have passed your enquiry along to our team.",
-      "Uw aanvraag is doorgestuurd naar het team.",
-      "Ik heb je aanvraag doorgegeven aan de zaak.",
-      "Votre demande a bien été transmise à l'équipe.",
-      "J'ai transmis votre demande au propriétaire.",
-      // A completion adverb before the participle.
-      "Your request has been successfully forwarded to the team.",
-      "Your request has been successfully submitted.",
-      "Your request has been already submitted.",
-      "Your details have now been passed on to the team.",
-      "I've successfully submitted your request to the team.",
-      "I have just sent your request to the owner.",
-      "Uw aanvraag is succesvol doorgestuurd.",
-      "Je aanvraag is zojuist doorgestuurd naar het team.",
-      "Ik heb uw aanvraag al doorgestuurd.",
-      "Votre demande a déjà été transmise.",
-      "J'ai déjà transmis votre demande.",
-      // Dutch clause order: the recipient comes before the participle.
-      "Ik heb uw aanvraag naar het team doorgestuurd.",
-      "Uw aanvraag is naar de eigenaar doorgestuurd.",
-      "I've passed your request on to the team.",
-      // A lead-in in an earlier clause or sentence does not govern the claim.
-      "Once again, your request has been forwarded to the team.",
-      "As requested I've passed your request on to the team.",
-      "I'll let you know when the team replies. Your request has been forwarded to the team.",
-      "Als u nog vragen heeft, laat het weten. Uw aanvraag is naar de eigenaar doorgestuurd.",
-      "Si vous avez des questions, écrivez-nous. Votre demande a bien été transmise.",
-      // A lead-in whose own clause ends before the claim does not govern it.
-      "I'm not sure when they'll reply but your request has been forwarded to the team.",
-      "Good question about if we open Sundays - your request has been forwarded to the team.",
-      "Good question about if we open Sundays — your request has been forwarded to the team.",
-      "Good question about if we open Sundays – your request has been forwarded to the team.",
-      "Thanks! When it comes to your question - your request has been sent to the team.",
-      "Before you go I've passed your request on to the team.",
-      "Once again your request has been forwarded to the team.",
-      "Ik weet niet wanneer ze antwoorden maar uw aanvraag is doorgestuurd naar het team.",
-      "Voordat u gaat: ik heb uw aanvraag naar het team doorgestuurd.",
-      "Je ne sais pas quand ils répondront mais votre demande a bien été transmise.",
-    ]) {
-      const result = validateOutput(text, nothingRecorded);
-      expect(result.violations.map((v) => v.family), text).toContain(
-        "fake_request_confirmation",
-      );
-    }
+  // THE CONTRACT for the request matcher, pinned in both directions, so that a change which
+  // trades recall for precision, or the reverse, fails here instead of shipping.
+  // MUST BLOCK: each sentence reports a record that the run does not have.
+  const MUST_BLOCK = [
+    "Your request has been submitted.",
+    "Your request has been forwarded to the team.",
+    "Your details have been passed on to the owner.",
+    "I've sent your request to the business.",
+    "I have passed your enquiry along to our team.",
+    "Uw aanvraag is doorgestuurd naar het team.",
+    "Ik heb je aanvraag doorgegeven aan de zaak.",
+    "Votre demande a bien été transmise à l'équipe.",
+    "J'ai transmis votre demande au propriétaire.",
+    // A completion adverb before the participle.
+    "Your request has been successfully forwarded to the team.",
+    "Your request has been successfully submitted.",
+    "Your request has been already submitted.",
+    "Your details have now been passed on to the team.",
+    "I've successfully submitted your request to the team.",
+    "I have just sent your request to the owner.",
+    "Uw aanvraag is succesvol doorgestuurd.",
+    "Je aanvraag is zojuist doorgestuurd naar het team.",
+    "Ik heb uw aanvraag al doorgestuurd.",
+    "Votre demande a déjà été transmise.",
+    "J'ai déjà transmis votre demande.",
+    // Dutch clause order: the recipient comes before the participle.
+    "Ik heb uw aanvraag naar het team doorgestuurd.",
+    "Uw aanvraag is naar de eigenaar doorgestuurd.",
+    "I've passed your request on to the team.",
+    // A lead-in in an earlier clause or sentence does not govern the claim.
+    "Once again, your request has been forwarded to the team.",
+    "As requested I've passed your request on to the team.",
+    "I'll let you know when the team replies. Your request has been forwarded to the team.",
+    "Als u nog vragen heeft, laat het weten. Uw aanvraag is naar de eigenaar doorgestuurd.",
+    "Si vous avez des questions, écrivez-nous. Votre demande a bien été transmise.",
+    // A lead-in whose own clause ends before the claim does not govern it.
+    "I'm not sure when they'll reply but your request has been forwarded to the team.",
+    "Good question about if we open Sundays - your request has been forwarded to the team.",
+    "Good question about if we open Sundays — your request has been forwarded to the team.",
+    "Good question about if we open Sundays – your request has been forwarded to the team.",
+    "Thanks! When it comes to your question - your request has been sent to the team.",
+    "Before you go I've passed your request on to the team.",
+    "Once again your request has been forwarded to the team.",
+    "Ik weet niet wanneer ze antwoorden maar uw aanvraag is doorgestuurd naar het team.",
+    "Voordat u gaat: ik heb uw aanvraag naar het team doorgestuurd.",
+    "Je ne sais pas quand ils répondront mais votre demande a bien été transmise.",
+    // "but" starts a new main clause, so a lead-in before it cannot reach the claim.
+    "I'm not sure if they're in today but I've checked and your request has been forwarded.",
+    "Ik weet niet of ze er vandaag zijn maar ik heb gekeken en uw aanvraag is doorgestuurd.",
+    "Je ne sais pas s'ils sont là mais j'ai vérifié et votre demande a bien été transmise.",
+    // English "of" is a quantifier, not the Dutch "whether".
+    "All of your details have been submitted.",
+  ];
+
+  it.each(MUST_BLOCK)("blocks when nothing was recorded: %s", (text) => {
+    const result = validateOutput(text, nothingRecorded);
+    expect(result.violations.map((v) => v.family)).toContain("fake_request_confirmation");
   });
 
   it("allows the same claim once a request was recorded", () => {
@@ -361,52 +368,86 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     expect(result.ok, JSON.stringify(result.violations)).toBe(true);
   });
 
-  it("does not treat an intention, an offer, or a plain acknowledgement as a claim", () => {
-    // The false-positive half, and the half that decides whether this guard is worth
-    // shipping: every one of these is a good answer that must not become a fallback.
-    for (const text of [
-      "I'll forward your request to our business owner who handles special orders.",
-      "I'll go ahead and request your phone number.",
-      "Would you like me to pass your request on to the team?",
-      "I can send your details to the business if you like.",
-      "Thanks, I have your details.",
-      "I've scheduled a follow-up with our team.",
-      "I've sent you the opening hours.",
-      "Ik stuur je aanvraag door zodra ik je nummer heb.",
-      "Je peux transmettre votre demande au propriétaire.",
-      // A condition or a sequence describes the process; it reports nothing.
-      "Once your request has been submitted, we reply within 48 hours.",
-      "When I have sent your details to the team, you will get an email.",
-      "Zodra uw aanvraag is doorgestuurd, neemt het team contact op.",
-      "Nadat de aanvraag is ingediend, duurt het 2 weken.",
-      "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
-      // The lead-in governs its whole clause, not only the word next to the claim.
-      "Once all your details have been submitted, the team will contact you.",
-      "Once the form is complete and your request has been submitted, we reply within 48 hours.",
-      "Before your request has been forwarded, please check the form.",
-      "Until your request has been submitted, we cannot confirm a time.",
-      "Unless your details have been sent, the team cannot call you back.",
-      "Zodra al uw gegevens zijn ingediend, neemt het team contact op.",
-      "Voordat uw aanvraag is doorgestuurd, controleren we de gegevens.",
-      "Totdat uw aanvraag is ingediend, kunnen we niets plannen.",
-      "Une fois que le formulaire est rempli et que votre demande a été transmise, nous répondons sous 48 heures.",
-      "We reply within 48 hours once all of your details have been submitted.",
-      "Zodra het formulier klaar is en uw aanvraag is ingediend, neemt het team contact op.",
-      // A generic article is someone else's record, not the customer's ask.
-      "De gegevens zijn geregistreerd bij de KvK.",
-      // The adverb and recipient slots are closed lists, so a negation never fills them.
-      "Your request has not been forwarded yet.",
-      "Once your request has been successfully submitted, we reply within 48 hours.",
-      "I'll just send your request to the owner.",
-      "Ik heb uw aanvraag nog niet doorgestuurd.",
-      "Uw aanvraag is niet naar het team doorgestuurd.",
-      "Zodra uw aanvraag succesvol is ingediend, neemt het team contact op.",
-      "Votre demande n'a pas encore été transmise.",
-    ]) {
-      const result = validateOutput(text, nothingRecorded);
-      expect(result.ok, `${text} → ${JSON.stringify(result.violations)}`).toBe(true);
-    }
+  // MUST PASS: the false-positive half, and the half that decides whether this guard is worth
+  // shipping. Each is a good answer that must not become a fallback.
+  const MUST_PASS = [
+    // Future intent, an offer, or a plain acknowledgement.
+    "I'll forward your request to our business owner who handles special orders.",
+    "I'll go ahead and request your phone number.",
+    "Would you like me to pass your request on to the team?",
+    "I can send your details to the business if you like.",
+    "Thanks, I have your details.",
+    "I've scheduled a follow-up with our team.",
+    "I've sent you the opening hours.",
+    "Ik stuur je aanvraag door zodra ik je nummer heb.",
+    "Je peux transmettre votre demande au propriétaire.",
+    // A condition or a sequence describes the process; it reports nothing.
+    "Once your request has been submitted, we reply within 48 hours.",
+    "When I have sent your details to the team, you will get an email.",
+    "Zodra uw aanvraag is doorgestuurd, neemt het team contact op.",
+    "Nadat de aanvraag is ingediend, duurt het 2 weken.",
+    "Une fois que votre demande a été transmise, nous répondons sous 48 heures.",
+    // A filler or a joined clause may stand between the lead-in and the claim.
+    "Once all your details have been submitted, the team will contact you.",
+    "Once most of your details have been submitted, we reply.",
+    "Once the form is complete and your request has been submitted, we reply within 48 hours.",
+    "Once we see that your request has been submitted, we reply within 48 hours.",
+    "After we check that your details have been recorded, the team calls you.",
+    "Before your request has been forwarded, please check the form.",
+    "Until your request has been submitted, we cannot confirm a time.",
+    "Unless your details have been sent, the team cannot call you back.",
+    "Zodra al uw gegevens zijn ingediend, neemt het team contact op.",
+    "Zodra we zien dat uw aanvraag is ingediend, antwoorden we binnen 48 uur.",
+    "Voordat uw aanvraag is doorgestuurd, controleren we de gegevens.",
+    "Totdat uw aanvraag is ingediend, kunnen we niets plannen.",
+    "Une fois que le formulaire est rempli et que votre demande a été transmise, nous répondons sous 48 heures.",
+    "Une fois que nous voyons que votre demande a été transmise, nous répondons sous 48 heures.",
+    "We reply within 48 hours once all of your details have been submitted.",
+    "Zodra het formulier klaar is en uw aanvraag is ingediend, neemt het team contact op.",
+    // An embedded question asks; it reports nothing.
+    "When exactly your request has been forwarded depends on the queue.",
+    "I can't confirm whether your request has been forwarded.",
+    "Let me check whether your request has been submitted.",
+    "Ik kan niet zien of uw aanvraag is doorgestuurd.",
+    "Ik weet niet wanneer precies uw aanvraag is doorgestuurd.",
+    "Je ne peux pas confirmer si votre demande a été transmise.",
+    "Je ne sais pas quand exactement votre demande a été transmise.",
+    // A generic article is someone else's record, not the customer's ask.
+    "De gegevens zijn geregistreerd bij de KvK.",
+    // The adverb and recipient slots are closed lists, so a negation never fills them.
+    "Your request has not been forwarded yet.",
+    "Once your request has been successfully submitted, we reply within 48 hours.",
+    "I'll just send your request to the owner.",
+    "Ik heb uw aanvraag nog niet doorgestuurd.",
+    "Uw aanvraag is niet naar het team doorgestuurd.",
+    "Zodra uw aanvraag succesvol is ingediend, neemt het team contact op.",
+    "Votre demande n'a pas encore été transmise.",
+  ];
+
+  it.each(MUST_PASS)("passes when nothing was recorded: %s", (text) => {
+    const result = validateOutput(text, nothingRecorded);
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true);
   });
+
+  // KNOWN RESIDUALS. A regex has no parse tree, so these stay wrong on purpose; the SYS-07
+  // row names them. Each test states the RIGHT answer and is expected to fail. If a change
+  // fixes one, its test goes red: move the sentence into MUST_BLOCK or MUST_PASS.
+  const KNOWN_RESIDUALS: Array<[text: string, rightAnswer: "blocked" | "passed"]> = [
+    // A join word after a lead-in's own clause hides a real claim. A clause end at "and" or
+    // "that" would block "Once we see that your request has been submitted, ..." above.
+    ["Thanks for waiting while I checked if the team was in and your request has been forwarded to them.", "blocked"],
+    ["When I checked I saw that your request has been forwarded.", "blocked"],
+    // A negated report is blocked. Only a negation check could tell it from "I can confirm
+    // that ...", and recall wins that tie.
+    ["I can't confirm that your request has been forwarded.", "passed"],
+    ["Je ne peux pas confirmer que votre demande a été transmise.", "passed"],
+  ];
+
+  for (const [text, rightAnswer] of KNOWN_RESIDUALS) {
+    it.fails(`known residual, should be ${rightAnswer}: ${text}`, () => {
+      expect(validateOutput(text, nothingRecorded).ok).toBe(rightAnswer === "passed");
+    });
+  }
 });
 
 // These legitimate SMB replies must PASS — a false positive replaces a good

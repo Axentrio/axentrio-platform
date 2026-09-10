@@ -44,7 +44,7 @@ single-day guard, and BK-03's new reuse assertion — and each reproduced the fa
 describes. The rest are the recorded claim of the test's own author, written in the file beside
 the assertion it defends.
 
-**Delivered in three waves** — one shared harness, 12 vitest files holding 87 passing tests, and one
+**Delivered in three waves** — one shared harness, 12 vitest files holding 95 passing tests, and one
 live eval script that no CI job can reach. Waves 1 and 2 touched no production code; wave 3 is the
 first that does, because the two cases it closes are defects rather than gaps.
 

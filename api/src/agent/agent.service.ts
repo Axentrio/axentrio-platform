@@ -1739,10 +1739,10 @@ export class AgentService {
   ): Promise<IterationOutcome> {
     const address = this.applyAddressGuard(i, ctx, state, content);
     if (address.kind === 'retry') return CONTINUE_ITERATION;
-    const booking = this.applyBookingClaimGuard(i, ctx, state, address.content);
+    const booking = await this.applyBookingClaimGuard(i, ctx, state, address.content);
     if (booking.kind === 'retry') return CONTINUE_ITERATION;
     if (booking.kind === 'result') return { kind: 'done', result: booking.result };
-    const request = this.applyRequestClaimGuard(i, ctx, state, booking.content);
+    const request = await this.applyRequestClaimGuard(i, ctx, state, booking.content);
     if (request.kind === 'retry') return CONTINUE_ITERATION;
     if (request.kind === 'result') return { kind: 'done', result: request.result };
     if (await this.applyPendingYesGuard(i, ctx, state, request.content)) return CONTINUE_ITERATION;
@@ -1789,12 +1789,12 @@ export class AgentService {
    * Egress guard (issue #35): never let the model tell the customer a
    * booking/request happened unless one was actually recorded this run.
    */
-  private applyBookingClaimGuard(
+  private async applyBookingClaimGuard(
     i: number,
     ctx: RunLoopContext,
     state: RunLoopState,
     content: string,
-  ): GuardVerdict {
+  ): Promise<GuardVerdict> {
     if (!ctx.bookingClaimGuardArmed || state.bookingRecorded || !bookingClaimOutrunsRecord(content, state)) {
       return { kind: 'content', content };
     }
@@ -1820,7 +1820,7 @@ export class AgentService {
       kind: 'result',
       result: {
         type: 'response',
-        content: BOOKING_SAFE_FALLBACK,
+        content: await inCustomerLanguage(BOOKING_SAFE_FALLBACK, ctx.message, ctx.session),
         ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
         ...(state.escalationRequested ? { handoffRequested: true } : {}),
       },
@@ -1832,12 +1832,12 @@ export class AgentService {
    * on record. The output gate judges the same sentence, but in shadow mode it only logs,
    * so this guard is what stops the claim for a tenant that never turned enforce on.
    */
-  private applyRequestClaimGuard(
+  private async applyRequestClaimGuard(
     i: number,
     ctx: RunLoopContext,
     state: RunLoopState,
     content: string,
-  ): GuardVerdict {
+  ): Promise<GuardVerdict> {
     if (!ctx.requestClaimGuardArmed || state.bookingRecorded || state.requestRecorded || !claimsRequestForwarded(content)) {
       return { kind: 'content', content };
     }
@@ -1857,7 +1857,7 @@ export class AgentService {
       kind: 'result',
       result: {
         type: 'response',
-        content: REQUEST_SAFE_FALLBACK,
+        content: await inCustomerLanguage(REQUEST_SAFE_FALLBACK, ctx.message, ctx.session),
         ...(state.pendingAffordance ? { affordance: state.pendingAffordance } : {}),
         ...(state.escalationRequested ? { handoffRequested: true } : {}),
       },

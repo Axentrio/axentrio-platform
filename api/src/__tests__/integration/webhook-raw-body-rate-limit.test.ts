@@ -5,27 +5,27 @@
  * They mount ahead of `express.json()` because HMAC verification needs the
  * exact request bytes. That also put them ahead of `app.use(rateLimitByIp)`,
  * so an attacker who could not forge a signature could still flood them for
- * free. `rateLimitWebhookByIp` now runs first on each of those four mounts.
+ * free. `rateLimitWebhookByIp` now runs first on each of those four mounts,
+ * with a separate per-IP bucket for each route.
  *
  * Every request body below is deliberately spaced so that a JSON parse plus
  * re-serialize would change the bytes. A signature computed over the sent
  * string therefore only verifies if the raw Buffer survived the limiter
- * untouched — that is the assertion that matters most here.
+ * untouched. That is the assertion that matters most here.
  *
- * The limit is lowered through `config.rateLimit.webhookMaxRequests`, which
+ * The limit is lowered through `WEBHOOK_IP_RATE_LIMIT.maxRequests`, which
  * `rateLimitWebhookByIp` reads per call. Integration tests never call
  * `initializeRedis`, so `getRedisClient()` is null, no Redis limiter is built
  * and the capped in-memory counter enforces the current value.
  */
 
-import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import crypto from 'crypto';
 import request from 'supertest';
 import { Webhook } from 'svix';
 import type * as EnvironmentModule from '../../config/environment';
 
-const { WEBHOOK_LIMIT, CLERK_SECRET, META_SECRET, WHATSAPP_SECRET } = vi.hoisted(() => ({
-  WEBHOOK_LIMIT: 3,
+const { CLERK_SECRET, META_SECRET, WHATSAPP_SECRET } = vi.hoisted(() => ({
   // svix rejects anything that is not `whsec_` + base64 in its constructor.
   CLERK_SECRET: 'whsec_dGVzdF9jbGVya193ZWJob29rX3NlY3JldA==',
   META_SECRET: 'test_meta_app_secret',
@@ -33,7 +33,7 @@ const { WEBHOOK_LIMIT, CLERK_SECRET, META_SECRET, WHATSAPP_SECRET } = vi.hoisted
 }));
 
 // `config` is `as const`, so these cannot be set by assignment. Mock the module
-// the way `rate-limit-wire.test.ts` does, but keep every other setting real —
+// the way `rate-limit-wire.test.ts` does, but keep every other setting real.
 // `server.ts` boots off this same object.
 //
 // The secrets live here rather than in `.env.test` because that file is shared
@@ -46,7 +46,6 @@ vi.mock('../../config/environment', async (importOriginal) => {
     ...actual,
     config: {
       ...actual.config,
-      rateLimit: { ...actual.config.rateLimit, webhookMaxRequests: WEBHOOK_LIMIT },
       clerk: { ...actual.config.clerk, webhookSecret: CLERK_SECRET },
       meta: { ...actual.config.meta, appSecret: META_SECRET },
       whatsapp: { ...actual.config.whatsapp, appSecret: WHATSAPP_SECRET },
@@ -61,6 +60,10 @@ import {
   StripeBillingProvider,
 } from '../../billing/providers/stripe';
 import { registerBillingProvider } from '../../billing/provider-registry';
+import { WEBHOOK_IP_RATE_LIMIT } from '../../middleware/rate-limit.middleware';
+
+const WEBHOOK_LIMIT = 3;
+const DEFAULT_WEBHOOK_LIMIT = WEBHOOK_IP_RATE_LIMIT.maxRequests;
 
 /** Raw bytes handed to `stripe.webhooks.constructEvent` by the billing route. */
 let stripeRawBodySeen: unknown;
@@ -185,12 +188,17 @@ beforeAll(() => {
   registerBillingProvider(new StripeBillingProvider());
 });
 
+beforeEach(() => {
+  WEBHOOK_IP_RATE_LIMIT.maxRequests = WEBHOOK_LIMIT;
+});
+
 afterEach(() => {
+  WEBHOOK_IP_RATE_LIMIT.maxRequests = DEFAULT_WEBHOOK_LIMIT;
   setStripeClient(null);
   vi.restoreAllMocks();
 });
 
-describe.each(cases)('$name webhook — raw body and IP rate limit', (webhook) => {
+describe.each(cases)('$name webhook - raw body and IP rate limit', (webhook) => {
   it('accepts a validly signed webhook and verifies it against the unmodified raw body', async () => {
     webhook.arrange?.();
 
@@ -237,5 +245,25 @@ describe.each(cases)('$name webhook — raw body and IP rate limit', (webhook) =
     const res = await send(webhook, nextClientIp());
 
     webhook.assertAccepted(res, webhook.rawBody);
+  });
+});
+
+describe('per-route webhook buckets', () => {
+  it.each(cases)('a flood on $name leaves the other webhook routes open to the same IP', async (flooded) => {
+    const clientIp = nextClientIp();
+    flooded.arrange?.();
+
+    for (let i = 0; i < WEBHOOK_LIMIT; i++) {
+      // eslint-disable-next-line no-await-in-loop -- the limiter counts requests, so they must be sequential
+      await send(flooded, clientIp);
+    }
+    expect((await send(flooded, clientIp)).status).toBe(429);
+
+    for (const other of cases.filter((c) => c !== flooded)) {
+      other.arrange?.();
+      // eslint-disable-next-line no-await-in-loop -- one shared IP, checked route by route
+      const res = await send(other, clientIp);
+      other.assertAccepted(res, other.rawBody);
+    }
   });
 });

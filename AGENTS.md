@@ -29,6 +29,19 @@ failures that belong to no test. Commands: `npm run test:unit` and `npm run test
 in `api/`. Integration fixtures are truncated in an `afterEach` (`api/src/__tests__/setup.ts`),
 so build them per test, never in `beforeAll`.
 
+## Deploys
+
+A merge to `main` ships production through Railway, in `.github/workflows/ci.yml`:
+`deploy-prod-api-railway` and `deploy-prod-portal-railway`. `deploy-prod-vps-manual` is a
+manual `workflow_dispatch` path to a self-hosted VPS that has never run; it is gated behind
+`vars.PROD_VPS_LIVE`. `build-images` publishes a GHCR image that no job on `main` deploys.
+
+`railway up --detach` makes a green run mean "uploaded", not "serving". Ask the live service
+instead: `curl https://api.axentrio.com/health` returns the API commit, and
+`curl https://app.axentrio.com/commit.txt` returns the portal commit. Both read a sha that CI
+writes into the uploaded source (`api/public/commit.txt`, `portal/public/commit.txt`), which
+is tracked and holds the literal `unknown` in git.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

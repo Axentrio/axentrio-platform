@@ -155,7 +155,7 @@ jobs:
         working-directory: portal
         run: npm run build
 
-  deploy-api:
+  deploy-prod-api-railway:
     needs: [api-unit, api-integration, portal-build]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -175,15 +175,16 @@ jobs:
         working-directory: api
         run: npm ci && npm run build
 
-      - name: Upload source maps to Sentry
-        continue-on-error: true
-        working-directory: api
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        run: |
-          npx @sentry/cli sourcemaps upload ./dist --release="$GITHUB_SHA"
+      # NO Sentry source-map upload here, deliberately. A `sourcemaps upload` step used to run
+      # with `continue-on-error: true` and failed on EVERY production deploy with "organization
+      # not found", because `SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT` are all
+      # empty. A red error inside a green run trains people to ignore red, so the step was
+      # removed rather than left as decoration.
+      #
+      # CONSEQUENCE, written down instead of hidden: production API stack traces in Sentry are
+      # MINIFIED. To fix, set the three secrets in Settings > Actions > Secrets, then restore a
+      # `npx @sentry/cli sourcemaps upload ./dist --release="$GITHUB_SHA"` step here and in
+      # build-images, WITHOUT `continue-on-error`.
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
@@ -218,7 +219,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-  deploy-portal:
+  deploy-prod-portal-railway:
     needs: [api-unit, api-integration, portal-build]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -230,6 +231,21 @@ jobs:
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+
+      # Same stamp as deploy-prod-api-railway above, and for the same reason: written into
+      # the SOURCE that `railway up` uploads, never as a service variable. Vite copies
+      # `portal/public/commit.txt` into `dist/`, and nginx `try_files` serves it at
+      # `/commit.txt`, so `curl https://app.axentrio.com/commit.txt` answers "is my fix
+      # live" without the Railway dashboard.
+      #
+      # OVERWRITES a tracked placeholder rather than creating an ignored file, because
+      # `railway up` skips paths that .gitignore excludes. The tracked content is the
+      # literal `unknown`, so a stale sha cannot ship.
+      #
+      # NEVER fatal. A diagnostic that can stop a deploy is worse than no diagnostic.
+      - name: Stamp the commit into the build
+        continue-on-error: true
+        run: echo "$GITHUB_SHA" > portal/public/commit.txt
 
       - name: Deploy to Railway
         working-directory: .
@@ -265,16 +281,6 @@ jobs:
       - name: Install dependencies and build
         working-directory: api
         run: npm ci && npm run build
-
-      - name: Upload source maps to Sentry
-        continue-on-error: true
-        working-directory: api
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
-        run: |
-          npx @sentry/cli sourcemaps upload ./dist --release="$GITHUB_SHA"
 
       - name: Stamp the commit into the build
         continue-on-error: true
@@ -443,7 +449,7 @@ jobs:
           $AXENTRIO_SSH "deploy@${HOST}" \
             "/opt/axentrio/incoming/dev/apply-nonprod.sh dev dev-${GITHUB_SHA}"
 
-  deploy-prod:
+  deploy-prod-vps-manual:
     if: >
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
@@ -454,8 +460,8 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
-      name: production
-      url: https://app.axentrio.com
+      name: production-vps
+      url: https://api-vps.axentrio.com
     permissions:
       contents: read
       packages: read

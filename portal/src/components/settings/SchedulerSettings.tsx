@@ -15,6 +15,7 @@ import { AddressAutocomplete } from './AddressAutocomplete';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
+import { useAppAuth } from '@/auth/useAppAuth';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
@@ -33,6 +34,9 @@ import {
   useGoogleCalendarStatus,
   useConnectGoogleCalendar,
   useDisconnectGoogleCalendar,
+  useGoogleCalendars,
+  useSetGoogleCalendar,
+  type GoogleCalendarOption,
 } from '../../queries/useGoogleCalendarQueries';
 import {
   useOutlookCalendarStatus,
@@ -202,6 +206,13 @@ export const SchedulerSettings: React.FC = () => {
   const googleStatus = useGoogleCalendarStatus(botId);
   const connectGoogle = useConnectGoogleCalendar(botId);
   const disconnectGoogle = useDisconnectGoogleCalendar(botId);
+  // The picker's list is fetched only for a live connection: the endpoint calls Google, and a
+  // dead link has nothing to list until the owner reconnects.
+  const googleCalendars = useGoogleCalendars(
+    botId,
+    Boolean(googleStatus.data?.connected) && !googleStatus.data?.needsReauth
+  );
+  const setGoogleCalendar = useSetGoogleCalendar(botId);
   const outlookStatus = useOutlookCalendarStatus(botId);
   const connectOutlook = useConnectOutlookCalendar(botId);
   const disconnectOutlook = useDisconnectOutlookCalendar(botId);
@@ -463,6 +474,8 @@ export const SchedulerSettings: React.FC = () => {
                     connect={connectGoogle}
                     disconnect={disconnectGoogle}
                     blockedBy={outlookStatus.data?.connected ? 'Outlook' : null}
+                    calendars={googleCalendars}
+                    setCalendar={setGoogleCalendar}
                   />
                   <OutlookCalendarSection
                     status={outlookStatus}
@@ -645,11 +658,26 @@ export const SchedulerSettings: React.FC = () => {
  *  Both providers report the same three facts; only the copy around them differs,
  *  which is why the two rows stay separate. */
 interface CalendarSectionProps {
-  status: { data?: { connected: boolean; accountEmail: string | null; needsReauth?: boolean; supportsOnlineMeetings?: boolean } };
+  status: {
+    data?: {
+      connected: boolean;
+      accountEmail: string | null;
+      needsReauth?: boolean;
+      supportsOnlineMeetings?: boolean;
+      calendarId?: string | null;
+    };
+  };
   connect: { mutate: () => void; isPending: boolean };
   disconnect: { mutate: () => void; isPending: boolean };
   /** Other provider already active. Connect is off until they disconnect that one. */
   blockedBy: string | null;
+}
+
+/** Google carries the write-target picker on top of the shared row. Outlook writes to the
+ *  account's default calendar and ignores a calendar id, so its section has no such props. */
+interface GoogleCalendarSectionProps extends CalendarSectionProps {
+  calendars: { data?: GoogleCalendarOption[] };
+  setCalendar: { mutate: (calendarId: string) => void; isPending: boolean };
 }
 
 function CalendarIdleConnect({
@@ -688,7 +716,14 @@ function CalendarIdleConnect({
 
 /** Google Calendar connect / reconnect / disconnect row. Verbatim JSX, lifted out
  *  of SchedulerSettings so each section stays readable. */
-const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect, blockedBy }) => (
+const GoogleCalendarSection: React.FC<GoogleCalendarSectionProps> = ({
+  status,
+  connect,
+  disconnect,
+  blockedBy,
+  calendars,
+  setCalendar,
+}) => (
   <div className="space-y-2">
     <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
     {status.data?.connected && status.data?.needsReauth ? (
@@ -710,20 +745,27 @@ const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect
         </Button>
       </div>
     ) : status.data?.connected ? (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm text-text-secondary flex items-center gap-2">
-          <Check className="w-4 h-4 text-status-online" />
-          Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to your calendar and the bot won't double-book over your events.
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => disconnect.mutate()}
-          disabled={disconnect.isPending}
-        >
-          Disconnect
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-sm text-text-secondary flex items-center gap-2">
+            <Check className="w-4 h-4 text-status-online" />
+            Connected{status.data.accountEmail ? ` · ${status.data.accountEmail}` : ''} - bookings sync to the calendar this Agent writes to, and the bot won't double-book over the events on that calendar.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => disconnect.mutate()}
+            disabled={disconnect.isPending}
+          >
+            Disconnect
+          </Button>
+        </div>
+        <GoogleCalendarPicker
+          calendars={calendars}
+          setCalendar={setCalendar}
+          calendarId={status.data.calendarId ?? null}
+        />
+      </>
     ) : (
       <CalendarIdleConnect
         hint="Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events."
@@ -734,6 +776,73 @@ const GoogleCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect
     )}
   </div>
 );
+
+/**
+ * WHICH calendar this Agent's bookings are written to.
+ *
+ * The write-target endpoints (`GET /integrations/google/calendars`, `PUT /integrations/google/calendar`)
+ * have existed since the picker was added, but nothing in the portal ever called them - so every
+ * owner was silently pinned to their primary calendar (`docs/booking-epic-gap-analysis.md`). For
+ * the business moving bookings off a personal account onto a shared one, this control is what
+ * makes that choice real rather than API-only.
+ */
+function GoogleCalendarPicker({
+  calendars,
+  setCalendar,
+  calendarId,
+}: {
+  calendars: { data?: GoogleCalendarOption[] };
+  setCalendar: { mutate: (calendarId: string) => void; isPending: boolean };
+  calendarId: string | null;
+}) {
+  // `PUT /integrations/google/calendar` is admin-only while `GET /calendars` also allows a
+  // supervisor, so a supervisor can read the list but not write the choice. Show it read-only
+  // rather than letting the write fail at the server.
+  const { isRole } = useAppAuth();
+  const canEdit = isRole('admin');
+  const options = calendars.data ?? [];
+  // No list means no picker: the query is still loading, or the reader may not call
+  // `GET /integrations/google/calendars` (agent role). A control with nothing to choose
+  // from would only be able to label the stored value by its internal id.
+  if (options.length === 0) return null;
+  const value = calendarId ?? 'primary';
+  // The stored calendar can be missing from the list when its sharing changed after the choice
+  // was made. Keep it selectable rather than letting the control fall silent on a real value.
+  const valueIsListed = options.some((c) => (c.primary ? 'primary' : c.id) === value);
+  return (
+    <div className="space-y-1">
+      <Label htmlFor="google-calendar-target">Bookings go to</Label>
+      <select
+        id="google-calendar-target"
+        className="w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
+        value={value}
+        onChange={(e) => setCalendar.mutate(e.target.value)}
+        disabled={!canEdit || setCalendar.isPending}
+      >
+        {!valueIsListed ? (
+          // Deliberately names no cause: the reachable ones differ (the sharer downgraded this
+          // account below writer, or revoked access outright) and the list cannot tell them apart.
+          <option value={value}>Current calendar (not writable with this account)</option>
+        ) : null}
+        {options.map((c) => (
+          <option key={c.id} value={c.primary ? 'primary' : c.id}>
+            {c.summary}
+            {c.primary ? ' (primary)' : ''}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-text-secondary">
+        New bookings, their invites and any Meet link are written here. Your own events block a
+        new slot only while they sit on this calendar, so events on the calendar you leave stop
+        blocking. Bookings the bot already made keep their slots blocked, and their events stay
+        on the calendar they were created on.
+      </p>
+      {!canEdit ? (
+        <p className="text-xs text-text-muted">Only an admin can change this calendar.</p>
+      ) : null}
+    </div>
+  );
+}
 
 /** Outlook Calendar connect / reconnect / disconnect row. */
 const OutlookCalendarSection: React.FC<CalendarSectionProps> = ({ status, connect, disconnect, blockedBy }) => (

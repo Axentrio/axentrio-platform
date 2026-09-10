@@ -37,15 +37,29 @@ const mgrUpdate = vi.fn();
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: () => ({ findOne: repoFindOne, save: repoSave, create: (x: any) => x }),
-    transaction: async (cb: any) =>
-      cb({
+    // Writes are BUFFERED and only replayed onto the spies once the callback resolves, because
+    // Postgres rolls a transaction back when the callback throws. A save-then-throw from inside
+    // the callback therefore leaves `mgrSave`/`mgrUpdate` un-called, exactly as the real database
+    // leaves the row unchanged.
+    transaction: async (cb: any) => {
+      const writes: Array<() => void> = [];
+      const result = await cb({
         query: mgrQuery,
         findOne: mgrFindOne,
-        save: mgrSave,
-        update: mgrUpdate,
+        save: async (...args: any[]) => {
+          writes.push(() => mgrSave(...args));
+          return args[0];
+        },
+        update: async (...args: any[]) => {
+          writes.push(() => mgrUpdate(...args));
+          return undefined;
+        },
         // TypeORM EntityManager.create(EntityClass, data) → return the data object.
         create: (_cls: any, data: any) => data,
-      }),
+      });
+      for (const commit of writes) commit();
+      return result;
+    },
   },
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -55,6 +69,9 @@ vi.mock('../../scheduler/calendar-rekey', async (orig) => ({
   ...(await (orig as () => Promise<object>)()),
   rekeyBotBookings,
 }));
+
+const { alertCalendarReconnect } = vi.hoisted(() => ({ alertCalendarReconnect: vi.fn() }));
+vi.mock('../../notifications/calendar-reauth-alert', () => ({ alertCalendarReconnect }));
 
 import {
   buildConnectUrl,
@@ -195,7 +212,13 @@ describe('getValidAccessTokenMicrosoft', () => {
   });
 
   it('sets reauth_required and throws on invalid_grant', async () => {
-    const cred: any = { id: 'c1', botId: 'b1', tokenExpiry: new Date(Date.now() - 1000) };
+    const cred: any = {
+      id: 'c1',
+      botId: 'b1',
+      tenantId: 't1',
+      accountEmail: 'owner@outlook.com',
+      tokenExpiry: new Date(Date.now() - 1000),
+    };
     const row = {
       id: 'c1',
       botId: 'b1',
@@ -210,5 +233,31 @@ describe('getValidAccessTokenMicrosoft', () => {
     await expect(getValidAccessTokenMicrosoft(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
     expect(row.reauthRequired).toBe(true);
     expect(mgrSave).toHaveBeenCalledWith(expect.objectContaining({ reauthRequired: true }));
+    // The flag is COMMITTED before the error is raised. It used to be saved and then thrown out
+    // of the transaction, which rolled it back — so the dead link read as healthy forever.
+    expect(mgrSave.mock.invocationCallOrder[0]).toBeLessThan(
+      alertCalendarReconnect.mock.invocationCallOrder[0],
+    );
+    expect(alertCalendarReconnect).toHaveBeenCalledWith({
+      tenantId: 't1',
+      botId: 'b1',
+      provider: 'outlook',
+      accountEmail: 'owner@outlook.com',
+    });
+  });
+
+  it('does not re-alert when the link is already flagged', async () => {
+    const cred: any = { id: 'c1', botId: 'b1', tokenExpiry: new Date(Date.now() - 1000) };
+    mgrFindOne.mockResolvedValue({
+      id: 'c1',
+      botId: 'b1',
+      status: 'active',
+      reauthRequired: true,
+      refreshTokenEnc: 'enc(old-refresh)',
+      tokenExpiry: new Date(Date.now() - 1000),
+    });
+
+    await expect(getValidAccessTokenMicrosoft(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
+    expect(alertCalendarReconnect).not.toHaveBeenCalled();
   });
 });

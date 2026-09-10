@@ -48,6 +48,9 @@ vi.mock('../../database/data-source', () => ({
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
+const { alertCalendarReconnect } = vi.hoisted(() => ({ alertCalendarReconnect: vi.fn() }));
+vi.mock('../../notifications/calendar-reauth-alert', () => ({ alertCalendarReconnect }));
+
 import {
   validateState,
   getValidAccessToken,
@@ -114,10 +117,41 @@ describe('google-calendar.service', () => {
 
   it('flags reauthRequired on a permanent invalid_grant refresh failure', async () => {
     mockClient.getAccessToken.mockRejectedValue({ response: { data: { error: 'invalid_grant' } } });
-    const cred: any = { accessTokenEnc: 'enc(old)', refreshTokenEnc: 'enc(refresh)', tokenExpiry: new Date(Date.now() - 1000) };
+    const cred: any = {
+      tenantId: 't1',
+      botId: 'b1',
+      accountEmail: 'owner@axentrio.com',
+      accessTokenEnc: 'enc(old)',
+      refreshTokenEnc: 'enc(refresh)',
+      tokenExpiry: new Date(Date.now() - 1000),
+    };
     await expect(getValidAccessToken(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
     expect(cred.reauthRequired).toBe(true);
     expect(credSave).toHaveBeenCalledOnce();
+    // The owner is told, not left to notice a silent fallback to Requests.
+    expect(alertCalendarReconnect).toHaveBeenCalledOnce();
+    expect(alertCalendarReconnect).toHaveBeenCalledWith({
+      tenantId: 't1',
+      botId: 'b1',
+      provider: 'google',
+      accountEmail: 'owner@axentrio.com',
+    });
+  });
+
+  it('does not re-alert while the link is already flagged', async () => {
+    // Once flagged, every availability check re-enters this path. Re-alerting each time would
+    // bury the owner in duplicates of one outage.
+    mockClient.getAccessToken.mockRejectedValue({ response: { data: { error: 'invalid_grant' } } });
+    const cred: any = {
+      tenantId: 't1',
+      botId: 'b1',
+      accessTokenEnc: 'enc(old)',
+      refreshTokenEnc: 'enc(refresh)',
+      tokenExpiry: new Date(Date.now() - 1000),
+      reauthRequired: true,
+    };
+    await expect(getValidAccessToken(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
+    expect(alertCalendarReconnect).not.toHaveBeenCalled();
   });
 
   it('does NOT flag reauthRequired on a transient refresh error (rethrows)', async () => {

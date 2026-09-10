@@ -20,28 +20,28 @@ export interface WebsiteCrawlJob {
   extraUrls?: string[];
 }
 
-async function renderWithFetch(url: string) {
-  const { extractHtml } = await import("./document-extractors/html.extractor");
-
-  // safeOutboundRequest sets maxRedirects: 0, so redirects are followed
-  // manually: every hop is re-checked for SSRF and must stay on the
-  // original host (plan: https, same-host, public, capped).
+// safeOutboundRequest sets maxRedirects: 0, so redirects are followed
+// manually: every hop is re-checked for SSRF and must stay on the
+// original host (plan: https, same-host, public, capped).
+async function getFollowingSameHostRedirects(
+  url: string,
+  timeout: number,
+  maxRequests: number,
+) {
   let current = url;
-  let html = "";
-  for (let hop = 0; hop < 3; hop += 1) {
+  for (let request = 0; request < maxRequests; request += 1) {
     const res = await safeOutboundRequest({
       url: current,
       method: "GET",
-      timeout: 15000,
+      timeout,
       headers: { "User-Agent": KNOWLEDGE_BOT_UA },
       responseType: "text",
       validateStatus: () => true,
       maxRedirects: 0,
     });
-    const status = res.status;
     const location = res.headers.location;
     if (
-      [301, 302, 303, 307, 308].includes(status) &&
+      [301, 302, 303, 307, 308].includes(res.status) &&
       typeof location === "string" &&
       location.length > 0
     ) {
@@ -53,21 +53,30 @@ async function renderWithFetch(url: string) {
       current = next;
       continue;
     }
-    if (status < 200 || status >= 400) {
-      throw new Error(`Fetch failed with status ${status}`);
-    }
-    const contentType = String(res.headers["content-type"] || "").toLowerCase();
-    if (
-      contentType &&
-      !contentType.includes("html") &&
-      !contentType.includes("xml") &&
-      !contentType.includes("text/plain")
-    ) {
-      throw new Error(`Not HTML: ${contentType}`);
-    }
-    html = typeof res.data === "string" ? res.data : String(res.data ?? "");
-    break;
+    return res;
   }
+  throw new Error("Redirect chain did not reach a page");
+}
+
+async function renderWithFetch(url: string) {
+  const { extractHtml } = await import("./document-extractors/html.extractor");
+
+  const res = await getFollowingSameHostRedirects(url, 15000, 3);
+  const status = res.status;
+  if (status < 200 || status >= 400) {
+    throw new Error(`Fetch failed with status ${status}`);
+  }
+  const contentType = String(res.headers["content-type"] || "").toLowerCase();
+  if (
+    contentType &&
+    !contentType.includes("html") &&
+    !contentType.includes("xml") &&
+    !contentType.includes("text/plain")
+  ) {
+    throw new Error(`Not HTML: ${contentType}`);
+  }
+  const html =
+    typeof res.data === "string" ? res.data : String(res.data ?? "");
   if (!html) {
     throw new Error("Redirect chain did not reach a page");
   }
@@ -118,15 +127,7 @@ export function createWebsiteCrawlProcessor(
         remainingSlots: slots,
         renderer: pageRenderer,
         robotsAllows: await fetchRobotsAllows(url, async (robotsUrl) => {
-          const res = await safeOutboundRequest({
-            url: robotsUrl,
-            method: "GET",
-            timeout: 5000,
-            headers: { "User-Agent": KNOWLEDGE_BOT_UA },
-            responseType: "text",
-            validateStatus: () => true,
-            maxRedirects: 0,
-          });
+          const res = await getFollowingSameHostRedirects(robotsUrl, 5000, 6);
           return {
             status: res.status,
             body: typeof res.data === "string" ? res.data : "",

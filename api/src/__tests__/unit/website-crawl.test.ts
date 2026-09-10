@@ -171,6 +171,19 @@ describe("fetchRobotsAllows", () => {
     });
   });
 
+  it("refuses every path when robots.txt is a redirect that was not followed", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({ status: 301, body: "" }),
+    );
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "robots.txt returned status 301",
+    });
+  });
+
   it("requests robots.txt at the origin root", async () => {
     const requested: string[] = [];
     await fetchRobotsAllows("https://example.com/blog/post", async (url) => {

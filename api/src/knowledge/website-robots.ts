@@ -49,11 +49,11 @@ export async function fetchRobotsAllows(
       error instanceof Error ? error.message : String(error),
     );
   }
-  if (res.status >= 500) {
-    return refuseCrawl(originUrl, `robots.txt returned status ${res.status}`);
-  }
-  if (res.status !== 200) {
+  if (res.status >= 400 && res.status < 500) {
     return async () => true;
+  }
+  if (res.status < 200 || res.status >= 300) {
+    return refuseCrawl(originUrl, `robots.txt returned status ${res.status}`);
   }
   const { allows } = parseRobotsTxt(res.body);
   return async (pageUrl: string) => {

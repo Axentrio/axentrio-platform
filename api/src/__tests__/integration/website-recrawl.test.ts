@@ -15,10 +15,25 @@ vi.mock("../../security/ssrf-guard", async (importOriginal) => {
   return {
     ...actual,
     safeOutboundRequest: vi.fn(async (config: { url: string }) => {
-      if (new URL(config.url).host === "blocked.example") {
+      const { host } = new URL(config.url);
+      if (host === "blocked.example") {
         return {
           status: 200,
           data: "User-agent: *\nDisallow: /\n",
+          headers: {},
+        };
+      }
+      if (host === "moved.example") {
+        return {
+          status: 301,
+          data: "",
+          headers: { location: "https://www.moved.example/robots.txt" },
+        };
+      }
+      if (host === "www.moved.example") {
+        return {
+          status: 200,
+          data: "User-agent: *\nDisallow: /private\n",
           headers: {},
         };
       }
@@ -106,5 +121,39 @@ describe("recrawlStaleWebsiteOrigins", () => {
       expect(doc.updatedAt.toISOString()).toBe(LAST_REFRESH.toISOString());
       expect(doc.sourceContent).toBe("indexed before the robots fix");
     }
+  });
+});
+
+describe("createWebsiteCrawlProcessor", () => {
+  it("follows a same-host robots.txt redirect and skips the paths it disallows", async () => {
+    const tenant = await createTestTenant();
+    const knowledge = new KnowledgeService(AppDataSource);
+    const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+    const render = vi.fn(async (url: string) => ({
+      url,
+      html: "",
+      title: url,
+      text: `Page at ${url}`,
+      links: [
+        "https://moved.example/private/team",
+        "https://moved.example/services",
+      ],
+    }));
+    const processor = createWebsiteCrawlProcessor(AppDataSource, { render });
+
+    await processor({
+      data: {
+        tenantId: tenant.id,
+        kbId: kb.id,
+        originUrl: "https://moved.example/",
+        followLinks: true,
+        maxPages: 10,
+        extraUrls: [],
+      },
+    });
+
+    const rendered = render.mock.calls.map(([url]) => url);
+    expect(rendered).toContain("https://moved.example/services");
+    expect(rendered).not.toContain("https://moved.example/private/team");
   });
 });

@@ -75,7 +75,7 @@ describe('customer-facing copy for a BookingError', () => {
     expect(customerMessage(new BookingError('x', 'UNKNOWN_CODE', 500), frCopy)).toBe('Ce lien est invalide ou expiré.');
   });
 
-  it('tells a manage-page customer a refused hour is outside opening hours, in every locale, never "invalid link"', () => {
+  it('tells a manage-page customer the business does not take a refused time, in every locale, never "invalid link"', () => {
     const err = new BookingError('Do NOT capture it and do NOT tell the customer the team will come back on it.', 'REQUEST_OUTSIDE_WINDOW', 409);
     for (const [lang, copy] of [['en', BOOKING_COPY_EN], ['nl', BOOKING_COPY_NL], ['fr', BOOKING_COPY_FR]] as const) {
       const shown = customerMessage(err, copy);

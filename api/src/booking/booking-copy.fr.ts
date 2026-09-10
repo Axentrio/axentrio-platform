@@ -106,7 +106,7 @@ export const BOOKING_COPY_FR: BookingCopy = {
   'manage.err_SERVICE_REQUIRED':
     'Nous n’avons pas pu charger les horaires disponibles pour ce rendez-vous. Contactez l’entreprise directement.',
   'manage.err_SLOT_UNAVAILABLE': 'Cet horaire vient d’être pris. Choisissez-en un autre.',
-  'manage.err_REQUEST_OUTSIDE_WINDOW': 'Cet horaire est en dehors des heures d’ouverture. Choisissez-en un autre.',
+  'manage.err_REQUEST_OUTSIDE_WINDOW': 'L’entreprise ne prend pas de rendez-vous à cet horaire. Choisissez-en un autre.',
   'manage.err_BOOKING_NOT_FOUND': 'Ce rendez-vous n’a plus pu être trouvé.',
   'manage.err_CHANGE_NOT_ALLOWED':
     'Ce rendez-vous ne peut pas être modifié en ligne. Contactez l’entreprise directement.',

@@ -410,10 +410,11 @@ it opens counts as no hours, so that date gets the closed-day refusal. The gate 
 daily cap, so a capped date still sends the customer to another date. When the named date has no
 time left that the business can take, the refusal names the range the whole-day check would retry,
 or the week after that date when that check gives no reason (a Service too long for the day's
-windows), not the same date. The reschedule change-Request path runs the same check before it writes a change
-Request. Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals,
-the date with no time left, the unusable window, the reschedule path, the cap's precedence, and
-three capture controls.
+windows), not the same date. The reschedule change-Request path runs the same check
+(`requestWindowRefusal`: out-of-hours, closed date, `too_soon`) before it writes a change Request.
+Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals on each
+door, the date with no time left, the unusable window, the cap's precedence, and three capture
+controls.
 
 ### 3.3 `GEO-05` — ambiguous as written
 
@@ -487,7 +488,8 @@ Reported rather than patched — each is a behaviour change needing an owner's d
    sentence is permitted (§3.1).
 2. **`AVL-01`** — FIXED. The opening-hours gate now runs on `request_appointment` and on the
    reschedule change-Request path, so an Auto-book service can no longer capture a Request at an
-   hour outside the opening hours of a date that has hours (§3.2).
+   hour outside the opening hours of a date that has hours, on a date closed all day, or inside
+   the minimum notice (§3.2).
 3. **`SYS-02`** — a conversation reset cancels live Bookings and deletes their calendar mirrors,
    which is broader than "clear conversation state, keep bookings" (§1.4).
 4. **`PRC-12` / `sync-reconciler.ts:311`** — the discount is re-derived at reconcile time with its

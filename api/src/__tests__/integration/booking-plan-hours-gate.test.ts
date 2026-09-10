@@ -430,17 +430,40 @@ describe('booking plan · the opening-hours gate on the request path', () => {
     });
   });
 
-  describe('[AVL-01] the reschedule door — a change Request is held to the same hours', () => {
-    it('refuses a move to 03:00 before any change Request is written, and still captures one in hours', async () => {
-      const date = planDate(38);
-      const { tenant, bot, service, session } = await planHoursFixture({ date, service: { rescheduleMode: 'request' } });
+  describe('[AVL-01] the reschedule door — a change Request is held to the same three rules', () => {
+    /** A confirmed booking on a Service whose moves go to the owner, and the customer's own context. */
+    async function planMoveFixture(input: {
+      originalLocal: string;
+      rule?: Parameters<typeof setPlanAvailability>[1];
+      service?: Parameters<typeof createPlanService>[1];
+    }) {
+      const { tenant, bot, service, session } = await planHoursFixture({
+        date: input.originalLocal.slice(0, 10),
+        rule: input.rule,
+        service: { rescheduleMode: 'request', ...input.service },
+      });
       const original = await seedConfirmedBooking({
         bot,
         serviceId: service.id,
         sessionId: session.id,
-        startLocal: `${date}T10:00`,
+        startLocal: input.originalLocal,
       });
       const customerCtx = planBookingContext(tenant, bot, session, { subjectToCustomerChangePolicy: true });
+      return { service, original, customerCtx };
+    }
+
+    /** No change Request row, and the original still sits where it was. */
+    async function expectOriginalKept(serviceId: string, originalLocal: string) {
+      expect(await requestCount(serviceId)).toBe(0);
+      const [kept] = await bookingsForService(serviceId);
+      expect(kept.status).toBe('confirmed');
+      expect(localSpan(kept)).toMatchObject({ date: originalLocal.slice(0, 10), start: originalLocal.slice(11) });
+    }
+
+    it('[case 1] refuses a move to 03:00 before any change Request is written, and still captures one in hours', async () => {
+      const date = planDate(38);
+      const originalLocal = `${date}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({ originalLocal });
       const provider = new InternalProvider();
 
       const move = provider.rescheduleBooking(customerCtx, original.id, localInstant(`${date}T03:00`).toISOString());
@@ -449,10 +472,7 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       await expect(move).rejects.toThrow(/opening hours/i);
       await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
       await expect(move).rejects.toThrow(new RegExp(`startDate ${date} and endDate ${date}`));
-      expect(await requestCount(service.id)).toBe(0);
-      const [kept] = await bookingsForService(service.id);
-      expect(kept.status).toBe('confirmed');
-      expect(localSpan(kept)).toMatchObject({ date, start: '10:00' });
+      await expectOriginalKept(service.id, originalLocal);
 
       // The policy decision is untouched: an in-hours move on the same Service still goes to the
       // owner as a change Request.
@@ -461,6 +481,55 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       const request = (await bookingsForService(service.id)).find((r) => r.status === 'request_created');
       expect(request?.requestKind).toBe('reschedule');
       expect(localSpan(request!)).toMatchObject({ date, start: '14:00' });
+    });
+
+    it('[case 2] refuses a move to a date closed all day and offers ANOTHER DATE, never that one', async () => {
+      const closed = planDate(40);
+      const originalLocal = `${planDate(33)}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({
+        originalLocal,
+        rule: { dateOverrides: [{ date: closed, closed: true }] },
+      });
+
+      const move = new InternalProvider().rescheduleBooking(
+        customerCtx,
+        original.id,
+        localInstant(`${closed}T10:00`).toISOString(),
+      );
+
+      await expect(move).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(move).rejects.toThrow(/closed that whole date/i);
+      await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
+      await expect(move).rejects.toThrow(
+        new RegExp(`startDate ${dayAfter(closed, 1)} and endDate ${dayAfter(closed, 7)}`),
+      );
+      await expect(move).rejects.not.toThrow(new RegExp(closed));
+      await expectOriginalKept(service.id, originalLocal);
+    });
+
+    it('[case 3] refuses a move inside the minimum notice and offers a reachable range', async () => {
+      const refused = planDate(3);
+      const originalLocal = `${planDate(35)}T10:00`;
+      const { service, original, customerCtx } = await planMoveFixture({
+        originalLocal,
+        service: { minNoticeMin: 20 * 24 * 60 },
+      });
+      const noticeDate = DateTime.now().setZone(PLAN_TZ).plus({ days: 20 }).toFormat('yyyy-MM-dd');
+
+      const move = new InternalProvider().rescheduleBooking(
+        customerCtx,
+        original.id,
+        localInstant(`${refused}T10:00`).toISOString(),
+      );
+
+      await expect(move).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(move).rejects.toThrow(/sooner than the notice/i);
+      await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
+      await expect(move).rejects.toThrow(
+        new RegExp(`startDate ${noticeDate} and endDate ${dayAfter(noticeDate, 6)}`),
+      );
+      await expect(move).rejects.not.toThrow(new RegExp(refused));
+      await expectOriginalKept(service.id, originalLocal);
     });
   });
 

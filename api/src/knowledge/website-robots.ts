@@ -31,7 +31,7 @@ function ruleMatches(pattern: string, path: string): boolean {
 const utf8 = new TextEncoder();
 
 function normalisePercentEncoding(value: string): string {
-  return value.replace(/%[0-9a-f]{2}|\P{ASCII}+/giu, (match) =>
+  return value.replace(/%[0-9A-Fa-f]{2}|\P{ASCII}+/gu, (match) =>
     match.startsWith("%")
       ? match.toUpperCase()
       : Array.from(

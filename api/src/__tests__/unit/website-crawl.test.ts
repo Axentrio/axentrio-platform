@@ -231,6 +231,12 @@ describe("fetchRobotsAllows", () => {
       expect(await allows("https://example.com/über-uns/intern")).toBe(false);
     });
 
+    it("leaves ASCII k and s unencoded so rule lengths stay correct", async () => {
+      const allows = await allowsFor("Allow: /services/\nDisallow: /*/internal");
+      expect(await allows("https://example.com/services/internal")).toBe(false);
+      expect(await allows("https://example.com/services/boilers")).toBe(true);
+    });
+
     it("keeps * and $ working in a rule with non-ASCII text", async () => {
       const allows = await allowsFor("Disallow: /über-uns/*\nDisallow: /straße$");
       expect(await allows("https://example.com/über-uns/team/anna")).toBe(
@@ -394,6 +400,76 @@ describe("crawlWebsite", () => {
       enqueueIngest: async () => undefined,
     });
     expect(visited).toEqual(["https://plumber.example/"]);
+  });
+
+  describe("when a page redirects", () => {
+    const home = "https://plumber.example/";
+    const crawlWithRedirect = async (from: string, to: string) => {
+      const robotsAllows = await fetchRobotsAllows(home, async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /members/\n",
+      }));
+      const rendered: string[] = [];
+      const stored: Array<{ sourceUrl: string; text: string }> = [];
+      const result = await crawlWebsite({
+        originUrl: home,
+        followLinks: true,
+        maxPages: 10,
+        remainingSlots: 10,
+        renderer: {
+          render: async (url: string) => {
+            rendered.push(url);
+            const finalUrl = url === from ? to : url;
+            return {
+              url: finalUrl,
+              html: "",
+              title: finalUrl,
+              links:
+                url === home ? [from] : ["https://plumber.example/discovered"],
+              text: `Text of ${finalUrl}`,
+            };
+          },
+        },
+        robotsAllows,
+        assertSafe: () => undefined,
+        upsertPage: async (page) => {
+          stored.push({ sourceUrl: page.sourceUrl, text: page.text });
+          return { id: page.sourceUrl, processingVersion: 1, created: true };
+        },
+        enqueueIngest: async () => undefined,
+      });
+      return { rendered, stored, result };
+    };
+
+    it("stores nothing when an allowed url redirects to a disallowed one", async () => {
+      const { rendered, stored, result } = await crawlWithRedirect(
+        "https://plumber.example/account",
+        "https://plumber.example/members/login",
+      );
+      expect(stored).toEqual([{ sourceUrl: home, text: `Text of ${home}` }]);
+      expect(rendered).not.toContain("https://plumber.example/discovered");
+      expect(result).toMatchObject({ indexed: 1, failed: 0 });
+    });
+
+    it("stores normally when an allowed url redirects to another allowed one", async () => {
+      const { rendered, stored } = await crawlWithRedirect(
+        "https://plumber.example/old",
+        "https://plumber.example/new",
+      );
+      expect(stored).toContainEqual({
+        sourceUrl: "https://plumber.example/old",
+        text: "Text of https://plumber.example/new",
+      });
+      expect(rendered).toContain("https://plumber.example/discovered");
+    });
+
+    it("leaves a page without a redirect unaffected", async () => {
+      const { stored } = await crawlWithRedirect(
+        "https://plumber.example/account",
+        "https://plumber.example/members/login",
+      );
+      expect(stored[0]).toEqual({ sourceUrl: home, text: `Text of ${home}` });
+    });
   });
 
   it("stops at remaining document quota", async () => {

@@ -80,6 +80,7 @@ export async function crawlWebsite(input: {
 
     try {
       const rendered = await input.renderer.render(pageUrl);
+      if (!(await input.robotsAllows(rendered.url))) continue;
       const extracted = rendered.text
         ? { title: rendered.title, text: rendered.text, links: rendered.links }
         : extractHtml(rendered.html, pageUrl);

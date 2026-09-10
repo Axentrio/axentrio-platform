@@ -53,15 +53,19 @@ async function getFollowingSameHostRedirects(
       current = next;
       continue;
     }
-    return res;
+    return { res, url: current };
   }
   throw new Error("Redirect chain did not reach a page");
 }
 
-async function renderWithFetch(url: string) {
+export async function renderWithFetch(url: string) {
   const { extractHtml } = await import("./document-extractors/html.extractor");
 
-  const res = await getFollowingSameHostRedirects(url, 15000, 3);
+  const { res, url: finalUrl } = await getFollowingSameHostRedirects(
+    url,
+    15000,
+    3,
+  );
   const status = res.status;
   if (status < 200 || status >= 400) {
     throw new Error(`Fetch failed with status ${status}`);
@@ -82,7 +86,7 @@ async function renderWithFetch(url: string) {
   }
   const extracted = extractHtml(html, url);
   return {
-    url,
+    url: finalUrl,
     html,
     title: extracted.title,
     links: extracted.links,
@@ -127,7 +131,11 @@ export function createWebsiteCrawlProcessor(
         remainingSlots: slots,
         renderer: pageRenderer,
         robotsAllows: await fetchRobotsAllows(url, async (robotsUrl) => {
-          const res = await getFollowingSameHostRedirects(robotsUrl, 5000, 6);
+          const { res } = await getFollowingSameHostRedirects(
+            robotsUrl,
+            5000,
+            6,
+          );
           return {
             status: res.status,
             body: typeof res.data === "string" ? res.data : "",

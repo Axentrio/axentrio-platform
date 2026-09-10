@@ -15,7 +15,21 @@ vi.mock("../../security/ssrf-guard", async (importOriginal) => {
   return {
     ...actual,
     safeOutboundRequest: vi.fn(async (config: { url: string }) => {
-      const { host } = new URL(config.url);
+      const { host, pathname } = new URL(config.url);
+      if (host === "redirect.example") {
+        if (pathname === "/account") {
+          return {
+            status: 302,
+            data: "",
+            headers: { location: "/members/login" },
+          };
+        }
+        return {
+          status: 200,
+          data: "<html><head><title>Login</title></head><body><p>Members login</p></body></html>",
+          headers: { "content-type": "text/html" },
+        };
+      }
       if (host === "blocked.example") {
         return {
           status: 200,
@@ -48,6 +62,7 @@ import { KnowledgeService } from "../../knowledge/knowledge.service";
 import { recrawlStaleWebsiteOrigins } from "../../knowledge/website-crawl.service";
 import {
   createWebsiteCrawlProcessor,
+  renderWithFetch,
   WEBSITE_CRAWL_QUEUE,
   type WebsiteCrawlJob,
 } from "../../knowledge/website-crawl.worker";
@@ -121,6 +136,14 @@ describe("recrawlStaleWebsiteOrigins", () => {
       expect(doc.updatedAt.toISOString()).toBe(LAST_REFRESH.toISOString());
       expect(doc.sourceContent).toBe("indexed before the robots fix");
     }
+  });
+});
+
+describe("renderWithFetch", () => {
+  it("reports the final url after a same-host redirect", async () => {
+    const page = await renderWithFetch("https://redirect.example/account");
+    expect(page.url).toBe("https://redirect.example/members/login");
+    expect(page.text).toContain("Members login");
   });
 });
 

@@ -63,7 +63,7 @@ export async function renderWithPlaywright(url: string): Promise<RenderedPage> {
     const html = await page.content();
     const extracted = extractHtml(html, url);
     return {
-      url,
+      url: page.url(),
       html,
       title: extracted.title,
       links: extracted.links,
@@ -91,6 +91,7 @@ interface BrowserLike {
     waitForTimeout: (ms: number) => Promise<void>;
     evaluate: (fn: () => Promise<void>) => Promise<void>;
     content: () => Promise<string>;
+    url: () => string;
   }>;
   close: () => Promise<void>;
 }

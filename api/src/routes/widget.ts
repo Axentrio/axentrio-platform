@@ -232,7 +232,9 @@ router.get(
     const bot = result.bot;
 
     // #16d completion: widget appearance + behavioural config lives on
-    // bot.settings. Tenant is only consulted for tier (entitlement gates)
+    // bot.settings. One exception: a bot with no theme uses the anchor bot's
+    // primaryColor, because the portal Appearances form writes only to the
+    // anchor bot. Tenant is only consulted for tier (entitlement gates)
     // and the LLM-provider apiKey (read elsewhere, not exposed here).
     const botSettings = bot.settings ?? {};
     const appearance = buildWidgetAppearance(botSettings, await readAnchorPrimaryColor(bot));

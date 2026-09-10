@@ -164,7 +164,6 @@ export function createWebsiteCrawlProcessor(
       return result;
     };
 
-
     const result = await runCrawl(originUrl, remaining);
     await knowledge.recordUrlCrawlAttempt(tenantId, kbId, originUrl);
     logger.info("Website crawl finished", {

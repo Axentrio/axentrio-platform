@@ -23,7 +23,6 @@ import {
   useRefreshWebsiteDocument,
   useWebsiteCrawlNotices,
 } from "@/queries/useKnowledgeQueries";
-
 import DocumentCard from "./DocumentCard";
 import AddDocumentModal from "./AddDocumentModal";
 import WebsiteCrawlNotices from "./WebsiteCrawlNotices";
@@ -82,7 +81,6 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
   const retryDoc = useRetryDocument();
   const refreshWebsite = useRefreshWebsiteDocument();
   const { data: websiteCrawls = [] } = useWebsiteCrawlNotices();
-
 
   const [typeFilter, setTypeFilter] = useState<string>(initialFilter || "all");
   const [search, setSearch] = useState("");

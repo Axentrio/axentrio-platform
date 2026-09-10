@@ -179,7 +179,6 @@ export function useWebsiteCrawlNotices() {
   });
 }
 
-
 export function useKnowledgeStats() {
   return useQuery(knowledgeOptions.stats());
 }

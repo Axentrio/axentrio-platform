@@ -1145,7 +1145,6 @@
           "rulesUnreachable": "Les règles du site {{host}} n'ont pas pu être lues, donc rien n'a été importé.",
           "rulesUnreachableNoNewPages": "La dernière vérification n'a pas pu lire les règles du site {{host}}, donc aucune nouvelle page n'a été ajoutée."
         },
-
         "filters": {
           "all": "Tous",
           "indexed": "Indexé",

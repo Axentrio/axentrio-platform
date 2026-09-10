@@ -1153,7 +1153,6 @@
           "rulesUnreachable": "The site's own rules for {{host}} were not available, so nothing was imported.",
           "rulesUnreachableNoNewPages": "The latest check could not read the site's own rules for {{host}}, so no new pages were added."
         },
-
         "filters": {
           "all": "All",
           "indexed": "Indexed",

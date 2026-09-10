@@ -8,7 +8,6 @@ import {
   DocumentType,
 } from "../database/entities/KnowledgeDocument";
 import { WebsiteCrawlRun } from "../database/entities/WebsiteCrawlRun";
-
 import { KnowledgeChunk } from "../database/entities/KnowledgeChunk";
 import { Tenant } from "../database/entities/Tenant";
 import { config } from "../config/environment";
@@ -59,7 +58,6 @@ export class KnowledgeService {
     this.tenantRepo = dataSource.getRepository(Tenant);
     this.crawlRunRepo = dataSource.getRepository(WebsiteCrawlRun);
   }
-
 
   /**
    * Resolve the tenant-primary (bot-less) KnowledgeBase, creating it if absent.
@@ -473,7 +471,6 @@ export class KnowledgeService {
       { conflictPaths: ["tenantId", "knowledgeBaseId", "origin"] },
     );
   }
-
 
   async listStaleUrlOrigins(
     olderThan: Date,

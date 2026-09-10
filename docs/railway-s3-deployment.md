@@ -46,13 +46,19 @@ Complete guide for deploying the White Label Chatbot Platform on Railway with AW
 
 ### Option 2: Manual Deploy
 
+CI deploys production on every merge to `main`. The jobs are
+`deploy-prod-api-railway` and `deploy-prod-portal-railway` in
+`.github/workflows/ci.yml`. Use a manual deploy only when CI cannot run.
+
 ```bash
 # 1. Clone repository
 git clone <your-repo-url>
 cd chatbot-platform
 
-# 2. Run deployment script
-./deploy-railway.sh
+# 2. Deploy each service by name. Always give --service: `railway up` with no
+#    service target deploys to whichever service the local link points at.
+railway up --service chatbot-api
+railway up --service chatbot-portal
 ```
 
 ---

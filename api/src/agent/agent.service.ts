@@ -189,6 +189,16 @@ function absorbRecordedOutcome(tool: { name: string }, result: ToolResult, state
 }
 
 /**
+ * Every argument name a refusing booking tool can carry its time in, first match wins.
+ *
+ * `newStartTime` is `reschedule_booking`'s only one. While it was missing, a refused MOVE
+ * set the in-run flag and then persisted nothing - `localDate` stayed undefined and
+ * `absorbNamedTimeRefusal` returned early - so the next turn read no refusal and offered
+ * the hour the horizon had just refused.
+ */
+const REFUSED_TIME_ARGS = ['startDate', 'startTime', 'newStartTime', 'preferredTime'];
+
+/**
  * Notice/horizon refused the named time this run. Later availability is a list of
  * alternatives, so the clock-only "already chose this hour" match must stand down.
  */
@@ -211,11 +221,14 @@ function absorbNamedTimeRefusal(
   if (!horizonCheck && !horizonMutation) return;
   state.namedTimeRefused = true;
   const args = toolCall.arguments ?? {};
-  const dateArg =
-    (typeof args.startDate === 'string' && args.startDate) ||
-    (typeof args.startTime === 'string' && args.startTime) ||
-    (typeof args.preferredTime === 'string' && args.preferredTime) ||
-    '';
+  let dateArg = '';
+  for (const name of REFUSED_TIME_ARGS) {
+    const value = args[name];
+    if (typeof value === 'string' && value) {
+      dateArg = value;
+      break;
+    }
+  }
   const localDate = /^(\d{4}-\d{2}-\d{2})/.exec(dateArg)?.[1];
   const customer = latestCustomerTimeText([
     ...ctx.conversationHistory.map((m) => ({ role: m.role, text: contentToText(m.content) })),

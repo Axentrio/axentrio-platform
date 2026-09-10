@@ -115,6 +115,7 @@ describe('GET /widget/config — appearance block', () => {
     await jsonCalled;
     const body = unwrap(calls[0]);
     expect(body.appearance).toEqual({
+      primaryColor: null,
       avatarUrl: null,
       launcherPosition: 'bottom-right',
       launcherLabel: null,
@@ -145,10 +146,84 @@ describe('GET /widget/config — appearance block', () => {
     await jsonCalled;
     const body = unwrap(calls[0]);
     expect(body.appearance).toEqual({
+      primaryColor: null,
       avatarUrl: 'https://example.com/a.png',
       launcherPosition: 'bottom-left',
       launcherLabel: 'Chat',
     });
+  });
+
+  it('carries the saved theme.primaryColor on appearance', async () => {
+    mockResolvedBotAndTenant(
+      {
+        id: 't1',
+        name: 'Tenant',
+        status: 'active',
+        apiKey: 'k',
+        settings: {},
+      },
+      null,
+      {
+        theme: { primaryColor: '#c41e3a' },
+      },
+    );
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('k'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.appearance.primaryColor).toBe('#c41e3a');
+  });
+
+  const tenant = { id: 't1', name: 'Tenant', status: 'active', apiKey: 'k', settings: {} };
+
+  function nonAnchorBot(settings: Record<string, unknown>) {
+    return {
+      id: 'second-bot-id',
+      name: 'Second',
+      status: 'active',
+      isDefault: false,
+      publicKey: 'bk_second',
+      tenantId: tenant.id,
+      tenant,
+      settings,
+    };
+  }
+
+  function anchorBot(primaryColor: string) {
+    return {
+      id: 'anchor-bot-id',
+      name: 'Anchor',
+      status: 'active',
+      isDefault: true,
+      publicKey: tenant.apiKey,
+      tenantId: tenant.id,
+      settings: { theme: { primaryColor } },
+    };
+  }
+
+  it('paints the anchor bot saved colour on a non-anchor bot with no theme', async () => {
+    mockResolvedBotAndTenant(tenant, nonAnchorBot({}));
+    mockFindOne.mockResolvedValueOnce(anchorBot('#c41e3a'));
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('bk_second'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.bot.id).toBe('second-bot-id');
+    expect(body.appearance.primaryColor).toBe('#c41e3a');
+    expect(mockFindOne).toHaveBeenCalledWith({
+      where: expect.objectContaining({ tenantId: 't1', isDefault: true }),
+    });
+  });
+
+  it('keeps the own saved colour of a non-anchor bot', async () => {
+    mockResolvedBotAndTenant(tenant, nonAnchorBot({ theme: { primaryColor: '#0a7e3c' } }));
+    mockFindOne.mockResolvedValueOnce(anchorBot('#c41e3a'));
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('bk_second'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.bot.id).toBe('second-bot-id');
+    expect(body.appearance.primaryColor).toBe('#0a7e3c');
   });
 
   // D33/D34: Powered-by-Axentrio watermark is gated by tenant tier. Essential

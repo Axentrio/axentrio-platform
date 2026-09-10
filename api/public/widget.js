@@ -42,7 +42,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     
     // Widget Appearance
     position: 'right',
-    primaryColor: '#4F46E5',
+    primaryColor: '#6366f1',
     secondaryColor: '#10B981',
     backgroundColor: '',      // legacy, unused by editorial theme
     textColor: '',            // legacy, unused by editorial theme
@@ -326,7 +326,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
     :host {
       /* ---- Brand (tenant-configurable via applyThemeTokens) ---- */
-      --cb-primary:       #4F46E5;
+      --cb-primary:       #6366f1;
       --cb-primary-hover: color-mix(in oklch, var(--cb-primary) 88%, #000);
       --cb-primary-ink:   #FFFFFF;
       --cb-secondary:     #22C55E;
@@ -1745,6 +1745,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
       this._syncAttachButton();
+      // Re-paint brand colour now that appearance.primaryColor may have landed.
+      this.applyThemeTokens();
       // Note: already-rendered message-bubble avatars keep their original
       // render. New bot messages pick up this.appearance.avatarUrl via the
       // message template (line ~1801).
@@ -2338,7 +2340,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       };
 
-      set('--cb-primary',   this.config.primaryColor);
+      set('--cb-primary',   (this.appearance && this.appearance.primaryColor) || this.config.primaryColor);
       set('--cb-secondary', this.config.secondaryColor);
       set('--cb-radius',    this.config.borderRadius);
 

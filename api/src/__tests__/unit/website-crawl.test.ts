@@ -202,6 +202,45 @@ describe("fetchRobotsAllows", () => {
     expect(await allows("https://example.com/private.html")).toBe(true);
   });
 
+  describe("percent-encoding", () => {
+    const allowsFor = (rules: string) =>
+      fetchRobotsAllows("https://example.com", async () => ({
+        status: 200,
+        body: `User-agent: *\n${rules}\n`,
+      }));
+
+    it("encodes a non-ASCII rule to match the encoded pathname", async () => {
+      const allows = await allowsFor("Disallow: /über-uns/intern");
+      expect(new URL("https://example.com/über-uns/intern").pathname).toBe(
+        "/%C3%BCber-uns/intern",
+      );
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+      expect(await allows("https://example.com/%c3%bcber-uns/intern")).toBe(
+        false,
+      );
+      expect(await allows("https://example.com/über-uns/public")).toBe(true);
+    });
+
+    it("does not double-encode a rule that is already percent-encoded", async () => {
+      const allows = await allowsFor("Disallow: /%C3%BCber-uns/intern");
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+    });
+
+    it("matches lowercase hex in a rule against the uppercase pathname", async () => {
+      const allows = await allowsFor("Disallow: /%c3%bcber-uns/intern");
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+    });
+
+    it("keeps * and $ working in a rule with non-ASCII text", async () => {
+      const allows = await allowsFor("Disallow: /über-uns/*\nDisallow: /straße$");
+      expect(await allows("https://example.com/über-uns/team/anna")).toBe(
+        false,
+      );
+      expect(await allows("https://example.com/straße")).toBe(false);
+      expect(await allows("https://example.com/straße/karte")).toBe(true);
+    });
+  });
+
   it("allows every path when robots.txt is 404", async () => {
     const allows = await fetchRobotsAllows(
       "https://example.com",

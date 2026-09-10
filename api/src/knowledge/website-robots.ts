@@ -28,6 +28,19 @@ function ruleMatches(pattern: string, path: string): boolean {
   return path.indexOf(last, position) >= 0;
 }
 
+const utf8 = new TextEncoder();
+
+function normalisePercentEncoding(value: string): string {
+  return value.replace(/%[0-9a-f]{2}|\P{ASCII}+/giu, (match) =>
+    match.startsWith("%")
+      ? match.toUpperCase()
+      : Array.from(
+          utf8.encode(match),
+          (byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`,
+        ).join(""),
+  );
+}
+
 export function parseRobotsTxt(body: string): {
   allows: (path: string) => boolean;
 } {
@@ -59,7 +72,10 @@ export function parseRobotsTxt(body: string): {
     if (field !== "allow" && field !== "disallow") continue;
     groupHasRules = true;
     if (!value) continue;
-    const rule = { allow: field === "allow", pattern: value };
+    const rule = {
+      allow: field === "allow",
+      pattern: normalisePercentEncoding(value),
+    };
     if (agents.includes(ownAgent)) ownRules.push(rule);
     if (agents.includes("*")) starRules.push(rule);
   }
@@ -67,9 +83,10 @@ export function parseRobotsTxt(body: string): {
   const rules = namesOwnAgent ? ownRules : starRules;
   return {
     allows(path: string): boolean {
+      const target = normalisePercentEncoding(path);
       let winner: RobotsRule | undefined;
       for (const rule of rules) {
-        if (!ruleMatches(rule.pattern, path)) continue;
+        if (!ruleMatches(rule.pattern, target)) continue;
         if (
           !winner ||
           rule.pattern.length > winner.pattern.length ||

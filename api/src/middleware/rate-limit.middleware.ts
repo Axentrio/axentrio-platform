@@ -87,6 +87,7 @@ function fallbackConsume(key: string, maxRequests: number, windowMs: number): Fa
 // `null` means "no Redis-backed limiter yet" — requests are then enforced by
 // the capped `fallbackCounters` map above.
 let ipLimiter: RateLimiterAbstract | null = null;
+let webhookIpLimiter: RateLimiterAbstract | null = null;
 let tenantLimiter: RateLimiterAbstract | null = null;
 let socketLimiter: RateLimiterAbstract | null = null;
 
@@ -122,6 +123,11 @@ function createRateLimiter(
 function ensureLimiters(): void {
   if (!ipLimiter) {
     ipLimiter = createRateLimiter('rl:ip', RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS);
+    webhookIpLimiter = createRateLimiter(
+      'rl:webhook-ip',
+      config.rateLimit.webhookMaxRequests,
+      RATE_LIMIT_WINDOW_MS,
+    );
     tenantLimiter = createRateLimiter('rl:tenant', RATE_LIMIT_MAX_REQUESTS * 2, RATE_LIMIT_WINDOW_MS);
     socketLimiter = createRateLimiter('rl:socket', 100, RATE_LIMIT_WINDOW_MS);
   }
@@ -192,31 +198,45 @@ function consumeCappedFallback(
   next(new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }));
 }
 
+/** One IP-keyed budget: which limiter holds it, and how big it is. */
+interface IpBucket {
+  limiter: RateLimiterAbstract | null;
+  /** Namespaces the capped in-memory fallback key. */
+  keyPrefix: string;
+  maxRequests: number;
+}
+
 /**
- * HTTP Middleware: Rate limit by IP address
+ * Consume one point from an IP-keyed bucket and either continue or reject.
+ *
+ * `rateLimitByIp` and `rateLimitWebhookByIp` differ only in which bucket they
+ * charge and how many points that bucket holds, so the Redis path, the capped
+ * in-memory fallback and the two 429 body shapes live here once.
  */
-export function rateLimitByIp(
+function enforceIpLimit(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
+  bucket: IpBucket,
 ): void {
-  ensureLimiters();
+  const { limiter, maxRequests } = bucket;
   const clientIp = getClientIp(req);
+  const fallbackKey = `${bucket.keyPrefix}:${clientIp}`;
 
-  if (!ipLimiter) {
+  if (!limiter) {
     consumeCappedFallback(
       req,
       res,
       next,
-      `ip:${clientIp}`,
-      RATE_LIMIT_MAX_REQUESTS,
+      fallbackKey,
+      maxRequests,
       RATE_LIMIT_WINDOW_MS,
       'Rate limit exceeded. Please try again later.',
     );
     return;
   }
 
-  ipLimiter
+  limiter
     .consume(clientIp, 1)
     .then(() => {
       next();
@@ -224,7 +244,7 @@ export function rateLimitByIp(
     .catch((rateLimiterRes: RateLimiterRes | Error) => {
       if (rateLimiterRes instanceof Error) {
         logger.error('Rate limiter error, using in-memory fallback:', rateLimiterRes);
-        if (fallbackConsume(`ip:${clientIp}`, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS).allowed) {
+        if (fallbackConsume(fallbackKey, maxRequests, RATE_LIMIT_WINDOW_MS).allowed) {
           return next();
         }
         if (shouldUseLegacyEnvelope(req)) {
@@ -250,6 +270,53 @@ export function rateLimitByIp(
         new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
       );
     });
+}
+
+/**
+ * HTTP Middleware: Rate limit by IP address
+ */
+export function rateLimitByIp(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  ensureLimiters();
+  enforceIpLimit(req, res, next, {
+    limiter: ipLimiter,
+    keyPrefix: 'ip',
+    maxRequests: RATE_LIMIT_MAX_REQUESTS,
+  });
+}
+
+/**
+ * HTTP Middleware: Rate limit raw-body webhook ingress by IP address.
+ *
+ * The four provider webhook routes (Clerk, Meta, WhatsApp, billing) mount
+ * ahead of `express.json()` because HMAC verification needs the exact request
+ * bytes. That also put them ahead of `rateLimitByIp`, so an attacker who could
+ * not forge a signature could still flood them for free. This middleware runs
+ * before `express.raw()` on exactly those paths; it reads only `req.ip`, never
+ * the body, so the Buffer reaches the verifier untouched.
+ *
+ * It charges its OWN bucket (`rl:webhook-ip`), not the portal bucket, for two
+ * reasons: provider egress IPs are shared by every tenant at once, and a
+ * webhook burst must not spend the browser-facing budget of the same IP.
+ *
+ * The point count is read from `config` on each call so the setting has a
+ * single home; the Redis-backed limiter still binds it once in
+ * `ensureLimiters`, so a production change needs a restart.
+ */
+export function rateLimitWebhookByIp(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  ensureLimiters();
+  enforceIpLimit(req, res, next, {
+    limiter: webhookIpLimiter,
+    keyPrefix: 'webhook-ip',
+    maxRequests: config.rateLimit.webhookMaxRequests,
+  });
 }
 
 /**

@@ -119,7 +119,10 @@ import metaOAuthRoutes, {
 } from "./channels/meta/oauth.routes";
 
 // Middleware
-import { rateLimitByIp } from "./middleware/rate-limit.middleware";
+import {
+  rateLimitByIp,
+  rateLimitWebhookByIp,
+} from "./middleware/rate-limit.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import { requestIdMiddleware } from "./middleware/request-id.middleware";
 import { httpLoggerMiddleware } from "./middleware/http-logger.middleware";
@@ -165,10 +168,21 @@ async function checkRedisReadiness(): Promise<boolean> {
   }
 }
 
+// Raw-body provider webhooks.
+//
+// Each route needs the exact request bytes for HMAC signature verification, so
+// it must be registered before the app-level express.json(). That also puts it
+// ahead of app.use(rateLimitByIp) below, which once left all four endpoints
+// with no flood control at all. rateLimitWebhookByIp closes that: it reads only
+// req.ip, never the body, so the raw Buffer still reaches each verifier intact.
+// Keep it FIRST in every chain here — behind express.raw() it would still work,
+// but the body would already be buffered before the limit was checked.
+
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
 app.use(
   "/api/v1/webhooks/clerk",
+  rateLimitWebhookByIp,
   express.raw({ type: "application/json" }),
   clerkWebhookRoutes,
 );
@@ -176,6 +190,7 @@ app.use(
 // Meta webhook — must use raw body parser for HMAC verification
 app.use(
   "/api/v1/channels/meta/webhook",
+  rateLimitWebhookByIp,
   express.raw({ type: "application/json" }),
   metaWebhookRoutes,
 );
@@ -184,6 +199,7 @@ app.use(
 // scheme as Meta; mounted before express.json() so the Buffer is intact).
 app.use(
   "/api/v1/channels/whatsapp/webhook",
+  rateLimitWebhookByIp,
   express.raw({ type: "application/json" }),
   whatsappWebhookRoutes,
 );
@@ -194,6 +210,7 @@ app.use(
 // in .scratch/plan-billing.md.
 app.use(
   "/api/v1/webhooks/billing",
+  rateLimitWebhookByIp,
   express.raw({ type: "application/json" }),
   billingWebhookRoutes,
 );

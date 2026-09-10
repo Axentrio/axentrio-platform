@@ -55,6 +55,11 @@ const envSchema = z.object({
   // Rate Limiting
   RATE_LIMIT_WINDOW_MS: z.string().default('60000').transform(Number),
   RATE_LIMIT_MAX_REQUESTS: z.string().default('100').transform(Number),
+  // Raw-body provider webhooks (Clerk, Meta, WhatsApp, Stripe) share the
+  // window above but need their own, far larger, per-IP budget: every tenant's
+  // traffic arrives from one provider egress pool, and all four providers
+  // retry in bursts. Sized to stop a flood, not to shape provider traffic.
+  RATE_LIMIT_WEBHOOK_MAX_REQUESTS: z.string().default('1000').transform(Number),
   WS_RATE_LIMIT_MAX_CONNECTIONS: z.string().default('50').transform(Number),
 
   // Queue
@@ -434,6 +439,7 @@ export const config = {
   rateLimit: {
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     maxRequests: env.RATE_LIMIT_MAX_REQUESTS,
+    webhookMaxRequests: env.RATE_LIMIT_WEBHOOK_MAX_REQUESTS,
     wsMaxConnections: env.WS_RATE_LIMIT_MAX_CONNECTIONS,
   },
 

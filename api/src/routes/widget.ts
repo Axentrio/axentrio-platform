@@ -150,7 +150,11 @@ function buildWidgetAppearance(botSettings: WidgetBotSettings) {
     launcherPosition?: 'bottom-right' | 'bottom-left';
     launcherLabel?: string | null;
   };
+  const theme = (botSettings.theme ?? {}) as {
+    primaryColor?: string | null;
+  };
   return {
+    primaryColor: theme.primaryColor || null,
     avatarUrl: widgetSettings.avatarUrl || null,
     launcherPosition: widgetSettings.launcherPosition || 'bottom-right',
     launcherLabel: widgetSettings.launcherLabel || null,

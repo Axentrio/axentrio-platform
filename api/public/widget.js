@@ -1745,6 +1745,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
       this._syncAttachButton();
+      // Re-paint brand colour now that appearance.primaryColor may have landed.
+      this.applyThemeTokens();
       // Note: already-rendered message-bubble avatars keep their original
       // render. New bot messages pick up this.appearance.avatarUrl via the
       // message template (line ~1801).
@@ -2338,7 +2340,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       };
 
-      set('--cb-primary',   this.config.primaryColor);
+      set('--cb-primary',   (this.appearance && this.appearance.primaryColor) || this.config.primaryColor);
       set('--cb-secondary', this.config.secondaryColor);
       set('--cb-radius',    this.config.borderRadius);
 

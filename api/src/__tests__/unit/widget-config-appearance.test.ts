@@ -115,6 +115,7 @@ describe('GET /widget/config — appearance block', () => {
     await jsonCalled;
     const body = unwrap(calls[0]);
     expect(body.appearance).toEqual({
+      primaryColor: null,
       avatarUrl: null,
       launcherPosition: 'bottom-right',
       launcherLabel: null,
@@ -145,10 +146,32 @@ describe('GET /widget/config — appearance block', () => {
     await jsonCalled;
     const body = unwrap(calls[0]);
     expect(body.appearance).toEqual({
+      primaryColor: null,
       avatarUrl: 'https://example.com/a.png',
       launcherPosition: 'bottom-left',
       launcherLabel: 'Chat',
     });
+  });
+
+  it('carries the saved theme.primaryColor on appearance', async () => {
+    mockResolvedBotAndTenant(
+      {
+        id: 't1',
+        name: 'Tenant',
+        status: 'active',
+        apiKey: 'k',
+        settings: {},
+      },
+      null,
+      {
+        theme: { primaryColor: '#c41e3a' },
+      },
+    );
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('k'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.appearance.primaryColor).toBe('#c41e3a');
   });
 
   // D33/D34: Powered-by-Axentrio watermark is gated by tenant tier. Essential

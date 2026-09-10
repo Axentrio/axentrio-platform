@@ -395,14 +395,20 @@ alone, with no runtime guard.
 "every test that expects a request must assert the request row exists" as an implementation note for
 *automation*, the likely intent is a real guard. **Decide, then test.**
 
-### 3.2 `AVL-01` — no opening-hours gate on the request path
+### 3.2 `AVL-01` — no opening-hours gate on the request path — FIXED, not blocked
 
-`internal.provider.ts:2414-2443` refuses past / too_soon / too_far / closed-day / service-cap /
-no-check — but **not** an out-of-hours hour on a day that has hours. So after any check for that
-date, a model that names 08:30 on a 09:00 day can capture a Request on an **Auto-book** service,
-which `docs/booking-rules.md:26-28` explicitly forbids and calls load-bearing
-(*"Stay in the auto-book flow"*). The offer side is correctly pinned
-(`unit/slot-engine.test.ts:45`, `unit/agent-service.test.ts:1726`); the write side is not gated.
+This was recorded here as blocked on a product decision. It was not: `docs/booking-rules.md:26-28`
+already decided it and names the case first. The request path gated past / too_soon / too_far /
+closed-day / service-cap / no-check and **not** an out-of-hours hour on a day that has hours, so
+after a check for that date a model naming 08:30 on a 09:00 day captured a Request on an
+**Auto-book** service.
+
+Now gated in `internal.provider.ts`, by calling the offer path's own `isWithinBusinessHours`
+(`slot-engine.ts:457`) rather than restating an hours rule. Guarded with `windowsForDay(...).length
+> 0`, so a business that never opens keeps the ordinary-empty Request `booking-rules.md:20`
+documents, and placed after the daily cap, so a capped date still sends the customer to another
+date. Pinned in `integration/booking-plan-hours-gate.test.ts` — the three documented refusals, the
+cap's precedence, and three capture controls.
 
 ### 3.3 `GEO-05` — ambiguous as written
 
@@ -474,8 +480,8 @@ Reported rather than patched — each is a behaviour change needing an owner's d
 
 1. **`SYS-07`** — no runtime guard for request-shaped success claims; a test asserts the forbidden
    sentence is permitted (§3.1).
-2. **`AVL-01`** — no opening-hours gate on the request path; an Auto-book service can capture an
-   out-of-hours Request (§3.2).
+2. **`AVL-01`** — FIXED. The opening-hours gate now runs on the request path, so an Auto-book
+   service can no longer capture an out-of-hours Request (§3.2).
 3. **`SYS-02`** — a conversation reset cancels live Bookings and deletes their calendar mirrors,
    which is broader than "clear conversation state, keep bookings" (§1.4).
 4. **`PRC-12` / `sync-reconciler.ts:311`** — the discount is re-derived at reconcile time with its

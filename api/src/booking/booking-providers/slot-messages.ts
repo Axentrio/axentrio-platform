@@ -152,6 +152,38 @@ export const requestClosedDay = (startDate: string, endDate: string): string =>
   `Offer ONLY times that call gives you. Do not retry the same date.`;
 
 /**
+ * An auto-book service at an hour it does not open is not a request.
+ *
+ * The last hole in the window gates, and `requestClosedDay` above is why it stayed open so long:
+ * that one refuses a date with NO hours, so a date WITH hours looked handled. It was not. 03:00
+ * against a 09:00-17:00 Tuesday is the first case `docs/booking-rules.md:26-28` names, and the
+ * request path never looked at the day's windows at all. The offer path cannot produce that hour
+ * - `windowsForDay` never yields a start outside a window - so `check_availability` simply
+ * returns the day's real times, and only `request_appointment` could bank one. The owner then
+ * wakes to a request for an hour they never sold.
+ *
+ * THE DATE STAYS, AND THAT IS THE DIFFERENCE FROM EVERY MESSAGE ABOVE. Closed, capped, too soon
+ * and too far all send the customer to ANOTHER DATE. This date is open, so its own hours are the
+ * answer, and moving the customer off it would refuse times the business actively sells. Hence
+ * one date in, one date out, and the explicit "do not say closed".
+ *
+ * The opening clock itself is still absent, for the reason `requestTooSoon` documents at length:
+ * a bound this server states outranks the model's own reading, and the model is about to hold a
+ * real check for that date which carries the true hours.
+ */
+export const requestOutsideHours = (date: string): string =>
+  `That time is outside this business's opening hours for that date, so it cannot be booked OR ` +
+  `requested - they have already said they do not work at that hour, so there is nothing for ` +
+  `them to confirm. Do NOT capture it and do NOT tell the customer the team will come back on ` +
+  `it. SAY THE REASON: tell the customer plainly that the business does not open at the hour ` +
+  `they asked for. The business IS open on that date, so do NOT say it is closed for the day ` +
+  `and do NOT move the customer to another date. Call check_availability with startDate ` +
+  `${date} and endDate ${date} (whole day, no earliestTime or latestTime), offer the customer ` +
+  `the times it returns for that same date, and book one outright: this service books ` +
+  `automatically. Offer ONLY times that call gives you - do not work out the opening hours ` +
+  `yourself and do not name an hour to the customer.`;
+
+/**
  * An auto-book Request with no availability check behind it.
  * BK 2026-09-08: first reply offered a same-day appointment as a request for the owner to
  * review — zero tool calls, open day, free times. The window gates above cannot see it because

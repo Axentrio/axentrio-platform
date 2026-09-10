@@ -38,7 +38,7 @@ Never call `request_appointment` on Auto-book before a `check_availability` resu
 
 Request-only Services: no `check_availability`, no chips. Ask preferred time in their words.
 
-Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, closed weekday, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`. `internal-provider-create.test.ts` (check before capture).
+Pinned: `booking-prompt-behaviour.test.ts` (notice/horizon, daily cap, closed weekday, out-of-hours, check-before-capture, phone). Engine: `diagnoseEmptyRange` in `slot-engine.ts`. Tool: `outOfWindowGuidance` / empty-range `suggestedAction: 'check_availability'`. `internal-provider-create.test.ts` (check before capture). The three refusals above, on the WRITE path and against a real Availability Rule row: `integration/booking-plan-hours-gate.test.ts` — an out-of-hours hour keeps the named date, a closed date moves to another date, `too_soon` gets a reachable range, and the daily cap outranks all three. The hours check itself is `isWithinBusinessHours` in `slot-engine.ts`, shared with the offer path.
 
 ---
 

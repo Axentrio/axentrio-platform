@@ -49,7 +49,7 @@ import {
   type UpdateBookingPatch,
   type UpdateBookingResult,
 } from './types';
-import { computeSlots, diagnoseEmptyRange, bookableWindow, windowsForDay, weekFromHasHours, type SlotEngineInput } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, bookableWindow, windowsForDay, weekFromHasHours, isWithinBusinessHours, type SlotEngineInput } from './slot-engine';
 import {
   buildBookingEventContent,
   storedFileNames,
@@ -134,6 +134,7 @@ import {
   requestTooSoon,
   requestTooFar,
   requestClosedDay,
+  requestOutsideHours,
   requestBeforeCheck,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
@@ -2395,8 +2396,9 @@ export class InternalProvider implements BookingProvider {
     // Requests deliberately skip slot validation: a request is a preference and the owner
     // decides. That holds for a full day, an out-of-area job, or an unmeasured drive - all
     // times the owner COULD say yes to. It does not hold outside their notice or horizon,
-    // once this service has reached maxBookingsPerDay, or on a weekday they do not open:
-    // they have already said no and no decision is left to make.
+    // once this service has reached maxBookingsPerDay, on a weekday they do not open, or at an
+    // hour they do not open on a weekday they do: they have already said no and no decision is
+    // left to make.
     //
     // Seen on production with this fix's other half already deployed: the model skipped
     // check_availability entirely, asked for a name, and captured a request for a date 63 days
@@ -2410,7 +2412,8 @@ export class InternalProvider implements BookingProvider {
     // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
     // capturing exactly as before - a request is the RIGHT answer for those - and so does any
     // time inside the window that is merely taken. A daily cap is not "merely taken". A closed
-    // weekday is not "merely taken". Never-open is ordinary empty and still captures.
+    // weekday is not "merely taken". An hour outside the day's own opening hours is not
+    // "merely taken" either. Never-open is ordinary empty and still captures.
     const canAuto =
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
@@ -2433,11 +2436,32 @@ export class InternalProvider implements BookingProvider {
       }
       const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
       const retryFrom = day.plus({ days: 1 });
-      if (windowsForDay(rule, day).length === 0 && weekFromHasHours(rule, retryFrom)) {
+      const dayWindows = windowsForDay(rule, day);
+      if (dayWindows.length === 0 && weekFromHasHours(rule, retryFrom)) {
         const { startDate, endDate } = retryRange('closed', retryFrom.toJSDate().toISOString(), rule.timezone);
         throw new BookingError(requestClosedDay(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       await enforceServiceDayCapacity(null, service, start, rule.timezone);
+      // ...and an hour they do not open, on a date they DO. The gate above only sees a date with
+      // NO hours, so 03:00 against a 09:00-17:00 Tuesday walked straight past every check here
+      // and became a request - booking-rules.md:26-28 names that case FIRST and forbids it.
+      //
+      // `isWithinBusinessHours` is the offer path's own window math (weekly hours, date
+      // overrides, the "24:00" end-of-day marker, always-open), sharing `windowsForDay` with the
+      // engine. Reused rather than restated so the hour this path refuses and the hour
+      // `check_availability` declines to offer can never be decided differently. Only the START
+      // is judged: a request still skips slot-FIT, so an in-hours start that would overrun
+      // closing is the owner's call exactly as before.
+      //
+      // AFTER the daily cap on purpose. A capped date must send the customer to another date;
+      // this refusal keeps them on it. The stricter, date-wide no has to speak first.
+      //
+      // A never-open business still captures: it has no windows on ANY day, so `dayWindows` is
+      // empty, the closed-day gate stood down, and so does this one. That is the documented
+      // ordinary-empty Request, not an out-of-hours one.
+      if (dayWindows.length > 0 && !isWithinBusinessHours(rule, start)) {
+        throw new BookingError(requestOutsideHours(day.toFormat('yyyy-MM-dd')), 'REQUEST_OUTSIDE_WINDOW', 409);
+      }
       if (await this.requestNeedsCheckFirst(ctx, service, extras, day.toFormat('yyyy-MM-dd'))) {
         throw new BookingError(requestBeforeCheck(day.toFormat('yyyy-MM-dd')), 'REQUEST_BEFORE_CHECK', 409);
       }

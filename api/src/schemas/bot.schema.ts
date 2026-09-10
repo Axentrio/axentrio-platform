@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateOverride } from './scheduler.schema';
+import { dateOverride, findInvertedHoursWindow } from './scheduler.schema';
 import { ORIGIN_PATTERN_RE } from '../security/widget-origin';
 
 export const createBotSchema = z.object({
@@ -10,24 +10,35 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Operational, tenant-owned business hours (drives off-hours handling). Optional
 // per-bot config; absent/empty schedule = always "in hours".
-export const businessHoursSchema = z.object({
-  enabled: z.boolean(),
-  schedule: z
-    .array(
-      z.object({
-        // Full lowercase weekday name — must match Intl `weekday: 'long'` output
-        // (e.g. "monday"), which is how the off-hours check matches the day.
-        day: z.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']),
-        open: z.string().regex(TIME_RE, 'open must be HH:MM'),
-        close: z.string().regex(TIME_RE, 'close must be HH:MM'),
-        closed: z.boolean(),
-      }),
-    )
-    .max(7),
-  // Same Date Override shape the booking Availability Rule already stores:
-  // a named closure, or different hours, on a specific date (or inclusive range).
-  dateOverrides: z.array(dateOverride).optional(),
-});
+export const businessHoursSchema = z
+  .object({
+    enabled: z.boolean(),
+    schedule: z
+      .array(
+        z.object({
+          // Full lowercase weekday name — must match Intl `weekday: 'long'` output
+          // (e.g. "monday"), which is how the off-hours check matches the day.
+          day: z.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']),
+          open: z.string().regex(TIME_RE, 'open must be HH:MM'),
+          close: z.string().regex(TIME_RE, 'close must be HH:MM'),
+          closed: z.boolean(),
+        }),
+      )
+      .max(7),
+    // Same Date Override shape the booking Availability Rule already stores:
+    // a named closure, or different hours, on a specific date (or inclusive range).
+    dateOverrides: z.array(dateOverride).optional(),
+  })
+  .superRefine((v, ctx) => {
+    const bad = findInvertedHoursWindow(v.schedule);
+    if (bad) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['schedule', bad.index, 'close'],
+        message: bad.message,
+      });
+    }
+  });
 
 export const updateBotSchema = z
   .object({

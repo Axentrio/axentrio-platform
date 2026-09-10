@@ -57,10 +57,56 @@ describe('businessHoursSchema — dateOverrides', () => {
     expect(r.success).toBe(false);
   });
 
+  it('refuses an inverted one-off window and names the date', () => {
+    const r = businessHoursSchema.safeParse({
+      enabled: true,
+      schedule,
+      dateOverrides: [{ date: '2026-12-24', windows: [{ start: '18:00', end: '09:00' }] }],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('2026-12-24: close (09:00) must be after open (18:00)');
+      expect(r.error.issues[0]!.path).toEqual(['dateOverrides', 0, 'windows', 0, 'end']);
+    }
+  });
+
   it('treats a missing dateOverrides as empty (weekly schedule only)', () => {
     const r = businessHoursSchema.safeParse({ enabled: true, schedule });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.dateOverrides).toBeUndefined();
+  });
+});
+
+describe('businessHoursSchema — window direction', () => {
+  const day = (open: string, close: string, closed = false) => ({
+    enabled: true,
+    schedule: [{ day: 'wednesday' as const, open, close, closed }],
+  });
+
+  it('accepts a window that runs forward', () => {
+    expect(businessHoursSchema.safeParse(day('09:00', '17:00')).success).toBe(true);
+  });
+
+  it('refuses equal open and close, and names the day', () => {
+    const r = businessHoursSchema.safeParse(day('09:00', '09:00'));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('wednesday: close (09:00) must be after open (09:00)');
+      expect(r.error.issues[0]!.path).toEqual(['schedule', 0, 'close']);
+    }
+  });
+
+  it('refuses a close before the open (an overnight window is not representable)', () => {
+    const r = businessHoursSchema.safeParse(day('18:00', '02:00'));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(r.error.issues[0]!.message).toBe('wednesday: close (02:00) must be after open (18:00)');
+    }
+  });
+
+  it('ignores the times of a day marked closed', () => {
+    expect(businessHoursSchema.safeParse(day('18:00', '09:00', true)).success).toBe(true);
+    expect(businessHoursSchema.safeParse(day('00:00', '00:00', true)).success).toBe(true);
   });
 });
 

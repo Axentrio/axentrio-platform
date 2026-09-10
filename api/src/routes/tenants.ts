@@ -52,6 +52,7 @@ import { AvailabilityRule } from "../database/entities/AvailabilityRule";
 import { businessHoursToAvailability } from "../booking/sync-hours-from-bot";
 import { parseDefaultTakeoverHours } from "../services/inbox-prefs.service";
 import { SUPPORTED_LOCALES, type SupportedLocale } from "../schemas/user.schema";
+import { findInvertedHoursWindow } from "../schemas/scheduler.schema";
 import { presentTenantSettings } from "./tenant-settings-view";
 import {
   listTenantUsers,
@@ -236,10 +237,25 @@ async function buildAnchorBotPatch(
 }
 
 
+/**
+ * PATCH /tenants/me writes business hours without `businessHoursSchema` (it merges a
+ * partial onto the stored value), so the same inverted-window guard is applied here on
+ * the merged result. It is the only business-hours write path in this router.
+ */
+function rejectInvertedHoursWindow(bh: Record<string, unknown>): void {
+  const schedule = bh.schedule;
+  if (!Array.isArray(schedule)) return;
+  const bad = findInvertedHoursWindow(
+    schedule as Array<{ day: string; open: string; close: string; closed: boolean }>,
+  );
+  if (bad) throw new BadRequestError(bad.message);
+}
+
 async function businessHoursWithDerivedTimezone(
   tenantId: string,
   bh: Record<string, unknown>,
 ): Promise<BotSettings["businessHours"]> {
+  rejectInvertedHoursWindow(bh);
   const { bot: anchor } = await getAnchorBotConfig(tenantId);
   const derived = anchor.businessTimezone || "Europe/Brussels";
   if (

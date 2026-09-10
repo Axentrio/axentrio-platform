@@ -116,6 +116,29 @@ describe("Tenant Management", () => {
       expect(updated.weeklyHours.mon).toBeUndefined();
     });
 
+    it("refuses an inverted window and names the day", async () => {
+      const tenant = await AppDataSource.getRepository(Tenant).findOneByOrFail({
+        id: tenantId,
+      });
+      await createTestAnchorBot(tenant);
+
+      const res = await request(app)
+        .patch("/api/v1/tenants/me")
+        .send({
+          businessHours: {
+            enabled: true,
+            schedule: [
+              { day: "tuesday", open: "18:00", close: "09:00", closed: false },
+            ],
+          },
+        });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        "tuesday: close (09:00) must be after open (18:00)",
+      );
+    });
+
     it("leaves the AvailabilityRule alone when businessHours are disabled", async () => {
       const tenant = await AppDataSource.getRepository(Tenant).findOneByOrFail({
         id: tenantId,

@@ -164,6 +164,7 @@ describe("guardrails · validateOutput — checks run state", () => {
     const context = {
       bookingRecorded: false,
       requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -186,9 +187,31 @@ describe("guardrails · validateOutput — checks run state", () => {
     const result = validateOutput("I've confirmed your appointment.", {
       bookingRecorded: true,
       requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("allows 'your booking has been submitted' when a booking tool recorded a Request", () => {
+    const requestRun = {
+      bookingRecorded: false,
+      requestRecorded: true,
+      bookingRequestRecorded: true,
+      priceContextLoaded: false,
+    };
+    const honest = validateOutput("Your booking has been submitted for approval.", requestRun);
+    expect(honest.ok, JSON.stringify(honest.violations)).toBe(true);
+    // The Request makes that one sentence true. A booked claim on the same run is still false.
+    expect(
+      validateOutput("I've confirmed your appointment.", requestRun).violations.map((v) => v.family),
+    ).toContain("fake_booking_confirmation");
+    // A lead or handoff is not a Request, so it does not make the sentence true.
+    const leadOnly = validateOutput("Your booking has been submitted for approval.", {
+      ...requestRun,
+      bookingRequestRecorded: false,
+    });
+    expect(leadOnly.violations.map((v) => v.family)).toContain("fake_booking_confirmation");
   });
 
   it("flags a price assertion when no price context was loaded", () => {
@@ -199,6 +222,7 @@ describe("guardrails · validateOutput — checks run state", () => {
       const result = validateOutput(text, {
         bookingRecorded: false,
         requestRecorded: false,
+        bookingRequestRecorded: false,
         priceContextLoaded: false,
       });
       expect(result.violations.map((v) => v.family)).toContain(
@@ -211,6 +235,7 @@ describe("guardrails · validateOutput — checks run state", () => {
     const result = validateOutput("That service costs €30.", {
       bookingRecorded: false,
       requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: true,
     });
     expect(result.ok).toBe(true);
@@ -223,6 +248,7 @@ describe("guardrails · validateOutput — checks run state", () => {
       // below is legitimate. Before `requestRecorded` existed the sentence passed because
       // nothing looked at it at all; now it passes for the reason that makes it true.
       requestRecorded: true,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     };
     for (const text of [
@@ -251,6 +277,7 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
   const nothingRecorded = {
     bookingRecorded: false,
     requestRecorded: false,
+    bookingRequestRecorded: false,
     priceContextLoaded: false,
   };
 
@@ -282,6 +309,7 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
       const result = validateOutput(text, {
         bookingRecorded: false,
         requestRecorded: true,
+        bookingRequestRecorded: false,
         priceContextLoaded: false,
       });
       expect(result.ok, JSON.stringify(result.violations)).toBe(true);
@@ -294,6 +322,7 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     const result = validateOutput("Your request has been submitted and you're all set.", {
       bookingRecorded: true,
       requestRecorded: false,
+      bookingRequestRecorded: false,
       priceContextLoaded: false,
     });
     expect(result.ok, JSON.stringify(result.violations)).toBe(true);

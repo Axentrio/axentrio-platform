@@ -61,6 +61,7 @@ describe('CaptureLeadTool', () => {
     // R31: the internal leadId is NOT exposed to the model; just a confirmation.
     expect((res.data as { leadId?: string; message?: string }).leadId).toBeUndefined();
     expect((res.data as { message?: string }).message).toBe('Lead captured');
+    expect((res.data as { captured?: boolean }).captured).toBe(true);
     expect(upsertLead).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: 'tenant-123', sessionId: 'session-abc', source: 'tool', channel: 'widget', email: 'alice@example.com', name: null }),
     );
@@ -144,6 +145,8 @@ describe('CaptureLeadTool', () => {
     const tool = new CaptureLeadTool();
     const res = await tool.execute({ email: 'a@b.com' }, makeCtx());
     expect(res.success).toBe(true); // never surface gating as a tool error to the model
+    // No row was written, so nothing may license "your details have been passed on".
+    expect((res.data as { captured?: boolean }).captured).toBeUndefined();
   });
 
   it('surfaces a thrown service error as success=false', async () => {

@@ -36,7 +36,9 @@ export interface OutputValidationContext {
   /** True only when a CONFIRMED Booking was recorded during this Agent run. */
   bookingRecorded: boolean;
   /**
-   * True only when a Request, lead or handoff row was recorded during this Agent run.
+   * True only when a Request, lead or handoff row was recorded during this Agent run, or
+   * during an earlier turn of the same conversation - so a reply that repeats an earlier,
+   * true "your request has been forwarded" is not judged a new claim.
    *
    * Separate from `bookingRecorded` because the two claims are separately falsifiable:
    * `docs/booking-rules.md:223` — "`CONFIRMATION_REQUIRED` is not a Booking" — and a
@@ -44,6 +46,11 @@ export interface OutputValidationContext {
    * honestly say "your request is in" and dishonestly say "you are booked".
    */
   requestRecorded: boolean;
+  /**
+   * True only when a booking tool recorded a Request, not a Booking, during this Agent run.
+   * That makes "your booking has been submitted" true, and a lead or handoff does not.
+   */
+  bookingRequestRecorded: boolean;
   /** True when price-bearing catalog or KnowledgeBase content reached this run. */
   priceContextLoaded: boolean;
 }
@@ -57,6 +64,16 @@ export function containsCurrencyAmount(text: string): boolean {
 
 /** High-precision detector for a reply claiming a booking mutation completed now. */
 export function claimsBookingDone(text: string): boolean {
+  // Only a *booking* submission counts — a lead/handoff `request` is not a
+  // booking mutation.
+  return claimsBookingConfirmed(text) || /\byour booking has been submitted\b/.test(text.toLowerCase());
+}
+
+/**
+ * `claimsBookingDone` without "your booking has been submitted": the sentences only a
+ * CONFIRMED Booking makes true. A Request makes that one sentence true as well.
+ */
+export function claimsBookingConfirmed(text: string): boolean {
   const t = text.toLowerCase();
   return [
     // Completed booking mutation only — bare `scheduled` (reminder/follow-up) is
@@ -65,9 +82,7 @@ export function claimsBookingDone(text: string): boolean {
     // `confirmed your booking/appointment` — but NOT when it merely states
     // availability ("your appointment is available tomorrow").
     /\bi(?:'ve| have) (?:successfully )?confirmed your (?:booking|appointment)\b(?!\s+is\s+available)/,
-    // Only a *booking* submission counts — a lead/handoff `request` is not a
-    // booking mutation.
-    /\byour booking has been (?:submitted|booked|confirmed)\b/,
+    /\byour booking has been (?:booked|confirmed)\b/,
     // Dutch: `geboekt/gereserveerd` may stand alone ("ik heb geboekt" is a
     // completed claim), but `gepland/ingepland/bevestigd` need the booking noun
     // — otherwise "ik heb gepland om je te bellen" / "ik heb bevestigd dat we
@@ -362,7 +377,8 @@ export function validateOutput(
   for (const r of detectUnsafeLinkHosts(t)) {
     violations.push({ family: "unsafe_link", evidence: r });
   }
-  if (context?.bookingRecorded === false && claimsBookingDone(t)) {
+  const claimsBooking = context?.bookingRequestRecorded ? claimsBookingConfirmed(t) : claimsBookingDone(t);
+  if (context?.bookingRecorded === false && claimsBooking) {
     violations.push({
       family: "fake_booking_confirmation",
       evidence:

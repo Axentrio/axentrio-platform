@@ -14,9 +14,10 @@
  *   pin it, because pinning it would have frozen the contradicted behaviour.
  *
  * * [SYS-07] `claimsBookingDone` excludes request language on purpose — a lead or handoff
- *   request is not a booking mutation — and NOTHING then judged the sentence. On a bot
- *   with no booking tools nothing in the loop looks at it either, so "your request has
- *   been submitted" shipped green with nothing behind it.
+ *   request is not a booking mutation — and NOTHING then judged the sentence, so "your
+ *   request has been submitted" shipped green with nothing behind it. Two seams judge it
+ *   now: the in-loop request guard, armed whenever a tool could have recorded the request,
+ *   and the output gate, which only acts for a tenant in enforce mode.
  *
  * WHAT EACH CASE ASSERTS is the row in `messages` the send path committed, never the tool
  * result: the tool halves are already pinned (`unit/builtin-tools.test.ts`,
@@ -107,6 +108,7 @@ import { AppDataSource } from '../../database/data-source';
 import { Message } from '../../database/entities/Message';
 import { Tenant } from '../../database/entities/Tenant';
 import { Lead } from '../../database/entities/Lead';
+import { ChatSession } from '../../database/entities/ChatSession';
 import { GuardrailOutputLog } from '../../database/entities/GuardrailOutputLog';
 import { decrypt } from '../../utils/encryption';
 import { createTestParticipant, createTestMessage } from '../helpers/factories';
@@ -124,7 +126,6 @@ import {
   setPlanAvailability,
 } from '../helpers/booking-plan-harness';
 import type { ServiceType } from '../../database/entities/ServiceType';
-import type { ChatSession } from '../../database/entities/ChatSession';
 
 const messageRepo = AppDataSource.getRepository(Message);
 
@@ -176,6 +177,9 @@ const callTool = (id: string, name: string, args: Record<string, unknown>) => ({
 /** The agent's replacement when a booking claim has no Booking behind it. */
 const BOOKING_SAFE_FALLBACK =
   "Sorry, let me just confirm a couple of details before I put that through — could you confirm the date and time you'd like?";
+/** The agent's replacement when a request claim has nothing on record behind it. */
+const REQUEST_SAFE_FALLBACK =
+  'Sorry, I have not passed your request on to the team yet. Let me know how I can help from here.';
 /** The tenant fallback `createPlanBusiness` seeds, sent when the output gate blocks a reply. */
 const TENANT_FALLBACK = 'Let me connect you with our team.';
 
@@ -189,9 +193,25 @@ interface Chat {
   userId: string;
 }
 
-/** An Auto-book business. The calendar credential is the ONLY thing a caller varies. */
-async function autoBookBusiness(opts: { calendarConnected: boolean }): Promise<Chat & { service: ServiceType }> {
+/** Tenant switches a case varies: feature toggles, and whether the output gate enforces. */
+async function configureTenant(
+  tenantId: string,
+  opts: { featureToggles?: NonNullable<Tenant['featureToggles']>; enforce?: boolean },
+): Promise<void> {
+  const tenantRepo = AppDataSource.getRepository(Tenant);
+  const row = await tenantRepo.findOneByOrFail({ id: tenantId });
+  if (opts.featureToggles) row.featureToggles = { ...(row.featureToggles ?? {}), ...opts.featureToggles };
+  if (opts.enforce !== undefined) row.settings = { ...(row.settings ?? {}), guardrails: { enforce: opts.enforce } };
+  await tenantRepo.save(row);
+}
+
+/** An Auto-book business. The calendar credential is the thing a caller varies. */
+async function autoBookBusiness(opts: {
+  calendarConnected: boolean;
+  enforce?: boolean;
+}): Promise<Chat & { service: ServiceType }> {
   const { tenant, bot } = await createPlanBusiness();
+  if (opts.enforce !== undefined) await configureTenant(tenant.id, { enforce: opts.enforce });
   await setPlanAvailability(bot);
   if (opts.calendarConnected) await seedPlanCalendarCredential(bot);
   const service = await createPlanService(bot, { bookingMode: 'auto' });
@@ -202,19 +222,33 @@ async function autoBookBusiness(opts: { calendarConnected: boolean }): Promise<C
 
 /**
  * A LEAD-CAPTURE bot: bookings toggled off, so `create_booking` never reaches the run and
- * the in-loop booking guard is never armed. That is SYS-07's real shape — with booking
- * tools present the loop's own nudge already catches a request claim, so a case built on a
- * booking bot would pass without the output guard existing at all.
- *
- * Guardrail ENFORCE is on, because the output gate is the seam under test and in shadow
- * mode it only logs.
+ * the in-loop booking guard is never armed. `capture_lead` is there, so the in-loop request
+ * guard IS armed. `enforce` decides whether the output gate replaces a reply or only logs.
  */
-async function leadCaptureBusiness(): Promise<Chat> {
+async function leadCaptureBusiness(opts: { enforce: boolean }): Promise<Chat> {
   const { tenant, bot } = await createPlanBusiness();
+  await configureTenant(tenant.id, { featureToggles: { bookings: false }, enforce: opts.enforce });
+  const session = await planSession(bot, { status: 'bot' });
+  const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+  return { session, tenantId: tenant.id, userId: user.id };
+}
+
+/**
+ * A bot with NOTHING that could record a request: no bookings, no lead capture, no handoff.
+ * No in-loop guard is armed, so a request claim here can only ever be false, and the output
+ * gate (enforce on) is the only seam between the sentence and the customer.
+ */
+async function noRecordingToolBusiness(): Promise<Chat> {
+  const { tenant, bot } = await createPlanBusiness();
+  await configureTenant(tenant.id, { featureToggles: { bookings: false, leadCapture: false }, enforce: true });
+  // The plan has no handoff, so `escalate_to_human` is never offered. The bot's own
+  // `handoffEnabled` stays on, so a blocked reply still hands off exactly as before.
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const row = await tenantRepo.findOneByOrFail({ id: tenant.id });
-  row.featureToggles = { ...(row.featureToggles ?? {}), bookings: false };
-  row.settings = { ...(row.settings ?? {}), guardrails: { enforce: true } };
+  row.featureOverrides = {
+    ...(row.featureOverrides ?? {}),
+    handoff: { value: false, reason: 'test: no handoff on this plan', setBy: 'test', setAt: new Date().toISOString() },
+  };
   await tenantRepo.save(row);
   const session = await planSession(bot, { status: 'bot' });
   const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
@@ -229,6 +263,14 @@ async function customerSays(chat: Chat, content: string): Promise<boolean> {
     status: 'sent',
   });
   return forwardMessageToN8n(chat.session, message);
+}
+
+async function leadCount(tenantId: string): Promise<number> {
+  return AppDataSource.getRepository(Lead).countBy({ tenantId });
+}
+
+async function guardrailLogCount(sessionId: string): Promise<number> {
+  return AppDataSource.getRepository(GuardrailOutputLog).countBy({ conversationId: sessionId });
 }
 
 beforeEach(() => {
@@ -318,12 +360,102 @@ describe('CAL-06 — a Request is not a Booking, and the reply may not say it is
     const replies = await botMessages(session.id);
     expect(replies).toEqual([BOOKED_CLAIM]);
   });
+
+  // The output gate's `claimsBookingDone` leaves these out on purpose (a Dutch confirmation
+  // the bot may quote, and a bare "scheduled"), so on a downgraded Request only the in-loop
+  // booked-claim family stands between them and the customer.
+  it.each([
+    ['a Dutch confirmation', 'Top, je afspraak is bevestigd voor dinsdag om 10:00!'],
+    ['"I\'ve scheduled"', "I've scheduled your appointment for 10:00. See you then!"],
+    ['"successfully booked"', 'Your appointment was successfully booked for 10:00.'],
+  ])('[CAL-06] on the downgraded Request, %s is not what the customer reads', async (_label, claim) => {
+    initializeAgentService(realAgent());
+    const chat = await autoBookBusiness({ calendarConnected: false });
+    const { service, session } = chat;
+    const day = planDate(7, { weekdayOnly: true });
+
+    chatMock
+      .mockResolvedValueOnce(
+        callTool('tc-cal06-3', 'create_booking', {
+          serviceId: service.id,
+          startTime: `${day}T10:00:00`,
+          attendeeName: 'Visitor',
+          attendeeEmail: PLAN_CUSTOMER_EMAIL,
+        }),
+      )
+      .mockResolvedValueOnce(say(claim))
+      .mockResolvedValueOnce(say(claim));
+
+    expect(await customerSays(chat, `Book me in at 10:00 on ${day}, my name is Visitor`)).toBe(true);
+
+    expect(await requestCount(service.id)).toBe(1);
+    expect(await bookingCount(service.id, 'confirmed')).toBe(0);
+    expect(await botMessages(session.id)).toEqual([BOOKING_SAFE_FALLBACK]);
+  });
+
+  it('[CAL-06] control: on the same downgraded Request, the honest "your booking has been submitted" ships unchanged', async () => {
+    initializeAgentService(realAgent());
+    // Enforce on, so the output gate would replace the reply if it judged the sentence false.
+    const chat = await autoBookBusiness({ calendarConnected: false, enforce: true });
+    const { service, session } = chat;
+    const day = planDate(7, { weekdayOnly: true });
+    const submitted = 'Your booking has been submitted for approval. The team will confirm it shortly.';
+
+    chatMock
+      .mockResolvedValueOnce(
+        callTool('tc-cal06-4', 'create_booking', {
+          serviceId: service.id,
+          startTime: `${day}T10:00:00`,
+          attendeeName: 'Visitor',
+          attendeeEmail: PLAN_CUSTOMER_EMAIL,
+        }),
+      )
+      .mockResolvedValueOnce(say(submitted))
+      .mockResolvedValueOnce(say(submitted));
+
+    expect(await customerSays(chat, `Book me in at 10:00 on ${day}, my name is Visitor`)).toBe(true);
+
+    // The Request the sentence is about really exists…
+    expect(await requestCount(service.id)).toBe(1);
+    // …so neither the loop nor the output gate replaces it, and nothing is flagged.
+    expect(await botMessages(session.id)).toEqual([submitted]);
+    expect(await guardrailLogCount(session.id)).toBe(0);
+  });
+});
+
+describe('a lead or handoff licenses a request claim, never a booking claim', () => {
+  it('a captured lead does not stand the booking nudge down for "I\'ll go ahead and book"', async () => {
+    initializeAgentService(realAgent());
+    // A connected calendar, so the only thing missing is the create call itself.
+    const chat = await autoBookBusiness({ calendarConnected: true });
+    const { service, session, tenantId } = chat;
+    const goAhead = "Great, I'll go ahead and book Tuesday at 10:00 for you now.";
+
+    chatMock
+      .mockResolvedValueOnce(
+        callTool('tc-lead-1', 'capture_lead', {
+          name: 'Visitor',
+          email: PLAN_CUSTOMER_EMAIL,
+          summary: 'Wants Tuesday at 10:00',
+        }),
+      )
+      .mockResolvedValueOnce(say(goAhead))
+      .mockResolvedValueOnce(say(goAhead));
+
+    expect(await customerSays(chat, `Can I come in Tuesday at 10:00? My email is ${PLAN_CUSTOMER_EMAIL}`)).toBe(true);
+
+    // The lead is real, and it is all that exists: no Booking, no Request.
+    expect(await leadCount(tenantId)).toBe(1);
+    expect(await bookingCount(service.id, 'confirmed')).toBe(0);
+    expect(await requestCount(service.id)).toBe(0);
+    expect(await botMessages(session.id)).toEqual([BOOKING_SAFE_FALLBACK]);
+  });
 });
 
 describe('SYS-07 — a request-forwarded claim needs a recorded request', () => {
   it('[SYS-07] nothing was recorded, so the claim never reaches the customer', async () => {
     initializeAgentService(realAgent());
-    const chat = await leadCaptureBusiness();
+    const chat = await noRecordingToolBusiness();
     const { session, tenantId } = chat;
 
     // No tool call at all. The model simply says it has been dealt with.
@@ -332,7 +464,7 @@ describe('SYS-07 — a request-forwarded claim needs a recorded request', () => 
     expect(await customerSays(chat, 'Can someone call me about a broken tap?')).toBe(true);
 
     // 1. STATE: nothing was written. No lead, no request, nothing to forward.
-    expect(await AppDataSource.getRepository(Lead).countBy({ tenantId })).toBe(0);
+    expect(await leadCount(tenantId)).toBe(0);
 
     // 2. What the customer READ is the tenant fallback, not the claim.
     const replies = await botMessages(session.id);
@@ -341,9 +473,8 @@ describe('SYS-07 — a request-forwarded claim needs a recorded request', () => 
     expect(replies[0]).toBe(TENANT_FALLBACK);
 
     // 3. And it was THIS guard that replaced it. The family is written only by
-    //    `validateOutput`'s request check, so this pins the seam: had the in-loop booking
-    //    nudge caught the sentence instead, the reply would be the booking fallback and no
-    //    such row would exist.
+    //    `validateOutput`'s request check, and no in-loop guard is armed on this bot, so
+    //    this pins the output-gate seam alone.
     const log = await AppDataSource.getRepository(GuardrailOutputLog).findOneByOrFail({
       conversationId: session.id,
     });
@@ -353,7 +484,7 @@ describe('SYS-07 — a request-forwarded claim needs a recorded request', () => 
 
   it('[SYS-07] control: the SAME sentence ships unchanged once the lead row is really written', async () => {
     initializeAgentService(realAgent());
-    const chat = await leadCaptureBusiness();
+    const chat = await leadCaptureBusiness({ enforce: true });
     const { session, tenantId } = chat;
 
     chatMock
@@ -369,12 +500,80 @@ describe('SYS-07 — a request-forwarded claim needs a recorded request', () => 
     expect(await customerSays(chat, `Can someone call me about a broken tap? My email is ${PLAN_CUSTOMER_EMAIL}`)).toBe(true);
 
     // The row the sentence is about really exists…
-    expect(await AppDataSource.getRepository(Lead).countBy({ tenantId })).toBe(1);
+    expect(await leadCount(tenantId)).toBe(1);
     // …so the customer reads the model's own words, unchanged, and nothing was flagged.
     const replies = await botMessages(session.id);
     expect(replies).toEqual([FORWARDED_CLAIM]);
-    expect(
-      await AppDataSource.getRepository(GuardrailOutputLog).countBy({ conversationId: session.id }),
-    ).toBe(0);
+    expect(await guardrailLogCount(session.id)).toBe(0);
+  });
+
+  it('[SYS-07] a tenant on the default shadow mode is protected too: the loop nudges, then replaces the claim', async () => {
+    initializeAgentService(realAgent());
+    // No `enforce`: the output gate would log this claim and still send it.
+    const chat = await leadCaptureBusiness({ enforce: false });
+    const { session, tenantId } = chat;
+
+    chatMock.mockResolvedValueOnce(say(FORWARDED_CLAIM)).mockResolvedValueOnce(say(FORWARDED_CLAIM));
+
+    expect(await customerSays(chat, 'Can someone call me about a broken tap?')).toBe(true);
+
+    expect(await leadCount(tenantId)).toBe(0);
+    expect(await botMessages(session.id)).toEqual([REQUEST_SAFE_FALLBACK]);
+    // The in-loop guard replaced the claim before the output gate saw it.
+    expect(await guardrailLogCount(session.id)).toBe(0);
+  });
+
+  it('[SYS-07] control: on shadow mode, a model that records the lead after the nudge ships the same sentence', async () => {
+    initializeAgentService(realAgent());
+    const chat = await leadCaptureBusiness({ enforce: false });
+    const { session, tenantId } = chat;
+
+    chatMock
+      .mockResolvedValueOnce(say(FORWARDED_CLAIM))
+      .mockResolvedValueOnce(
+        callTool('tc-sys07-2', 'capture_lead', {
+          name: 'Visitor',
+          email: PLAN_CUSTOMER_EMAIL,
+          summary: 'Broken tap, wants a call back',
+        }),
+      )
+      .mockResolvedValueOnce(say(FORWARDED_CLAIM));
+
+    expect(await customerSays(chat, `Can someone call me about a broken tap? My email is ${PLAN_CUSTOMER_EMAIL}`)).toBe(true);
+
+    expect(await leadCount(tenantId)).toBe(1);
+    expect(await botMessages(session.id)).toEqual([FORWARDED_CLAIM]);
+  });
+
+  it('[SYS-07] an honest restatement on a LATER turn ships, and the bot stays on', async () => {
+    initializeAgentService(realAgent());
+    const chat = await leadCaptureBusiness({ enforce: true });
+    const { session, tenantId } = chat;
+    const restated = 'Yes, your details have been passed on to the team.';
+
+    chatMock
+      .mockResolvedValueOnce(
+        callTool('tc-sys07-3', 'capture_lead', {
+          name: 'Visitor',
+          email: PLAN_CUSTOMER_EMAIL,
+          summary: 'Broken tap, wants a call back',
+        }),
+      )
+      .mockResolvedValueOnce(say(FORWARDED_CLAIM))
+      // Turn 2 makes no tool call: the lead was written on turn 1.
+      .mockResolvedValueOnce(say(restated));
+
+    expect(await customerSays(chat, `Can someone call me about a broken tap? My email is ${PLAN_CUSTOMER_EMAIL}`)).toBe(true);
+
+    // The next turn arrives on a freshly loaded session, as it does in production.
+    const sessionRepo = AppDataSource.getRepository(ChatSession);
+    const nextTurn: Chat = { ...chat, session: await sessionRepo.findOneByOrFail({ id: session.id }) };
+    expect(await customerSays(nextTurn, 'So someone will call me?')).toBe(true);
+
+    expect(await leadCount(tenantId)).toBe(1);
+    expect(await botMessages(session.id)).toEqual([FORWARDED_CLAIM, restated]);
+    expect(await guardrailLogCount(session.id)).toBe(0);
+    // No `bot_error` handoff: the conversation is still the bot's.
+    expect((await sessionRepo.findOneByOrFail({ id: session.id })).status).toBe('bot');
   });
 });

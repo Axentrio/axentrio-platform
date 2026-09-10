@@ -2303,6 +2303,56 @@ describe('AgentService', () => {
     if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
   });
 
+  it('counts capture_lead as a recorded request only when it wrote a row', async () => {
+    const claim = 'Your details have been passed on to the team.';
+    const usage = { promptTokens: 10, completionTokens: 5 };
+    const captureLead = (data: Record<string, unknown>): ToolAdapter => ({
+      name: 'capture_lead',
+      description: 'Lead',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data }),
+    });
+    const callCapture = {
+      content: '',
+      usage,
+      finishReason: 'tool_calls',
+      toolCalls: [{ id: 'tc_1', name: 'capture_lead', arguments: { email: 'a@b.com' } }],
+    };
+    const say = { content: claim, usage, finishReason: 'stop' };
+    const run = () =>
+      agent.run(
+        'can someone call me back?',
+        { id: 's1', tenantId: 't1', status: 'bot' } as any,
+        { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+        [],
+      );
+
+    // The `Noted.` path returns success and writes no row, so the claim is false: one nudge,
+    // then the safe fallback.
+    mockGetToolsForTenant.mockResolvedValueOnce([captureLead({ message: 'Noted.' })]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce(callCapture)
+      .mockResolvedValueOnce(say)
+      .mockResolvedValueOnce(say);
+    const noted = await run();
+    expect(noted.type).toBe('response');
+    if (noted.type === 'response') {
+      expect(noted.content).not.toBe(claim);
+      expect(noted.content).toMatch(/not passed your request on/);
+    }
+
+    // A written row makes the same sentence true, so it ships unchanged.
+    mockGetToolsForTenant.mockResolvedValueOnce([captureLead({ message: 'Lead captured', captured: true })]);
+    (mockProvider.chat as any).mockResolvedValueOnce(callCapture).mockResolvedValueOnce(say);
+    const captured = await run();
+    expect(captured.type).toBe('response');
+    if (captured.type === 'response') {
+      expect(captured.content).toBe(claim);
+      expect(captured.validationContext?.requestRecorded).toBe(true);
+    }
+  });
+
   it('retries a wrong-address reply once with tools disabled', async () => {
     const requestAppointment: ToolAdapter = {
       name: 'request_appointment',

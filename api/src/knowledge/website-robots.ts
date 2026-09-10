@@ -5,18 +5,27 @@ export const KNOWLEDGE_BOT_UA = "Axentrio-KnowledgeBot";
 interface RobotsRule {
   allow: boolean;
   pattern: string;
-  matcher: RegExp;
 }
 
 // Google robots semantics: a rule is a path prefix, so "/private" also
 // blocks "/privateX".
-function ruleMatcher(pattern: string): RegExp {
+function ruleMatches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith("$");
-  const source = (anchored ? pattern.slice(0, -1) : pattern)
-    .split("*")
-    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${source}${anchored ? "$" : ""}`);
+  const segments = (anchored ? pattern.slice(0, -1) : pattern).split("*");
+  const first = segments[0];
+  if (!path.startsWith(first)) return false;
+  if (segments.length === 1) return !anchored || path.length === first.length;
+  let position = first.length;
+  for (const segment of segments.slice(1, -1)) {
+    const found = path.indexOf(segment, position);
+    if (found < 0) return false;
+    position = found + segment.length;
+  }
+  const last = segments[segments.length - 1];
+  if (anchored) {
+    return path.length - last.length >= position && path.endsWith(last);
+  }
+  return path.indexOf(last, position) >= 0;
 }
 
 export function parseRobotsTxt(body: string): {
@@ -50,11 +59,7 @@ export function parseRobotsTxt(body: string): {
     if (field !== "allow" && field !== "disallow") continue;
     groupHasRules = true;
     if (!value) continue;
-    const rule = {
-      allow: field === "allow",
-      pattern: value,
-      matcher: ruleMatcher(value),
-    };
+    const rule = { allow: field === "allow", pattern: value };
     if (agents.includes(ownAgent)) ownRules.push(rule);
     if (agents.includes("*")) starRules.push(rule);
   }
@@ -64,7 +69,7 @@ export function parseRobotsTxt(body: string): {
     allows(path: string): boolean {
       let winner: RobotsRule | undefined;
       for (const rule of rules) {
-        if (!rule.matcher.test(path)) continue;
+        if (!ruleMatches(rule.pattern, path)) continue;
         if (
           !winner ||
           rule.pattern.length > winner.pattern.length ||

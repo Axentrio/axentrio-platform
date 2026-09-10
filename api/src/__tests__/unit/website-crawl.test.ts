@@ -122,6 +122,19 @@ describe("parseRobotsTxt", () => {
     expect(robots.allows("/cart")).toBe(true);
   });
 
+  it("matches many wildcards against a long path without backtracking", () => {
+    const robots = parseRobotsTxt(
+      `User-agent: *\nDisallow: /${"*a".repeat(20)}*b\nDisallow: /x${"*a".repeat(20)}$\n`,
+    );
+    const path = `/${"a".repeat(200)}`;
+    const started = performance.now();
+    expect(robots.allows(path)).toBe(true);
+    expect(robots.allows(`${path}b`)).toBe(false);
+    expect(robots.allows(`/x${"a".repeat(200)}`)).toBe(false);
+    expect(robots.allows(`/x${"a".repeat(200)}c`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
   it("anchors a trailing $ at the end of the path", () => {
     const robots = parseRobotsTxt("User-agent: *\nDisallow: /p$\n");
     expect(robots.allows("/p")).toBe(false);

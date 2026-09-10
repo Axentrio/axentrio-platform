@@ -1141,7 +1141,8 @@
           "configureCta": "Configurer le bot IA",
           "skippedByRules_one": "{{count}} page de {{host}} n'a pas été importée, car les règles du site la refusent.",
           "skippedByRules_other": "{{count}} pages de {{host}} n'ont pas été importées, car les règles du site les refusent.",
-          "rulesUnreachable": "Les règles du site {{host}} n'ont pas pu être lues, donc rien n'a été importé."
+          "rulesUnreachable": "Les règles du site {{host}} n'ont pas pu être lues, donc rien n'a été importé.",
+          "rulesUnreachableNoNewPages": "La dernière vérification n'a pas pu lire les règles du site {{host}}, donc aucune nouvelle page n'a été ajoutée."
         },
 
         "filters": {

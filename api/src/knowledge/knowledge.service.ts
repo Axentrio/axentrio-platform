@@ -136,14 +136,43 @@ export class KnowledgeService {
     const runs = await this.crawlRunRepo.find({
       where: { tenantId, knowledgeBaseId: kb.id },
     });
-    const websiteCrawls = runs
-      .filter((run) => run.rulesUnreachable || run.skippedByRules > 0)
-      .map((run) => ({
+    const websiteCrawls: Array<{
+      origin: string;
+      skippedByRules: number;
+      rulesUnreachable: boolean;
+      hasPages: boolean;
+    }> = [];
+    for (const run of runs) {
+      if (!run.rulesUnreachable && run.skippedByRules === 0) continue;
+      const hasPages = await this.originHasUrlDocuments(
+        tenantId,
+        kb.id,
+        run.origin,
+      );
+      if (!run.rulesUnreachable && !hasPages) continue;
+      websiteCrawls.push({
         origin: run.origin,
         skippedByRules: run.skippedByRules,
         rulesUnreachable: run.rulesUnreachable,
-      }));
+        hasPages,
+      });
+    }
     return { documents, total, page, limit, websiteCrawls };
+  }
+
+  private async originHasUrlDocuments(
+    tenantId: string,
+    kbId: string,
+    origin: string,
+  ): Promise<boolean> {
+    return this.docRepo
+      .createQueryBuilder("doc")
+      .where({ tenantId, knowledgeBaseId: kbId, type: "url" })
+      .andWhere(`left("doc"."sourceUrl", :prefixLength) = :prefix`, {
+        prefix: origin,
+        prefixLength: origin.length,
+      })
+      .getExists();
   }
 
   async createDocument(

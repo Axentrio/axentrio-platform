@@ -90,7 +90,7 @@ export async function crawlWebsite(input: {
     try {
       const rendered = await input.renderer.render(pageUrl);
       if (!(await input.robotsAllows(rendered.url))) {
-        skippedByRules.add(rendered.url);
+        skippedByRules.add(canonicalSourceUrl(rendered.url));
         continue;
       }
       const extracted = rendered.text

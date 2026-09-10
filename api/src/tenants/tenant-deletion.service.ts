@@ -115,6 +115,7 @@ export const PURGE_BY_CAMEL_TENANT_ID = [
   'agent_traces',
   'canned_responses',
   'channel_connections',
+  'website_crawl_runs',
   'knowledge_bases',
   'knowledge_chunks',
   'knowledge_documents',

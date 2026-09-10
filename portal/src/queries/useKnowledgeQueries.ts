@@ -3,6 +3,7 @@ import {
   useMutation,
   useQueryClient,
   queryOptions,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { api } from "../services/apiClient";
 import { queryKeys } from "./queryKeys";
@@ -18,12 +19,55 @@ export type WebsiteCrawlNotice = {
   origin: string;
   skippedByRules: number;
   rulesUnreachable: boolean;
+  hasPages: boolean;
 };
 
 type DocumentsQueryData = {
   documents: Any[];
   websiteCrawls: WebsiteCrawlNotice[];
 };
+
+type ImportWebsiteInput = {
+  url: string;
+  followLinks?: boolean;
+  maxPages?: number;
+  kbId?: string;
+  extraUrls?: string[];
+};
+
+const POLL_MS = 5000;
+export const WEBSITE_IMPORT_WATCH_MS = 2 * 60 * 1000;
+const importWebsiteKey = ["knowledge", "importWebsite"] as const;
+
+function importOrigin(url: string): string | null {
+  try {
+    return `${new URL(normalizeWebsiteUrl(url)).origin}/`;
+  } catch {
+    return null;
+  }
+}
+
+export function websiteImportPollInterval(
+  queryClient: QueryClient,
+  kbId: string | undefined,
+  notices: WebsiteCrawlNotice[] | undefined,
+): number | false {
+  const arrived = new Set((notices ?? []).map((notice) => notice.origin));
+  const watching = queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: importWebsiteKey })
+    .some((mutation) => {
+      const input = mutation.state.variables as ImportWebsiteInput | undefined;
+      if (!input || input.kbId !== kbId) return false;
+      if (mutation.state.status === "error") return false;
+      if (Date.now() - mutation.state.submittedAt >= WEBSITE_IMPORT_WATCH_MS) {
+        return false;
+      }
+      const origin = importOrigin(input.url);
+      return origin !== null && !arrived.has(origin);
+    });
+  return watching ? POLL_MS : false;
+}
 
 export const knowledgeOptions = {
   documents: () =>
@@ -52,19 +96,22 @@ export const knowledgeOptions = {
 // --- Query Hooks ---
 
 export function useKnowledgeDocuments() {
+  const queryClient = useQueryClient();
   return useQuery({
     ...knowledgeOptions.documents(),
     select: (data) => data.documents,
     // Auto-poll every 5s while any document is pending/processing
     refetchInterval: (query) => {
       const data = query.state.data;
-      const docs = Array.isArray(data) ? data : data?.documents;
-      const hasProcessing =
-        Array.isArray(docs) &&
-        docs.some(
-          (d: Any) => d.status === "pending" || d.status === "processing",
-        );
-      return hasProcessing ? 5000 : false;
+      const hasProcessing = data?.documents.some(
+        (d: Any) => d.status === "pending" || d.status === "processing",
+      );
+      if (hasProcessing) return POLL_MS;
+      return websiteImportPollInterval(
+        queryClient,
+        undefined,
+        data?.websiteCrawls,
+      );
     },
   });
 }
@@ -170,13 +217,8 @@ export function useDiscoverWebsiteHosts(url: string, enabled: boolean) {
 export function useImportWebsite() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: {
-      url: string;
-      followLinks?: boolean;
-      maxPages?: number;
-      kbId?: string;
-      extraUrls?: string[];
-    }) =>
+    mutationKey: importWebsiteKey,
+    mutationFn: (data: ImportWebsiteInput) =>
       api.post("/knowledge/documents/website", {
         ...data,
         url: normalizeWebsiteUrl(data.url),

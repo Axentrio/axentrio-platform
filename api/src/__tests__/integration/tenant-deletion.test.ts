@@ -12,6 +12,7 @@ vi.mock('../../utils/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefi
 
 import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
+import { KnowledgeService } from '../../knowledge/knowledge.service';
 import {
   DELETION_DORMANCY_DAYS,
   cancelTenantDeletion,
@@ -138,6 +139,28 @@ describe('executeTenantDeletion', () => {
       [tenant.id],
     );
     expect(events.map((e: { event_type: string }) => e.event_type)).toContain('tenant.deleted');
+  });
+
+  it('purges the website crawl notices of the workspace', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestAnchorBot(tenant);
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    const knowledge = new KnowledgeService(AppDataSource);
+    const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+    await knowledge.recordWebsiteCrawlRun(tenant.id, kb.id, 'https://down.example/', {
+      skippedByRules: 0,
+      rulesUnreachable: true,
+    });
+
+    await requestTenantDeletion(tenant.id, admin.id);
+    const counts = await executeTenantDeletion(tenant.id);
+
+    expect(counts.website_crawl_runs).toBe(1);
+    const rows = await AppDataSource.query(
+      `SELECT 1 FROM website_crawl_runs WHERE "tenantId" = $1`,
+      [tenant.id],
+    );
+    expect(rows).toEqual([]);
   });
 });
 

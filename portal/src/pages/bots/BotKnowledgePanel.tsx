@@ -43,6 +43,7 @@ import {
 } from "@/queries/useKnowledgeQueries";
 import { queryKeys } from "@/queries/queryKeys";
 import { useQueryClient } from "@tanstack/react-query";
+import WebsiteCrawlNotices from "@/pages/knowledge/WebsiteCrawlNotices";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> =
   {
@@ -195,6 +196,7 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <WebsiteCrawlNotices notices={data.websiteCrawls} />
         {!readOnly && (
           <div className="space-y-2 rounded-lg bg-surface-2 p-3">
             <Label className="text-text-secondary">

@@ -26,6 +26,7 @@ import {
 
 import DocumentCard from "./DocumentCard";
 import AddDocumentModal from "./AddDocumentModal";
+import WebsiteCrawlNotices from "./WebsiteCrawlNotices";
 
 const allFilters = [
   { key: "all", labelKey: "ai.knowledge.list.filters.all", group: "all" },
@@ -148,29 +149,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
         </div>
       )}
 
-      {websiteCrawls.map((crawl) => {
-        let host = crawl.origin;
-        try {
-          host = new URL(crawl.origin).host;
-        } catch {
-          /* keep origin */
-        }
-        const message = crawl.rulesUnreachable
-          ? t("ai.knowledge.list.banner.rulesUnreachable", { host })
-          : t("ai.knowledge.list.banner.skippedByRules", {
-              count: crawl.skippedByRules,
-              host,
-            });
-        return (
-          <div
-            key={crawl.origin}
-            className="p-3 rounded-lg bg-amber-400/5 border border-amber-400/10"
-          >
-            <p className="text-xs text-amber-400/80">{message}</p>
-          </div>
-        );
-      })}
-
+      <WebsiteCrawlNotices notices={websiteCrawls} />
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between gap-3">

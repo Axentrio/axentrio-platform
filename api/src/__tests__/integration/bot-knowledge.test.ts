@@ -24,6 +24,7 @@ import { IsNull } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { BotKnowledgeBase } from '../../database/entities/BotKnowledgeBase';
+import { KnowledgeService } from '../../knowledge/knowledge.service';
 import { app } from '../../server';
 import { createTestTenant, createTestAnchorBot, createTestUser } from '../helpers/factories';
 
@@ -73,6 +74,28 @@ describe('Per-bot dedicated knowledge', () => {
     expect(get.body.data.mode).toBe('dedicated');
     expect(get.body.data.documents).toHaveLength(1);
     expect(get.body.data.documents[0].title).toBe('Bot Doc');
+  });
+
+  it('returns the website crawl notices of the dedicated KB', async () => {
+    const enable = await request(app).post(`/api/v1/bots/${botId}/knowledge/dedicated`).send();
+    const kbId = enable.body.data.kbId;
+    await new KnowledgeService(AppDataSource).recordWebsiteCrawlRun(
+      tenantId,
+      kbId,
+      'https://down.example/',
+      { skippedByRules: 0, rulesUnreachable: true },
+    );
+
+    const get = await request(app).get(`/api/v1/bots/${botId}/knowledge`);
+    expect(get.status).toBe(200);
+    expect(get.body.data.websiteCrawls).toEqual([
+      {
+        origin: 'https://down.example/',
+        skippedByRules: 0,
+        rulesUnreachable: true,
+        hasPages: false,
+      },
+    ]);
   });
 
   it('switches back to shared (non-destructive) and re-enable keeps the docs', async () => {

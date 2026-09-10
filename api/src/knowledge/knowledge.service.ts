@@ -144,34 +144,41 @@ export class KnowledgeService {
     }> = [];
     for (const run of runs) {
       if (!run.rulesUnreachable && run.skippedByRules === 0) continue;
-      const hasPages = await this.originHasUrlDocuments(
-        tenantId,
-        kb.id,
-        run.origin,
-      );
+      const pages = await this.originPagesSinceRun(tenantId, kb.id, run);
+      if (run.rulesUnreachable && pages.touchedSinceRun) continue;
       websiteCrawls.push({
         origin: run.origin,
         skippedByRules: run.skippedByRules,
         rulesUnreachable: run.rulesUnreachable,
-        hasPages,
+        hasPages: pages.hasPages,
       });
     }
     return { documents, total, page, limit, websiteCrawls };
   }
 
-  private async originHasUrlDocuments(
+  private async originPagesSinceRun(
     tenantId: string,
     kbId: string,
-    origin: string,
-  ): Promise<boolean> {
-    return this.docRepo
+    run: WebsiteCrawlRun,
+  ): Promise<{ hasPages: boolean; touchedSinceRun: boolean }> {
+    const counts = await this.docRepo
       .createQueryBuilder("doc")
+      .select("COUNT(*)", "pages")
+      .addSelect(
+        `COUNT(*) FILTER (WHERE "doc"."updatedAt" > (SELECT "updatedAt" FROM "website_crawl_runs" WHERE "id" = :runId))`,
+        "touched",
+      )
       .where({ tenantId, knowledgeBaseId: kbId, type: "url" })
       .andWhere(`left("doc"."sourceUrl", :prefixLength) = :prefix`, {
-        prefix: origin,
-        prefixLength: origin.length,
+        prefix: run.origin,
+        prefixLength: run.origin.length,
       })
-      .getExists();
+      .setParameter("runId", run.id)
+      .getRawOne<{ pages: string; touched: string }>();
+    return {
+      hasPages: Number(counts?.pages) > 0,
+      touchedSinceRun: Number(counts?.touched) > 0,
+    };
   }
 
   async createDocument(

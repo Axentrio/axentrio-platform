@@ -15,7 +15,19 @@ vi.mock("@/services/apiClient", () => ({
   extractApiErrorMessage: () => null,
 }));
 
+import i18n from "@/i18n";
 import BotKnowledgePanel from "./BotKnowledgePanel";
+
+function renderPanel() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BotKnowledgePanel botId="bot-1" readOnly />
+    </QueryClientProvider>,
+  );
+}
 
 describe("BotKnowledgePanel", () => {
   it("tells the tenant that a website import into the bot's own knowledge imported nothing", async () => {
@@ -32,15 +44,8 @@ describe("BotKnowledgePanel", () => {
         },
       ],
     });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BotKnowledgePanel botId="bot-1" readOnly />
-      </QueryClientProvider>,
-    );
+    renderPanel();
 
     expect(
       await screen.findByText(
@@ -48,5 +53,19 @@ describe("BotKnowledgePanel", () => {
       ),
     ).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith("/bots/bot-1/knowledge");
+  });
+
+  it("still renders when the API does not send crawl notices yet", async () => {
+    apiGet.mockResolvedValue({
+      mode: "dedicated",
+      kbId: "kb-bot",
+      documents: [],
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText(i18n.t("bots.knowledge.empty")),
+    ).toBeInTheDocument();
   });
 });

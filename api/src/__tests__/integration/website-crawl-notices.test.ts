@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const queued = vi.hoisted(() => [] as Array<{ queue: string; data: unknown }>);
+const againRules = vi.hoisted(() => ({ reachable: false }));
 
 vi.mock("../../queue/message-queue", () => ({
   addJob: vi.fn(async (queue: string, data: unknown) => {
@@ -29,6 +30,12 @@ vi.mock("../../security/ssrf-guard", async (importOriginal) => {
         return { status: 200, data: "User-agent: *\nDisallow: /\n", headers: {} };
       }
       if (host === "clean.notices.example") {
+        return { status: 404, data: "", headers: {} };
+      }
+      if (host === "again.notices.example") {
+        if (!againRules.reachable) {
+          throw new Error("timeout of 5000ms exceeded");
+        }
         return { status: 404, data: "", headers: {} };
       }
       throw new Error(`unexpected outbound request ${config.url}`);
@@ -211,5 +218,83 @@ describe("website crawl notices", () => {
     const payload = await knowledge.listDocuments(tenant.id);
     expect(payload.documents).toEqual([]);
     expect(payload.websiteCrawls).toEqual([]);
+  });
+
+  describe("a re-import of a previously refused site", () => {
+    const origin = "https://again.notices.example/";
+    const refusedNotice = (hasPages: boolean) => ({
+      origin,
+      skippedByRules: 0,
+      rulesUnreachable: true,
+      hasPages,
+    });
+    const renderAgain = (onRender?: (url: string) => Promise<void>) =>
+      vi.fn(async (url: string) => {
+        await onRender?.(url);
+        return {
+          url,
+          html: "",
+          title: url,
+          text: `Page at ${url}`,
+          links: url === origin ? ["https://again.notices.example/about"] : [],
+        };
+      });
+
+    afterEach(() => {
+      againRules.reachable = false;
+    });
+
+    it("shows no refusal while its pages are arriving", async () => {
+      const tenant = await createTestTenant();
+      const knowledge = new KnowledgeService(AppDataSource);
+      const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+      await createWebsiteCrawlProcessor(AppDataSource, { render: vi.fn() })(
+        crawlJob(tenant.id, kb.id, origin),
+      );
+      expect((await knowledge.listDocuments(tenant.id)).websiteCrawls).toEqual([
+        refusedNotice(false),
+      ]);
+
+      againRules.reachable = true;
+      let midCrawl:
+        | Awaited<ReturnType<KnowledgeService["listDocuments"]>>
+        | undefined;
+      const render = renderAgain(async (url) => {
+        if (url === "https://again.notices.example/about") {
+          midCrawl = await knowledge.listDocuments(tenant.id);
+        }
+      });
+      await createWebsiteCrawlProcessor(AppDataSource, { render })(
+        crawlJob(tenant.id, kb.id, origin),
+      );
+
+      expect(midCrawl?.documents.map((doc) => doc.sourceUrl)).toEqual([origin]);
+      expect(midCrawl?.websiteCrawls).toEqual([]);
+    });
+
+    it("shows the refusal again once a later re-import is refused too", async () => {
+      const tenant = await createTestTenant();
+      const knowledge = new KnowledgeService(AppDataSource);
+      const kb = await knowledge.resolveKnowledgeBase(tenant.id);
+      await createWebsiteCrawlProcessor(AppDataSource, { render: vi.fn() })(
+        crawlJob(tenant.id, kb.id, origin),
+      );
+      againRules.reachable = true;
+      await createWebsiteCrawlProcessor(AppDataSource, {
+        render: renderAgain(),
+      })(crawlJob(tenant.id, kb.id, origin));
+      expect((await knowledge.listDocuments(tenant.id)).websiteCrawls).toEqual(
+        [],
+      );
+
+      againRules.reachable = false;
+      await createWebsiteCrawlProcessor(AppDataSource, { render: vi.fn() })(
+        crawlJob(tenant.id, kb.id, origin),
+      );
+
+      const payload = await knowledge.listDocuments(tenant.id);
+      expect(payload.documents).toHaveLength(2);
+      expect(payload.websiteCrawls).toEqual([refusedNotice(true)]);
+    });
   });
 });

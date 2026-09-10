@@ -468,7 +468,10 @@ export function useBotKnowledge(
   const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.bots.knowledge(botId ?? ""),
-    queryFn: () => api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`),
+    queryFn: async (): Promise<BotKnowledgeState> => {
+      const res = await api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`);
+      return { ...res, websiteCrawls: res?.websiteCrawls ?? [] };
+    },
     enabled: !!botId && (opts.enabled ?? true),
     refetchInterval: (query) => {
       const data = query.state.data;

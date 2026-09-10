@@ -29,14 +29,14 @@ Paths below are relative to `api/` unless stated otherwise.
 | Verdict | Count |
 |---|---|
 | `COVERED` — already pinned, no work needed | 46 |
-| Closed by this work (`GAP`/`PARTIAL`/`BUG` with a delivered test) | 39 — includes SYS-07, a former `BUG` |
-| Still open (audited, test not yet written) | 1 — AVL-01, blocked on a product decision (§11) |
+| Closed by this work (`GAP`/`PARTIAL`/`BUG` with a delivered test) | 40 — includes SYS-07 and AVL-01, both former `BUG`s |
+| Still open (audited, test not yet written) | 0 |
 | `EVAL` — measured by the live suite, which never runs in CI | 5 — SYS-03, SYS-04, and the model half of BK-02, BK-08 and SRV-02 |
 | `RESTATE` — drop or reword the case | 4 |
-| `BUG` — product defect found, left unfixed | 3 — AVL-01, SYS-02 and PRC-12 (§11) |
+| `BUG` — product defect found, left unfixed | 2 — SYS-02 and PRC-12 (§11) |
 
-The rows overlap, so they do not sum to the case count: AVL-01 is both still open and a `BUG`,
-and the `EVAL` row counts the model half of cases that another row also counts.
+The rows overlap, so they do not sum to the case count: the `EVAL` row counts the model half of
+cases that another row also counts.
 
 Several closed rows carry a named residual clause. A residual is written into the row rather than
 rounded up, so `COVERED` here always means "a test would fail if this broke", never "near enough".
@@ -155,7 +155,7 @@ the test was corrected to the real contract rather than the contract bent to the
 
 | Case | Pri | Verdict | Evidence / new test |
 |---|---|---|---|
-| AVL-01 time before opening rejected | P0 | `BUG` + `PARTIAL` | The offer side is pinned (`unit/slot-engine.test.ts:45`; `unit/agent-service.test.ts:1726`). But the plan's "no request fallback" clause is **not enforced server-side**: `internal.provider.ts:2414-2443` gates past / too_soon / too_far / closed-day / service-cap / no-check and **not** an out-of-hours hour on an open day, which `docs/booking-rules.md:26-28` explicitly forbids. Enforced by prompt copy alone. See §11. |
+| AVL-01 time before opening rejected | P0 | `PARTIAL`; defect FIXED | The offer side was already pinned (`unit/slot-engine.test.ts:45`; `unit/agent-service.test.ts:1726`). The plan's "no request fallback" clause was **not enforced server-side**: `internal.provider.ts` gated past / too_soon / too_far / closed-day / service-cap / no-check and **not** an out-of-hours hour on an open day, which `docs/booking-rules.md:26-28` forbids. Now gated on `request_appointment` and on the reschedule change-Request path, by reusing the offer path's own `isWithinBusinessHours` with a `dayHasHours` guard, so a never-open business keeps its documented ordinary-empty Request. Both doors ask one check, `requestWindowRefusal`, so the reschedule path also refuses a date closed all day, `too_soon`, and a past start with its own `past` reason. DELIVERED in `integration/booking-plan-hours-gate.test.ts`: the three documented cases on each door (out-of-hours keeps the date while it still has a time the business can take, closed-all-day moves to another date, `too_soon` offers a reachable range), plus a date with no time left, a window that closes before it opens, the daily cap's precedence and three capture controls. |
 | AVL-02 always open 24/7 | P0 | `PARTIAL` | `unit/slot-engine.test.ts:149`; every fixture pairs `always_open` with an **empty** grid, so a mode that failed to bypass a configured grid would pass. DELIVERED in `unit/booking-plan-rules.test.ts`. |
 | AVL-03 day-specific hours | P0 | `PARTIAL` | Tuesday-opens-at-12:00 was pinned with **injected** slots (`unit/internal-provider-create.test.ts:2973`, `unit/agent-service.test.ts:1971`). Engine-level test with two differing weekdays added in `unit/booking-plan-rules.test.ts`. |
 | AVL-04 exact end allowed | P0 | `COVERED` | `unit/slot-engine.test.ts:45`; `unit/business-capacity.test.ts:44`. |
@@ -258,10 +258,10 @@ Two smaller wording corrections, which the new tests pin as-is with a comment:
 6. **SYS-05** says never create or offer a Request for a past time. A **request-only** Service
    still captures one.
 
-## 11. Product defects found (4, one now FIXED)
+## 11. Product defects found (4, two now FIXED)
 
 Reported rather than patched, because each is a behaviour change that needs an owner's decision.
-The exception is SYS-07, whose decision `docs/booking-rules.md:223-225` had already taken.
+SYS-07 and AVL-01 are the exceptions: the rule had already decided each, and both are now fixed.
 
 1. **SYS-07 — the output guard excluded request-shaped claims. FIXED** (wave 3). A false "your
    request has been forwarded" claim reached the customer, and a test asserted the sentence was
@@ -270,11 +270,7 @@ The exception is SYS-07, whose decision `docs/booking-rules.md:223-225` had alre
    Booking. The guard now judges a request claim against `requestRecorded`, and the same root
    cause closed CAL-06's reply half. See both rows for the tests and the falsification. The
    SYS-07 row states the condition under which the fix holds.
-2. **AVL-01 — no opening-hours gate on the request path.** `internal.provider.ts:2414-2443`
-   refuses past / too_soon / too_far / closed-day / service-cap / no-check but **not** an
-   out-of-hours hour on a day that has hours, so an Auto-book Service can capture a Request for
-   08:30 on a 09:00 day. `docs/booking-rules.md:26-28` explicitly forbids that Request and calls
-   the invariant load-bearing; it is enforced by prompt copy alone.
+2. **AVL-01 — no opening-hours gate on the request path.** FIXED. See the AVL-01 row in §5.
 3. **SYS-02 — a reset mutates and un-mirrors live Bookings.** Cancel + mirror delete
    (`services/conversation-reset-state.ts:255-291`, `:121-131`) is broader than the plan's
    "clear conversation state, keep bookings". Worth confirming this is intended.
@@ -336,11 +332,9 @@ has moved into the tables above with a `file:line`; what follows is what is genu
 **Blocked on a product decision, not on test effort** (§11). Until the decision lands, a test could
 only pin the current, contradicted behaviour:
 
-1. **AVL-01** — no opening-hours gate on the request path, so an Auto-book Service can capture an out-of-hours Request. Forbidden by `docs/booking-rules.md:26-28`, enforced by prompt copy alone.
-
-SYS-07 and CAL-06's reply half were on this list and are now closed by wave 3. They were never
-blocked: `docs/booking-rules.md:223` and `:225` had already decided both, and the code simply did
-not honour the rule.
+Nothing is left on this list. SYS-07, CAL-06's reply half and AVL-01 all sat here, and each is now
+closed with the evidence in its own row. None of the three was blocked in the end:
+`docs/booking-rules.md` had already decided each one, and the code did not honour the rule.
 
 **Named residuals inside closed rows** (each is written into its row, not rounded away):
 

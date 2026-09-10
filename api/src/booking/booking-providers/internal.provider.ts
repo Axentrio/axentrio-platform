@@ -49,7 +49,7 @@ import {
   type UpdateBookingPatch,
   type UpdateBookingResult,
 } from './types';
-import { computeSlots, diagnoseEmptyRange, bookableWindow, windowsForDay, weekFromHasHours, type SlotEngineInput } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, bookableWindow, dayHasHours, weekFromHasHours, isWithinBusinessHours, type SlotEngineInput } from './slot-engine';
 import {
   buildBookingEventContent,
   storedFileNames,
@@ -134,6 +134,12 @@ import {
   requestTooSoon,
   requestTooFar,
   requestClosedDay,
+  requestOutsideHours,
+  requestOutsideHoursNoneLeft,
+  rescheduleOutsideHours,
+  rescheduleClosedDay,
+  rescheduleTooSoon,
+  reschedulePast,
   requestBeforeCheck,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
@@ -293,6 +299,60 @@ function clearedTravelSnapshot(checked: TravelSnapshot | null, verdict: TravelVe
     drives: checked.drives,
     base: checked.base,
     dayStart: checked.dayStart,
+  };
+}
+
+/**
+ * Which refusal `docs/booking-rules.md:26-28` names for an Auto-book Request at `start`, with the
+ * range to offer instead, or null when none applies. Both doors that write a Request ask this, so
+ * the create path and a reschedule change Request cannot disagree about a time.
+ *
+ *  - `past`: already gone by, and the range is the first reachable week.
+ *  - `too_soon`: inside the minimum notice, and the range is the first reachable week.
+ *  - `closed`: a date with no usable hours while the next week has some, and the range is ANOTHER
+ *    date, never that one. A business that never opens gets null: that is the documented
+ *    ordinary-empty Request, not a closed date.
+ *  - `outside_hours`: an hour outside a date that has hours, and the range is that same date.
+ *  - `outside_hours_none_left`: the same hour, on a date with no start left the business can take,
+ *    and the range is the one the whole-day check for that date would retry, else the week after.
+ *
+ * Only the START is judged, with the offer path's own window math, so a request still skips
+ * slot-fit exactly as before. Busy time is not read: this is the owner's policy, not the diary.
+ */
+function requestWindowRefusal(
+  rule: AvailabilityRule,
+  service: SlotEngineInput['eventType'],
+  start: Date,
+  durationMin: number,
+  now: Date,
+): {
+  reason: 'past' | 'too_soon' | 'closed' | 'outside_hours' | 'outside_hours_none_left';
+  startDate: string;
+  endDate: string;
+} | null {
+  const { earliestMs } = bookableWindow(service, now);
+  const earliest = new Date(earliestMs).toISOString();
+  if (start.getTime() < now.getTime()) {
+    return { reason: 'past', ...retryRange('past', earliest, rule.timezone) };
+  }
+  if (start.getTime() < earliestMs) {
+    return { reason: 'too_soon', ...retryRange('too_soon', earliest, rule.timezone) };
+  }
+  const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
+  const nextDay = day.plus({ days: 1 });
+  const anotherDate = retryRange('closed', nextDay.toJSDate().toISOString(), rule.timezone);
+  if (!dayHasHours(rule, day)) {
+    return weekFromHasHours(rule, nextDay) ? { reason: 'closed', ...anotherDate } : null;
+  }
+  if (isWithinBusinessHours(rule, start)) return null;
+  const date = day.toFormat('yyyy-MM-dd');
+  const { rangeStart, rangeEnd } = normalizeDateRange(date, date, rule.timezone);
+  const dayInput: SlotEngineInput = { rule, eventType: { ...service, durationMin }, rangeStart, rangeEnd, now };
+  if (computeSlots(dayInput).length > 0) return { reason: 'outside_hours', startDate: date, endDate: date };
+  const gone = diagnoseEmptyRange(dayInput);
+  return {
+    reason: 'outside_hours_none_left',
+    ...(gone ? retryRange(gone.reason, gone.boundary, rule.timezone) : anotherDate),
   };
 }
 
@@ -2395,8 +2455,9 @@ export class InternalProvider implements BookingProvider {
     // Requests deliberately skip slot validation: a request is a preference and the owner
     // decides. That holds for a full day, an out-of-area job, or an unmeasured drive - all
     // times the owner COULD say yes to. It does not hold outside their notice or horizon,
-    // once this service has reached maxBookingsPerDay, or on a weekday they do not open:
-    // they have already said no and no decision is left to make.
+    // once this service has reached maxBookingsPerDay, on a weekday they do not open, or at an
+    // hour they do not open on a weekday they do: they have already said no and no decision is
+    // left to make.
     //
     // Seen on production with this fix's other half already deployed: the model skipped
     // check_availability entirely, asked for a name, and captured a request for a date 63 days
@@ -2410,34 +2471,47 @@ export class InternalProvider implements BookingProvider {
     // Narrow on purpose. Request-only services, a paused business and a dead calendar all keep
     // capturing exactly as before - a request is the RIGHT answer for those - and so does any
     // time inside the window that is merely taken. A daily cap is not "merely taken". A closed
-    // weekday is not "merely taken". Never-open is ordinary empty and still captures.
+    // weekday is not "merely taken". An hour outside the day's own opening hours is not
+    // "merely taken" either. Never-open is ordinary empty and still captures.
     const canAuto =
       (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     if (service.bookingMode !== 'request' && canAuto) {
       const now = new Date();
-      const { earliestMs, latestMs } = bookableWindow(service, now);
+      const { latestMs } = bookableWindow(service, now);
       const startMs = start.getTime();
       // The RANGE goes into the message, never the bound: it is a policy instant, not an opening
       // time - see the note on `requestTooSoon`.
-      if (startMs < now.getTime()) {
-        const { startDate, endDate } = retryRange('past', new Date(earliestMs).toISOString(), rule.timezone);
-        throw new BookingError(requestInPast(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      //
+      // `requestWindowRefusal` decides which of booking-rules.md:26-28 applies; each answer is
+      // spoken here at its own place in this path's gate order.
+      const refusal = requestWindowRefusal(rule, service, start, effectiveDuration, now);
+      if (refusal?.reason === 'past') {
+        throw new BookingError(requestInPast(refusal.startDate, refusal.endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
-      if (startMs < earliestMs) {
-        const { startDate, endDate } = retryRange('too_soon', new Date(earliestMs).toISOString(), rule.timezone);
-        throw new BookingError(requestTooSoon(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      if (refusal?.reason === 'too_soon') {
+        throw new BookingError(requestTooSoon(refusal.startDate, refusal.endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       if (startMs > latestMs) {
         const { startDate, endDate } = retryRange('too_far', new Date(latestMs).toISOString(), rule.timezone);
         throw new BookingError(requestTooFar(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
-      const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
-      const retryFrom = day.plus({ days: 1 });
-      if (windowsForDay(rule, day).length === 0 && weekFromHasHours(rule, retryFrom)) {
-        const { startDate, endDate } = retryRange('closed', retryFrom.toJSDate().toISOString(), rule.timezone);
-        throw new BookingError(requestClosedDay(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+      if (refusal?.reason === 'closed') {
+        throw new BookingError(requestClosedDay(refusal.startDate, refusal.endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
       await enforceServiceDayCapacity(null, service, start, rule.timezone);
+      // The out-of-hours refusal speaks AFTER the daily cap on purpose. A capped date must send
+      // the customer to another date; this refusal keeps them on it. The stricter, date-wide no
+      // has to speak first.
+      if (refusal) {
+        throw new BookingError(
+          refusal.reason === 'outside_hours'
+            ? requestOutsideHours(refusal.startDate)
+            : requestOutsideHoursNoneLeft(refusal.startDate, refusal.endDate),
+          'REQUEST_OUTSIDE_WINDOW',
+          409,
+        );
+      }
+      const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
       if (await this.requestNeedsCheckFirst(ctx, service, extras, day.toFormat('yyyy-MM-dd'))) {
         throw new BookingError(requestBeforeCheck(day.toFormat('yyyy-MM-dd')), 'REQUEST_BEFORE_CHECK', 409);
       }
@@ -3945,7 +4019,7 @@ export class InternalProvider implements BookingProvider {
       service,
       start,
       end,
-      rule.timezone,
+      rule,
       newAddress,
     );
     if (changeRequest) return changeRequest;
@@ -4253,7 +4327,7 @@ export class InternalProvider implements BookingProvider {
     service: ResolvedService,
     start: Date,
     end: Date,
-    timezone: string,
+    rule: AvailabilityRule,
     newAddress: string | null | undefined,
   ): Promise<RescheduleResult | null> {
     if (!ctx.subjectToCustomerChangePolicy) return null;
@@ -4262,7 +4336,29 @@ export class InternalProvider implements BookingProvider {
     const decision = resolveCustomerChange(policy, booking.startUtc, untilMin);
     if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule', policy, untilMin);
     if (decision !== 'request') return null;
-    return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, timezone, newAddress);
+    // The create path's refusals for booking-rules.md:26-28, on the same terms: an Auto-book
+    // Service that can auto-confirm. The policy still decides WHETHER the move needs approval;
+    // this decides only which hour or date may be put to the owner.
+    const refusal =
+      service.bookingMode === 'request' || start.getTime() === booking.startUtc.getTime()
+        ? null
+        : requestWindowRefusal(rule, service, start, (end.getTime() - start.getTime()) / 60_000, new Date());
+    if (
+      refusal &&
+      (await this.canAutoConfirm(ctx)) &&
+      !(await loadBusinessRules(ctx.bot.id)).bookingsPaused
+    ) {
+      const message =
+        refusal.reason === 'past'
+          ? reschedulePast(refusal.startDate, refusal.endDate)
+          : refusal.reason === 'too_soon'
+          ? rescheduleTooSoon(refusal.startDate, refusal.endDate)
+          : refusal.reason === 'closed'
+            ? rescheduleClosedDay(refusal.startDate, refusal.endDate)
+            : rescheduleOutsideHours(refusal.startDate, refusal.endDate);
+      throw new BookingError(message, 'REQUEST_OUTSIDE_WINDOW', 409);
+    }
+    return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone, newAddress);
   }
 
   /**

@@ -116,15 +116,7 @@ Keep `stripe listen` running while you exercise checkout flows — the webhook i
 
 Two non-obvious wiring rules that the billing layer depends on:
 
-1. **Raw-body middleware ordering.** The Stripe webhook handler verifies an HMAC signature over the raw request body. `server.ts` mounts the webhook router with `express.raw({ type: 'application/json' })` **before** any global `express.json()` middleware:
-
-   ```ts
-   app.use(
-     '/api/v1/webhooks/billing',
-     express.raw({ type: 'application/json' }),
-     billingWebhookRoutes,
-   );
-   ```
+1. **Raw-body middleware ordering.** The Stripe webhook handler verifies an HMAC signature over the raw request body. `server.ts` mounts the webhook router with `express.raw({ type: 'application/json' })` **before** any global `express.json()` middleware. The comment above the raw-body webhook mounts in `src/server.ts` owns the full chain, which starts with `rateLimitWebhookByIp("billing")`.
 
    The handler receives `req.body` as a `Buffer` and passes it directly to `provider.verifyWebhook` — it must **not** be JSON-parsed. Re-ordering the middleware or registering an extra body-parser on `/webhooks/billing/*` will break signature verification.
 

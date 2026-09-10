@@ -382,21 +382,54 @@ export class KnowledgeService {
     };
   }
 
+  async recordUrlCrawlAttempt(
+    tenantId: string,
+    kbId: string,
+    originUrl: string,
+  ): Promise<void> {
+    const prefix = `${new URL(originUrl).origin}/`;
+    await this.docRepo
+      .createQueryBuilder()
+      .update()
+      .set({
+        metadata: () =>
+          `jsonb_set("metadata", '{crawlAttemptedAt}', to_jsonb(CAST(:attemptedAt AS text)))`,
+        updatedAt: () => `"updatedAt"`,
+      })
+      .where({ tenantId, knowledgeBaseId: kbId, type: "url" })
+      .andWhere(`left("sourceUrl", :prefixLength) = :prefix`, {
+        prefix,
+        prefixLength: prefix.length,
+      })
+      .setParameter("attemptedAt", new Date().toISOString())
+      .execute();
+  }
+
   async listStaleUrlOrigins(
     olderThan: Date,
     limit = 20,
   ): Promise<Array<{ tenantId: string; kbId: string; origin: string }>> {
-    const docs = await this.docRepo.find({
-      where: {
+    const docs = await this.docRepo
+      .createQueryBuilder("doc")
+      .select([
+        "doc.tenantId",
+        "doc.knowledgeBaseId",
+        "doc.sourceUrl",
+        "doc.updatedAt",
+      ])
+      .where({
         type: "url",
         sourceUrl: Not(IsNull()),
         updatedAt: LessThan(olderThan),
         status: In(["indexed", "failed"]),
-      },
-      select: ["tenantId", "knowledgeBaseId", "sourceUrl", "updatedAt"],
-      order: { updatedAt: "ASC" },
-      take: 500,
-    });
+      })
+      .andWhere(
+        `("doc"."metadata"->>'crawlAttemptedAt' IS NULL OR CAST("doc"."metadata"->>'crawlAttemptedAt' AS timestamptz) < :olderThan)`,
+        { olderThan },
+      )
+      .orderBy("doc.updatedAt", "ASC")
+      .take(500)
+      .getMany();
     const { originFromSourceUrl } = await import("./website-url");
     const seen = new Set<string>();
     const origins: Array<{ tenantId: string; kbId: string; origin: string }> =

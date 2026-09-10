@@ -1,4 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../../utils/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+import { logger } from "../../utils/logger";
 import {
   canonicalSourceUrl,
   normalizeWebsiteUrl,
@@ -6,7 +12,10 @@ import {
   isMediaUrl,
   originFromSourceUrl,
 } from "../../knowledge/website-url";
-import { parseRobotsTxt } from "../../knowledge/website-robots";
+import {
+  parseRobotsTxt,
+  fetchRobotsAllows,
+} from "../../knowledge/website-robots";
 import {
   crawlWebsite,
   DEFAULT_MAX_PAGES,
@@ -87,13 +96,228 @@ describe("originFromSourceUrl", () => {
 });
 
 describe("parseRobotsTxt", () => {
-  it("honours Disallow for our bot and for *", () => {
+  it("honours Disallow for * when no group names our bot", () => {
+    const robots = parseRobotsTxt("User-agent: *\nDisallow: /private\n");
+    expect(robots.allows("/services")).toBe(true);
+    expect(robots.allows("/private/x")).toBe(false);
+  });
+
+  it("lets a group naming our bot override the * group instead of stacking", () => {
     const robots = parseRobotsTxt(
       "User-agent: *\nDisallow: /private\n\nUser-agent: Axentrio-KnowledgeBot\nDisallow: /drafts\n",
     );
     expect(robots.allows("/services")).toBe(true);
-    expect(robots.allows("/private/x")).toBe(false);
     expect(robots.allows("/drafts/a")).toBe(false);
+    expect(robots.allows("/private/x")).toBe(true);
+  });
+
+  it("matches * as any sequence of characters", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /private*\nDisallow: /*/secret\nDisallow: /*?session=\n",
+    );
+    expect(robots.allows("/private/team")).toBe(false);
+    expect(robots.allows("/en/secret/team")).toBe(false);
+    expect(robots.allows("/cart?session=1")).toBe(false);
+    expect(robots.allows("/en/public")).toBe(true);
+    expect(robots.allows("/cart")).toBe(true);
+  });
+
+  it("matches many wildcards against a long path without backtracking", () => {
+    const robots = parseRobotsTxt(
+      `User-agent: *\nDisallow: /${"*a".repeat(20)}*b\nDisallow: /x${"*a".repeat(20)}$\n`,
+    );
+    const path = `/${"a".repeat(200)}`;
+    const started = performance.now();
+    expect(robots.allows(path)).toBe(true);
+    expect(robots.allows(`${path}b`)).toBe(false);
+    expect(robots.allows(`/x${"a".repeat(200)}`)).toBe(false);
+    expect(robots.allows(`/x${"a".repeat(200)}c`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it("anchors a trailing $ at the end of the path", () => {
+    const robots = parseRobotsTxt("User-agent: *\nDisallow: /p$\n");
+    expect(robots.allows("/p")).toBe(false);
+    expect(robots.allows("/page")).toBe(true);
+  });
+
+  it("applies a group with several User-agent lines to each agent", () => {
+    const withStar = parseRobotsTxt(
+      "User-agent: *\nUser-agent: GPTBot\nDisallow: /private\n",
+    );
+    expect(withStar.allows("/private")).toBe(false);
+    const withOwn = parseRobotsTxt(
+      "User-agent: GPTBot\nUser-agent: Axentrio-KnowledgeBot\nDisallow: /drafts\n",
+    );
+    expect(withOwn.allows("/drafts/a")).toBe(false);
+  });
+
+  it("starts a new group at a User-agent line after a rule line", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /a\nUser-agent: GPTBot\nDisallow: /b\n",
+    );
+    expect(robots.allows("/a")).toBe(false);
+    expect(robots.allows("/b")).toBe(true);
+  });
+
+  it("lets the longest match win, and Allow win a tie", () => {
+    const robots = parseRobotsTxt(
+      "User-agent: *\nDisallow: /\nAllow: /public\nDisallow: /folder\nAllow: /folder\n",
+    );
+    expect(robots.allows("/public/page")).toBe(true);
+    expect(robots.allows("/private/page")).toBe(false);
+    expect(robots.allows("/folder/x")).toBe(true);
+  });
+});
+
+describe("fetchRobotsAllows", () => {
+  beforeEach(() => {
+    vi.mocked(logger.warn).mockClear();
+  });
+
+  it("refuses Disallow paths on 200 and allows the rest", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /private\n",
+      }),
+    );
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(await allows("https://example.com/services")).toBe(true);
+  });
+
+  it("refuses the canonical directory URL when Disallow ends in a slash", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /private/\n",
+      }),
+    );
+    expect(await allows("https://example.com/private")).toBe(false);
+    expect(await allows("https://example.com/private?page=2")).toBe(false);
+    expect(await allows("https://example.com/private/team")).toBe(false);
+    expect(await allows("https://example.com/privateer")).toBe(true);
+    expect(await allows("https://example.com/private.html")).toBe(true);
+  });
+
+  describe("percent-encoding", () => {
+    const allowsFor = (rules: string) =>
+      fetchRobotsAllows("https://example.com", async () => ({
+        status: 200,
+        body: `User-agent: *\n${rules}\n`,
+      }));
+
+    it("encodes a non-ASCII rule to match the encoded pathname", async () => {
+      const allows = await allowsFor("Disallow: /über-uns/intern");
+      expect(new URL("https://example.com/über-uns/intern").pathname).toBe(
+        "/%C3%BCber-uns/intern",
+      );
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+      expect(await allows("https://example.com/%c3%bcber-uns/intern")).toBe(
+        false,
+      );
+      expect(await allows("https://example.com/über-uns/public")).toBe(true);
+    });
+
+    it("does not double-encode a rule that is already percent-encoded", async () => {
+      const allows = await allowsFor("Disallow: /%C3%BCber-uns/intern");
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+    });
+
+    it("matches lowercase hex in a rule against the uppercase pathname", async () => {
+      const allows = await allowsFor("Disallow: /%c3%bcber-uns/intern");
+      expect(await allows("https://example.com/über-uns/intern")).toBe(false);
+    });
+
+    it("leaves ASCII k and s unencoded so rule lengths stay correct", async () => {
+      const allows = await allowsFor("Allow: /services/\nDisallow: /*/internal");
+      expect(await allows("https://example.com/services/internal")).toBe(false);
+      expect(await allows("https://example.com/services/boilers")).toBe(true);
+    });
+
+    it("keeps * and $ working in a rule with non-ASCII text", async () => {
+      const allows = await allowsFor("Disallow: /über-uns/*\nDisallow: /straße$");
+      expect(await allows("https://example.com/über-uns/team/anna")).toBe(
+        false,
+      );
+      expect(await allows("https://example.com/straße")).toBe(false);
+      expect(await allows("https://example.com/straße/karte")).toBe(true);
+    });
+  });
+
+  it("allows every path when robots.txt is 404", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({ status: 404, body: "" }),
+    );
+    expect(await allows("https://example.com/private/x")).toBe(true);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("refuses every path when get throws", async () => {
+    const allows = await fetchRobotsAllows("https://example.com", async () => {
+      throw new Error("timeout of 5000ms exceeded");
+    });
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "timeout of 5000ms exceeded",
+    });
+  });
+
+  it("refuses every path when robots.txt is 5xx", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({ status: 503, body: "" }),
+    );
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "robots.txt returned status 503",
+    });
+  });
+
+  it("refuses every path when robots.txt is a redirect that was not followed", async () => {
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => ({ status: 301, body: "" }),
+    );
+    expect(await allows("https://example.com/")).toBe(false);
+    expect(await allows("https://example.com/private/x")).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), {
+      origin: "https://example.com",
+      cause: "robots.txt returned status 301",
+    });
+  });
+
+  it("requests robots.txt at the origin root", async () => {
+    const requested: string[] = [];
+    await fetchRobotsAllows("https://example.com/blog/post", async (url) => {
+      requested.push(url);
+      return { status: 404, body: "" };
+    });
+    expect(requested).toEqual(["https://example.com/robots.txt"]);
+  });
+
+  it("fetches robots.txt once per origin", async () => {
+    let calls = 0;
+    const allows = await fetchRobotsAllows(
+      "https://example.com",
+      async () => {
+        calls += 1;
+        return {
+          status: 200,
+          body: "User-agent: *\nDisallow: /private\n",
+        };
+      },
+    );
+    await allows("https://example.com/a");
+    await allows("https://example.com/b");
+    await allows("https://example.com/private/x");
+    expect(calls).toBe(1);
   });
 });
 
@@ -176,6 +400,76 @@ describe("crawlWebsite", () => {
       enqueueIngest: async () => undefined,
     });
     expect(visited).toEqual(["https://plumber.example/"]);
+  });
+
+  describe("when a page redirects", () => {
+    const home = "https://plumber.example/";
+    const crawlWithRedirect = async (from: string, to: string) => {
+      const robotsAllows = await fetchRobotsAllows(home, async () => ({
+        status: 200,
+        body: "User-agent: *\nDisallow: /members/\n",
+      }));
+      const rendered: string[] = [];
+      const stored: Array<{ sourceUrl: string; text: string }> = [];
+      const result = await crawlWebsite({
+        originUrl: home,
+        followLinks: true,
+        maxPages: 10,
+        remainingSlots: 10,
+        renderer: {
+          render: async (url: string) => {
+            rendered.push(url);
+            const finalUrl = url === from ? to : url;
+            return {
+              url: finalUrl,
+              html: "",
+              title: finalUrl,
+              links:
+                url === home ? [from] : ["https://plumber.example/discovered"],
+              text: `Text of ${finalUrl}`,
+            };
+          },
+        },
+        robotsAllows,
+        assertSafe: () => undefined,
+        upsertPage: async (page) => {
+          stored.push({ sourceUrl: page.sourceUrl, text: page.text });
+          return { id: page.sourceUrl, processingVersion: 1, created: true };
+        },
+        enqueueIngest: async () => undefined,
+      });
+      return { rendered, stored, result };
+    };
+
+    it("stores nothing when an allowed url redirects to a disallowed one", async () => {
+      const { rendered, stored, result } = await crawlWithRedirect(
+        "https://plumber.example/account",
+        "https://plumber.example/members/login",
+      );
+      expect(stored).toEqual([{ sourceUrl: home, text: `Text of ${home}` }]);
+      expect(rendered).not.toContain("https://plumber.example/discovered");
+      expect(result).toMatchObject({ indexed: 1, failed: 0 });
+    });
+
+    it("stores normally when an allowed url redirects to another allowed one", async () => {
+      const { rendered, stored } = await crawlWithRedirect(
+        "https://plumber.example/old",
+        "https://plumber.example/new",
+      );
+      expect(stored).toContainEqual({
+        sourceUrl: "https://plumber.example/old",
+        text: "Text of https://plumber.example/new",
+      });
+      expect(rendered).toContain("https://plumber.example/discovered");
+    });
+
+    it("leaves a page without a redirect unaffected", async () => {
+      const { stored } = await crawlWithRedirect(
+        "https://plumber.example/account",
+        "https://plumber.example/members/login",
+      );
+      expect(stored[0]).toEqual({ sourceUrl: home, text: `Text of ${home}` });
+    });
   });
 
   it("stops at remaining document quota", async () => {

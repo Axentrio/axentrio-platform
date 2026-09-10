@@ -173,6 +173,12 @@ function nextClientIp(): string {
   return `198.51.100.${allocatedIps}`;
 }
 
+function caseNamed(name: string): WebhookCase {
+  const found = cases.find((c) => c.name === name);
+  if (!found) throw new Error(`no webhook case named ${name}`);
+  return found;
+}
+
 function send(webhook: WebhookCase, clientIp: string) {
   return request(app)
     .post(webhook.path)
@@ -265,5 +271,38 @@ describe('per-route webhook buckets', () => {
       const res = await send(other, clientIp);
       other.assertAccepted(res, other.rawBody);
     }
+  });
+});
+
+describe('429 body shape on the raw-body webhooks', () => {
+  async function floodThenSend(webhook: WebhookCase): Promise<request.Response> {
+    const clientIp = nextClientIp();
+    webhook.arrange?.();
+    for (let i = 0; i < WEBHOOK_LIMIT; i++) {
+      // eslint-disable-next-line no-await-in-loop -- the limiter counts requests, so they must be sequential
+      await send(webhook, clientIp);
+    }
+    return send(webhook, clientIp);
+  }
+
+  it('keeps the legacy body on billing, because the Stripe body shape is a partner contract', async () => {
+    const res = await floodThenSend(caseNamed('Billing'));
+
+    expect(res.status).toBe(429);
+    expect(res.body).toEqual({
+      error: 'Too Many Requests',
+      retryAfter: expect.any(Number),
+      message: expect.any(String),
+    });
+  });
+
+  it('sends the RATE_LIMIT_EXCEEDED envelope on Clerk, which has no legacy-body claim', async () => {
+    const res = await floodThenSend(caseNamed('Clerk'));
+
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({
+      success: false,
+      error: { code: 'RATE_LIMIT_EXCEEDED' },
+    });
   });
 });

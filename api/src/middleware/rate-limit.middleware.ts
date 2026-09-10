@@ -40,12 +40,19 @@ export type WebhookRoute = 'clerk' | 'meta' | 'whatsapp' | 'billing';
  * enforces, `Retry-After` is still set. Match on `req.originalUrl` (NOT
  * `req.path`) because these limiters run inside `apiRouter` (codex round 5 #3).
  *
- * See `timeout.middleware.ts` for the same list and per-path rationale.
+ * `/api/v1/webhooks/billing` is here because `rateLimitWebhookByIp('billing')`
+ * fronts it, and the Stripe body shape is a partner contract (ADR 0011). The
+ * Clerk webhook has no documented legacy-body claim, so it gets the envelope.
+ *
+ * `timeout.middleware.ts` keeps the per-path rationale for the shared entries.
+ * Its list has no billing entry on purpose: `timeoutMiddleware` mounts only
+ * inside `apiRouter`, and the raw-body webhook routes mount before it.
  */
 const LEGACY_ENVELOPE_PATHS = [
   /^\/api\/v1\/webhooks\/inbound(\?|$|\/)/,
   /^\/api\/v1\/webhooks\/health(\?|$|\/)/,
   /^\/api\/v1\/webhooks\/events(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/billing(\?|$|\/)/,
   /^\/api\/v1\/internal\/rag(\?|$|\/)/,
   /^\/api\/v1\/internal\/booking(\?|$|\/)/,
   /^\/api\/v1\/channels\/[^/?]+\/webhook(\?|$|\/)/,

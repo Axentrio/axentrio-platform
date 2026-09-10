@@ -310,6 +310,9 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     "Ik heb uw aanvraag naar het team doorgestuurd.",
     "Uw aanvraag is naar de eigenaar doorgestuurd.",
     "I've passed your request on to the team.",
+    // A model writes either apostrophe.
+    "I’ve passed your request on to the team.",
+    "I’ve sent your details to the owner.",
     // A lead-in in an earlier clause or sentence does not govern the claim.
     "Once again, your request has been forwarded to the team.",
     "As requested I've passed your request on to the team.",
@@ -330,7 +333,7 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     // "but" starts a new main clause, so a lead-in before it cannot reach the claim.
     "I'm not sure if they're in today but I've checked and your request has been forwarded.",
     "Ik weet niet of ze er vandaag zijn maar ik heb gekeken en uw aanvraag is doorgestuurd.",
-    "Je ne sais pas s'ils sont là mais j'ai vérifié et votre demande a bien été transmise.",
+    "Je ne sais pas si l'équipe est là aujourd'hui mais j'ai vérifié et votre demande a bien été transmise.",
     // English "of" is a quantifier, not the Dutch "whether".
     "All of your details have been submitted.",
   ];
@@ -441,6 +444,12 @@ describe("guardrails · validateOutput — a request claim needs a recorded requ
     // that ...", and recall wins that tie.
     ["I can't confirm that your request has been forwarded.", "passed"],
     ["Je ne peux pas confirmer que votre demande a été transmise.", "passed"],
+    // The vocabulary is closed, so the same claim in other words passes. A longer list is not
+    // the cure: no list holds every wording of a lie.
+    ["Zojuist heb ik uw aanvraag doorgestuurd naar het team.", "blocked"],
+    ["Inmiddels is uw aanvraag doorgestuurd naar het team.", "blocked"],
+    ["I've forwarded your question to the owner.", "blocked"],
+    ["I've passed this on to the team.", "blocked"],
   ];
 
   for (const [text, rightAnswer] of KNOWN_RESIDUALS) {

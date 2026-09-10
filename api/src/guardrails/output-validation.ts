@@ -122,13 +122,15 @@ export function claimsBookingConfirmed(text: string): boolean {
  *    not count. A lead-in whose own clause ends first ("Before you go I've passed your request
  *    on") introduces nothing, so the claim after it still counts.
  *
- * KNOWN RESIDUALS. A regex has no parse tree, so two shapes stay wrong on purpose. Each is
+ * KNOWN RESIDUALS. A regex has no parse tree, so three shapes stay wrong on purpose. Each is
  * pinned with `it.fails` in the unit corpus and written into the SYS-07 row:
  *  - A join word after a lead-in's own clause hides a real claim: "When I checked I saw that
  *    your request has been forwarded." A clause end at "and" or "that" would block "Once we see
  *    that your request has been submitted, we reply within 48 hours."
  *  - A negated report is blocked: "I can't confirm that your request has been forwarded." Only
  *    a negation check could tell it from "I can confirm that ...", and recall wins that tie.
+ *  - The vocabulary is closed, so the same claim in other words passes: "I've forwarded your
+ *    question to the owner.", or the Dutch inversion "Inmiddels is uw aanvraag doorgestuurd."
  */
 export function claimsRequestForwarded(text: string): boolean {
   const t = text.toLowerCase();
@@ -190,7 +192,7 @@ const REQUEST_FORWARDED: Array<{ claim: RegExp; leadIn: RegExp }> = [
   // "I've sent you the opening hours" would match on `sent` alone.
   {
     claim: new RegExp(
-      `\\bi(?:'ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
+      `\\bi(?:['’]ve| have) ${EN_ADVERB}(?:submitted|forwarded|sent|logged|recorded|passed(?: on| along)?) (?:your|the|this) (?:request|enquiry|inquiry|details|message)\\b`,
       'g',
     ),
     leadIn: EN_LEAD_IN,

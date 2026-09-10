@@ -21,9 +21,11 @@ import {
   useDeleteDocument,
   useRetryDocument,
   useRefreshWebsiteDocument,
+  useWebsiteCrawlNotices,
 } from "@/queries/useKnowledgeQueries";
 import DocumentCard from "./DocumentCard";
 import AddDocumentModal from "./AddDocumentModal";
+import WebsiteCrawlNotices from "./WebsiteCrawlNotices";
 
 const allFilters = [
   { key: "all", labelKey: "ai.knowledge.list.filters.all", group: "all" },
@@ -78,6 +80,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
   const deleteDoc = useDeleteDocument();
   const retryDoc = useRetryDocument();
   const refreshWebsite = useRefreshWebsiteDocument();
+  const { data: websiteCrawls = [] } = useWebsiteCrawlNotices();
 
   const [typeFilter, setTypeFilter] = useState<string>(initialFilter || "all");
   const [search, setSearch] = useState("");
@@ -143,6 +146,8 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({
           </button>
         </div>
       )}
+
+      <WebsiteCrawlNotices notices={websiteCrawls} />
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between gap-3">

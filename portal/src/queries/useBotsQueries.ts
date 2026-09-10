@@ -18,6 +18,10 @@ import {
   useQueryClient,
   queryOptions,
 } from "@tanstack/react-query";
+import {
+  websiteImportPollInterval,
+  type WebsiteCrawlNotice,
+} from "./useKnowledgeQueries";
 import { api } from "../services/apiClient";
 import { queryKeys } from "./queryKeys";
 import type { SkillReadinessResponse } from "@contracts/skill-readiness";
@@ -454,16 +458,30 @@ export interface BotKnowledgeState {
   mode: "shared" | "dedicated";
   kbId: string | null;
   documents: BotKnowledgeDocument[];
+  websiteCrawls: WebsiteCrawlNotice[];
 }
 
 export function useBotKnowledge(
   botId: string | null | undefined,
   opts: { enabled?: boolean } = {},
 ) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.bots.knowledge(botId ?? ""),
-    queryFn: () => api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`),
+    queryFn: async (): Promise<BotKnowledgeState> => {
+      const res = await api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`);
+      return { ...res, websiteCrawls: res?.websiteCrawls ?? [] };
+    },
     enabled: !!botId && (opts.enabled ?? true),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.mode !== "dedicated" || !data.kbId) return false;
+      return websiteImportPollInterval(
+        queryClient,
+        data.kbId,
+        data.websiteCrawls,
+      );
+    },
   });
 }
 

@@ -88,6 +88,7 @@ import { GuardrailOutputLog } from './entities/GuardrailOutputLog';
 import { ConversationCommand } from './entities/ConversationCommand';
 import { StorageConnection } from './entities/StorageConnection';
 import { StorageImportJob } from './entities/StorageImportJob';
+import { WebsiteCrawlRun } from './entities/WebsiteCrawlRun';
 
 /** Optional per-session statement timeout (ms). Unset = Postgres default (no
  *  timeout). `0` also means no timeout. Only applied when the env var is an
@@ -192,6 +193,7 @@ export const AppDataSource = new DataSource({
     ConversationCommand,
     StorageConnection,
     StorageImportJob,
+    WebsiteCrawlRun,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

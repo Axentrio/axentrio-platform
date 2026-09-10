@@ -612,11 +612,15 @@ router.get(
     const tenantId = (req as ProvisionedRequest).tenantId!;
     await loadTenantBot(req.params.id, tenantId);
     const state = await getBotKnowledgeState(tenantId, req.params.id);
-    const documents =
+    const listed =
       state.mode === 'dedicated' && state.kbId
-        ? (await knowledgeSvc.listDocuments(tenantId, {}, state.kbId)).documents
-        : [];
-    sendSuccess(res, { ...state, documents });
+        ? await knowledgeSvc.listDocuments(tenantId, {}, state.kbId)
+        : null;
+    sendSuccess(res, {
+      ...state,
+      documents: listed?.documents ?? [],
+      websiteCrawls: listed?.websiteCrawls ?? [],
+    });
   })
 );
 

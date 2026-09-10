@@ -112,10 +112,21 @@ function rulesAllow(rules: RobotsRule[], path: string): boolean {
   return winner?.allow ?? true;
 }
 
+export type RobotsAllows = ((pageUrl: string) => Promise<boolean>) & {
+  originRefused: boolean;
+};
+
+function tagged(
+  allows: (pageUrl: string) => Promise<boolean>,
+  originRefused: boolean,
+): RobotsAllows {
+  return Object.assign(allows, { originRefused });
+}
+
 export async function fetchRobotsAllows(
   originUrl: string,
   get: (url: string) => Promise<{ status: number; body: string }>,
-): Promise<(pageUrl: string) => Promise<boolean>> {
+): Promise<RobotsAllows> {
   let res: { status: number; body: string };
   try {
     res = await get(new URL("/robots.txt", originUrl).toString());
@@ -126,26 +137,23 @@ export async function fetchRobotsAllows(
     );
   }
   if (res.status >= 400 && res.status < 500) {
-    return async () => true;
+    return tagged(async () => true, false);
   }
   if (res.status < 200 || res.status >= 300) {
     return refuseCrawl(originUrl, `robots.txt returned status ${res.status}`);
   }
   const { allows } = parseRobotsTxt(res.body);
-  return async (pageUrl: string) => {
+  return tagged(async (pageUrl: string) => {
     const { pathname, search } = new URL(pageUrl);
     const directory = pathname.endsWith("/") ? pathname : `${pathname}/`;
     return allows(`${pathname}${search}`) && allows(`${directory}${search}`);
-  };
+  }, false);
 }
 
-function refuseCrawl(
-  originUrl: string,
-  cause: string,
-): (pageUrl: string) => Promise<boolean> {
+function refuseCrawl(originUrl: string, cause: string): RobotsAllows {
   logger.warn("Website crawl refused: robots.txt unreachable", {
     origin: originUrl,
     cause,
   });
-  return async () => false;
+  return tagged(async () => false, true);
 }

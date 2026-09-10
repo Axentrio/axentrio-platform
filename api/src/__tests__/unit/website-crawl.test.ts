@@ -472,6 +472,47 @@ describe("crawlWebsite", () => {
     });
   });
 
+  it("counts a disallowed page once when a redirect and a link both lead to it", async () => {
+    const home = "https://plumber.example/";
+    const robotsAllows = await fetchRobotsAllows(home, async () => ({
+      status: 200,
+      body: "User-agent: *\nDisallow: /members/\n",
+    }));
+    const result = await crawlWebsite({
+      originUrl: home,
+      followLinks: true,
+      maxPages: 10,
+      remainingSlots: 10,
+      renderer: {
+        render: async (url: string) => ({
+          url:
+            url === "https://plumber.example/account"
+              ? "https://plumber.example/members/"
+              : url,
+          html: "",
+          title: url,
+          links:
+            url === home
+              ? [
+                  "https://plumber.example/account",
+                  "https://plumber.example/members/",
+                ]
+              : [],
+          text: `Text of ${url}`,
+        }),
+      },
+      robotsAllows,
+      assertSafe: () => undefined,
+      upsertPage: async (page) => ({
+        id: page.sourceUrl,
+        processingVersion: 1,
+        created: true,
+      }),
+      enqueueIngest: async () => undefined,
+    });
+    expect(result.skippedByRules).toBe(1);
+  });
+
   it("stops at remaining document quota", async () => {
     const renderer: PageRenderer = {
       render: async (url: string) => ({

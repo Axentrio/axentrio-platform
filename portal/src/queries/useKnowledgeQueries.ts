@@ -3,6 +3,7 @@ import {
   useMutation,
   useQueryClient,
   queryOptions,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { api } from "../services/apiClient";
 import { queryKeys } from "./queryKeys";
@@ -14,15 +15,131 @@ type Any = any;
 
 // --- Query Options ---
 
+export type WebsiteCrawlNotice = {
+  origin: string;
+  skippedByRules: number;
+  rulesUnreachable: boolean;
+  hasPages: boolean;
+};
+
+type DocumentsQueryData = {
+  documents: Any[];
+  websiteCrawls: WebsiteCrawlNotice[];
+};
+
+type ImportWebsiteInput = {
+  url: string;
+  followLinks?: boolean;
+  maxPages?: number;
+  kbId?: string;
+  extraUrls?: string[];
+};
+
+const POLL_MS = 5000;
+export const WEBSITE_IMPORT_WATCH_MS = 2 * 60 * 1000;
+const importWebsiteKey = ["knowledge", "importWebsite"] as const;
+
+function importOrigin(url: string): string | null {
+  try {
+    return `${new URL(normalizeWebsiteUrl(url)).origin}/`;
+  } catch {
+    return null;
+  }
+}
+
+type ImportWatch = {
+  kbId: string | undefined;
+  origin: string | null;
+  before: string | null;
+};
+
+type KnowledgeView = {
+  kbId: string | undefined;
+  documents: Array<{ id: string; sourceUrl?: string | null }>;
+  websiteCrawls: WebsiteCrawlNotice[];
+};
+
+function noticeFor(
+  notices: WebsiteCrawlNotice[] | undefined,
+  origin: string | null,
+): string | null {
+  const notice = notices?.find((candidate) => candidate.origin === origin);
+  return notice ? JSON.stringify(notice) : null;
+}
+
+function cachedKnowledgeViews(queryClient: QueryClient): KnowledgeView[] {
+  const primary = queryClient.getQueryData<DocumentsQueryData>(
+    queryKeys.knowledge.documents(),
+  );
+  const views: KnowledgeView[] = primary
+    ? [
+        {
+          kbId: undefined,
+          documents: primary.documents,
+          websiteCrawls: primary.websiteCrawls,
+        },
+      ]
+    : [];
+  const bots = queryClient.getQueriesData<{
+    kbId?: string | null;
+    documents?: KnowledgeView["documents"];
+    websiteCrawls?: WebsiteCrawlNotice[];
+  }>({ queryKey: [...queryKeys.bots.all(), "knowledge"] });
+  for (const [, data] of bots) {
+    if (!data?.kbId) continue;
+    views.push({
+      kbId: data.kbId,
+      documents: data.documents ?? [],
+      websiteCrawls: data.websiteCrawls ?? [],
+    });
+  }
+  return views;
+}
+
+function watchCrawl(
+  view: KnowledgeView | undefined,
+  kbId: string | undefined,
+  url: string | null | undefined,
+): ImportWatch {
+  const origin = url ? importOrigin(url) : null;
+  return { kbId, origin, before: noticeFor(view?.websiteCrawls, origin) };
+}
+
+export function websiteImportPollInterval(
+  queryClient: QueryClient,
+  kbId: string | undefined,
+  notices: WebsiteCrawlNotice[] | undefined,
+): number | false {
+  const watching = queryClient
+    .getMutationCache()
+    .findAll({ mutationKey: importWebsiteKey })
+    .some((mutation) => {
+      const watch = mutation.state.context as ImportWatch | undefined;
+      if (!watch?.origin || watch.kbId !== kbId) return false;
+      if (mutation.state.status === "error") return false;
+      if (Date.now() - mutation.state.submittedAt >= WEBSITE_IMPORT_WATCH_MS) {
+        return false;
+      }
+      return noticeFor(notices, watch.origin) === watch.before;
+    });
+  return watching ? POLL_MS : false;
+}
+
 export const knowledgeOptions = {
   documents: () =>
     queryOptions({
       queryKey: queryKeys.knowledge.documents(),
-      queryFn: async () => {
+      queryFn: async (): Promise<DocumentsQueryData> => {
         const res = await api.get<Any>("/knowledge/documents", {
           params: { limit: 100 },
         });
-        return Array.isArray(res) ? res : (res?.documents ?? []);
+        if (Array.isArray(res)) {
+          return { documents: res, websiteCrawls: [] };
+        }
+        return {
+          documents: res?.documents ?? [],
+          websiteCrawls: res?.websiteCrawls ?? [],
+        };
       },
     }),
   stats: () =>
@@ -35,18 +152,30 @@ export const knowledgeOptions = {
 // --- Query Hooks ---
 
 export function useKnowledgeDocuments() {
+  const queryClient = useQueryClient();
   return useQuery({
     ...knowledgeOptions.documents(),
+    select: (data) => data.documents,
     // Auto-poll every 5s while any document is pending/processing
     refetchInterval: (query) => {
       const data = query.state.data;
-      const hasProcessing =
-        Array.isArray(data) &&
-        data.some(
-          (d: Any) => d.status === "pending" || d.status === "processing",
-        );
-      return hasProcessing ? 5000 : false;
+      const hasProcessing = data?.documents.some(
+        (d: Any) => d.status === "pending" || d.status === "processing",
+      );
+      if (hasProcessing) return POLL_MS;
+      return websiteImportPollInterval(
+        queryClient,
+        undefined,
+        data?.websiteCrawls,
+      );
     },
+  });
+}
+
+export function useWebsiteCrawlNotices() {
+  return useQuery({
+    ...knowledgeOptions.documents(),
+    select: (data) => data.websiteCrawls ?? [],
   });
 }
 
@@ -143,18 +272,21 @@ export function useDiscoverWebsiteHosts(url: string, enabled: boolean) {
 export function useImportWebsite() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: {
-      url: string;
-      followLinks?: boolean;
-      maxPages?: number;
-      kbId?: string;
-      extraUrls?: string[];
-    }) =>
+    mutationKey: importWebsiteKey,
+    mutationFn: (data: ImportWebsiteInput) =>
       api.post("/knowledge/documents/website", {
         ...data,
         url: normalizeWebsiteUrl(data.url),
         extraUrls: data.extraUrls?.map(normalizeWebsiteUrl),
       }),
+    onMutate: (data): ImportWatch =>
+      watchCrawl(
+        cachedKnowledgeViews(queryClient).find(
+          (view) => view.kbId === data.kbId,
+        ),
+        data.kbId,
+        data.url,
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),
@@ -169,7 +301,15 @@ export function useImportWebsite() {
 export function useRefreshWebsiteDocument() {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: importWebsiteKey,
     mutationFn: (id: string) => api.post(`/knowledge/documents/${id}/refresh`),
+    onMutate: (id): ImportWatch | undefined => {
+      for (const view of cachedKnowledgeViews(queryClient)) {
+        const doc = view.documents.find((candidate) => candidate.id === id);
+        if (doc) return watchCrawl(view, view.kbId, doc.sourceUrl);
+      }
+      return undefined;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.knowledge.documents(),

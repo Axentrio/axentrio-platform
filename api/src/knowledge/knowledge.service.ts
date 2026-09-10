@@ -7,6 +7,7 @@ import {
   KnowledgeDocument,
   DocumentType,
 } from "../database/entities/KnowledgeDocument";
+import { WebsiteCrawlRun } from "../database/entities/WebsiteCrawlRun";
 import { KnowledgeChunk } from "../database/entities/KnowledgeChunk";
 import { Tenant } from "../database/entities/Tenant";
 import { config } from "../config/environment";
@@ -48,12 +49,14 @@ export class KnowledgeService {
   private docRepo: Repository<KnowledgeDocument>;
   private chunkRepo: Repository<KnowledgeChunk>;
   private tenantRepo: Repository<Tenant>;
+  private crawlRunRepo: Repository<WebsiteCrawlRun>;
 
   constructor(dataSource: DataSource) {
     this.kbRepo = dataSource.getRepository(KnowledgeBase);
     this.docRepo = dataSource.getRepository(KnowledgeDocument);
     this.chunkRepo = dataSource.getRepository(KnowledgeChunk);
     this.tenantRepo = dataSource.getRepository(Tenant);
+    this.crawlRunRepo = dataSource.getRepository(WebsiteCrawlRun);
   }
 
   /**
@@ -128,7 +131,52 @@ export class KnowledgeService {
       .take(limit);
 
     const [documents, total] = await qb.getManyAndCount();
-    return { documents, total, page, limit };
+    const runs = await this.crawlRunRepo.find({
+      where: { tenantId, knowledgeBaseId: kb.id },
+    });
+    const websiteCrawls: Array<{
+      origin: string;
+      skippedByRules: number;
+      rulesUnreachable: boolean;
+      hasPages: boolean;
+    }> = [];
+    for (const run of runs) {
+      if (!run.rulesUnreachable && run.skippedByRules === 0) continue;
+      const pages = await this.originPagesSinceRun(tenantId, kb.id, run);
+      if (run.rulesUnreachable && pages.touchedSinceRun) continue;
+      websiteCrawls.push({
+        origin: run.origin,
+        skippedByRules: run.skippedByRules,
+        rulesUnreachable: run.rulesUnreachable,
+        hasPages: pages.hasPages,
+      });
+    }
+    return { documents, total, page, limit, websiteCrawls };
+  }
+
+  private async originPagesSinceRun(
+    tenantId: string,
+    kbId: string,
+    run: WebsiteCrawlRun,
+  ): Promise<{ hasPages: boolean; touchedSinceRun: boolean }> {
+    const counts = await this.docRepo
+      .createQueryBuilder("doc")
+      .select("COUNT(*)", "pages")
+      .addSelect(
+        `COUNT(*) FILTER (WHERE "doc"."updatedAt" > (SELECT "updatedAt" FROM "website_crawl_runs" WHERE "id" = :runId))`,
+        "touched",
+      )
+      .where({ tenantId, knowledgeBaseId: kbId, type: "url" })
+      .andWhere(`left("doc"."sourceUrl", :prefixLength) = :prefix`, {
+        prefix: run.origin,
+        prefixLength: run.origin.length,
+      })
+      .setParameter("runId", run.id)
+      .getRawOne<{ pages: string; touched: string }>();
+    return {
+      hasPages: Number(counts?.pages) > 0,
+      touchedSinceRun: Number(counts?.touched) > 0,
+    };
   }
 
   async createDocument(
@@ -403,6 +451,25 @@ export class KnowledgeService {
       })
       .setParameter("attemptedAt", new Date().toISOString())
       .execute();
+  }
+
+  async recordWebsiteCrawlRun(
+    tenantId: string,
+    kbId: string,
+    originUrl: string,
+    facts: { skippedByRules: number; rulesUnreachable: boolean },
+  ): Promise<void> {
+    const origin = `${new URL(originUrl).origin}/`;
+    await this.crawlRunRepo.upsert(
+      {
+        tenantId,
+        knowledgeBaseId: kbId,
+        origin,
+        skippedByRules: facts.skippedByRules,
+        rulesUnreachable: facts.rulesUnreachable,
+      },
+      { conflictPaths: ["tenantId", "knowledgeBaseId", "origin"] },
+    );
   }
 
   async listStaleUrlOrigins(

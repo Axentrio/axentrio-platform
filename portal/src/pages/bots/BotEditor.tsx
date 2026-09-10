@@ -89,10 +89,9 @@ const BotEditorBody: React.FC<{
   aiEnabled: boolean;
   publicKey?: string;
   previousKey?: BotPreviousKey | null;
-  allowedOrigins?: string[];
   onGoToKnowledge: () => void;
   onTestChat: () => void;
-}> = ({ botId, isAdmin, isLoading, hasError, aiEnabled, publicKey, previousKey, allowedOrigins, onGoToKnowledge, onTestChat }) => {
+}> = ({ botId, isAdmin, isLoading, hasError, aiEnabled, publicKey, previousKey, onGoToKnowledge, onTestChat }) => {
   const { t } = useTranslation();
   return (
     <div className="px-4 md:px-6 py-6">
@@ -113,7 +112,6 @@ const BotEditorBody: React.FC<{
                 publicKey={publicKey}
                 botId={botId}
                 previousKey={previousKey}
-                allowedOrigins={allowedOrigins}
                 onTestChat={onTestChat}
               />
             </div>
@@ -173,7 +171,6 @@ const BotEditor: React.FC = () => {
         aiEnabled={aiEnabled}
         publicKey={embed?.publicKey}
         previousKey={embed?.previousKey}
-        allowedOrigins={embed?.allowedOrigins}
         onGoToKnowledge={goToKnowledge}
         onTestChat={openTestChat}
       />

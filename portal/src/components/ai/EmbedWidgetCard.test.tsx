@@ -8,7 +8,6 @@ const mutate = vi.fn();
 vi.mock('@/queries/useBotsQueries', () => ({
   useRotateBotKey: () => ({ mutate, isPending: false }),
   useEndKeyGrace: () => ({ mutate, isPending: false }),
-  useUpdateBot: () => ({ mutate, isPending: false }),
 }));
 
 function renderCard(publicKey = 'bk_test_public_widget_id_abc123') {
@@ -18,7 +17,6 @@ function renderCard(publicKey = 'bk_test_public_widget_id_abc123') {
         enabled
         botId="bot-1"
         publicKey={publicKey}
-        allowedOrigins={[]}
       />
     </MemoryRouter>,
   );
@@ -36,6 +34,14 @@ describe('EmbedWidgetCard — deploy snippet', () => {
     expect(snippet).toContain(`data-widget-id="${publicKey}"`);
     expect(snippet).not.toContain('data-api-key=');
     expect(snippet).toContain('/widget.js');
+  });
+
+  it('renders no allowed-websites editor, so the origin list stays server-side', () => {
+    const { container } = renderCard();
+
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('#allowedOrigins')).toBeNull();
+    expect(container.textContent).not.toContain('allowedOrigins');
   });
 
   it('renders nothing when publicKey is missing', () => {

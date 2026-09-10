@@ -1,6 +1,6 @@
 /**
- * A named booking time the notice/horizon policy refused, remembered for this
- * conversation so the next turn does not treat the clock as already chosen.
+ * A named booking time a clock rule refused (`refusedByClockRule` in agent.service.ts),
+ * remembered for this conversation so the next turn does not treat the clock as already chosen.
  *
  * Same Redis fail-open as offered slots: no store means the in-run flag is the
  * only latch, and a later "ja" can match the hour again.

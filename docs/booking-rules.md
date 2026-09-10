@@ -62,13 +62,15 @@ If they named a clock time and `check_availability` includes it: confirm **that*
 
 Keep the named hour through intake. An intake answer is not a new time. `latestCustomerTimeText` walks past intake; `confirmableLocal` is the full day, not the 8-chip prefix (or 10:00 is dropped and 00:00 chips reappear).
 
-If that hour was refused this run (notice, horizon, `REQUEST_OUTSIDE_WINDOW`, or a later retry): it is not "already chosen". `namedTimeRefused` unlocks retry chips. Clock-only match of 10:00 on a different day is alternatives, not confirmation.
+If that hour was refused (notice, horizon, `REQUEST_OUTSIDE_WINDOW`, or a later retry): it is not "already chosen". `namedTimeRefused` unlocks retry chips. Clock-only match of 10:00 on a different day is alternatives, not confirmation. The refusal lasts the whole conversation, not one run: `refused-named-time.ts` keeps it for 24 hours and drops it when the customer names another day. A move counts. `reschedule_booking` names its time in `newStartTime`, so that argument belongs in `REFUSED_TIME_ARGS`.
+
+Remember only a refusal by a clock rule, because asking again gets the same answer (`refusedByClockRule`): `REQUEST_OUTSIDE_WINDOW`, and `SLOT_UNAVAILABLE` with `SLOT_NOT_OFFERABLE` or `SLOT_NOT_OFFERABLE_ON_RESCHEDULE` (the auto-book create and the auto-mode move). Never remember a taken slot (`SLOT_TAKEN_*`, `CAPACITY_REACHED`, `TRAVEL_TIME_CONFLICT`). It can free up, and a 24-hour memory would hide it.
 
 A refusal whose only clock is the day's first open hour (the customer's named clock was not offered) is not already-chosen. Keep the chips.
 
 A first message that dumps name + email + time is not a yes. `CONFIRMATION_REQUIRED` → short summary → wait for explicit yes (or a tap after you asked). Then `create_booking` again. Do not send a second summary.
 
-Pinned: `builtin-tools.test.ts` intake named-time; `agent-service.test.ts` horizon retry chips / 08:30 out-of-hours chips / opening-hour refusal chips.
+Pinned: `builtin-tools.test.ts` intake named-time; `agent-service.test.ts` horizon retry chips / 08:30 out-of-hours chips / opening-hour refusal chips; `refused-named-time-reschedule.test.ts` a refused MOVE hour, over two turns.
 
 ---
 

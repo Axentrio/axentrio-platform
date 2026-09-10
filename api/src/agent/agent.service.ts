@@ -59,6 +59,7 @@ import { renderMemoryForPrompt } from '../memory/memory-store';
 import { pendingYesNeedsCreate, pendingYesNeedsReschedule, type PendingAgreedMove } from './pending-booking-confirmation';
 import { refusedNamedTimeStillApplies, rememberRefusedNamedTime, clearRefusedNamedTime } from './refused-named-time';
 import { peekAvailabilityChecked } from '../booking/booking-providers/availability-checked';
+import { SLOT_NOT_OFFERABLE, SLOT_NOT_OFFERABLE_ON_RESCHEDULE } from '../booking/booking-providers/slot-messages';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -189,6 +190,31 @@ function absorbRecordedOutcome(tool: { name: string }, result: ToolResult, state
 }
 
 /**
+ * Every argument name a refusing booking tool can carry its time in, first match wins.
+ *
+ * `newStartTime` is `reschedule_booking`'s only one. While it was missing, a refused MOVE
+ * set the in-run flag and then persisted nothing - `localDate` stayed undefined and
+ * `absorbNamedTimeRefusal` returned early - so the next turn read no refusal and offered
+ * the hour the notice had just refused.
+ */
+const REFUSED_TIME_ARGS = ['startDate', 'startTime', 'newStartTime', 'preferredTime'];
+
+/**
+ * A mutation refusal that asking again cannot change: the owner's clock rules (past, notice,
+ * horizon, closed date, hours), never the diary.
+ *
+ * `SLOT_UNAVAILABLE` carries both kinds of "no", so it counts only with the not-offerable
+ * message. The throwing code picks that message when no busy time overlaps the slot, and
+ * `computeSlots` there reads no daily cap. The taken message is a slot that can free up
+ * minutes later, and remembering it for 24 hours would hide a time that is bookable again.
+ */
+const RULE_REFUSED_SLOT = [SLOT_NOT_OFFERABLE, SLOT_NOT_OFFERABLE_ON_RESCHEDULE].map((m) => `SLOT_UNAVAILABLE: ${m}`);
+
+function refusedByClockRule(error: string): boolean {
+  return error.startsWith('REQUEST_OUTSIDE_WINDOW:') || RULE_REFUSED_SLOT.includes(error);
+}
+
+/**
  * Notice/horizon refused the named time this run. Later availability is a list of
  * alternatives, so the clock-only "already chose this hour" match must stand down.
  */
@@ -207,15 +233,18 @@ function absorbNamedTimeRefusal(
     BOOKING_MUTATION_TOOLS.includes(tool.name) &&
     !result.success &&
     typeof result.error === 'string' &&
-    result.error.startsWith('REQUEST_OUTSIDE_WINDOW:');
+    refusedByClockRule(result.error);
   if (!horizonCheck && !horizonMutation) return;
   state.namedTimeRefused = true;
   const args = toolCall.arguments ?? {};
-  const dateArg =
-    (typeof args.startDate === 'string' && args.startDate) ||
-    (typeof args.startTime === 'string' && args.startTime) ||
-    (typeof args.preferredTime === 'string' && args.preferredTime) ||
-    '';
+  let dateArg = '';
+  for (const name of REFUSED_TIME_ARGS) {
+    const value = args[name];
+    if (typeof value === 'string' && value) {
+      dateArg = value;
+      break;
+    }
+  }
   const localDate = /^(\d{4}-\d{2}-\d{2})/.exec(dateArg)?.[1];
   const customer = latestCustomerTimeText([
     ...ctx.conversationHistory.map((m) => ({ role: m.role, text: contentToText(m.content) })),
@@ -915,7 +944,7 @@ interface RunLoopState {
   heldBooking: boolean;
   /**
    * A booking time the customer named was refused THIS RUN by the notice or horizon
-   * policy (check_availability out-of-window, or a mutation's REQUEST_OUTSIDE_WINDOW).
+   * policy (check_availability out-of-window, or a mutation's `refusedByClockRule`).
    * Every availability result after it is a list of alternatives, so the customer's
    * named hour must not count as "already chosen": the hour matches by clock only,
    * and the date it sat on is the one just refused. Live WhatsApp 2026-08-30: 14 Sept

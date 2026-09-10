@@ -102,6 +102,16 @@ function parseHHMM(s: string): { h: number; m: number } | null {
   return { h, m };
 }
 
+/** A window's `[start, end)` in minutes of the day, or null when the engine cannot walk it: an end that does not parse, or one at or before its start. */
+function windowMinutes(window: TimeWindow): { start: number; end: number } | null {
+  const s = parseHHMM(window.start);
+  const e = parseHHMM(window.end);
+  if (!s || !e) return null;
+  const start = s.h * 60 + s.m;
+  const end = e.h * 60 + e.m;
+  return end > start ? { start, end } : null;
+}
+
 /** A full calendar day (00:00–24:00) — the implicit window in `always_open` mode. */
 const ALL_DAY: TimeWindow[] = [{ start: '00:00', end: '24:00' }];
 
@@ -143,6 +153,11 @@ export function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): Tim
     return override.windows || [];
   }
   return baseWindowsForDay(rule, day);
+}
+
+/** Does this day have a window the engine can offer a start from? One that closes at or before it opens opens nothing. */
+export function dayHasHours(rule: SlotEngineInput['rule'], day: DateTime): boolean {
+  return windowsForDay(rule, day).some((w) => windowMinutes(w) !== null);
 }
 
 function overlapsBusy(startMs: number, endMs: number, busy: BusyInterval[]): boolean {
@@ -263,14 +278,10 @@ function collectDaySlots(
   out: BookingSlot[],
 ): void {
   for (const window of windows) {
-    const ws = parseHHMM(window.start);
-    const we = parseHHMM(window.end);
-    if (!ws || !we) continue;
-    const winStartMin = ws.h * 60 + ws.m;
-    const winEndMin = we.h * 60 + we.m;
-    if (winEndMin <= winStartMin) continue;
+    const span = windowMinutes(window);
+    if (!span) continue;
 
-    for (let startMin = winStartMin; startMin + b.duration <= winEndMin; startMin += b.granularity) {
+    for (let startMin = span.start; startMin + b.duration <= span.end; startMin += b.granularity) {
       const hour = Math.floor(startMin / 60);
       const minute = startMin % 60;
       const startLocal = localTime(day.year, day.month, day.day, hour, minute, b.zone);
@@ -349,7 +360,8 @@ const NO_HORIZON_DAYS = 3650;
  *
  * Notice and horizon: THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only those two lifted.
  * Service daily cap: the same range with only that cap lifted. Closed: every local day in the
- * queried range has no opening windows, AND the 7-day retry starting at rangeEnd has hours.
+ * queried range has no usable opening window (`dayHasHours`), AND the 7-day retry starting at
+ * rangeEnd has hours.
  * A business that never opens is ordinary empty - retrying the next week is still empty.
  *
  * Null unless EVERY would-be start falls on one side of the window, the only thing that
@@ -365,7 +377,7 @@ function rangeIsShut(input: SlotEngineInput): boolean {
   let anyDay = false;
   for (let day = start, guard = 0; day < end && guard < 400; day = day.plus({ days: 1 }), guard++) {
     anyDay = true;
-    if (windowsForDay(input.rule, day).length > 0) return false;
+    if (dayHasHours(input.rule, day)) return false;
   }
   return anyDay;
 }
@@ -381,7 +393,7 @@ export function weekFromHasHours(
 ): boolean {
   if (!from.isValid) return false;
   for (let i = 0, day = from.startOf('day'); i < 7; i++, day = day.plus({ days: 1 })) {
-    if (windowsForDay(rule, day).length > 0) return true;
+    if (dayHasHours(rule, day)) return true;
   }
   return false;
 }
@@ -452,7 +464,8 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
  * Is `at` inside the rule's business hours? Reuses the same window math as
  * slot computation (weekly hours + date overrides + "24:00" end-of-day, in
  * the owner's timezone) so "after hours" in analytics can never drift from
- * "bookable hours" in the scheduler. Pure; used by the outcome metrics.
+ * "bookable hours" in the scheduler. Pure; used by the outcome metrics and by the
+ * request path's hours gate (`requestWindowRefusal` in `internal.provider.ts`).
  */
 export function isWithinBusinessHours(
   rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides' | 'availabilityMode'>,
@@ -466,10 +479,8 @@ export function isWithinBusinessHours(
   const windows = windowsForDay({ ...rule, slotGranularityMin: 0 }, dt);
   const minutesOfDay = dt.hour * 60 + dt.minute;
   for (const w of windows) {
-    const start = parseHHMM(w.start);
-    const end = parseHHMM(w.end);
-    if (!start || !end) continue;
-    if (minutesOfDay >= start.h * 60 + start.m && minutesOfDay < end.h * 60 + end.m) return true;
+    const span = windowMinutes(w);
+    if (span && minutesOfDay >= span.start && minutesOfDay < span.end) return true;
   }
   return false;
 }

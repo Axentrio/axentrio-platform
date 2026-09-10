@@ -105,6 +105,7 @@ export const BOOKING_COPY_NL: BookingCopy = {
   'manage.err_SERVICE_REQUIRED':
     'We konden de beschikbare tijden voor deze afspraak niet laden. Neem rechtstreeks contact op met het bedrijf.',
   'manage.err_SLOT_UNAVAILABLE': 'Dat tijdstip is net ingenomen. Kies een ander.',
+  'manage.err_REQUEST_OUTSIDE_WINDOW': 'Het bedrijf neemt op dat tijdstip geen afspraken aan. Kies een ander.',
   'manage.err_BOOKING_NOT_FOUND': 'Deze afspraak kon niet meer gevonden worden.',
   'manage.err_CHANGE_NOT_ALLOWED':
     'Deze afspraak kan niet online gewijzigd worden. Neem rechtstreeks contact op met het bedrijf.',

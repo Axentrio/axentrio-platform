@@ -379,8 +379,9 @@ flag is caught.
 
 ## 3. Blocked on a product decision — do not write a test yet
 
-Two items cannot be honestly tested until someone decides what the behaviour should be. **This is
+The items below cannot be honestly tested until someone decides what the behaviour should be. **This is
 not a test-effort gap**, and writing a test now would only pin the current, contradicted behaviour.
+`AVL-01` (§3.2) was listed here in error and is now fixed.
 
 ### 3.1 `SYS-07` — a false "we forwarded your request" claim ships green
 
@@ -395,14 +396,13 @@ alone, with no runtime guard.
 "every test that expects a request must assert the request row exists" as an implementation note for
 *automation*, the likely intent is a real guard. **Decide, then test.**
 
-### 3.2 `AVL-01` — no opening-hours gate on the request path
+### 3.2 `AVL-01` — no opening-hours gate on the request path — FIXED, not blocked
 
-`internal.provider.ts:2414-2443` refuses past / too_soon / too_far / closed-day / service-cap /
-no-check — but **not** an out-of-hours hour on a day that has hours. So after any check for that
-date, a model that names 08:30 on a 09:00 day can capture a Request on an **Auto-book** service,
-which `docs/booking-rules.md:26-28` explicitly forbids and calls load-bearing
-(*"Stay in the auto-book flow"*). The offer side is correctly pinned
-(`unit/slot-engine.test.ts:45`, `unit/agent-service.test.ts:1726`); the write side is not gated.
+This was recorded here as blocked on a product decision. It was not: `docs/booking-rules.md:26-28`
+already decided it. The request path and the reschedule change-Request path now refuse those
+times. The rule, the gate order and the pinning test are in `docs/booking-rules.md` ("Auto-book
+stays Auto-book", its `Pinned:` line). The evidence is the AVL-01 row in
+`docs/booking-test-plan-traceability.md` §5.
 
 ### 3.3 `GEO-05` — ambiguous as written
 
@@ -468,14 +468,14 @@ Two smaller wording corrections, both now pinned as-is with a comment:
 
 ---
 
-## 6. Product defects found, all left unfixed
+## 6. Product defects found
 
 Reported rather than patched — each is a behaviour change needing an owner's decision.
+`AVL-01` is the exception: the rule already decided it, and it is now fixed.
 
 1. **`SYS-07`** — no runtime guard for request-shaped success claims; a test asserts the forbidden
    sentence is permitted (§3.1).
-2. **`AVL-01`** — no opening-hours gate on the request path; an Auto-book service can capture an
-   out-of-hours Request (§3.2).
+2. **`AVL-01`** — FIXED (§3.2).
 3. **`SYS-02`** — a conversation reset cancels live Bookings and deletes their calendar mirrors,
    which is broader than "clear conversation state, keep bookings" (§1.4).
 4. **`PRC-12` / `sync-reconciler.ts:311`** — the discount is re-derived at reconcile time with its

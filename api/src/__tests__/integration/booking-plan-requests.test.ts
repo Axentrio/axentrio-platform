@@ -370,14 +370,14 @@ describe('booking plan · requests and reset', () => {
       // the owner's diary at all.
       expect(PLAN_CALENDAR.creates).toHaveLength(0);
 
-      // WHAT THIS DOES NOT PROVE, stated rather than implied. `modules/booking.module.ts:623`
-      // — "Never tell the customer it is booked or confirmed" — is PROMPT PROSE with no runtime
-      // guard behind it on this path, so no deterministic seam exists at which the assistant's
-      // refusal can be asserted. The create returns `success: true` here, which is what
-      // `agent.service.ts:2225-2233` reads to set `state.bookingRecorded = true`, and that flag is
-      // the only thing standing between a "your booking has been confirmed" reply and the customer
-      // (`guardrails/output-validation.ts:319`). Reported as a defect; not fixed here, and not
-      // pinned here either, because pinning it would freeze the contradicted behaviour.
+      // WHAT THIS DOES NOT PROVE: the reply. `modules/booking.module.ts:623` - "Never tell the
+      // customer it is booked or confirmed" - is judged in the agent loop, not at this seam. The
+      // create returns `success: true` with `requested: true` here, and `absorbRecordedOutcome`
+      // in `agent.service.ts` reads `requested` to set `state.requestRecorded`, never
+      // `state.bookingRecorded`, so the false-confirmation guard stays armed on this path. The
+      // reply half is pinned end to end over this same fixture in
+      // `integration/booking-plan-truth-guard.test.ts` (CAL-06), with its known residuals pinned
+      // as `it.fails`.
     });
 
     it('confirms the identical fixture once a calendar is connected, so the credential is the cause', async () => {

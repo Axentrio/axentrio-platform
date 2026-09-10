@@ -469,6 +469,31 @@ export function validateOutput(
   for (const r of detectUnsafeLinkHosts(t)) {
     violations.push({ family: "unsafe_link", evidence: r });
   }
+  violations.push(...claimViolations(t, context));
+  if (context?.priceContextLoaded === false && containsCurrencyAmount(t)) {
+    violations.push({
+      family: "invented_price",
+      evidence:
+        "reply asserts a price but no price-bearing context was loaded this run",
+    });
+  }
+
+  // De-dupe identical (family, evidence) pairs so repeated markers in one reply
+  // log once.
+  const seen = new Set<string>();
+  const deduped = violations.filter((v) => {
+    const k = `${v.family}:${v.evidence}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  return { ok: deduped.length === 0, violations: deduped };
+}
+
+/** The honesty checks: a reply that says a Booking or a Request exists when the run recorded none. */
+function claimViolations(t: string, context?: OutputValidationContext): OutputViolation[] {
+  const violations: OutputViolation[] = [];
   const claimsBooking = context?.bookingRequestRecorded ? claimsBookingConfirmed(t) : claimsBookingDone(t);
   if (context?.bookingRecorded === false && claimsBooking) {
     violations.push({
@@ -492,23 +517,5 @@ export function validateOutput(
         "reply claims a request reached the business but none was recorded this run",
     });
   }
-  if (context?.priceContextLoaded === false && containsCurrencyAmount(t)) {
-    violations.push({
-      family: "invented_price",
-      evidence:
-        "reply asserts a price but no price-bearing context was loaded this run",
-    });
-  }
-
-  // De-dupe identical (family, evidence) pairs so repeated markers in one reply
-  // log once.
-  const seen = new Set<string>();
-  const deduped = violations.filter((v) => {
-    const k = `${v.family}:${v.evidence}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-
-  return { ok: deduped.length === 0, violations: deduped };
+  return violations;
 }

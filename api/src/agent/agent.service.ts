@@ -2374,7 +2374,7 @@ export class AgentService {
         `UPDATE chat_sessions SET metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
         [session.id, JSON.stringify({ [REQUEST_ON_RECORD_KEY]: true })],
       );
-      session.metadata = { ...(session.metadata ?? {}), [REQUEST_ON_RECORD_KEY]: true } as ChatSession['metadata'];
+      session.metadata = { ...session.metadata, [REQUEST_ON_RECORD_KEY]: true } as ChatSession['metadata'];
     } catch (error) {
       logger.warn('[agent] could not remember the recorded request on the session', { sessionId: session.id, error });
     }

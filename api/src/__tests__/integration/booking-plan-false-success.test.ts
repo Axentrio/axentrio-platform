@@ -242,7 +242,7 @@ describe('BK-07 — a failed write must never reach the customer as a confirmati
     // Why this cannot pass for the wrong reason: an empty or missing reply would
     // also satisfy a bare `not.toMatch`, so the length check above pins that a
     // reply exists, and the guard's own replacement text is pinned below. PROVEN
-    // by breaking it: with the guard's early return at agent.service.ts:1687
+    // by breaking it: with the guard's early return at agent.service.ts:1821
     // changed to ship `content` instead of BOOKING_SAFE_FALLBACK, this test fails
     // on exactly these lines; restored, it passes.
     expect(reply.toLowerCase()).not.toMatch(/\bconfirmed your (?:booking|appointment)\b/);

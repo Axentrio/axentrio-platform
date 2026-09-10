@@ -163,7 +163,7 @@ chatbot-platform/
 │   └── k8s/                         # Kubernetes manifests
 │
 ├── 📁 docs/                         # Documentation
-│   ├── n8n-integration.md           # n8n setup guide
+│   ├── webhook-integration.md       # n8n setup guide
 │   ├── webhook-reference.md         # API endpoint docs
 │   ├── message-format.md            # Message schemas
 │   ├── troubleshooting.md           # Common issues
@@ -391,7 +391,7 @@ Content-Type: application/json
 | `file-handling.json` | Image analysis + document processing |
 | `lead-capture.json` | Lead extraction + CRM integration |
 
-See [docs/n8n-integration.md](docs/n8n-integration.md) for detailed setup instructions.
+See [docs/webhook-integration.md](docs/webhook-integration.md) for detailed setup instructions.
 
 ## 🚀 Deployment
 
@@ -465,7 +465,27 @@ See `api/.env.example` for all options.
 | **XSS Protection** | DOMPurify sanitization, CSP headers |
 | **Rate Limiting** | Per-tenant and per-IP limits |
 | **Audit Logging** | Security event logging, GDPR-compliant |
-| **GDPR** | Auto-delete after 30 days, data export/delete APIs |
+| **GDPR** | Per-lead subject export and erasure APIs; scheduled deletion for uploads, agent traces and audit logs |
+
+**What the GDPR row does and does not mean.** Retention is not one blanket period.
+Uploaded files and their S3 objects expire after 30 days
+(`api/src/file-handling/upload.service.ts:171`, swept by `performGDPRCleanup` at
+`upload.service.ts:1215`). Agent traces expire after 30 days
+(`api/src/agent/trace-retention.service.ts:17`). Audit logs expire after
+`AUDIT_RETENTION_DAYS`, default 90 (`api/src/config/environment.ts:168`).
+Conversations, messages and leads have **no** default expiry: each tenant sets
+`conversationRetentionDays` or `leadRetentionDays`, and an unset value means keep
+forever (`api/src/conversations/conversation-retention.service.ts:13-14`,
+`api/src/leads/lead-retention.service.ts:17-20`).
+
+The two data-subject APIs are admin or supervisor endpoints on a captured lead. They
+are not self-service end-user endpoints. `GET /api/v1/leads/:id/export` returns the
+person's record, including decrypted messages
+(`api/src/leads/subject-export.service.ts:40`, route at
+`api/src/routes/leads.routes.ts:959-987`). `DELETE /api/v1/leads/:id` erases that
+person, and the transcript messages are deleted with the lead
+(`api/src/leads/lead-erasure.service.ts:100`, route at
+`api/src/routes/leads.routes.ts:1004-1033`).
 
 ### OWASP Top 10 Mitigations
 
@@ -480,7 +500,10 @@ See `api/.env.example` for all options.
 - ✅ **Components** - Dependency scanning, minimal base images
 - ✅ **Logging** - Security audit logs, SIEM-ready format
 
-See [docs/security-audit.md](docs/security-audit.md) for full security checklist.
+There is no full security checklist document in this repository. For the
+data-protection controls - what each deletion path covers, what it deliberately keeps,
+and how to re-erase after a database restore - see
+[docs/gdpr-erasure-and-restore.md](docs/gdpr-erasure-and-restore.md).
 
 ## 📊 Monitoring
 
@@ -526,7 +549,7 @@ npm run test:integration
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 

@@ -165,7 +165,8 @@ export const requestClosedDay = (startDate: string, endDate: string): string =>
  * THE DATE STAYS, AND THAT IS THE DIFFERENCE FROM EVERY MESSAGE ABOVE. Closed, capped, too soon
  * and too far all send the customer to ANOTHER DATE. This date is open, so its own hours are the
  * answer, and moving the customer off it would refuse times the business actively sells. Hence
- * one date in, one date out, and the explicit "do not say closed".
+ * one date in, one date out, and the explicit "do not say closed". Only while the date still has
+ * a time the business can take: `requestOutsideHoursNoneLeft` is the date whose hours are gone.
  *
  * The opening clock itself is still absent, for the reason `requestTooSoon` documents at length:
  * a bound this server states outranks the model's own reading, and the model is about to hold a
@@ -181,7 +182,41 @@ export const requestOutsideHours = (date: string): string =>
   `${date} and endDate ${date} (whole day, no earliestTime or latestTime), offer the customer ` +
   `the times it returns for that same date, and book one outright: this service books ` +
   `automatically. Offer ONLY times that call gives you - do not work out the opening hours ` +
-  `yourself and do not name an hour to the customer.`;
+  `yourself and do not name an hour to the customer. If that call returns no times, follow the ` +
+  `guidance it returns instead.`;
+
+/**
+ * `requestOutsideHours` on a date with no time left the business can take: its hours have gone
+ * by, sit inside the notice, or lie past the horizon. Keeping the customer on that date would
+ * contradict the check for it, so this one names the range that check itself would retry.
+ */
+export const requestOutsideHoursNoneLeft = (startDate: string, endDate: string): string =>
+  `That time is outside this business's opening hours for that date, so it cannot be booked OR ` +
+  `requested - they have already said they do not work at that hour, so there is nothing for ` +
+  `them to confirm. Do NOT capture it and do NOT tell the customer the team will come back on ` +
+  `it. No time the business can still take is left on that date either. SAY THE REASON: tell ` +
+  `the customer plainly that the business does not open at the hour they asked for and that ` +
+  `nothing is left on that date. Do NOT say the business is closed that day, and do NOT offer ` +
+  `another time on that same date. Call check_availability with startDate ${startDate} and ` +
+  `endDate ${endDate}, offer the customer the times it returns, and book one outright: this ` +
+  `service books automatically. Offer ONLY times that call gives you - do not work out the ` +
+  `opening hours yourself and do not name an hour to the customer.`;
+
+/**
+ * The same refusal for a move whose Service sends changes to the owner. The hour is refused
+ * before any change Request is written, and the range comes from the same decision as above.
+ */
+export const rescheduleOutsideHours = (startDate: string, endDate: string): string =>
+  `That time is outside this business's opening hours, so the appointment cannot be moved there ` +
+  `and no change request can be sent for it - they have already said they do not work at that ` +
+  `hour, so there is nothing for them to approve. The existing appointment has NOT been changed. ` +
+  `Do NOT tell the customer the team will come back on that time. SAY BOTH: tell the customer ` +
+  `plainly that the business does not open at the hour they asked for, and that their ` +
+  `appointment still stands. Call check_availability with startDate ${startDate} and endDate ` +
+  `${endDate} (no earliestTime or latestTime), offer the customer ONLY the times it returns, and ` +
+  `call reschedule_booking again with the one they choose. Do not work out the opening hours ` +
+  `yourself and do not name an hour to the customer. Do NOT capture it with request_appointment: ` +
+  `a move is not a new request.`;
 
 /**
  * An auto-book Request with no availability check behind it.

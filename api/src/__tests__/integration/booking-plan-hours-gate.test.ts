@@ -210,6 +210,42 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       ).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
       expect(await bookingCount(service.id)).toBe(0);
     });
+
+    it('sends the customer to another date when the named date has no time left the business can take', async () => {
+      // The notice ends at 16:45 on a 09:00-17:00 date, so its last 30-minute start (16:30) is
+      // already out of reach, while 20:00 clears the notice and is refused for its hour alone.
+      // Keeping the customer on that date would contradict the whole-day check for it.
+      const date = planDate(3);
+      const noticeEnds = localInstant(`${date}T16:45`);
+      const { service, ctx } = await planHoursFixture({
+        date,
+        service: { minNoticeMin: Math.ceil((noticeEnds.getTime() - Date.now()) / 60_000) },
+      });
+
+      const provider = new InternalProvider();
+      const capture = provider.requestAppointment(
+        ctx,
+        `idem-avl01-noneleft-${randomUUID()}`,
+        localInstant(`${date}T20:00`).toISOString(),
+        CUSTOMER,
+      );
+
+      await expect(capture).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(capture).rejects.toThrow(/opening hours/i);
+      await expect(capture).rejects.toThrow(new RegExp(`startDate ${date} and endDate ${dayAfter(date, 6)}`));
+      await expect(capture).rejects.toThrow(/do NOT offer another time on that same date/i);
+      await expect(capture).rejects.not.toThrow(/do NOT move the customer to another date/i);
+      expect(await bookingCount(service.id)).toBe(0);
+
+      const sameDate = await provider.checkAvailability(ctx, date, date, service.id);
+      expect(sameDate.slots).toHaveLength(0);
+      expect(sameDate.emptyRange?.reason).toBe('too_soon');
+      const elsewhere = await provider.checkAvailability(ctx, date, dayAfter(date, 6), service.id);
+      expect(elsewhere.slots.length).toBeGreaterThan(0);
+      for (const slot of elsewhere.slots) {
+        expect(DateTime.fromISO(slot.start, { zone: PLAN_TZ }).toFormat('yyyy-MM-dd')).not.toBe(date);
+      }
+    });
   });
 
   describe('[AVL-01] case 2 — a date closed all day', () => {
@@ -255,6 +291,38 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       for (const slot of elsewhere.slots) {
         expect(DateTime.fromISO(slot.start, { zone: PLAN_TZ }).toFormat('yyyy-MM-dd')).not.toBe(date);
       }
+    });
+
+    it('treats a window that closes before it opens as no hours, and refuses that date as closed', async () => {
+      // 18:00-02:00 can be saved but the engine never offers from it, so the date has no usable
+      // hours. The hours gate must not claim it is open; the closed-day answer offers another date.
+      const date = planDate(41);
+      const { service, ctx } = await planHoursFixture({
+        date,
+        rule: { dateOverrides: [{ date, windows: [{ start: '18:00', end: '02:00' }] }] },
+      });
+
+      const provider = new InternalProvider();
+      const capture = provider.requestAppointment(
+        ctx,
+        `idem-avl01-inverted-${randomUUID()}`,
+        localInstant(`${date}T20:00`).toISOString(),
+        CUSTOMER,
+      );
+
+      await expect(capture).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(capture).rejects.toThrow(/closed that whole date/i);
+      await expect(capture).rejects.toThrow(
+        new RegExp(`startDate ${dayAfter(date, 1)} and endDate ${dayAfter(date, 7)}`),
+      );
+      await expect(capture).rejects.not.toThrow(new RegExp(date));
+      expect(await bookingCount(service.id)).toBe(0);
+
+      // The offer path agrees: the same date is closed there too, so its guidance cannot send the
+      // model back to capture a Request this gate refuses.
+      const shut = await provider.checkAvailability(ctx, date, date, service.id);
+      expect(shut.slots).toHaveLength(0);
+      expect(shut.emptyRange?.reason).toBe('closed');
     });
   });
 
@@ -333,6 +401,40 @@ describe('booking plan · the opening-hours gate on the request path', () => {
       );
 
       expect(await requestCount(service.id)).toBe(0);
+    });
+  });
+
+  describe('[AVL-01] the reschedule door — a change Request is held to the same hours', () => {
+    it('refuses a move to 03:00 before any change Request is written, and still captures one in hours', async () => {
+      const date = planDate(38);
+      const { tenant, bot, service, session } = await planHoursFixture({ date, service: { rescheduleMode: 'request' } });
+      const original = await seedConfirmedBooking({
+        bot,
+        serviceId: service.id,
+        sessionId: session.id,
+        startLocal: `${date}T10:00`,
+      });
+      const customerCtx = planBookingContext(tenant, bot, session, { subjectToCustomerChangePolicy: true });
+      const provider = new InternalProvider();
+
+      const move = provider.rescheduleBooking(customerCtx, original.id, localInstant(`${date}T03:00`).toISOString());
+
+      await expect(move).rejects.toMatchObject({ code: 'REQUEST_OUTSIDE_WINDOW' });
+      await expect(move).rejects.toThrow(/opening hours/i);
+      await expect(move).rejects.toThrow(/existing appointment has NOT been changed/i);
+      await expect(move).rejects.toThrow(new RegExp(`startDate ${date} and endDate ${date}`));
+      expect(await requestCount(service.id)).toBe(0);
+      const [kept] = await bookingsForService(service.id);
+      expect(kept.status).toBe('confirmed');
+      expect(localSpan(kept)).toMatchObject({ date, start: '10:00' });
+
+      // The policy decision is untouched: an in-hours move on the same Service still goes to the
+      // owner as a change Request.
+      const moved = await provider.rescheduleBooking(customerCtx, original.id, localInstant(`${date}T14:00`).toISOString());
+      expect(moved.requested).toBe(true);
+      const request = (await bookingsForService(service.id)).find((r) => r.status === 'request_created');
+      expect(request?.requestKind).toBe('reschedule');
+      expect(localSpan(request!)).toMatchObject({ date, start: '14:00' });
     });
   });
 

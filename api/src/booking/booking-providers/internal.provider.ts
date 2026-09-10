@@ -49,7 +49,7 @@ import {
   type UpdateBookingPatch,
   type UpdateBookingResult,
 } from './types';
-import { computeSlots, diagnoseEmptyRange, bookableWindow, windowsForDay, weekFromHasHours, isWithinBusinessHours, type SlotEngineInput } from './slot-engine';
+import { computeSlots, diagnoseEmptyRange, bookableWindow, dayHasHours, weekFromHasHours, isWithinBusinessHours, type SlotEngineInput } from './slot-engine';
 import {
   buildBookingEventContent,
   storedFileNames,
@@ -135,6 +135,8 @@ import {
   requestTooFar,
   requestClosedDay,
   requestOutsideHours,
+  requestOutsideHoursNoneLeft,
+  rescheduleOutsideHours,
   requestBeforeCheck,
 } from './slot-messages';
 import { normalizeIntakeAnswers, assertRequiredIntake } from './intake';
@@ -295,6 +297,28 @@ function clearedTravelSnapshot(checked: TravelSnapshot | null, verdict: TravelVe
     base: checked.base,
     dayStart: checked.dayStart,
   };
+}
+
+/**
+ * A requested start outside the opening hours of a date that has hours, or null when the hour is
+ * not the problem. `retry` is null while that date still has a start the business can take, and
+ * otherwise the range the whole-day check for that date would itself retry. Busy time is not read:
+ * this is the owner's policy, not the diary.
+ */
+function outOfHoursRetry(
+  rule: AvailabilityRule,
+  service: SlotEngineInput['eventType'],
+  start: Date,
+  durationMin: number,
+  now: Date,
+): { date: string; retry: { startDate: string; endDate: string } | null } | null {
+  const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
+  if (!dayHasHours(rule, day) || isWithinBusinessHours(rule, start)) return null;
+  const date = day.toFormat('yyyy-MM-dd');
+  const { rangeStart, rangeEnd } = normalizeDateRange(date, date, rule.timezone);
+  const dayInput: SlotEngineInput = { rule, eventType: { ...service, durationMin }, rangeStart, rangeEnd, now };
+  const gone = computeSlots(dayInput).length === 0 ? diagnoseEmptyRange(dayInput) : null;
+  return { date, retry: gone ? retryRange(gone.reason, gone.boundary, rule.timezone) : null };
 }
 
 export class InternalProvider implements BookingProvider {
@@ -2436,8 +2460,7 @@ export class InternalProvider implements BookingProvider {
       }
       const day = DateTime.fromJSDate(start).setZone(rule.timezone).startOf('day');
       const retryFrom = day.plus({ days: 1 });
-      const dayWindows = windowsForDay(rule, day);
-      if (dayWindows.length === 0 && weekFromHasHours(rule, retryFrom)) {
+      if (!dayHasHours(rule, day) && weekFromHasHours(rule, retryFrom)) {
         const { startDate, endDate } = retryRange('closed', retryFrom.toJSDate().toISOString(), rule.timezone);
         throw new BookingError(requestClosedDay(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
       }
@@ -2456,11 +2479,18 @@ export class InternalProvider implements BookingProvider {
       // AFTER the daily cap on purpose. A capped date must send the customer to another date;
       // this refusal keeps them on it. The stricter, date-wide no has to speak first.
       //
-      // A never-open business still captures: it has no windows on ANY day, so `dayWindows` is
-      // empty, the closed-day gate stood down, and so does this one. That is the documented
-      // ordinary-empty Request, not an out-of-hours one.
-      if (dayWindows.length > 0 && !isWithinBusinessHours(rule, start)) {
-        throw new BookingError(requestOutsideHours(day.toFormat('yyyy-MM-dd')), 'REQUEST_OUTSIDE_WINDOW', 409);
+      // A never-open business still captures: it has no hours on ANY day, so the closed-day gate
+      // stood down, and so does this one. That is the documented ordinary-empty Request, not an
+      // out-of-hours one.
+      const outOfHours = outOfHoursRetry(rule, service, start, effectiveDuration, now);
+      if (outOfHours) {
+        throw new BookingError(
+          outOfHours.retry
+            ? requestOutsideHoursNoneLeft(outOfHours.retry.startDate, outOfHours.retry.endDate)
+            : requestOutsideHours(outOfHours.date),
+          'REQUEST_OUTSIDE_WINDOW',
+          409,
+        );
       }
       if (await this.requestNeedsCheckFirst(ctx, service, extras, day.toFormat('yyyy-MM-dd'))) {
         throw new BookingError(requestBeforeCheck(day.toFormat('yyyy-MM-dd')), 'REQUEST_BEFORE_CHECK', 409);
@@ -3969,7 +3999,7 @@ export class InternalProvider implements BookingProvider {
       service,
       start,
       end,
-      rule.timezone,
+      rule,
       newAddress,
     );
     if (changeRequest) return changeRequest;
@@ -4277,7 +4307,7 @@ export class InternalProvider implements BookingProvider {
     service: ResolvedService,
     start: Date,
     end: Date,
-    timezone: string,
+    rule: AvailabilityRule,
     newAddress: string | null | undefined,
   ): Promise<RescheduleResult | null> {
     if (!ctx.subjectToCustomerChangePolicy) return null;
@@ -4286,7 +4316,22 @@ export class InternalProvider implements BookingProvider {
     const decision = resolveCustomerChange(policy, booking.startUtc, untilMin);
     if (decision === 'not_allowed') this.refuseCustomerChange(service.name, 'reschedule', policy, untilMin);
     if (decision !== 'request') return null;
-    return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, timezone, newAddress);
+    // The create path's opening-hours refusal, on the same terms: an Auto-book Service that can
+    // auto-confirm. The policy still decides WHETHER the move needs approval; this decides only
+    // which hour may be put to the owner.
+    const outOfHours =
+      service.bookingMode === 'request'
+        ? null
+        : outOfHoursRetry(rule, service, start, (end.getTime() - start.getTime()) / 60_000, new Date());
+    if (
+      outOfHours &&
+      (await this.canAutoConfirm(ctx)) &&
+      !(await loadBusinessRules(ctx.bot.id)).bookingsPaused
+    ) {
+      const { startDate, endDate } = outOfHours.retry ?? { startDate: outOfHours.date, endDate: outOfHours.date };
+      throw new BookingError(rescheduleOutsideHours(startDate, endDate), 'REQUEST_OUTSIDE_WINDOW', 409);
+    }
+    return this.createChangeRequest(ctx, booking, service, 'reschedule', start, end, rule.timezone, newAddress);
   }
 
   /**

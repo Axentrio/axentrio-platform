@@ -18,6 +18,18 @@ const RATE_LIMIT_WINDOW_MS = config.rateLimit.windowMs;
 const RATE_LIMIT_MAX_REQUESTS = config.rateLimit.maxRequests;
 
 /**
+ * 1000 requests / window per client IP, per webhook route. Sized to stop a
+ * flood, not to shape provider traffic: every tenant's webhooks arrive from one
+ * shared provider egress pool, and all four providers retry in bursts.
+ * Mutable so tests can shrink it; the Redis-backed limiters bind it once in
+ * `ensureLimiters`.
+ */
+export const WEBHOOK_IP_RATE_LIMIT = { maxRequests: 1000 };
+
+/** The raw-body provider webhook routes. Each one owns a separate IP bucket. */
+export type WebhookRoute = 'clerk' | 'meta' | 'whatsapp' | 'billing';
+
+/**
  * Paths that must keep the LEGACY 429 body shape
  *   `{ error: 'Too Many Requests', retryAfter, message: '...' }`
  * even after the response-envelope migration (plan §10, decision (a)).
@@ -28,12 +40,19 @@ const RATE_LIMIT_MAX_REQUESTS = config.rateLimit.maxRequests;
  * enforces, `Retry-After` is still set. Match on `req.originalUrl` (NOT
  * `req.path`) because these limiters run inside `apiRouter` (codex round 5 #3).
  *
- * See `timeout.middleware.ts` for the same list and per-path rationale.
+ * `/api/v1/webhooks/billing` is here because `rateLimitWebhookByIp('billing')`
+ * fronts it, and the Stripe body shape is a partner contract (ADR 0011). The
+ * Clerk webhook has no documented legacy-body claim, so it gets the envelope.
+ *
+ * `timeout.middleware.ts` keeps the per-path rationale for the shared entries.
+ * Its list has no billing entry on purpose: `timeoutMiddleware` mounts only
+ * inside `apiRouter`, and the raw-body webhook routes mount before it.
  */
 const LEGACY_ENVELOPE_PATHS = [
   /^\/api\/v1\/webhooks\/inbound(\?|$|\/)/,
   /^\/api\/v1\/webhooks\/health(\?|$|\/)/,
   /^\/api\/v1\/webhooks\/events(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/billing(\?|$|\/)/,
   /^\/api\/v1\/internal\/rag(\?|$|\/)/,
   /^\/api\/v1\/internal\/booking(\?|$|\/)/,
   /^\/api\/v1\/channels\/[^/?]+\/webhook(\?|$|\/)/,
@@ -87,6 +106,12 @@ function fallbackConsume(key: string, maxRequests: number, windowMs: number): Fa
 // `null` means "no Redis-backed limiter yet" — requests are then enforced by
 // the capped `fallbackCounters` map above.
 let ipLimiter: RateLimiterAbstract | null = null;
+const webhookIpLimiters: Record<WebhookRoute, RateLimiterAbstract | null> = {
+  clerk: null,
+  meta: null,
+  whatsapp: null,
+  billing: null,
+};
 let tenantLimiter: RateLimiterAbstract | null = null;
 let socketLimiter: RateLimiterAbstract | null = null;
 
@@ -98,11 +123,15 @@ let socketLimiter: RateLimiterAbstract | null = null;
  * first request pinned that unbounded store for the life of the process — a
  * spoofable-key flood then grew it without limit. Callers enforce through the
  * capped `fallbackCounters` map instead, and retry Redis on the next request.
+ *
+ * `blockDuration` is the extra lockout, in seconds, after a key first goes
+ * over the limit. With 0 the key is throttled only until its window ends.
  */
 function createRateLimiter(
   keyPrefix: string,
   points: number,
-  duration: number
+  duration: number,
+  blockDuration = 60,
 ): RateLimiterAbstract | null {
   const client = getRedisClient();
   if (client && isRedisAvailable()) {
@@ -111,9 +140,9 @@ function createRateLimiter(
       keyPrefix,
       points,
       duration: Math.floor(duration / 1000),
-      blockDuration: 60,
+      blockDuration,
       inMemoryBlockOnConsumed: points + 1,
-      inMemoryBlockDuration: 60,
+      inMemoryBlockDuration: blockDuration,
     });
   }
   return null;
@@ -122,6 +151,14 @@ function createRateLimiter(
 function ensureLimiters(): void {
   if (!ipLimiter) {
     ipLimiter = createRateLimiter('rl:ip', RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS);
+    for (const route of Object.keys(webhookIpLimiters) as WebhookRoute[]) {
+      webhookIpLimiters[route] = createRateLimiter(
+        `rl:webhook-ip:${route}`,
+        WEBHOOK_IP_RATE_LIMIT.maxRequests,
+        RATE_LIMIT_WINDOW_MS,
+        0,
+      );
+    }
     tenantLimiter = createRateLimiter('rl:tenant', RATE_LIMIT_MAX_REQUESTS * 2, RATE_LIMIT_WINDOW_MS);
     socketLimiter = createRateLimiter('rl:socket', 100, RATE_LIMIT_WINDOW_MS);
   }
@@ -192,31 +229,45 @@ function consumeCappedFallback(
   next(new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }));
 }
 
+/** One IP-keyed budget: which limiter holds it, and how big it is. */
+interface IpBucket {
+  limiter: RateLimiterAbstract | null;
+  /** Namespaces the capped in-memory fallback key. */
+  keyPrefix: string;
+  maxRequests: number;
+}
+
 /**
- * HTTP Middleware: Rate limit by IP address
+ * Consume one point from an IP-keyed bucket and either continue or reject.
+ *
+ * `rateLimitByIp` and `rateLimitWebhookByIp` differ only in which bucket they
+ * charge and how many points that bucket holds, so the Redis path, the capped
+ * in-memory fallback and the two 429 body shapes live here once.
  */
-export function rateLimitByIp(
+function enforceIpLimit(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
+  bucket: IpBucket,
 ): void {
-  ensureLimiters();
+  const { limiter, maxRequests } = bucket;
   const clientIp = getClientIp(req);
+  const fallbackKey = `${bucket.keyPrefix}:${clientIp}`;
 
-  if (!ipLimiter) {
+  if (!limiter) {
     consumeCappedFallback(
       req,
       res,
       next,
-      `ip:${clientIp}`,
-      RATE_LIMIT_MAX_REQUESTS,
+      fallbackKey,
+      maxRequests,
       RATE_LIMIT_WINDOW_MS,
       'Rate limit exceeded. Please try again later.',
     );
     return;
   }
 
-  ipLimiter
+  limiter
     .consume(clientIp, 1)
     .then(() => {
       next();
@@ -224,7 +275,7 @@ export function rateLimitByIp(
     .catch((rateLimiterRes: RateLimiterRes | Error) => {
       if (rateLimiterRes instanceof Error) {
         logger.error('Rate limiter error, using in-memory fallback:', rateLimiterRes);
-        if (fallbackConsume(`ip:${clientIp}`, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS).allowed) {
+        if (fallbackConsume(fallbackKey, maxRequests, RATE_LIMIT_WINDOW_MS).allowed) {
           return next();
         }
         if (shouldUseLegacyEnvelope(req)) {
@@ -250,6 +301,56 @@ export function rateLimitByIp(
         new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
       );
     });
+}
+
+/**
+ * HTTP Middleware: Rate limit by IP address
+ */
+export function rateLimitByIp(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  ensureLimiters();
+  enforceIpLimit(req, res, next, {
+    limiter: ipLimiter,
+    keyPrefix: 'ip',
+    maxRequests: RATE_LIMIT_MAX_REQUESTS,
+  });
+}
+
+/**
+ * HTTP Middleware factory: rate limit one raw-body webhook route by IP address.
+ *
+ * The four provider webhook routes (Clerk, Meta, WhatsApp, billing) mount
+ * ahead of `express.json()` because HMAC verification needs the exact request
+ * bytes. That also put them ahead of `rateLimitByIp`, so an attacker who could
+ * not forge a signature could still flood them for free. This middleware runs
+ * before `express.raw()` on exactly those paths; it reads only `req.ip`, never
+ * the body, so the Buffer reaches the verifier untouched.
+ *
+ * Each route charges its OWN bucket (`rl:webhook-ip:<route>`), apart from the
+ * portal bucket and from the other routes. WhatsApp arrives from the same Meta
+ * egress IPs as Messenger and Instagram, so one shared bucket would let one
+ * provider starve another. A webhook burst also must not spend the
+ * browser-facing budget of the same IP.
+ *
+ * There is no extended block. An IP over the limit gets 429 only until the
+ * current window ends, then recovers, so the Redis limiter and the capped
+ * in-memory fallback behave the same under the same load.
+ */
+export function rateLimitWebhookByIp(
+  route: WebhookRoute,
+): (req: Request, res: Response, next: NextFunction) => void {
+  const keyPrefix = `webhook-ip:${route}`;
+  return (req: Request, res: Response, next: NextFunction): void => {
+    ensureLimiters();
+    enforceIpLimit(req, res, next, {
+      limiter: webhookIpLimiters[route],
+      keyPrefix,
+      maxRequests: WEBHOOK_IP_RATE_LIMIT.maxRequests,
+    });
+  };
 }
 
 /**

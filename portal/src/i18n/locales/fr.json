@@ -493,18 +493,9 @@
       },
       "embed": {
         "title": "Intégrer le widget",
-        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio. Restreignez les sites autorisés via Sites autorisés - laissez vide pour autoriser tous les sites.",
+        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture. L'identifiant widget est public et visible dans les DevTools ; le chat est autorisé par un jeton de session de courte durée émis par Axentrio.",
         "copied": "Copié dans le presse-papiers",
         "copyTitle": "Copier l'extrait",
-        "allowedOrigins": {
-          "label": "Sites autorisés",
-          "placeholder": "example.com\n*.example.com",
-          "helper": "Un par ligne. `*.example.com` couvre aussi example.com. Laissez vide pour autoriser tous les sites.",
-          "invalid": "Utilisez un nom d'hôte comme example.com ou *.example.com",
-          "save": "Enregistrer",
-          "saved": "Sites autorisés enregistrés",
-          "saveFailed": "Échec de l'enregistrement"
-        },
         "rotate": {
           "button": "Régénérer la clé",
           "confirmTitle": "Régénérer la clé d'intégration ?",

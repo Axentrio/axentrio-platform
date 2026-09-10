@@ -493,18 +493,9 @@
       },
       "embed": {
         "title": "Widget insluiten",
-        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag. De widget-id is openbaar en zichtbaar in DevTools; chat wordt geautoriseerd met een kortlevend sessietoken van Axentrio. Beperk welke sites mogen insluiten via Toegestane websites - laat leeg om elke website toe te staan.",
+        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag. De widget-id is openbaar en zichtbaar in DevTools; chat wordt geautoriseerd met een kortlevend sessietoken van Axentrio.",
         "copied": "Gekopieerd naar klembord",
         "copyTitle": "Codefragment kopiëren",
-        "allowedOrigins": {
-          "label": "Toegestane websites",
-          "placeholder": "example.com\n*.example.com",
-          "helper": "Eén per regel. `*.example.com` dekt ook example.com. Laat leeg om elke website toe te staan.",
-          "invalid": "Gebruik een hostnaam zoals example.com of *.example.com",
-          "save": "Opslaan",
-          "saved": "Toegestane websites opgeslagen",
-          "saveFailed": "Opslaan is mislukt"
-        },
         "rotate": {
           "button": "Sleutel vernieuwen",
           "confirmTitle": "Insluitsleutel vernieuwen?",

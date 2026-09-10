@@ -6,15 +6,13 @@
  * because the snippet contains the bot's embed key.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Copy, MessageSquare, ExternalLink, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -25,9 +23,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog';
-import { useEndKeyGrace, useRotateBotKey, useUpdateBot, type BotPreviousKey } from '@/queries/useBotsQueries';
-
-const ORIGIN_LINE_RE = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d{1,5})?$/;
+import { useEndKeyGrace, useRotateBotKey, type BotPreviousKey } from '@/queries/useBotsQueries';
 
 interface EmbedWidgetCardProps {
   /** Whether the AI bot is enabled — drives the status badge + Test-chat gating. */
@@ -42,7 +38,6 @@ interface EmbedWidgetCardProps {
   publicKey?: string;
   botId: string;
   previousKey?: BotPreviousKey | null;
-  allowedOrigins?: string[];
 }
 
 export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({
@@ -51,28 +46,13 @@ export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({
   publicKey,
   botId,
   previousKey,
-  allowedOrigins,
 }) => {
   const { t } = useTranslation();
   const apiKey = publicKey;
   const rotate = useRotateBotKey();
   const endGrace = useEndKeyGrace();
-  const updateBot = useUpdateBot();
   const [rotateOpen, setRotateOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
-  const [originsText, setOriginsText] = useState(() => (allowedOrigins ?? []).join('\n'));
-
-  useEffect(() => {
-    setOriginsText((allowedOrigins ?? []).join('\n'));
-  }, [allowedOrigins]);
-
-  const originLines = originsText
-    .split('\n')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const originsInvalid = originLines.some((line) => !ORIGIN_LINE_RE.test(line));
-  const originsUnchanged =
-    JSON.stringify(originLines) === JSON.stringify(allowedOrigins ?? []);
 
   if (!apiKey) return null;
 
@@ -117,38 +97,6 @@ export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({
             </button>
           </div>
         </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="allowedOrigins">{t('settings.widget.embed.allowedOrigins.label')}</Label>
-          <Textarea
-            id="allowedOrigins"
-            rows={4}
-            placeholder={t('settings.widget.embed.allowedOrigins.placeholder')}
-            value={originsText}
-            onChange={(e) => setOriginsText(e.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">{t('settings.widget.embed.allowedOrigins.helper')}</p>
-          {originsInvalid ? (
-            <p className="text-xs text-destructive">{t('settings.widget.embed.allowedOrigins.invalid')}</p>
-          ) : null}
-          <Button
-            type="button"
-            size="sm"
-            disabled={originsInvalid || originsUnchanged || updateBot.isPending}
-            onClick={() => {
-              updateBot.mutate(
-                { id: botId, allowedOrigins: originLines },
-                {
-                  onSuccess: () => toast.success(t('settings.widget.embed.allowedOrigins.saved')),
-                  onError: () => toast.error(t('settings.widget.embed.allowedOrigins.saveFailed')),
-                },
-              );
-            }}
-          >
-            {t('settings.widget.embed.allowedOrigins.save')}
-          </Button>
-        </div>
-
 
         {previousKey ? (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-text-secondary space-y-2">

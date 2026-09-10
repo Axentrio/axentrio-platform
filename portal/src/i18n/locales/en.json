@@ -496,22 +496,13 @@
       "embed": {
         "title": "Embed Widget",
         "deployTitle": "Deploy",
-        "description": "Add this snippet to your website's HTML, just before the closing </body> tag. The widget id is public and visible in DevTools; chat is authorized by a short-lived session token from Axentrio. Restrict which sites can embed it with Allowed websites - leave empty to allow every website.",
+        "description": "Add this snippet to your website's HTML, just before the closing </body> tag. The widget id is public and visible in DevTools; chat is authorized by a short-lived session token from Axentrio.",
         "copied": "Copied to clipboard",
         "copyTitle": "Copy snippet",
         "statusActive": "Active",
         "statusInactive": "Off",
         "snippetLabel": "Embed snippet",
         "installGuide": "Install guide",
-        "allowedOrigins": {
-          "label": "Allowed websites",
-          "placeholder": "example.com\n*.example.com",
-          "helper": "One per line. `*.example.com` also covers example.com. Leave empty to allow every website.",
-          "invalid": "Use a hostname like example.com or *.example.com",
-          "save": "Save",
-          "saved": "Allowed websites saved",
-          "saveFailed": "Failed to save allowed websites"
-        },
         "rotate": {
           "button": "Rotate key",
           "confirmTitle": "Rotate embed key?",

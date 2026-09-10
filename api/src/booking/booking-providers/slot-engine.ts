@@ -360,7 +360,8 @@ const NO_HORIZON_DAYS = 3650;
  *
  * Notice and horizon: THE SAME RANGE, THE SAME DIARY, THE SAME CAPS, with only those two lifted.
  * Service daily cap: the same range with only that cap lifted. Closed: every local day in the
- * queried range has no opening windows, AND the 7-day retry starting at rangeEnd has hours.
+ * queried range has no usable opening window (`dayHasHours`), AND the 7-day retry starting at
+ * rangeEnd has hours.
  * A business that never opens is ordinary empty - retrying the next week is still empty.
  *
  * Null unless EVERY would-be start falls on one side of the window, the only thing that
@@ -463,7 +464,8 @@ export function diagnoseEmptyRange(input: SlotEngineInput): EmptyRangeDiagnosis 
  * Is `at` inside the rule's business hours? Reuses the same window math as
  * slot computation (weekly hours + date overrides + "24:00" end-of-day, in
  * the owner's timezone) so "after hours" in analytics can never drift from
- * "bookable hours" in the scheduler. Pure; used by the outcome metrics.
+ * "bookable hours" in the scheduler. Pure; used by the outcome metrics and by the
+ * request path's hours gate (`requestWindowRefusal` in `internal.provider.ts`).
  */
 export function isWithinBusinessHours(
   rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides' | 'availabilityMode'>,

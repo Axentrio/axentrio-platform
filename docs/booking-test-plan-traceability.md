@@ -29,11 +29,11 @@ Paths below are relative to `api/` unless stated otherwise.
 | Verdict | Count |
 |---|---|
 | `COVERED` — already pinned, no work needed | 46 |
-| Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 38 |
-| Still open (audited, test not yet written) | 2 — SYS-07 and AVL-01, both blocked on a product decision (§11) |
+| Closed by this work (`GAP`/`PARTIAL` with a delivered test) | 39 |
+| Still open (audited, test not yet written) | 1 - SYS-07, blocked on a product decision (§11) |
 | `EVAL` — measured by the live suite, which never runs in CI | 5 — SYS-03, SYS-04, and the model half of BK-02, BK-08 and SRV-02 |
 | `RESTATE` — drop or reword the case | 4 |
-| `BUG` — product defect found, left unfixed | 4 |
+| `BUG` — product defect found, left unfixed | 3 |
 
 Several closed rows carry a named residual clause. A residual is written into the row rather than
 rounded up, so `COVERED` here always means "a test would fail if this broke", never "near enough".
@@ -249,19 +249,16 @@ Two smaller wording corrections, which the new tests pin as-is with a comment:
 6. **SYS-05** says never create or offer a Request for a past time. A **request-only** Service
    still captures one.
 
-## 11. Product defects found (4, all left UNFIXED)
+## 11. Product defects found (4; AVL-01 since fixed, the rest left UNFIXED)
 
 Reported rather than patched, because each is a behaviour change that needs an owner's decision.
+AVL-01 is the exception: the rule already decided it, and it is now fixed.
 
 1. **SYS-07 — the output guard deliberately excludes request-shaped claims.** A false "your
    request has been forwarded" claim reaches the customer, and an existing test asserts that the
    sentence is permitted. `docs/booking-rules.md:186-231` (customer change policy, confirmation
    and honesty) carries **no `Pinned:` line** — which maps 1:1 onto this and the next finding.
-2. **AVL-01 — no opening-hours gate on the request path.** `internal.provider.ts:2414-2443`
-   refuses past / too_soon / too_far / closed-day / service-cap / no-check but **not** an
-   out-of-hours hour on a day that has hours, so an Auto-book Service can capture a Request for
-   08:30 on a 09:00 day. `docs/booking-rules.md:26-28` explicitly forbids that Request and calls
-   the invariant load-bearing; it is enforced by prompt copy alone.
+2. **AVL-01 — no opening-hours gate on the request path.** FIXED. See the AVL-01 row in §5.
 3. **SYS-02 — a reset mutates and un-mirrors live Bookings.** Cancel + mirror delete
    (`services/conversation-reset-state.ts:255-291`, `:121-131`) is broader than the plan's
    "clear conversation state, keep bookings". Worth confirming this is intended.
@@ -324,8 +321,7 @@ has moved into the tables above with a `file:line`; what follows is what is genu
 only pin the current, contradicted behaviour:
 
 1. **SYS-07** — a false "your request has been forwarded" claim ships green. `unit/guardrails-output-validation.test.ts:232` positively asserts that the sentence is permitted with `bookingRecorded: false`.
-2. **AVL-01** — no opening-hours gate on the request path, so an Auto-book Service can capture an out-of-hours Request. Forbidden by `docs/booking-rules.md:26-28`, enforced by prompt copy alone.
-3. **CAL-06's reply half** — "never tell the customer it is booked" on a disconnected calendar is prompt prose with no runtime seam, and the create still returns `success: true`, which sets `state.bookingRecorded`. Same decision as SYS-07.
+2. **CAL-06's reply half** — "never tell the customer it is booked" on a disconnected calendar is prompt prose with no runtime seam, and the create still returns `success: true`, which sets `state.bookingRecorded`. Same decision as SYS-07.
 
 **Named residuals inside closed rows** (each is written into its row, not rounded away):
 
